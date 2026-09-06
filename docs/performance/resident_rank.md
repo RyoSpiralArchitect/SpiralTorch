@@ -70,6 +70,11 @@ one seed is quantized to exercise ties. `--resident-only` excludes intervening
 host maps/uploads from the fixed-input timing intervals. Correctness is checked
 before and after all intervals. The default suite and rotated host/resident
 comparison remain available. These are host-API/fence timings, not GPU events.
+CUDA uses stable sort for MidK and for any TopK/BottomK row with tied values;
+tie-free TopK/BottomK retain `torch.topk`. Every timed CUDA case checks exact
+source indices as well as values before and after all intervals. Each report
+records the chosen CUDA operation; tied controls cannot receive credit for a
+weaker ordering contract.
 
 Tiles with a padded stride up to 1024 now sort in 8 KiB of workgroup memory,
 publishing their sorted run to global scratch only once. Larger tiles keep the

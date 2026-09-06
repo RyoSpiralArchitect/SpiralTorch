@@ -1,0 +1,7596 @@
+{
+  "schema": "spiraltorch.resident_rank_comparison.v1",
+  "status": "passed",
+  "suite": "midk-boundary",
+  "resident_only_requested": true,
+  "comparison": "separate-process wrapper diagnostics, not interleaved cross-framework or GPU-event timings",
+  "boundaries": {
+    "host_api": "upload, allocate outputs/scratch, two submits, two maps; pipelines prebuilt",
+    "resident_host_to_host": "reuse device buffers; upload, one compute submit, combined snapshot/map",
+    "resident_dispatch_fence_per_op": "16 resident rank pairs, one submit then completion fence; divided by 16; no upload/readback",
+    "torch_resident_per_op": "16 Python enqueue calls with preallocated CUDA outputs then synchronize; divided by 16; no upload/readback"
+  },
+  "torch": "2.13.0+cu132",
+  "torch_device": "NVIDIA GeForce RTX 5090",
+  "request_sha256": "c5dc53615cd5e831b5ee7f254a3f8e4a7545c2a7ce91036498c9929beac6f9c3",
+  "source": {
+    "repository": "/home/ryospiralarchitect/scratch/spiraltorch-midk-canonical-candidate-817af465",
+    "commit": "817af4651505e2b0faa6f59377f39635bcec4f22",
+    "tree": "3cce196e5897d8b08cdb74e414ad3ace28d9d5cc",
+    "tracked_dirty": false,
+    "tracked_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "native_build_identity": {
+    "build_fingerprint": "sha256:93ec9edc274ab3c7b0733958a9392199e8c560a7b0cff46d098d8e2f43b0cf90",
+    "manifest": {
+      "git": {
+        "commit": "817af4651505e2b0faa6f59377f39635bcec4f22",
+        "describe": "v0.4.27-80-g817af465",
+        "dirty": false,
+        "tree": "3cce196e5897d8b08cdb74e414ad3ace28d9d5cc"
+      },
+      "host": "unknown-host",
+      "id": "Ryo-ST-ryospiralarchitect-2026-09-06T08:07:27.945Z-ddc7883d34c749dfa50ebb2bbdd12268",
+      "pkg": {
+        "name": "st-core",
+        "version": "1.10.0"
+      },
+      "profile": "release",
+      "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+      "seed": "ddc7883d34c749dfa50ebb2bbdd12268",
+      "target": {
+        "arch": "x86_64",
+        "os": "linux",
+        "triple": "x86_64-unknown-linux-gnu"
+      },
+      "timestamp": "2026-09-06T08:07:27.945Z",
+      "user": "ryospiralarchitect"
+    },
+    "schema": "spiraltorch.native_build_identity.v1"
+  },
+  "build_source_binding": {
+    "valid": true,
+    "checks": {
+      "schema_matches": true,
+      "package_matches": true,
+      "commit_matches": true,
+      "tree_matches": true,
+      "build_was_clean": true,
+      "source_is_clean": true
+    },
+    "embedded_commit": "817af4651505e2b0faa6f59377f39635bcec4f22",
+    "embedded_tree": "3cce196e5897d8b08cdb74e414ad3ace28d9d5cc",
+    "source_commit": "817af4651505e2b0faa6f59377f39635bcec4f22",
+    "source_tree": "3cce196e5897d8b08cdb74e414ad3ace28d9d5cc"
+  },
+  "cases": [
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 3.093381,
+        "indices": [
+          17,
+          445,
+          134,
+          33,
+          371,
+          826,
+          164,
+          875,
+          402,
+          237,
+          208,
+          893,
+          909,
+          340
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.033730625,
+            0.034638999999999996,
+            0.038870749999999996,
+            0.03449025,
+            0.0344825625,
+            0.034555875,
+            0.034335187499999996,
+            0.033940625,
+            0.0343239375,
+            0.032749375,
+            0.0341909375,
+            0.0386604375
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4984470009803772,
+          0.4981195330619812,
+          0.49809765815734863,
+          0.49632617831230164,
+          0.4960700273513794,
+          0.4941135048866272,
+          0.49309125542640686,
+          0.49964645504951477,
+          0.49885693192481995,
+          0.4974212646484375,
+          0.49722692370414734,
+          0.49682915210723877,
+          0.4965185523033142,
+          0.49646636843681335
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.034408875,
+          "p95_ms": 0.038870749999999996,
+          "min_ms": 0.032749375,
+          "samples_ms": [
+            0.033730625,
+            0.034638999999999996,
+            0.038870749999999996,
+            0.03449025,
+            0.0344825625,
+            0.034555875,
+            0.034335187499999996,
+            0.033940625,
+            0.0343239375,
+            0.032749375,
+            0.0341909375,
+            0.0386604375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.011228375,
+          "p95_ms": 0.0112781875,
+          "min_ms": 0.0112046875,
+          "samples_ms": [
+            0.0112781875,
+            0.011254,
+            0.0112346875,
+            0.011237375,
+            0.01123325,
+            0.0112046875,
+            0.0112185,
+            0.011234125,
+            0.0112235,
+            0.011213625,
+            0.011217125,
+            0.011213375
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.950079,
+        "indices": [
+          17,
+          445,
+          134,
+          33,
+          371,
+          826,
+          164,
+          874,
+          401,
+          236,
+          207,
+          892,
+          908,
+          339
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041544375,
+            0.03875825,
+            0.041553875,
+            0.041472375,
+            0.04016375,
+            0.0422675625,
+            0.041222749999999996,
+            0.0392898125,
+            0.04110325,
+            0.041244,
+            0.0408714375,
+            0.041125437499999994
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4984470009803772,
+          0.4981195330619812,
+          0.49809765815734863,
+          0.49632617831230164,
+          0.4960700273513794,
+          0.4941135048866272,
+          0.49309125542640686,
+          0.49964645504951477,
+          0.49885693192481995,
+          0.4974212646484375,
+          0.49722692370414734,
+          0.49682915210723877,
+          0.4965185523033142,
+          0.49646636843681335
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041174093749999995,
+          "p95_ms": 0.0422675625,
+          "min_ms": 0.03875825,
+          "samples_ms": [
+            0.041544375,
+            0.03875825,
+            0.041553875,
+            0.041472375,
+            0.04016375,
+            0.0422675625,
+            0.041222749999999996,
+            0.0392898125,
+            0.04110325,
+            0.041244,
+            0.0408714375,
+            0.041125437499999994
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01199284375,
+          "p95_ms": 0.012014875,
+          "min_ms": 0.0119665,
+          "samples_ms": [
+            0.01200175,
+            0.0119771875,
+            0.011980375,
+            0.0120055,
+            0.0119819375,
+            0.011997875,
+            0.01198825,
+            0.0119665,
+            0.011974625,
+            0.01199825,
+            0.012014875,
+            0.0119974375
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.943156,
+        "indices": [
+          17,
+          445,
+          134,
+          33,
+          371,
+          826,
+          164,
+          874,
+          401,
+          236,
+          207,
+          892,
+          908,
+          339
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.04928025,
+            0.049183625,
+            0.049059374999999995,
+            0.04910525,
+            0.0492016875,
+            0.0491129375,
+            0.0488135625,
+            0.0463724375,
+            0.0478880625,
+            0.04909825,
+            0.048802812499999994,
+            0.0487861875
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4984470009803772,
+          0.4981195330619812,
+          0.49809765815734863,
+          0.49632617831230164,
+          0.4960700273513794,
+          0.4941135048866272,
+          0.49309125542640686,
+          0.49964645504951477,
+          0.49885693192481995,
+          0.4974212646484375,
+          0.49722692370414734,
+          0.49682915210723877,
+          0.4965185523033142,
+          0.49646636843681335
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0490788125,
+          "p95_ms": 0.04928025,
+          "min_ms": 0.0463724375,
+          "samples_ms": [
+            0.04928025,
+            0.049183625,
+            0.049059374999999995,
+            0.04910525,
+            0.0492016875,
+            0.0491129375,
+            0.0488135625,
+            0.0463724375,
+            0.0478880625,
+            0.04909825,
+            0.048802812499999994,
+            0.0487861875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.011970999999999999,
+          "p95_ms": 0.0120041875,
+          "min_ms": 0.0119540625,
+          "samples_ms": [
+            0.0120041875,
+            0.0119683125,
+            0.0119704375,
+            0.011972125,
+            0.01196425,
+            0.0119761875,
+            0.0119825625,
+            0.0119540625,
+            0.0119715625,
+            0.01196575,
+            0.0119568125,
+            0.011972625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.920024,
+        "indices": [
+          3597,
+          3783,
+          1899,
+          2736,
+          3334,
+          1426,
+          17,
+          48,
+          2427,
+          1984,
+          3642,
+          2654,
+          2182,
+          574
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041139375,
+            0.0411646875,
+            0.041131,
+            0.041076125,
+            0.041139,
+            0.041125499999999995,
+            0.041085375,
+            0.0410866875,
+            0.04105925,
+            0.041064250000000004,
+            0.0410464375,
+            0.0411365625
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.49994105100631714,
+          0.4996536374092102,
+          0.49964645504951477,
+          0.4995102286338806,
+          0.4989255368709564,
+          0.49885693192481995,
+          0.4984470009803772,
+          0.49994805455207825,
+          0.4996281862258911,
+          0.49934855103492737,
+          0.4988541305065155,
+          0.4987350106239319,
+          0.4983066916465759,
+          0.49827930331230164
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04110609375,
+          "p95_ms": 0.0411646875,
+          "min_ms": 0.0410464375,
+          "samples_ms": [
+            0.041139375,
+            0.0411646875,
+            0.041131,
+            0.041076125,
+            0.041139,
+            0.041125499999999995,
+            0.041085375,
+            0.0410866875,
+            0.04105925,
+            0.041064250000000004,
+            0.0410464375,
+            0.0411365625
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01675634375,
+          "p95_ms": 0.01677425,
+          "min_ms": 0.0167295625,
+          "samples_ms": [
+            0.016751625,
+            0.0167470625,
+            0.0167483125,
+            0.016753125,
+            0.016767,
+            0.0167609375,
+            0.0167665,
+            0.0167295625,
+            0.01673575,
+            0.0167595625,
+            0.01677425,
+            0.016772375
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.838582,
+        "indices": [
+          4145,
+          3597,
+          3783,
+          1899,
+          6524,
+          2736,
+          6081,
+          7220,
+          125,
+          5305,
+          4213,
+          1137,
+          3293,
+          6293
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0489634375,
+            0.048916062499999996,
+            0.0488628125,
+            0.05236125,
+            0.049171875000000004,
+            0.0491693125,
+            0.049420625,
+            0.048852875,
+            0.0488103125,
+            0.048766500000000004,
+            0.048736812500000004,
+            0.04874575
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.49994805455207825,
+          0.49994105100631714,
+          0.4996536374092102,
+          0.49964645504951477,
+          0.4996281862258911,
+          0.4995102286338806,
+          0.49934855103492737,
+          0.49990424513816833,
+          0.4998805522918701,
+          0.49969276785850525,
+          0.49966639280319214,
+          0.49961015582084656,
+          0.49943047761917114,
+          0.4993720054626465
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.048889437499999994,
+          "p95_ms": 0.05236125,
+          "min_ms": 0.048736812500000004,
+          "samples_ms": [
+            0.0489634375,
+            0.048916062499999996,
+            0.0488628125,
+            0.05236125,
+            0.049171875000000004,
+            0.0491693125,
+            0.049420625,
+            0.048852875,
+            0.0488103125,
+            0.048766500000000004,
+            0.048736812500000004,
+            0.04874575
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.02822315625,
+          "p95_ms": 0.0282595,
+          "min_ms": 0.02818675,
+          "samples_ms": [
+            0.0282593125,
+            0.0282290625,
+            0.0282138125,
+            0.0281971875,
+            0.0282595,
+            0.028217375,
+            0.0282228125,
+            0.0282415,
+            0.0282235,
+            0.0282381875,
+            0.02818675,
+            0.0282095625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.821998,
+        "indices": [
+          17,
+          134,
+          33,
+          164,
+          152,
+          75,
+          207,
+          188,
+          114,
+          95,
+          59,
+          219,
+          61,
+          103
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0411706875,
+            0.041100000000000005,
+            0.0410498125,
+            0.041083,
+            0.0411064375,
+            0.04109525,
+            0.04108825,
+            0.041037,
+            0.041055625000000005,
+            0.04112075,
+            0.0410533125,
+            0.041070312500000004
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4984470009803772,
+          0.49809765815734863,
+          0.49632617831230164,
+          0.49309125542640686,
+          0.48780718445777893,
+          0.4867905378341675,
+          0.4844835102558136,
+          0.4981195330619812,
+          0.4960700273513794,
+          0.4785488545894623,
+          0.47772911190986633,
+          0.46209716796875,
+          0.4595104455947876,
+          0.458807110786438
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041085625,
+          "p95_ms": 0.0411706875,
+          "min_ms": 0.041037,
+          "samples_ms": [
+            0.0411706875,
+            0.041100000000000005,
+            0.0410498125,
+            0.041083,
+            0.0411064375,
+            0.04109525,
+            0.04108825,
+            0.041037,
+            0.041055625000000005,
+            0.04112075,
+            0.0410533125,
+            0.041070312500000004
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.00730671875,
+          "p95_ms": 0.007419,
+          "min_ms": 0.0072828125,
+          "samples_ms": [
+            0.0073265625,
+            0.007297,
+            0.0073071875,
+            0.007419,
+            0.0072828125,
+            0.007305625,
+            0.0072925,
+            0.007319625,
+            0.00730625,
+            0.007327,
+            0.0073355,
+            0.0073030625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.813544,
+        "indices": [
+          17,
+          445,
+          134,
+          33,
+          371,
+          826,
+          164,
+          874,
+          401,
+          236,
+          207,
+          892,
+          908,
+          339
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.039732875,
+            0.041043125,
+            0.0374235,
+            0.041066875,
+            0.0412556875,
+            0.04109725,
+            0.04107525,
+            0.0411185,
+            0.041087500000000006,
+            0.041067125,
+            0.04115124999999999,
+            0.0409428125
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4984470009803772,
+          0.4981195330619812,
+          0.49809765815734863,
+          0.49632617831230164,
+          0.4960700273513794,
+          0.4941135048866272,
+          0.49309125542640686,
+          0.49964645504951477,
+          0.49885693192481995,
+          0.4974212646484375,
+          0.49722692370414734,
+          0.49682915210723877,
+          0.4965185523033142,
+          0.49646636843681335
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0410711875,
+          "p95_ms": 0.0412556875,
+          "min_ms": 0.0374235,
+          "samples_ms": [
+            0.039732875,
+            0.041043125,
+            0.0374235,
+            0.041066875,
+            0.0412556875,
+            0.04109725,
+            0.04107525,
+            0.0411185,
+            0.041087500000000006,
+            0.041067125,
+            0.04115124999999999,
+            0.0409428125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01198453125,
+          "p95_ms": 0.01200225,
+          "min_ms": 0.011973125,
+          "samples_ms": [
+            0.011992625,
+            0.011975625,
+            0.0119838125,
+            0.011977125,
+            0.01198925,
+            0.01198525,
+            0.011976125,
+            0.01199,
+            0.01200225,
+            0.01198225,
+            0.011973125,
+            0.011987625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.8374520000000001,
+        "indices": [
+          805,
+          317,
+          1000,
+          703,
+          298,
+          306,
+          113,
+          957,
+          223,
+          807,
+          879,
+          189,
+          347,
+          14
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.057444249999999995,
+            0.057725875,
+            0.0577095625,
+            0.057383937499999996,
+            0.0575663125,
+            0.053956875,
+            0.05751925,
+            0.0583454375,
+            0.05804975,
+            0.0574220625,
+            0.057467437499999996,
+            0.057495374999999994
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.020044472068548203,
+          -0.0185224786400795,
+          -0.01640767604112625,
+          -0.015967316925525665,
+          -0.015814656391739845,
+          -0.013968248851597309,
+          -0.01351754181087017,
+          0.005312617402523756,
+          0.0054951878264546394,
+          0.006062832195311785,
+          0.006447694264352322,
+          0.009862145408987999,
+          0.012267793528735638,
+          0.013719945214688778
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0575073125,
+          "p95_ms": 0.0583454375,
+          "min_ms": 0.053956875,
+          "samples_ms": [
+            0.057444249999999995,
+            0.057725875,
+            0.0577095625,
+            0.057383937499999996,
+            0.0575663125,
+            0.053956875,
+            0.05751925,
+            0.0583454375,
+            0.05804975,
+            0.0574220625,
+            0.057467437499999996,
+            0.057495374999999994
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.014329125,
+          "p95_ms": 0.01437175,
+          "min_ms": 0.0143118125,
+          "samples_ms": [
+            0.01437175,
+            0.0143334375,
+            0.0143316875,
+            0.014328875,
+            0.014329375,
+            0.0143520625,
+            0.0143224375,
+            0.014323375,
+            0.0143354375,
+            0.014316375,
+            0.0143158125,
+            0.0143118125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.835943,
+        "indices": [
+          317,
+          1000,
+          703,
+          298,
+          306,
+          113,
+          111,
+          222,
+          806,
+          878,
+          188,
+          346,
+          13,
+          723
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0875591875,
+            0.0907815,
+            0.089513,
+            0.08736843749999999,
+            0.09057925,
+            0.083607875,
+            0.090493625,
+            0.088140125,
+            0.0904144375,
+            0.08975224999999999,
+            0.0907820625,
+            0.0864189375
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.0185224786400795,
+          -0.01640767604112625,
+          -0.015967316925525665,
+          -0.015814656391739845,
+          -0.013968248851597309,
+          -0.01351754181087017,
+          -0.013186263851821423,
+          0.0054951878264546394,
+          0.006062832195311785,
+          0.006447694264352322,
+          0.009862145408987999,
+          0.012267793528735638,
+          0.013719945214688778,
+          0.015032275579869747
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.089632625,
+          "p95_ms": 0.0907820625,
+          "min_ms": 0.083607875,
+          "samples_ms": [
+            0.0875591875,
+            0.0907815,
+            0.089513,
+            0.08736843749999999,
+            0.09057925,
+            0.083607875,
+            0.090493625,
+            0.088140125,
+            0.0904144375,
+            0.08975224999999999,
+            0.0907820625,
+            0.0864189375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0146219375,
+          "p95_ms": 0.014714625,
+          "min_ms": 0.0146106875,
+          "samples_ms": [
+            0.014714625,
+            0.0146365625,
+            0.0146449375,
+            0.014612875,
+            0.0146219375,
+            0.0146214375,
+            0.0146134375,
+            0.0146106875,
+            0.0146219375,
+            0.014628375,
+            0.0146178125,
+            0.014635125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.8202389999999999,
+        "indices": [
+          317,
+          1000,
+          703,
+          298,
+          306,
+          113,
+          111,
+          222,
+          806,
+          878,
+          188,
+          346,
+          13,
+          723
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041298999999999995,
+            0.040846375000000004,
+            0.0413486875,
+            0.041145249999999994,
+            0.0403011875,
+            0.041077562500000005,
+            0.041336374999999995,
+            0.04046275,
+            0.0410725625,
+            0.0411148125,
+            0.040662937499999996,
+            0.041075562499999996
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.0185224786400795,
+          -0.01640767604112625,
+          -0.015967316925525665,
+          -0.015814656391739845,
+          -0.013968248851597309,
+          -0.01351754181087017,
+          -0.013186263851821423,
+          0.0054951878264546394,
+          0.006062832195311785,
+          0.006447694264352322,
+          0.009862145408987999,
+          0.012267793528735638,
+          0.013719945214688778,
+          0.015032275579869747
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0410765625,
+          "p95_ms": 0.0413486875,
+          "min_ms": 0.0403011875,
+          "samples_ms": [
+            0.041298999999999995,
+            0.040846375000000004,
+            0.0413486875,
+            0.041145249999999994,
+            0.0403011875,
+            0.041077562500000005,
+            0.041336374999999995,
+            0.04046275,
+            0.0410725625,
+            0.0411148125,
+            0.040662937499999996,
+            0.041075562499999996
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0146155,
+          "p95_ms": 0.014647625,
+          "min_ms": 0.01459125,
+          "samples_ms": [
+            0.014647625,
+            0.014624875,
+            0.0146270625,
+            0.014601625,
+            0.0146263125,
+            0.0145995,
+            0.0146090625,
+            0.01459575,
+            0.014614375,
+            0.014616625,
+            0.01459125,
+            0.0146175
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.845779,
+        "indices": [
+          965,
+          2156,
+          867,
+          3794,
+          605,
+          2609,
+          1207,
+          3269,
+          2904,
+          1605,
+          443,
+          2725,
+          3484,
+          1541
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.1182084375,
+            0.098912125,
+            0.1039945,
+            0.10416775,
+            0.10331593750000001,
+            0.1076035,
+            0.1046894375,
+            0.10467812500000001,
+            0.10461525,
+            0.1047258125,
+            0.09945675,
+            0.1047341875
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.00411143247038126,
+          -0.0037619490176439285,
+          -0.003625803627073765,
+          -0.0035541998222470284,
+          -0.0033036465756595135,
+          -0.002835297491401434,
+          -0.0027722364757210016,
+          -0.0014351751888170838,
+          -0.001373600447550416,
+          -0.0013216944644227624,
+          -0.0009308187291026115,
+          -0.0008467830484732985,
+          -0.000799758592620492,
+          -0.0003705446724779904
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.1046466875,
+          "p95_ms": 0.1182084375,
+          "min_ms": 0.098912125,
+          "samples_ms": [
+            0.1182084375,
+            0.098912125,
+            0.1039945,
+            0.10416775,
+            0.10331593750000001,
+            0.1076035,
+            0.1046894375,
+            0.10467812500000001,
+            0.10461525,
+            0.1047258125,
+            0.09945675,
+            0.1047341875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.05491878125,
+          "p95_ms": 0.05509575,
+          "min_ms": 0.0545656875,
+          "samples_ms": [
+            0.054744375,
+            0.0549756875,
+            0.0548711875,
+            0.054825,
+            0.05469875,
+            0.054945125,
+            0.0548924375,
+            0.05509575,
+            0.0545656875,
+            0.055090625,
+            0.055084125,
+            0.0549715
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.830913,
+        "indices": [
+          7651,
+          1798,
+          7906,
+          483,
+          2895,
+          4000,
+          6835,
+          5531,
+          2222,
+          3732,
+          5718,
+          7589,
+          4952,
+          7396
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.1098936875,
+            0.119957875,
+            0.1142571875,
+            0.11976,
+            0.1203110625,
+            0.1197655625,
+            0.1202193125,
+            0.117910875,
+            0.120186875,
+            0.11755162499999999,
+            0.1108038125,
+            0.11993106249999999
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.0023966843727976084,
+          -0.0023270805831998587,
+          -0.001902843709103763,
+          -0.0017952080816030502,
+          -0.0017145948950201273,
+          -0.0016762824961915612,
+          -0.001623644377104938,
+          -0.001837242627516389,
+          -0.001758159720338881,
+          -0.0017517067026346922,
+          -0.001720484928227961,
+          -0.0016584433615207672,
+          -0.0014357425970956683,
+          -0.0013752493541687727
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.11976278125,
+          "p95_ms": 0.1203110625,
+          "min_ms": 0.1098936875,
+          "samples_ms": [
+            0.1098936875,
+            0.119957875,
+            0.1142571875,
+            0.11976,
+            0.1203110625,
+            0.1197655625,
+            0.1202193125,
+            0.117910875,
+            0.120186875,
+            0.11755162499999999,
+            0.1108038125,
+            0.11993106249999999
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.05517953125,
+          "p95_ms": 0.0554244375,
+          "min_ms": 0.055087125,
+          "samples_ms": [
+            0.0554244375,
+            0.0552898125,
+            0.05526,
+            0.0551365,
+            0.0551466875,
+            0.0552570625,
+            0.055145875,
+            0.055087125,
+            0.05509625,
+            0.055212375,
+            0.05514375,
+            0.0552875625
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.819713,
+        "indices": [
+          12,
+          147,
+          255,
+          115,
+          158,
+          139,
+          0,
+          69,
+          42,
+          223,
+          231,
+          36,
+          129,
+          125
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0785285,
+            0.078544,
+            0.0781869375,
+            0.0780928125,
+            0.07811662500000001,
+            0.07530256249999999,
+            0.0782200625,
+            0.0781905,
+            0.07814012499999999,
+            0.0752081875,
+            0.078139,
+            0.083502
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0016026705270633101,
+          0.004257493652403355,
+          0.013994832523167133,
+          0.015667682513594627,
+          0.017629412934184074,
+          0.01863628625869751,
+          0.021983910351991653,
+          -0.05889315903186798,
+          -0.05828607827425003,
+          -0.052764516323804855,
+          -0.049029890447854996,
+          -0.04443380609154701,
+          -0.04077349603176117,
+          -0.03864134103059769
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.07816353125,
+          "p95_ms": 0.083502,
+          "min_ms": 0.0752081875,
+          "samples_ms": [
+            0.0785285,
+            0.078544,
+            0.0781869375,
+            0.0780928125,
+            0.07811662500000001,
+            0.07530256249999999,
+            0.0782200625,
+            0.0781905,
+            0.07814012499999999,
+            0.0752081875,
+            0.078139,
+            0.083502
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0136191875,
+          "p95_ms": 0.0136563125,
+          "min_ms": 0.0135974375,
+          "samples_ms": [
+            0.0136563125,
+            0.013613,
+            0.013643625,
+            0.0136350625,
+            0.0136115625,
+            0.013619125,
+            0.0136269375,
+            0.013601,
+            0.013625375,
+            0.0135974375,
+            0.01361925,
+            0.0136071875
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.821661,
+        "indices": [
+          317,
+          1000,
+          703,
+          298,
+          306,
+          113,
+          111,
+          222,
+          806,
+          878,
+          188,
+          346,
+          13,
+          723
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.07832806249999999,
+            0.088256125,
+            0.0782733125,
+            0.08842074999999999,
+            0.07843075000000001,
+            0.07832412500000001,
+            0.0785085625,
+            0.082148625,
+            0.0784626875,
+            0.0783559375,
+            0.07844200000000001,
+            0.0784205
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.0185224786400795,
+          -0.01640767604112625,
+          -0.015967316925525665,
+          -0.015814656391739845,
+          -0.013968248851597309,
+          -0.01351754181087017,
+          -0.013186263851821423,
+          0.0054951878264546394,
+          0.006062832195311785,
+          0.006447694264352322,
+          0.009862145408987999,
+          0.012267793528735638,
+          0.013719945214688778,
+          0.015032275579869747
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.078436375,
+          "p95_ms": 0.08842074999999999,
+          "min_ms": 0.0782733125,
+          "samples_ms": [
+            0.07832806249999999,
+            0.088256125,
+            0.0782733125,
+            0.08842074999999999,
+            0.07843075000000001,
+            0.07832412500000001,
+            0.0785085625,
+            0.082148625,
+            0.0784626875,
+            0.0783559375,
+            0.07844200000000001,
+            0.0784205
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01462890625,
+          "p95_ms": 0.0146716875,
+          "min_ms": 0.01461175,
+          "samples_ms": [
+            0.0146716875,
+            0.01461975,
+            0.014632625,
+            0.014635625,
+            0.0146174375,
+            0.014617,
+            0.01461175,
+            0.014630875,
+            0.0146469375,
+            0.0146271875,
+            0.014630625,
+            0.0146205
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.814891,
+        "indices": [
+          667,
+          888,
+          381,
+          677,
+          434,
+          238,
+          796,
+          419,
+          653,
+          558,
+          740,
+          6,
+          869,
+          666
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.03428775,
+            0.0382434375,
+            0.034362000000000004,
+            0.034268375,
+            0.0342825,
+            0.034405625,
+            0.0342391875,
+            0.034245375,
+            0.0331785625,
+            0.034245937500000004,
+            0.034209812500000006,
+            0.034219187500000005
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999295771121979,
+          -0.49773210287094116,
+          -0.49688830971717834,
+          -0.4952891767024994,
+          -0.4942701458930969,
+          -0.49298685789108276,
+          -0.49286457896232605,
+          -0.498521625995636,
+          -0.4956856667995453,
+          -0.4930136203765869,
+          -0.49279651045799255,
+          -0.49226605892181396,
+          -0.49223387241363525,
+          -0.4913865923881531
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.034257156250000004,
+          "p95_ms": 0.0382434375,
+          "min_ms": 0.0331785625,
+          "samples_ms": [
+            0.03428775,
+            0.0382434375,
+            0.034362000000000004,
+            0.034268375,
+            0.0342825,
+            0.034405625,
+            0.0342391875,
+            0.034245375,
+            0.0331785625,
+            0.034245937500000004,
+            0.034209812500000006,
+            0.034219187500000005
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.010772875,
+          "p95_ms": 0.0108015,
+          "min_ms": 0.0107613125,
+          "samples_ms": [
+            0.0108015,
+            0.0107871875,
+            0.0107613125,
+            0.0107694375,
+            0.0107733125,
+            0.0107928125,
+            0.010785,
+            0.0107729375,
+            0.0107696875,
+            0.0107728125,
+            0.01076825,
+            0.0107720625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.8360270000000001,
+        "indices": [
+          667,
+          888,
+          381,
+          677,
+          434,
+          238,
+          796,
+          418,
+          652,
+          557,
+          739,
+          5,
+          868,
+          665
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041147437499999995,
+            0.0412496875,
+            0.041135374999999995,
+            0.0410735625,
+            0.0411461875,
+            0.0410968125,
+            0.041052875,
+            0.041062875,
+            0.041053124999999996,
+            0.041055625000000005,
+            0.04108775,
+            0.0410860625
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999295771121979,
+          -0.49773210287094116,
+          -0.49688830971717834,
+          -0.4952891767024994,
+          -0.4942701458930969,
+          -0.49298685789108276,
+          -0.49286457896232605,
+          -0.498521625995636,
+          -0.4956856667995453,
+          -0.4930136203765869,
+          -0.49279651045799255,
+          -0.49226605892181396,
+          -0.49223387241363525,
+          -0.4913865923881531
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04108690625,
+          "p95_ms": 0.0412496875,
+          "min_ms": 0.041052875,
+          "samples_ms": [
+            0.041147437499999995,
+            0.0412496875,
+            0.041135374999999995,
+            0.0410735625,
+            0.0411461875,
+            0.0410968125,
+            0.041052875,
+            0.041062875,
+            0.041053124999999996,
+            0.041055625000000005,
+            0.04108775,
+            0.0410860625
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01160959375,
+          "p95_ms": 0.0116238125,
+          "min_ms": 0.011593875,
+          "samples_ms": [
+            0.0116204375,
+            0.011604125,
+            0.011619875,
+            0.0116238125,
+            0.011607625,
+            0.0116109375,
+            0.0115998125,
+            0.011608625,
+            0.011620625,
+            0.0116105625,
+            0.011593875,
+            0.0115955625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.825867,
+        "indices": [
+          667,
+          888,
+          381,
+          677,
+          434,
+          238,
+          796,
+          418,
+          652,
+          557,
+          739,
+          5,
+          868,
+          665
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.048844437500000004,
+            0.049058,
+            0.048816500000000006,
+            0.04904075,
+            0.0488360625,
+            0.049023624999999994,
+            0.0505549375,
+            0.04881075,
+            0.04902475,
+            0.048841375,
+            0.0452123125,
+            0.048748875000000004
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999295771121979,
+          -0.49773210287094116,
+          -0.49688830971717834,
+          -0.4952891767024994,
+          -0.4942701458930969,
+          -0.49298685789108276,
+          -0.49286457896232605,
+          -0.498521625995636,
+          -0.4956856667995453,
+          -0.4930136203765869,
+          -0.49279651045799255,
+          -0.49226605892181396,
+          -0.49223387241363525,
+          -0.4913865923881531
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04884290625,
+          "p95_ms": 0.0505549375,
+          "min_ms": 0.0452123125,
+          "samples_ms": [
+            0.048844437500000004,
+            0.049058,
+            0.048816500000000006,
+            0.04904075,
+            0.0488360625,
+            0.049023624999999994,
+            0.0505549375,
+            0.04881075,
+            0.04902475,
+            0.048841375,
+            0.0452123125,
+            0.048748875000000004
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01160134375,
+          "p95_ms": 0.0116296875,
+          "min_ms": 0.011594875,
+          "samples_ms": [
+            0.0116296875,
+            0.0116290625,
+            0.011599875,
+            0.011599375,
+            0.011600375,
+            0.0116126875,
+            0.011615875,
+            0.0116015625,
+            0.0116064375,
+            0.011594875,
+            0.011601125,
+            0.0116001875
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.8681599999999999,
+        "indices": [
+          667,
+          2061,
+          2467,
+          3076,
+          1443,
+          2270,
+          2193,
+          1692,
+          1704,
+          2408,
+          2428,
+          61,
+          1773,
+          715
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.045793812499999996,
+            0.041127375,
+            0.041077,
+            0.041084062500000004,
+            0.041035937499999994,
+            0.0413616875,
+            0.0411005625,
+            0.04108225,
+            0.0410470625,
+            0.041319999999999996,
+            0.041031,
+            0.041053875000000004
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999295771121979,
+          -0.4994114637374878,
+          -0.49928897619247437,
+          -0.49921953678131104,
+          -0.498521625995636,
+          -0.49847832322120667,
+          -0.49837589263916016,
+          -0.4995831251144409,
+          -0.49929124116897583,
+          -0.498957097530365,
+          -0.49835819005966187,
+          -0.49815046787261963,
+          -0.498025506734848,
+          -0.49774593114852905
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04108315625,
+          "p95_ms": 0.045793812499999996,
+          "min_ms": 0.041031,
+          "samples_ms": [
+            0.045793812499999996,
+            0.041127375,
+            0.041077,
+            0.041084062500000004,
+            0.041035937499999994,
+            0.0413616875,
+            0.0411005625,
+            0.04108225,
+            0.0410470625,
+            0.041319999999999996,
+            0.041031,
+            0.041053875000000004
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0179343125,
+          "p95_ms": 0.017980625,
+          "min_ms": 0.017910625,
+          "samples_ms": [
+            0.0179760625,
+            0.0179670625,
+            0.017927125,
+            0.0179484375,
+            0.017931,
+            0.017980625,
+            0.0179365,
+            0.0179515625,
+            0.017932125,
+            0.017910625,
+            0.01792325,
+            0.017915375
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.851544,
+        "indices": [
+          667,
+          5789,
+          2061,
+          5801,
+          2467,
+          3076,
+          6505,
+          7285,
+          7758,
+          35,
+          190,
+          2335,
+          4212,
+          6072
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0489766875,
+            0.0492505625,
+            0.0488253125,
+            0.0490303125,
+            0.04875375,
+            0.0488234375,
+            0.052949437499999995,
+            0.0490665625,
+            0.0487069375,
+            0.0490139375,
+            0.049226312499999994,
+            0.049100187499999996
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999295771121979,
+          -0.4995831251144409,
+          -0.4994114637374878,
+          -0.49929124116897583,
+          -0.49928897619247437,
+          -0.49921953678131104,
+          -0.498957097530365,
+          -0.49981382489204407,
+          -0.49975499510765076,
+          -0.4996546506881714,
+          -0.49961310625076294,
+          -0.49928033351898193,
+          -0.49921324849128723,
+          -0.4989607632160187
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.049022125,
+          "p95_ms": 0.052949437499999995,
+          "min_ms": 0.0487069375,
+          "samples_ms": [
+            0.0489766875,
+            0.0492505625,
+            0.0488253125,
+            0.0490303125,
+            0.04875375,
+            0.0488234375,
+            0.052949437499999995,
+            0.0490665625,
+            0.0487069375,
+            0.0490139375,
+            0.049226312499999994,
+            0.049100187499999996
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.025581468750000003,
+          "p95_ms": 0.0256255625,
+          "min_ms": 0.0255476875,
+          "samples_ms": [
+            0.02557825,
+            0.02561325,
+            0.0255476875,
+            0.0255969375,
+            0.02560675,
+            0.0255886875,
+            0.0255754375,
+            0.025574625,
+            0.0255635625,
+            0.0256255625,
+            0.0255846875,
+            0.0255750625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.814375,
+        "indices": [
+          238,
+          186,
+          66,
+          150,
+          38,
+          77,
+          168,
+          124,
+          177,
+          207,
+          208,
+          96,
+          233,
+          249
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.039047937500000005,
+            0.041219187500000004,
+            0.0412444375,
+            0.041025937500000005,
+            0.0411724375,
+            0.0411954375,
+            0.040093937499999996,
+            0.041261,
+            0.041186999999999994,
+            0.040856625,
+            0.041073374999999995,
+            0.041261375
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.49298685789108276,
+          -0.4925444722175598,
+          -0.49023663997650146,
+          -0.4878999590873718,
+          -0.48216569423675537,
+          -0.4793386161327362,
+          -0.47384151816368103,
+          -0.49688830971717834,
+          -0.4942701458930969,
+          -0.4927143156528473,
+          -0.4921978712081909,
+          -0.49217477440834045,
+          -0.49203798174858093,
+          -0.4904206395149231
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04117971875,
+          "p95_ms": 0.041261375,
+          "min_ms": 0.039047937500000005,
+          "samples_ms": [
+            0.039047937500000005,
+            0.041219187500000004,
+            0.0412444375,
+            0.041025937500000005,
+            0.0411724375,
+            0.0411954375,
+            0.040093937499999996,
+            0.041261,
+            0.041186999999999994,
+            0.040856625,
+            0.041073374999999995,
+            0.041261375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0075096875,
+          "p95_ms": 0.00752625,
+          "min_ms": 0.00749925,
+          "samples_ms": [
+            0.0075239375,
+            0.00749925,
+            0.0075195,
+            0.0075114375,
+            0.0075079375,
+            0.0075041875,
+            0.0074995,
+            0.0075135,
+            0.00752625,
+            0.0075175,
+            0.0075008125,
+            0.0075061875
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 17
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.818991,
+        "indices": [
+          667,
+          888,
+          381,
+          677,
+          434,
+          238,
+          796,
+          418,
+          652,
+          557,
+          739,
+          5,
+          868,
+          665
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.04115425,
+            0.0411676875,
+            0.041103875000000005,
+            0.041087875,
+            0.0410605,
+            0.0410351875,
+            0.0386380625,
+            0.041071125,
+            0.0411318125,
+            0.04110562500000001,
+            0.0413785625,
+            0.041161875
+          ]
+        },
+        "seed": 17,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999295771121979,
+          -0.49773210287094116,
+          -0.49688830971717834,
+          -0.4952891767024994,
+          -0.4942701458930969,
+          -0.49298685789108276,
+          -0.49286457896232605,
+          -0.498521625995636,
+          -0.4956856667995453,
+          -0.4930136203765869,
+          -0.49279651045799255,
+          -0.49226605892181396,
+          -0.49223387241363525,
+          -0.4913865923881531
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04110475000000001,
+          "p95_ms": 0.0413785625,
+          "min_ms": 0.0386380625,
+          "samples_ms": [
+            0.04115425,
+            0.0411676875,
+            0.041103875000000005,
+            0.041087875,
+            0.0410605,
+            0.0410351875,
+            0.0386380625,
+            0.041071125,
+            0.0411318125,
+            0.04110562500000001,
+            0.0413785625,
+            0.041161875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.011613,
+          "p95_ms": 0.0116375,
+          "min_ms": 0.011598375,
+          "samples_ms": [
+            0.0116375,
+            0.011614,
+            0.0116345625,
+            0.011607125,
+            0.011615,
+            0.011598375,
+            0.0116073125,
+            0.011612,
+            0.0116104375,
+            0.011631875,
+            0.0116203125,
+            0.0116020625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.814008,
+        "indices": [
+          323,
+          740,
+          366,
+          12,
+          118,
+          638,
+          245,
+          62,
+          162,
+          127,
+          123,
+          587,
+          956,
+          391
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.037032249999999996,
+            0.03433425,
+            0.034276625,
+            0.034167687499999995,
+            0.034464249999999995,
+            0.03427,
+            0.034203374999999994,
+            0.0337620625,
+            0.0342963125,
+            0.0341940625,
+            0.034178062499999995,
+            0.0341393125
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.49946045875549316,
+          0.4990665912628174,
+          0.498966246843338,
+          0.4987401068210602,
+          0.49854281544685364,
+          0.49785465002059937,
+          0.49685031175613403,
+          0.4996172785758972,
+          0.4967333972454071,
+          0.49658551812171936,
+          0.49447283148765564,
+          0.4940979778766632,
+          0.49399179220199585,
+          0.49289050698280334
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0342366875,
+          "p95_ms": 0.037032249999999996,
+          "min_ms": 0.0337620625,
+          "samples_ms": [
+            0.037032249999999996,
+            0.03433425,
+            0.034276625,
+            0.034167687499999995,
+            0.034464249999999995,
+            0.03427,
+            0.034203374999999994,
+            0.0337620625,
+            0.0342963125,
+            0.0341940625,
+            0.034178062499999995,
+            0.0341393125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0102249375,
+          "p95_ms": 0.010242875,
+          "min_ms": 0.01021025,
+          "samples_ms": [
+            0.0102350625,
+            0.0102285,
+            0.01022375,
+            0.0102190625,
+            0.0102245625,
+            0.01021025,
+            0.0102253125,
+            0.0102178125,
+            0.010226375,
+            0.0102165,
+            0.0102300625,
+            0.010242875
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.808905,
+        "indices": [
+          323,
+          740,
+          366,
+          12,
+          118,
+          638,
+          245,
+          61,
+          161,
+          126,
+          122,
+          586,
+          955,
+          390
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.037212375,
+            0.0411104375,
+            0.0412315625,
+            0.0414345,
+            0.0410824375,
+            0.0413653125,
+            0.04080225,
+            0.041036875,
+            0.0411449375,
+            0.040626249999999996,
+            0.04103125,
+            0.0414229375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.49946045875549316,
+          0.4990665912628174,
+          0.498966246843338,
+          0.4987401068210602,
+          0.49854281544685364,
+          0.49785465002059937,
+          0.49685031175613403,
+          0.4996172785758972,
+          0.4967333972454071,
+          0.49658551812171936,
+          0.49447283148765564,
+          0.4940979778766632,
+          0.49399179220199585,
+          0.49289050698280334
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0410964375,
+          "p95_ms": 0.0414345,
+          "min_ms": 0.037212375,
+          "samples_ms": [
+            0.037212375,
+            0.0411104375,
+            0.0412315625,
+            0.0414345,
+            0.0410824375,
+            0.0413653125,
+            0.04080225,
+            0.041036875,
+            0.0411449375,
+            0.040626249999999996,
+            0.04103125,
+            0.0414229375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01097753125,
+          "p95_ms": 0.0110064375,
+          "min_ms": 0.0109589375,
+          "samples_ms": [
+            0.0110064375,
+            0.0109780625,
+            0.0109785,
+            0.0109681875,
+            0.010974625,
+            0.0109838125,
+            0.010980375,
+            0.010969625,
+            0.010977,
+            0.010971,
+            0.0109589375,
+            0.0109838125
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.8506520000000001,
+        "indices": [
+          323,
+          740,
+          366,
+          12,
+          118,
+          638,
+          245,
+          61,
+          161,
+          126,
+          122,
+          586,
+          955,
+          390
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0488903125,
+            0.048947750000000005,
+            0.048814937499999995,
+            0.0487813125,
+            0.048805625,
+            0.048779062500000005,
+            0.04882825,
+            0.0440429375,
+            0.04900225,
+            0.048746437499999996,
+            0.049428437500000005,
+            0.0487305625
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.49946045875549316,
+          0.4990665912628174,
+          0.498966246843338,
+          0.4987401068210602,
+          0.49854281544685364,
+          0.49785465002059937,
+          0.49685031175613403,
+          0.4996172785758972,
+          0.4967333972454071,
+          0.49658551812171936,
+          0.49447283148765564,
+          0.4940979778766632,
+          0.49399179220199585,
+          0.49289050698280334
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04881028125,
+          "p95_ms": 0.049428437500000005,
+          "min_ms": 0.0440429375,
+          "samples_ms": [
+            0.0488903125,
+            0.048947750000000005,
+            0.048814937499999995,
+            0.0487813125,
+            0.048805625,
+            0.048779062500000005,
+            0.04882825,
+            0.0440429375,
+            0.04900225,
+            0.048746437499999996,
+            0.049428437500000005,
+            0.0487305625
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01098009375,
+          "p95_ms": 0.0109976875,
+          "min_ms": 0.010925625,
+          "samples_ms": [
+            0.0109976875,
+            0.01099175,
+            0.010980625,
+            0.0109963125,
+            0.010962,
+            0.010977875,
+            0.010967375,
+            0.0109773125,
+            0.0109856875,
+            0.010925625,
+            0.0109801875,
+            0.01098
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.837835,
+        "indices": [
+          3751,
+          2549,
+          1086,
+          3713,
+          323,
+          3982,
+          740,
+          2253,
+          1999,
+          3524,
+          2682,
+          2524,
+          1140,
+          1250
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041240125,
+            0.041141125,
+            0.041283875,
+            0.041075625,
+            0.041016625,
+            0.048532375,
+            0.0488996875,
+            0.041034249999999994,
+            0.0487583125,
+            0.044989749999999995,
+            0.040990687500000005,
+            0.049223
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4998978078365326,
+          0.49968042969703674,
+          0.4996172785758972,
+          0.4995458424091339,
+          0.49946045875549316,
+          0.4991818070411682,
+          0.4990665912628174,
+          0.4994108974933624,
+          0.4992828369140625,
+          0.49900439381599426,
+          0.49897125363349915,
+          0.49886375665664673,
+          0.4987673759460449,
+          0.4986989498138428
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041262,
+          "p95_ms": 0.049223,
+          "min_ms": 0.040990687500000005,
+          "samples_ms": [
+            0.041240125,
+            0.041141125,
+            0.041283875,
+            0.041075625,
+            0.041016625,
+            0.048532375,
+            0.0488996875,
+            0.041034249999999994,
+            0.0487583125,
+            0.044989749999999995,
+            0.040990687500000005,
+            0.049223
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01909,
+          "p95_ms": 0.019115875,
+          "min_ms": 0.0190745625,
+          "samples_ms": [
+            0.0190760625,
+            0.0190883125,
+            0.019115875,
+            0.0190916875,
+            0.01909675,
+            0.0190745625,
+            0.0190764375,
+            0.0191049375,
+            0.0190959375,
+            0.0191079375,
+            0.0190786875,
+            0.0190815
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.875536,
+        "indices": [
+          3751,
+          2549,
+          1086,
+          3713,
+          323,
+          6350,
+          6096,
+          4289,
+          2675,
+          173,
+          5756,
+          2374,
+          3096,
+          766
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0488405,
+            0.0487855,
+            0.049107875,
+            0.051079375,
+            0.048782124999999996,
+            0.04879525,
+            0.048789124999999996,
+            0.048716125,
+            0.054181562499999995,
+            0.04755125,
+            0.0487541875,
+            0.0488215625
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4998978078365326,
+          0.49968042969703674,
+          0.4996172785758972,
+          0.4995458424091339,
+          0.49946045875549316,
+          0.4994108974933624,
+          0.4992828369140625,
+          0.499961256980896,
+          0.499679833650589,
+          0.49966922402381897,
+          0.49950918555259705,
+          0.4994972348213196,
+          0.4994896948337555,
+          0.4994245171546936
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0487921875,
+          "p95_ms": 0.054181562499999995,
+          "min_ms": 0.04755125,
+          "samples_ms": [
+            0.0488405,
+            0.0487855,
+            0.049107875,
+            0.051079375,
+            0.048782124999999996,
+            0.04879525,
+            0.048789124999999996,
+            0.048716125,
+            0.054181562499999995,
+            0.04755125,
+            0.0487541875,
+            0.0488215625
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.026343375,
+          "p95_ms": 0.0263841875,
+          "min_ms": 0.0263080625,
+          "samples_ms": [
+            0.0263478125,
+            0.0263576875,
+            0.026375125,
+            0.026315,
+            0.0263266875,
+            0.0263841875,
+            0.0263411875,
+            0.0263455625,
+            0.0263080625,
+            0.0263141875,
+            0.026366,
+            0.0263345
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.815207,
+        "indices": [
+          12,
+          118,
+          245,
+          163,
+          160,
+          7,
+          59,
+          66,
+          109,
+          83,
+          186,
+          88,
+          106,
+          217
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0412349375,
+            0.0410115625,
+            0.0411274375,
+            0.041272500000000004,
+            0.0404690625,
+            0.0411175625,
+            0.041147937499999995,
+            0.040876375,
+            0.0410853125,
+            0.0411463125,
+            0.0405215,
+            0.0410634375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.4987401068210602,
+          0.49854281544685364,
+          0.49685031175613403,
+          0.48650532960891724,
+          0.4804173707962036,
+          0.4738588035106659,
+          0.47230714559555054,
+          0.49946045875549316,
+          0.498966246843338,
+          0.49193406105041504,
+          0.49002745747566223,
+          0.48715245723724365,
+          0.48626625537872314,
+          0.484385222196579
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041101437500000004,
+          "p95_ms": 0.041272500000000004,
+          "min_ms": 0.0404690625,
+          "samples_ms": [
+            0.0412349375,
+            0.0410115625,
+            0.0411274375,
+            0.041272500000000004,
+            0.0404690625,
+            0.0411175625,
+            0.041147937499999995,
+            0.040876375,
+            0.0410853125,
+            0.0411463125,
+            0.0405215,
+            0.0410634375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0075756875,
+          "p95_ms": 0.0075948125,
+          "min_ms": 0.0075649375,
+          "samples_ms": [
+            0.00759025,
+            0.007565375,
+            0.0075760625,
+            0.007573375,
+            0.007578125,
+            0.0075795625,
+            0.0075753125,
+            0.0075948125,
+            0.0075649375,
+            0.007568625,
+            0.0075875625,
+            0.0075675
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.8162440000000001,
+        "indices": [
+          323,
+          740,
+          366,
+          12,
+          118,
+          638,
+          245,
+          61,
+          161,
+          126,
+          122,
+          586,
+          955,
+          390
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041151,
+            0.041122874999999996,
+            0.0408409375,
+            0.041063312500000004,
+            0.0410575625,
+            0.0407344375,
+            0.041353375,
+            0.041030250000000004,
+            0.041453937499999996,
+            0.0410444375,
+            0.041110812499999996,
+            0.041061
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.49946045875549316,
+          0.4990665912628174,
+          0.498966246843338,
+          0.4987401068210602,
+          0.49854281544685364,
+          0.49785465002059937,
+          0.49685031175613403,
+          0.4996172785758972,
+          0.4967333972454071,
+          0.49658551812171936,
+          0.49447283148765564,
+          0.4940979778766632,
+          0.49399179220199585,
+          0.49289050698280334
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04106215625,
+          "p95_ms": 0.041453937499999996,
+          "min_ms": 0.0407344375,
+          "samples_ms": [
+            0.041151,
+            0.041122874999999996,
+            0.0408409375,
+            0.041063312500000004,
+            0.0410575625,
+            0.0407344375,
+            0.041353375,
+            0.041030250000000004,
+            0.041453937499999996,
+            0.0410444375,
+            0.041110812499999996,
+            0.041061
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.010985343750000001,
+          "p95_ms": 0.0110170625,
+          "min_ms": 0.01097925,
+          "samples_ms": [
+            0.0110170625,
+            0.01098125,
+            0.0109825625,
+            0.0109893125,
+            0.0109966875,
+            0.010990875,
+            0.010985125,
+            0.010982,
+            0.01097925,
+            0.010980875,
+            0.0109855625,
+            0.01101
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.819493,
+        "indices": [
+          370,
+          756,
+          974,
+          485,
+          350,
+          328,
+          467,
+          588,
+          24,
+          909,
+          773,
+          719,
+          1002,
+          478
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0576125,
+            0.057552375,
+            0.057535499999999996,
+            0.0576678125,
+            0.05746425,
+            0.0558569375,
+            0.056648437499999996,
+            0.05559625,
+            0.0554375625,
+            0.0578080625,
+            0.0574021875,
+            0.0574834375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.02121134288609028,
+          -0.019704245030879974,
+          -0.016901353374123573,
+          -0.01565341278910637,
+          -0.012660453096032143,
+          -0.01246707234531641,
+          -0.012194034643471241,
+          0.010518255643546581,
+          0.012907582335174084,
+          0.013455302454531193,
+          0.015019669197499752,
+          0.015675947070121765,
+          0.01679118722677231,
+          0.017251668497920036
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.05747384375,
+          "p95_ms": 0.0578080625,
+          "min_ms": 0.0554375625,
+          "samples_ms": [
+            0.0576125,
+            0.057552375,
+            0.057535499999999996,
+            0.0576678125,
+            0.05746425,
+            0.0558569375,
+            0.056648437499999996,
+            0.05559625,
+            0.0554375625,
+            0.0578080625,
+            0.0574021875,
+            0.0574834375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0143036875,
+          "p95_ms": 0.014354625,
+          "min_ms": 0.014292,
+          "samples_ms": [
+            0.014354625,
+            0.0143069375,
+            0.01430075,
+            0.014323,
+            0.014292,
+            0.0143029375,
+            0.0143076875,
+            0.0142933125,
+            0.0142965,
+            0.0143039375,
+            0.0143046875,
+            0.0143034375
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.811741,
+        "indices": [
+          756,
+          974,
+          485,
+          350,
+          328,
+          467,
+          590,
+          23,
+          908,
+          772,
+          718,
+          1001,
+          477,
+          458
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.09058425,
+            0.0893825,
+            0.08745162499999999,
+            0.090538125,
+            0.08391124999999999,
+            0.0917343125,
+            0.09131125,
+            0.086632,
+            0.09119875,
+            0.08936693750000001,
+            0.09118662500000001,
+            0.0863025625
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.019704245030879974,
+          -0.016901353374123573,
+          -0.01565341278910637,
+          -0.012660453096032143,
+          -0.01246707234531641,
+          -0.012194034643471241,
+          -0.011949113570153713,
+          0.012907582335174084,
+          0.013455302454531193,
+          0.015019669197499752,
+          0.015675947070121765,
+          0.01679118722677231,
+          0.017251668497920036,
+          0.017510894685983658
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0899603125,
+          "p95_ms": 0.0917343125,
+          "min_ms": 0.08391124999999999,
+          "samples_ms": [
+            0.09058425,
+            0.0893825,
+            0.08745162499999999,
+            0.090538125,
+            0.08391124999999999,
+            0.0917343125,
+            0.09131125,
+            0.086632,
+            0.09119875,
+            0.08936693750000001,
+            0.09118662500000001,
+            0.0863025625
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01460490625,
+          "p95_ms": 0.0155618125,
+          "min_ms": 0.014584625,
+          "samples_ms": [
+            0.01464625,
+            0.0146146875,
+            0.0146161875,
+            0.0147370625,
+            0.014611625,
+            0.0145981875,
+            0.01459375,
+            0.0155618125,
+            0.014586,
+            0.0145945,
+            0.014590875,
+            0.014584625
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.829427,
+        "indices": [
+          756,
+          974,
+          485,
+          350,
+          328,
+          467,
+          590,
+          23,
+          908,
+          772,
+          718,
+          1001,
+          477,
+          458
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.04144825,
+            0.0402849375,
+            0.041109625,
+            0.0410383125,
+            0.0411206875,
+            0.041038625,
+            0.0413315625,
+            0.0402143125,
+            0.041099375,
+            0.0410788125,
+            0.040897625,
+            0.1180058125
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.019704245030879974,
+          -0.016901353374123573,
+          -0.01565341278910637,
+          -0.012660453096032143,
+          -0.01246707234531641,
+          -0.012194034643471241,
+          -0.011949113570153713,
+          0.012907582335174084,
+          0.013455302454531193,
+          0.015019669197499752,
+          0.015675947070121765,
+          0.01679118722677231,
+          0.017251668497920036,
+          0.017510894685983658
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04108909375,
+          "p95_ms": 0.1180058125,
+          "min_ms": 0.0402143125,
+          "samples_ms": [
+            0.04144825,
+            0.0402849375,
+            0.041109625,
+            0.0410383125,
+            0.0411206875,
+            0.041038625,
+            0.0413315625,
+            0.0402143125,
+            0.041099375,
+            0.0410788125,
+            0.040897625,
+            0.1180058125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0146040625,
+          "p95_ms": 0.0146275,
+          "min_ms": 0.014587125,
+          "samples_ms": [
+            0.014624,
+            0.0146275,
+            0.014600375,
+            0.0145960625,
+            0.0146194375,
+            0.0146085,
+            0.0146208125,
+            0.0146019375,
+            0.01459825,
+            0.014604625,
+            0.0146035,
+            0.014587125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.813628,
+        "indices": [
+          3104,
+          582,
+          2928,
+          336,
+          3241,
+          782,
+          1566,
+          38,
+          1503,
+          2127,
+          1602,
+          393,
+          2031,
+          3798
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.10472912499999999,
+            0.1046710625,
+            0.100876125,
+            0.10493387500000001,
+            0.104860625,
+            0.099969125,
+            0.104918,
+            0.1102834375,
+            0.1043526875,
+            0.1045818125,
+            0.1045949375,
+            0.10474612500000001
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.004307026043534279,
+          -0.004131587687879801,
+          -0.004125581588596106,
+          -0.003219673875719309,
+          -0.0029309294186532497,
+          -0.002659536898136139,
+          -0.002518164226785302,
+          -0.012664628215134144,
+          -0.011905557475984097,
+          -0.010750764049589634,
+          -0.010489793494343758,
+          -0.010394994169473648,
+          -0.010062591172754765,
+          -0.009969823993742466
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.10470009375,
+          "p95_ms": 0.1102834375,
+          "min_ms": 0.099969125,
+          "samples_ms": [
+            0.10472912499999999,
+            0.1046710625,
+            0.100876125,
+            0.10493387500000001,
+            0.104860625,
+            0.099969125,
+            0.104918,
+            0.1102834375,
+            0.1043526875,
+            0.1045818125,
+            0.1045949375,
+            0.10474612500000001
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0548985,
+          "p95_ms": 0.055085875,
+          "min_ms": 0.054581875,
+          "samples_ms": [
+            0.0550858125,
+            0.0548074375,
+            0.0549585,
+            0.05495475,
+            0.0549698125,
+            0.055085875,
+            0.054825875,
+            0.0548373125,
+            0.054581875,
+            0.0548384375,
+            0.0549625625,
+            0.05484225
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.887397,
+        "indices": [
+          7940,
+          536,
+          1126,
+          5815,
+          920,
+          5330,
+          1167,
+          5612,
+          3749,
+          4300,
+          2963,
+          2531,
+          7746,
+          1513
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.12385181249999999,
+            0.114319875,
+            0.120666875,
+            0.12049375,
+            0.1201523125,
+            0.1203579375,
+            0.1203076875,
+            0.1201103125,
+            0.1177858125,
+            0.12024193749999999,
+            0.1175360625,
+            0.110921375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.007378017995506525,
+          -0.007213755510747433,
+          -0.007189280353486538,
+          -0.007062158081680536,
+          -0.007014756090939045,
+          -0.006824536249041557,
+          -0.006663644220679998,
+          -0.0027713847812265158,
+          -0.0026400070637464523,
+          -0.0026388473343104124,
+          -0.002622029045596719,
+          -0.0026114587672054768,
+          -0.00240803393535316,
+          -0.0023948801681399345
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.12019712499999999,
+          "p95_ms": 0.12385181249999999,
+          "min_ms": 0.110921375,
+          "samples_ms": [
+            0.12385181249999999,
+            0.114319875,
+            0.120666875,
+            0.12049375,
+            0.1201523125,
+            0.1203579375,
+            0.1203076875,
+            0.1201103125,
+            0.1177858125,
+            0.12024193749999999,
+            0.1175360625,
+            0.110921375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.05517725,
+          "p95_ms": 0.0554049375,
+          "min_ms": 0.0550935625,
+          "samples_ms": [
+            0.0551463125,
+            0.0552325625,
+            0.055129625,
+            0.0552811875,
+            0.0554049375,
+            0.055148125,
+            0.0551353125,
+            0.0550935625,
+            0.0552865,
+            0.0551523125,
+            0.0552021875,
+            0.05528025
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.8310369999999999,
+        "indices": [
+          48,
+          116,
+          214,
+          82,
+          110,
+          208,
+          242,
+          135,
+          150,
+          113,
+          228,
+          93,
+          71,
+          210
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.07823693749999999,
+            0.07824193750000001,
+            0.078172125,
+            0.0837951875,
+            0.07839581250000001,
+            0.07815325,
+            0.0780846875,
+            0.0870218125,
+            0.078393875,
+            0.076336375,
+            0.0780514375,
+            0.075795875
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.03341219946742058,
+          -0.029136497527360916,
+          -0.026566268876194954,
+          -0.00012543781485874206,
+          -3.7336449167924e-05,
+          0.0038657840341329575,
+          0.009198862127959728,
+          -0.03638611361384392,
+          -0.03511519730091095,
+          -0.02121134288609028,
+          -0.01565341278910637,
+          -0.012660453096032143,
+          -0.01246707234531641,
+          -0.012194034643471241
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.07820453124999999,
+          "p95_ms": 0.0870218125,
+          "min_ms": 0.075795875,
+          "samples_ms": [
+            0.07823693749999999,
+            0.07824193750000001,
+            0.078172125,
+            0.0837951875,
+            0.07839581250000001,
+            0.07815325,
+            0.0780846875,
+            0.0870218125,
+            0.078393875,
+            0.076336375,
+            0.0780514375,
+            0.075795875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0136111875,
+          "p95_ms": 0.0137029375,
+          "min_ms": 0.0135973125,
+          "samples_ms": [
+            0.01362925,
+            0.0136189375,
+            0.013609125,
+            0.01361325,
+            0.0136038125,
+            0.013625875,
+            0.013606125,
+            0.013609,
+            0.0136001875,
+            0.0137029375,
+            0.0136214375,
+            0.0135973125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.861115,
+        "indices": [
+          756,
+          974,
+          485,
+          350,
+          328,
+          467,
+          590,
+          23,
+          908,
+          772,
+          718,
+          1001,
+          477,
+          458
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0784878125,
+            0.07847256250000001,
+            0.078199625,
+            0.0839000625,
+            0.07850043749999999,
+            0.0781693125,
+            0.0781425625,
+            0.0871724375,
+            0.07839225,
+            0.0887133125,
+            0.0785288125,
+            0.07816206249999999
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.019704245030879974,
+          -0.016901353374123573,
+          -0.01565341278910637,
+          -0.012660453096032143,
+          -0.01246707234531641,
+          -0.012194034643471241,
+          -0.011949113570153713,
+          0.012907582335174084,
+          0.013455302454531193,
+          0.015019669197499752,
+          0.015675947070121765,
+          0.01679118722677231,
+          0.017251668497920036,
+          0.017510894685983658
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0784801875,
+          "p95_ms": 0.0887133125,
+          "min_ms": 0.0781425625,
+          "samples_ms": [
+            0.0784878125,
+            0.07847256250000001,
+            0.078199625,
+            0.0839000625,
+            0.07850043749999999,
+            0.0781693125,
+            0.0781425625,
+            0.0871724375,
+            0.07839225,
+            0.0887133125,
+            0.0785288125,
+            0.07816206249999999
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.014606968750000001,
+          "p95_ms": 0.014631,
+          "min_ms": 0.0145966875,
+          "samples_ms": [
+            0.014631,
+            0.014604875,
+            0.0146074375,
+            0.01462325,
+            0.0146161875,
+            0.0146131875,
+            0.0145966875,
+            0.014604375,
+            0.0146036875,
+            0.0146065,
+            0.0146265625,
+            0.014600125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.818704,
+        "indices": [
+          356,
+          795,
+          548,
+          550,
+          244,
+          721,
+          774,
+          867,
+          690,
+          139,
+          334,
+          795,
+          1000,
+          774
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.034305375,
+            0.0342885,
+            0.041178687500000005,
+            0.041131625,
+            0.041309875,
+            0.040149875,
+            0.034243875,
+            0.0411841875,
+            0.0410491875,
+            0.0411398125,
+            0.034205375,
+            0.0411864375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999639391899109,
+          -0.4992063045501709,
+          -0.49850109219551086,
+          -0.4982462525367737,
+          -0.49764662981033325,
+          -0.4959370195865631,
+          -0.49439555406570435,
+          -0.4984729588031769,
+          -0.4978173077106476,
+          -0.4961837828159332,
+          -0.49325302243232727,
+          -0.4924430847167969,
+          -0.4914378821849823,
+          -0.4868360459804535
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04109040625,
+          "p95_ms": 0.041309875,
+          "min_ms": 0.034205375,
+          "samples_ms": [
+            0.034305375,
+            0.0342885,
+            0.041178687500000005,
+            0.041131625,
+            0.041309875,
+            0.040149875,
+            0.034243875,
+            0.0411841875,
+            0.0410491875,
+            0.0411398125,
+            0.034205375,
+            0.0411864375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01027415625,
+          "p95_ms": 0.010309,
+          "min_ms": 0.0102529375,
+          "samples_ms": [
+            0.010309,
+            0.01029425,
+            0.0102830625,
+            0.010271875,
+            0.01025625,
+            0.010270625,
+            0.010273625,
+            0.010271625,
+            0.01028925,
+            0.0102746875,
+            0.0102529375,
+            0.010281125
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.814443,
+        "indices": [
+          356,
+          795,
+          548,
+          550,
+          244,
+          721,
+          774,
+          866,
+          689,
+          138,
+          333,
+          794,
+          999,
+          773
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0411666875,
+            0.041318125000000004,
+            0.0411365625,
+            0.041114125,
+            0.0412818125,
+            0.040725375,
+            0.041108,
+            0.041114437499999996,
+            0.040793625,
+            0.041350875,
+            0.041303625,
+            0.040464125
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999639391899109,
+          -0.4992063045501709,
+          -0.49850109219551086,
+          -0.4982462525367737,
+          -0.49764662981033325,
+          -0.4959370195865631,
+          -0.49439555406570435,
+          -0.4984729588031769,
+          -0.4978173077106476,
+          -0.4961837828159332,
+          -0.49325302243232727,
+          -0.4924430847167969,
+          -0.4914378821849823,
+          -0.4868360459804535
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041125499999999995,
+          "p95_ms": 0.041350875,
+          "min_ms": 0.040464125,
+          "samples_ms": [
+            0.0411666875,
+            0.041318125000000004,
+            0.0411365625,
+            0.041114125,
+            0.0412818125,
+            0.040725375,
+            0.041108,
+            0.041114437499999996,
+            0.040793625,
+            0.041350875,
+            0.041303625,
+            0.040464125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.011059375,
+          "p95_ms": 0.0110885625,
+          "min_ms": 0.011042875,
+          "samples_ms": [
+            0.0110885625,
+            0.0110754375,
+            0.0110761875,
+            0.011060875,
+            0.011042875,
+            0.0110540625,
+            0.01105075,
+            0.0110573125,
+            0.0110733125,
+            0.011057875,
+            0.011069875,
+            0.0110474375
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.818279,
+        "indices": [
+          356,
+          795,
+          548,
+          550,
+          244,
+          721,
+          774,
+          866,
+          689,
+          138,
+          333,
+          794,
+          999,
+          773
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.04890125,
+            0.048860562499999996,
+            0.048895625000000005,
+            0.048770562499999996,
+            0.049030000000000004,
+            0.048853875000000005,
+            0.047115375,
+            0.04876975,
+            0.049052125,
+            0.0488271875,
+            0.049712,
+            0.048742125
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999639391899109,
+          -0.4992063045501709,
+          -0.49850109219551086,
+          -0.4982462525367737,
+          -0.49764662981033325,
+          -0.4959370195865631,
+          -0.49439555406570435,
+          -0.4984729588031769,
+          -0.4978173077106476,
+          -0.4961837828159332,
+          -0.49325302243232727,
+          -0.4924430847167969,
+          -0.4914378821849823,
+          -0.4868360459804535
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04885721875,
+          "p95_ms": 0.049712,
+          "min_ms": 0.047115375,
+          "samples_ms": [
+            0.04890125,
+            0.048860562499999996,
+            0.048895625000000005,
+            0.048770562499999996,
+            0.049030000000000004,
+            0.048853875000000005,
+            0.047115375,
+            0.04876975,
+            0.049052125,
+            0.0488271875,
+            0.049712,
+            0.048742125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.011053625000000001,
+          "p95_ms": 0.0110869375,
+          "min_ms": 0.01104225,
+          "samples_ms": [
+            0.0110869375,
+            0.01104225,
+            0.0110589375,
+            0.01105375,
+            0.0110691875,
+            0.011063125,
+            0.011058375,
+            0.011052,
+            0.011053,
+            0.0110450625,
+            0.0110535,
+            0.0110441875
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.827955,
+        "indices": [
+          356,
+          2567,
+          2672,
+          795,
+          2796,
+          548,
+          1891,
+          240,
+          890,
+          3038,
+          3268,
+          2056,
+          1401,
+          2769
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0411415625,
+            0.0411250625,
+            0.041133,
+            0.0411329375,
+            0.04109975,
+            0.041119875,
+            0.0410569375,
+            0.041106937499999996,
+            0.0410825625,
+            0.041038000000000005,
+            0.04103075,
+            0.0488041875
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999639391899109,
+          -0.4997466206550598,
+          -0.4993313252925873,
+          -0.4992063045501709,
+          -0.49878427386283875,
+          -0.49850109219551086,
+          -0.4984729588031769,
+          -0.49918484687805176,
+          -0.4990465044975281,
+          -0.4989747703075409,
+          -0.49892154335975647,
+          -0.49888885021209717,
+          -0.49871551990509033,
+          -0.49859023094177246
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04111340625,
+          "p95_ms": 0.0488041875,
+          "min_ms": 0.04103075,
+          "samples_ms": [
+            0.0411415625,
+            0.0411250625,
+            0.041133,
+            0.0411329375,
+            0.04109975,
+            0.041119875,
+            0.0410569375,
+            0.041106937499999996,
+            0.0410825625,
+            0.041038000000000005,
+            0.04103075,
+            0.0488041875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01883615625,
+          "p95_ms": 0.0188561875,
+          "min_ms": 0.018812125,
+          "samples_ms": [
+            0.0188561875,
+            0.018812125,
+            0.018855,
+            0.0188519375,
+            0.0188450625,
+            0.018820125,
+            0.01882525,
+            0.018826125,
+            0.018842875,
+            0.0188514375,
+            0.0188294375,
+            0.0188261875
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.9420710000000001,
+        "indices": [
+          356,
+          2567,
+          2672,
+          795,
+          4337,
+          4987,
+          7135,
+          5415,
+          4200,
+          5759,
+          1453,
+          5491,
+          491,
+          8172
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0488920625,
+            0.0488213125,
+            0.0491326875,
+            0.0487818125,
+            0.0549958125,
+            0.047673437500000006,
+            0.047653375,
+            0.0490375625,
+            0.048763625,
+            0.053289125,
+            0.0481251875,
+            0.0475514375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999639391899109,
+          -0.4997466206550598,
+          -0.4993313252925873,
+          -0.4992063045501709,
+          -0.49918484687805176,
+          -0.4990465044975281,
+          -0.4989747703075409,
+          -0.49999934434890747,
+          -0.4998747706413269,
+          -0.4993181526660919,
+          -0.4992220103740692,
+          -0.4991011619567871,
+          -0.49904942512512207,
+          -0.4989910125732422
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0488015625,
+          "p95_ms": 0.0549958125,
+          "min_ms": 0.0475514375,
+          "samples_ms": [
+            0.0488920625,
+            0.0488213125,
+            0.0491326875,
+            0.0487818125,
+            0.0549958125,
+            0.047673437500000006,
+            0.047653375,
+            0.0490375625,
+            0.048763625,
+            0.053289125,
+            0.0481251875,
+            0.0475514375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.028363625,
+          "p95_ms": 0.02841275,
+          "min_ms": 0.0283490625,
+          "samples_ms": [
+            0.0283808125,
+            0.0283508125,
+            0.02837575,
+            0.0283541875,
+            0.02837425,
+            0.0283681875,
+            0.02841275,
+            0.0283685625,
+            0.0283490625,
+            0.02835775,
+            0.0283590625,
+            0.02835225
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.817428,
+        "indices": [
+          244,
+          71,
+          76,
+          147,
+          190,
+          60,
+          241,
+          99,
+          5,
+          253,
+          181,
+          160,
+          63,
+          142
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041161,
+            0.041184687500000004,
+            0.0411416875,
+            0.041100125,
+            0.041339625000000005,
+            0.0410159375,
+            0.041039,
+            0.0410884375,
+            0.04075025,
+            0.041075375000000004,
+            0.041069062499999996,
+            0.04126475
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.49764662981033325,
+          -0.4926030933856964,
+          -0.4916388988494873,
+          -0.49118706583976746,
+          -0.4843679964542389,
+          -0.4781235158443451,
+          -0.4762868583202362,
+          -0.4999639391899109,
+          -0.49105823040008545,
+          -0.49100857973098755,
+          -0.4872642755508423,
+          -0.4847756624221802,
+          -0.4832598865032196,
+          -0.4796206057071686
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04109428125,
+          "p95_ms": 0.041339625000000005,
+          "min_ms": 0.04075025,
+          "samples_ms": [
+            0.041161,
+            0.041184687500000004,
+            0.0411416875,
+            0.041100125,
+            0.041339625000000005,
+            0.0410159375,
+            0.041039,
+            0.0410884375,
+            0.04075025,
+            0.041075375000000004,
+            0.041069062499999996,
+            0.04126475
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.007257125,
+          "p95_ms": 0.00727375,
+          "min_ms": 0.00724625,
+          "samples_ms": [
+            0.00727375,
+            0.00724625,
+            0.0072635625,
+            0.0072524375,
+            0.007253875,
+            0.0072594375,
+            0.0072550625,
+            0.0072605625,
+            0.007256875,
+            0.0072619375,
+            0.0072519375,
+            0.007257375
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 29
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.835046,
+        "indices": [
+          356,
+          795,
+          548,
+          550,
+          244,
+          721,
+          774,
+          866,
+          689,
+          138,
+          333,
+          794,
+          999,
+          773
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0411776875,
+            0.041401749999999994,
+            0.03958325,
+            0.0411425,
+            0.0410608125,
+            0.0408919375,
+            0.041055312499999996,
+            0.0410055625,
+            0.0409421875,
+            0.041062625,
+            0.041026625,
+            0.0407609375
+          ]
+        },
+        "seed": 29,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -0.4999639391899109,
+          -0.4992063045501709,
+          -0.49850109219551086,
+          -0.4982462525367737,
+          -0.49764662981033325,
+          -0.4959370195865631,
+          -0.49439555406570435,
+          -0.4984729588031769,
+          -0.4978173077106476,
+          -0.4961837828159332,
+          -0.49325302243232727,
+          -0.4924430847167969,
+          -0.4914378821849823,
+          -0.4868360459804535
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04104096875,
+          "p95_ms": 0.041401749999999994,
+          "min_ms": 0.03958325,
+          "samples_ms": [
+            0.0411776875,
+            0.041401749999999994,
+            0.03958325,
+            0.0411425,
+            0.0410608125,
+            0.0408919375,
+            0.041055312499999996,
+            0.0410055625,
+            0.0409421875,
+            0.041062625,
+            0.041026625,
+            0.0407609375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01106209375,
+          "p95_ms": 0.0110939375,
+          "min_ms": 0.01100125,
+          "samples_ms": [
+            0.0110939375,
+            0.0110501875,
+            0.0110729375,
+            0.011056625,
+            0.0110675,
+            0.011064875,
+            0.0110593125,
+            0.0110668125,
+            0.011003125,
+            0.01100125,
+            0.0110795,
+            0.0110425625
+          ]
+        }
+      },
+      "torch_operation": "topk",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.815122,
+        "indices": [
+          29,
+          32,
+          37,
+          42,
+          54,
+          59,
+          62,
+          4,
+          7,
+          12,
+          13,
+          32,
+          82,
+          85
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0342573125,
+            0.034290625000000005,
+            0.0342339375,
+            0.0343254375,
+            0.034282125,
+            0.034395625,
+            0.03326075,
+            0.034248625,
+            0.034748875,
+            0.0342768125,
+            0.0342398125,
+            0.034243312500000005
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0342670625,
+          "p95_ms": 0.034748875,
+          "min_ms": 0.03326075,
+          "samples_ms": [
+            0.0342573125,
+            0.034290625000000005,
+            0.0342339375,
+            0.0343254375,
+            0.034282125,
+            0.034395625,
+            0.03326075,
+            0.034248625,
+            0.034748875,
+            0.0342768125,
+            0.0342398125,
+            0.034243312500000005
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01402878125,
+          "p95_ms": 0.0140895,
+          "min_ms": 0.014004,
+          "samples_ms": [
+            0.0140895,
+            0.014024875,
+            0.014006625,
+            0.014004,
+            0.0140383125,
+            0.0140368125,
+            0.0140208125,
+            0.01402275,
+            0.0140048125,
+            0.0140699375,
+            0.0140326875,
+            0.0140376875
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.811349,
+        "indices": [
+          29,
+          32,
+          37,
+          42,
+          54,
+          59,
+          62,
+          3,
+          6,
+          11,
+          12,
+          31,
+          81,
+          84
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041168125,
+            0.041144812499999996,
+            0.0407150625,
+            0.041073125,
+            0.0411371875,
+            0.040644187500000005,
+            0.04111625,
+            0.0410920625,
+            0.0408380625,
+            0.041131625,
+            0.04107225,
+            0.0407135
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04108259375,
+          "p95_ms": 0.041168125,
+          "min_ms": 0.040644187500000005,
+          "samples_ms": [
+            0.041168125,
+            0.041144812499999996,
+            0.0407150625,
+            0.041073125,
+            0.0411371875,
+            0.040644187500000005,
+            0.04111625,
+            0.0410920625,
+            0.0408380625,
+            0.041131625,
+            0.04107225,
+            0.0407135
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.014266750000000002,
+          "p95_ms": 0.0143050625,
+          "min_ms": 0.0142511875,
+          "samples_ms": [
+            0.0142770625,
+            0.0143050625,
+            0.0142675625,
+            0.0142579375,
+            0.014261375,
+            0.0142659375,
+            0.0142775625,
+            0.0142601875,
+            0.0142758125,
+            0.0142575625,
+            0.0142721875,
+            0.0142511875
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.815023,
+        "indices": [
+          29,
+          32,
+          37,
+          42,
+          54,
+          59,
+          62,
+          3,
+          6,
+          11,
+          12,
+          31,
+          81,
+          84
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.04883175,
+            0.0491115625,
+            0.048734,
+            0.0491596875,
+            0.048795124999999995,
+            0.046078875000000005,
+            0.048711000000000004,
+            0.0489436875,
+            0.0487355625,
+            0.04867025,
+            0.0461441875,
+            0.047459
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04873478125,
+          "p95_ms": 0.0491596875,
+          "min_ms": 0.046078875000000005,
+          "samples_ms": [
+            0.04883175,
+            0.0491115625,
+            0.048734,
+            0.0491596875,
+            0.048795124999999995,
+            0.046078875000000005,
+            0.048711000000000004,
+            0.0489436875,
+            0.0487355625,
+            0.04867025,
+            0.0461441875,
+            0.047459
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.0142581875,
+          "p95_ms": 0.0143519375,
+          "min_ms": 0.0142425625,
+          "samples_ms": [
+            0.0142653125,
+            0.0142728125,
+            0.01427,
+            0.0142686875,
+            0.01424925,
+            0.0142871875,
+            0.0142429375,
+            0.0142489375,
+            0.0143519375,
+            0.0142425625,
+            0.0142510625,
+            0.0142463125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.81963,
+        "indices": [
+          29,
+          32,
+          37,
+          42,
+          54,
+          59,
+          62,
+          11,
+          13,
+          16,
+          17,
+          54,
+          75,
+          78
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041125625,
+            0.041232,
+            0.0400634375,
+            0.041408125000000004,
+            0.041378437500000004,
+            0.04030275,
+            0.041056625,
+            0.041153499999999996,
+            0.040880875000000004,
+            0.04109975,
+            0.041171875000000004,
+            0.040577875
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041112687499999995,
+          "p95_ms": 0.041408125000000004,
+          "min_ms": 0.0400634375,
+          "samples_ms": [
+            0.041125625,
+            0.041232,
+            0.0400634375,
+            0.041408125000000004,
+            0.041378437500000004,
+            0.04030275,
+            0.041056625,
+            0.041153499999999996,
+            0.040880875000000004,
+            0.04109975,
+            0.041171875000000004,
+            0.040577875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.05262934375,
+          "p95_ms": 0.0529410625,
+          "min_ms": 0.0519491875,
+          "samples_ms": [
+            0.0527115625,
+            0.0529410625,
+            0.052407875,
+            0.0527856875,
+            0.052668625,
+            0.0525161875,
+            0.0519491875,
+            0.0527818125,
+            0.05260025,
+            0.0524081875,
+            0.0522779375,
+            0.0526584375
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.821092,
+        "indices": [
+          29,
+          32,
+          37,
+          42,
+          54,
+          59,
+          62,
+          0,
+          5,
+          7,
+          10,
+          17,
+          35,
+          49
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0489419375,
+            0.0489108125,
+            0.048813249999999996,
+            0.046331687499999996,
+            0.047746687499999996,
+            0.0490689375,
+            0.048772125,
+            0.0490699375,
+            0.0487635,
+            0.048812562500000004,
+            0.0492125,
+            0.048765750000000004
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.048812906249999996,
+          "p95_ms": 0.0492125,
+          "min_ms": 0.046331687499999996,
+          "samples_ms": [
+            0.0489419375,
+            0.0489108125,
+            0.048813249999999996,
+            0.046331687499999996,
+            0.047746687499999996,
+            0.0490689375,
+            0.048772125,
+            0.0490699375,
+            0.0487635,
+            0.048812562500000004,
+            0.0492125,
+            0.048765750000000004
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.054977843750000005,
+          "p95_ms": 0.0555425625,
+          "min_ms": 0.05482,
+          "samples_ms": [
+            0.0548790625,
+            0.0551238125,
+            0.05482,
+            0.0550143125,
+            0.054951125,
+            0.054922625,
+            0.0548671875,
+            0.0551319375,
+            0.0555425625,
+            0.054929375,
+            0.0550045625,
+            0.0551030625
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.811067,
+        "indices": [
+          29,
+          32,
+          37,
+          42,
+          54,
+          59,
+          62,
+          7,
+          8,
+          67,
+          69,
+          71,
+          82,
+          100
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.044041875,
+            0.0412139375,
+            0.041330187500000004,
+            0.0411285625,
+            0.0411505,
+            0.04113425,
+            0.041103,
+            0.0410470625,
+            0.041236,
+            0.04106625,
+            0.0410655625,
+            0.0410761875
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04113140625,
+          "p95_ms": 0.044041875,
+          "min_ms": 0.0410470625,
+          "samples_ms": [
+            0.044041875,
+            0.0412139375,
+            0.041330187500000004,
+            0.0411285625,
+            0.0411505,
+            0.04113425,
+            0.041103,
+            0.0410470625,
+            0.041236,
+            0.04106625,
+            0.0410655625,
+            0.0410761875
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01356765625,
+          "p95_ms": 0.0136205625,
+          "min_ms": 0.01355475,
+          "samples_ms": [
+            0.013606875,
+            0.0135926875,
+            0.0135749375,
+            0.013567375,
+            0.0136205625,
+            0.0135633125,
+            0.0135781875,
+            0.01356275,
+            0.01356175,
+            0.01355475,
+            0.0135615625,
+            0.0135679375
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "topk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.821039,
+        "indices": [
+          29,
+          32,
+          37,
+          42,
+          54,
+          59,
+          62,
+          3,
+          6,
+          11,
+          12,
+          31,
+          81,
+          84
+        ],
+        "k": 7,
+        "kind": "topk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0411619375,
+            0.04116025,
+            0.040685937500000005,
+            0.0410459375,
+            0.0414325625,
+            0.040511874999999996,
+            0.0413375625,
+            0.041056999999999996,
+            0.040570687499999994,
+            0.041077375,
+            0.041064250000000004,
+            0.0411640625
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0410708125,
+          "p95_ms": 0.0414325625,
+          "min_ms": 0.040511874999999996,
+          "samples_ms": [
+            0.0411619375,
+            0.04116025,
+            0.040685937500000005,
+            0.0410459375,
+            0.0414325625,
+            0.040511874999999996,
+            0.0413375625,
+            0.041056999999999996,
+            0.040570687499999994,
+            0.041077375,
+            0.041064250000000004,
+            0.0411640625
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.014254781250000001,
+          "p95_ms": 0.0142809375,
+          "min_ms": 0.0142385,
+          "samples_ms": [
+            0.014265125,
+            0.0142655625,
+            0.0142550625,
+            0.0142548125,
+            0.0142516875,
+            0.0142809375,
+            0.0142700625,
+            0.01425475,
+            0.014246,
+            0.0142468125,
+            0.014239875,
+            0.0142385
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.818226,
+        "indices": [
+          434,
+          436,
+          439,
+          453,
+          455,
+          457,
+          459,
+          478,
+          486,
+          487,
+          497,
+          498,
+          499,
+          502
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.057471562500000004,
+            0.057505125000000004,
+            0.0574378125,
+            0.057779625,
+            0.0574248125,
+            0.056840375,
+            0.055155875,
+            0.0553495625,
+            0.0577505,
+            0.057388875,
+            0.057445125,
+            0.05769375
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.05744146875,
+          "p95_ms": 0.057779625,
+          "min_ms": 0.055155875,
+          "samples_ms": [
+            0.057471562500000004,
+            0.057505125000000004,
+            0.0574378125,
+            0.057779625,
+            0.0574248125,
+            0.056840375,
+            0.055155875,
+            0.0553495625,
+            0.0577505,
+            0.057388875,
+            0.057445125,
+            0.05769375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01401259375,
+          "p95_ms": 0.01405975,
+          "min_ms": 0.013992,
+          "samples_ms": [
+            0.01405975,
+            0.013992,
+            0.014015,
+            0.014013,
+            0.014011125,
+            0.014006375,
+            0.013999875,
+            0.0140249375,
+            0.0140121875,
+            0.0139968125,
+            0.0140264375,
+            0.0140165625
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.808984,
+        "indices": [
+          436,
+          439,
+          453,
+          455,
+          457,
+          459,
+          460,
+          477,
+          485,
+          486,
+          496,
+          497,
+          498,
+          501
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.09086075,
+            0.0907586875,
+            0.088172375,
+            0.09073406249999999,
+            0.0832890625,
+            0.090458125,
+            0.087852,
+            0.0907556875,
+            0.08930687500000001,
+            0.0874965625,
+            0.09073825,
+            0.0834345
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.0898825,
+          "p95_ms": 0.09086075,
+          "min_ms": 0.0832890625,
+          "samples_ms": [
+            0.09086075,
+            0.0907586875,
+            0.088172375,
+            0.09073406249999999,
+            0.0832890625,
+            0.090458125,
+            0.087852,
+            0.0907556875,
+            0.08930687500000001,
+            0.0874965625,
+            0.09073825,
+            0.0834345
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01429740625,
+          "p95_ms": 0.014321125,
+          "min_ms": 0.0142851875,
+          "samples_ms": [
+            0.014321125,
+            0.014315375,
+            0.0143123125,
+            0.0142946875,
+            0.0143076875,
+            0.014308875,
+            0.01429075,
+            0.01429025,
+            0.0142853125,
+            0.0142881875,
+            0.0142851875,
+            0.014300125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.802092,
+        "indices": [
+          436,
+          439,
+          453,
+          455,
+          457,
+          459,
+          460,
+          477,
+          485,
+          486,
+          496,
+          497,
+          498,
+          501
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.04118925,
+            0.041446375,
+            0.039180875000000004,
+            0.041177624999999995,
+            0.041076875,
+            0.040898125,
+            0.11834375,
+            0.041446125,
+            0.041094124999999995,
+            0.040807125,
+            0.041108375,
+            0.041039812499999995
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04110125,
+          "p95_ms": 0.11834375,
+          "min_ms": 0.039180875000000004,
+          "samples_ms": [
+            0.04118925,
+            0.041446375,
+            0.039180875000000004,
+            0.041177624999999995,
+            0.041076875,
+            0.040898125,
+            0.11834375,
+            0.041446125,
+            0.041094124999999995,
+            0.040807125,
+            0.041108375,
+            0.041039812499999995
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01433646875,
+          "p95_ms": 0.0143651875,
+          "min_ms": 0.0143178125,
+          "samples_ms": [
+            0.01435475,
+            0.0143288125,
+            0.01433725,
+            0.0143651875,
+            0.0143319375,
+            0.0143355,
+            0.0143405625,
+            0.0143178125,
+            0.014332875,
+            0.0143356875,
+            0.0143606875,
+            0.0143376875
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.817417,
+        "indices": [
+          2032,
+          2037,
+          2038,
+          2039,
+          2040,
+          2042,
+          2045,
+          1941,
+          1946,
+          1948,
+          1952,
+          1955,
+          1959,
+          1962
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.10480425,
+            0.104791125,
+            0.1046743125,
+            0.104598125,
+            0.09906656250000001,
+            0.10468137500000001,
+            0.10474393750000001,
+            0.1043813125,
+            0.1031389375,
+            0.1046546875,
+            0.09988975,
+            0.10452906249999999
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.10462640625,
+          "p95_ms": 0.10480425,
+          "min_ms": 0.09906656250000001,
+          "samples_ms": [
+            0.10480425,
+            0.104791125,
+            0.1046743125,
+            0.104598125,
+            0.09906656250000001,
+            0.10468137500000001,
+            0.10474393750000001,
+            0.1043813125,
+            0.1031389375,
+            0.1046546875,
+            0.09988975,
+            0.10452906249999999
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.05261215625,
+          "p95_ms": 0.0530508125,
+          "min_ms": 0.05225725,
+          "samples_ms": [
+            0.0523815,
+            0.0525711875,
+            0.052653125,
+            0.052933375,
+            0.0525019375,
+            0.05225725,
+            0.0530375,
+            0.0530508125,
+            0.0523830625,
+            0.0527670625,
+            0.052912,
+            0.0523989375
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.83,
+        "indices": [
+          3967,
+          3974,
+          3983,
+          3984,
+          3986,
+          3987,
+          3999,
+          4309,
+          4310,
+          4312,
+          4314,
+          4325,
+          4331,
+          4332
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.11803274999999999,
+            0.1204126875,
+            0.118773125,
+            0.1203419375,
+            0.1169995625,
+            0.110962875,
+            0.11999325000000001,
+            0.12651525,
+            0.12164462499999999,
+            0.114186625,
+            0.1244224375,
+            0.1178893125
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.1193831875,
+          "p95_ms": 0.12651525,
+          "min_ms": 0.110962875,
+          "samples_ms": [
+            0.11803274999999999,
+            0.1204126875,
+            0.118773125,
+            0.1203419375,
+            0.1169995625,
+            0.110962875,
+            0.11999325000000001,
+            0.12651525,
+            0.12164462499999999,
+            0.114186625,
+            0.1244224375,
+            0.1178893125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.05510221875,
+          "p95_ms": 0.0553998125,
+          "min_ms": 0.054838375,
+          "samples_ms": [
+            0.0550221875,
+            0.05512575,
+            0.0550114375,
+            0.0553998125,
+            0.0549586875,
+            0.0550245,
+            0.0552174375,
+            0.05519875,
+            0.0552356875,
+            0.055139875,
+            0.0550786875,
+            0.054838375
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 1.004986,
+        "indices": [
+          119,
+          120,
+          124,
+          132,
+          134,
+          136,
+          140,
+          103,
+          113,
+          114,
+          115,
+          116,
+          117,
+          121
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.078405375,
+            0.07878487499999999,
+            0.07851000000000001,
+            0.082466125,
+            0.07873168750000001,
+            0.078734375,
+            0.077418625,
+            0.078312625,
+            0.0782991875,
+            0.0783834375,
+            0.0836389375,
+            0.07671725
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.07845768750000001,
+          "p95_ms": 0.0836389375,
+          "min_ms": 0.07671725,
+          "samples_ms": [
+            0.078405375,
+            0.07878487499999999,
+            0.07851000000000001,
+            0.082466125,
+            0.07873168750000001,
+            0.078734375,
+            0.077418625,
+            0.078312625,
+            0.0782991875,
+            0.0783834375,
+            0.0836389375,
+            0.07671725
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01357065625,
+          "p95_ms": 0.013627375,
+          "min_ms": 0.0135578125,
+          "samples_ms": [
+            0.013627375,
+            0.0135795625,
+            0.013577625,
+            0.0135659375,
+            0.0135578125,
+            0.0135585,
+            0.0135701875,
+            0.013567625,
+            0.013571125,
+            0.013590375,
+            0.01355925,
+            0.01357625
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "midk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.839019,
+        "indices": [
+          436,
+          439,
+          453,
+          455,
+          457,
+          459,
+          460,
+          477,
+          485,
+          486,
+          496,
+          497,
+          498,
+          501
+        ],
+        "k": 7,
+        "kind": "midk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.078901,
+            0.078805875,
+            0.07820231250000001,
+            0.07839487499999999,
+            0.07834925,
+            0.07934606250000001,
+            0.078431625,
+            0.078810375,
+            0.0783820625,
+            0.07841799999999999,
+            0.08265825,
+            0.0787413125
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.07858646875,
+          "p95_ms": 0.08265825,
+          "min_ms": 0.07820231250000001,
+          "samples_ms": [
+            0.078901,
+            0.078805875,
+            0.07820231250000001,
+            0.07839487499999999,
+            0.07834925,
+            0.07934606250000001,
+            0.078431625,
+            0.078810375,
+            0.0783820625,
+            0.07841799999999999,
+            0.08265825,
+            0.0787413125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01430675,
+          "p95_ms": 0.0143503125,
+          "min_ms": 0.0142960625,
+          "samples_ms": [
+            0.0143430625,
+            0.0143059375,
+            0.0142981875,
+            0.014311875,
+            0.0143125,
+            0.0143065,
+            0.0143249375,
+            0.0143003125,
+            0.014307,
+            0.0143503125,
+            0.0142960625,
+            0.0142985625
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1024,
+        "k": 7,
+        "tile": 32,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1024,
+        "create_ms": 0.845864,
+        "indices": [
+          0,
+          8,
+          19,
+          27,
+          28,
+          34,
+          39,
+          5,
+          6,
+          20,
+          26,
+          28,
+          44,
+          52
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0345461875,
+            0.034546812499999996,
+            0.034437625,
+            0.034412437500000004,
+            0.0337655625,
+            0.0343918125,
+            0.0344609375,
+            0.0344009375,
+            0.034496624999999996,
+            0.0344865,
+            0.0344289375,
+            0.0399934375
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.03444928125,
+          "p95_ms": 0.0399934375,
+          "min_ms": 0.0337655625,
+          "samples_ms": [
+            0.0345461875,
+            0.034546812499999996,
+            0.034437625,
+            0.034412437500000004,
+            0.0337655625,
+            0.0343918125,
+            0.0344609375,
+            0.0344009375,
+            0.034496624999999996,
+            0.0344865,
+            0.0344289375,
+            0.0399934375
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01399103125,
+          "p95_ms": 0.01411375,
+          "min_ms": 0.0139750625,
+          "samples_ms": [
+            0.0140260625,
+            0.0139959375,
+            0.01411375,
+            0.01398775,
+            0.0140104375,
+            0.0139914375,
+            0.0139750625,
+            0.0139903125,
+            0.013990625,
+            0.0139900625,
+            0.013999625,
+            0.0139865625
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 32,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.837896,
+        "indices": [
+          0,
+          8,
+          19,
+          27,
+          28,
+          34,
+          39,
+          4,
+          5,
+          19,
+          25,
+          27,
+          43,
+          51
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.034517624999999996,
+            0.034511625,
+            0.03428325,
+            0.034427125,
+            0.0392229375,
+            0.034464249999999995,
+            0.034442812499999996,
+            0.0343934375,
+            0.0344326875,
+            0.033861687499999994,
+            0.034384437500000004,
+            0.039206125
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 32,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.03443775,
+          "p95_ms": 0.0392229375,
+          "min_ms": 0.033861687499999994,
+          "samples_ms": [
+            0.034517624999999996,
+            0.034511625,
+            0.03428325,
+            0.034427125,
+            0.0392229375,
+            0.034464249999999995,
+            0.034442812499999996,
+            0.0343934375,
+            0.0344326875,
+            0.033861687499999994,
+            0.034384437500000004,
+            0.039206125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.014282625,
+          "p95_ms": 0.014331875,
+          "min_ms": 0.0142651875,
+          "samples_ms": [
+            0.014331875,
+            0.014294125,
+            0.014279,
+            0.01427425,
+            0.0142933125,
+            0.014278875,
+            0.0142858125,
+            0.0142794375,
+            0.0142651875,
+            0.01430175,
+            0.01426825,
+            0.0142906875
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 256,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.834917,
+        "indices": [
+          0,
+          8,
+          19,
+          27,
+          28,
+          34,
+          39,
+          4,
+          5,
+          19,
+          25,
+          27,
+          43,
+          51
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.049315,
+            0.049096312499999996,
+            0.0490444375,
+            0.048920875,
+            0.049116437500000006,
+            0.049085187499999995,
+            0.0461748125,
+            0.0489529375,
+            0.0492210625,
+            0.0491213125,
+            0.049329000000000005,
+            0.048961187499999996
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.049090749999999996,
+          "p95_ms": 0.049329000000000005,
+          "min_ms": 0.0461748125,
+          "samples_ms": [
+            0.049315,
+            0.049096312499999996,
+            0.0490444375,
+            0.048920875,
+            0.049116437500000006,
+            0.049085187499999995,
+            0.0461748125,
+            0.0489529375,
+            0.0492210625,
+            0.0491213125,
+            0.049329000000000005,
+            0.048961187499999996
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01431278125,
+          "p95_ms": 0.014412125,
+          "min_ms": 0.0142856875,
+          "samples_ms": [
+            0.01434325,
+            0.014313875,
+            0.014412125,
+            0.014332,
+            0.0142991875,
+            0.01431625,
+            0.014305,
+            0.0143133125,
+            0.014298,
+            0.01430425,
+            0.01431225,
+            0.0142856875
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 4097,
+        "k": 7,
+        "tile": 128,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 4097,
+        "create_ms": 0.831308,
+        "indices": [
+          0,
+          8,
+          19,
+          27,
+          28,
+          34,
+          39,
+          1,
+          6,
+          12,
+          18,
+          20,
+          24,
+          27
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.041362187499999994,
+            0.04137075,
+            0.0417779375,
+            0.0400144375,
+            0.0413295625,
+            0.04140475,
+            0.040312875000000005,
+            0.0413291875,
+            0.041472375,
+            0.0399731875,
+            0.041268812499999995,
+            0.0412905
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 128,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041329375,
+          "p95_ms": 0.0417779375,
+          "min_ms": 0.0399731875,
+          "samples_ms": [
+            0.041362187499999994,
+            0.04137075,
+            0.0417779375,
+            0.0400144375,
+            0.0413295625,
+            0.04140475,
+            0.040312875000000005,
+            0.0413291875,
+            0.041472375,
+            0.0399731875,
+            0.041268812499999995,
+            0.0412905
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.052739,
+          "p95_ms": 0.0532894375,
+          "min_ms": 0.05228075,
+          "samples_ms": [
+            0.0529700625,
+            0.052685375,
+            0.0525170625,
+            0.0528954375,
+            0.0532894375,
+            0.052910875,
+            0.052588375,
+            0.052792625,
+            0.05228075,
+            0.05254075,
+            0.0530325625,
+            0.0525931875
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 8193,
+        "k": 7,
+        "tile": 256,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 8193,
+        "create_ms": 0.8343470000000001,
+        "indices": [
+          0,
+          8,
+          19,
+          27,
+          28,
+          34,
+          39,
+          22,
+          29,
+          34,
+          42,
+          46,
+          47,
+          54
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.05335225,
+            0.0473143125,
+            0.0489954375,
+            0.049148374999999994,
+            0.0493283125,
+            0.049069249999999995,
+            0.0492229375,
+            0.04896775,
+            0.049063,
+            0.049506999999999995,
+            0.0489688125,
+            0.048942125
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 256,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.049066125,
+          "p95_ms": 0.05335225,
+          "min_ms": 0.0473143125,
+          "samples_ms": [
+            0.05335225,
+            0.0473143125,
+            0.0489954375,
+            0.049148374999999994,
+            0.0493283125,
+            0.049069249999999995,
+            0.0492229375,
+            0.04896775,
+            0.049063,
+            0.049506999999999995,
+            0.0489688125,
+            0.048942125
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.05512634375,
+          "p95_ms": 0.0553421875,
+          "min_ms": 0.0548298125,
+          "samples_ms": [
+            0.05501675,
+            0.05511975,
+            0.0551329375,
+            0.05513975,
+            0.054949375,
+            0.0551440625,
+            0.055275625,
+            0.0550816875,
+            0.0553421875,
+            0.0548298125,
+            0.055280875,
+            0.05509025
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 257,
+        "k": 7,
+        "tile": 1,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 257,
+        "create_ms": 0.83026,
+        "indices": [
+          0,
+          8,
+          19,
+          27,
+          28,
+          34,
+          39,
+          4,
+          6,
+          12,
+          13,
+          15,
+          37,
+          40
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0413825625,
+            0.0418388125,
+            0.040697125,
+            0.041625,
+            0.0414519375,
+            0.0394119375,
+            0.041226375,
+            0.041351125,
+            0.040855375,
+            0.041583875,
+            0.041415375000000004,
+            0.03929325
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 1,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.04136684375,
+          "p95_ms": 0.0418388125,
+          "min_ms": 0.03929325,
+          "samples_ms": [
+            0.0413825625,
+            0.0418388125,
+            0.040697125,
+            0.041625,
+            0.0414519375,
+            0.0394119375,
+            0.041226375,
+            0.041351125,
+            0.040855375,
+            0.041583875,
+            0.041415375000000004,
+            0.03929325
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.01356871875,
+          "p95_ms": 0.013599625,
+          "min_ms": 0.0135544375,
+          "samples_ms": [
+            0.013599625,
+            0.0135694375,
+            0.013570375,
+            0.01359375,
+            0.0135585625,
+            0.0135710625,
+            0.0135630625,
+            0.0135698125,
+            0.013568,
+            0.0135648125,
+            0.0135611875,
+            0.0135544375
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    },
+    {
+      "request": {
+        "kind": "bottomk",
+        "rows": 2,
+        "cols": 1025,
+        "k": 7,
+        "tile": 8,
+        "seed": 43
+      },
+      "native": {
+        "adapter": {
+          "backend": "Vulkan",
+          "name": "NVIDIA GeForce RTX 5090"
+        },
+        "cols": 1025,
+        "create_ms": 0.892374,
+        "indices": [
+          0,
+          8,
+          19,
+          27,
+          28,
+          34,
+          39,
+          4,
+          5,
+          19,
+          25,
+          27,
+          43,
+          51
+        ],
+        "k": 7,
+        "kind": "bottomk",
+        "mode": "resident_only",
+        "resident_repetitions": 16,
+        "rows": 2,
+        "samples_ms": {
+          "resident_dispatch_fence_per_op": [
+            0.0413929375,
+            0.04168375,
+            0.041316624999999996,
+            0.0403809375,
+            0.041307375,
+            0.0412845,
+            0.040379624999999995,
+            0.041648250000000005,
+            0.0412815625,
+            0.0397065625,
+            0.041250249999999995,
+            0.0412515
+          ]
+        },
+        "seed": 43,
+        "status": "passed",
+        "tile": 8,
+        "validation_boundary": "fixed input validated before and after all timing intervals; resident-only does not insert host maps/uploads between intervals",
+        "values": [
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0,
+          -3.0
+        ]
+      },
+      "timings": {
+        "resident_dispatch_fence_per_op": {
+          "n": 12,
+          "median_ms": 0.041283031250000005,
+          "p95_ms": 0.04168375,
+          "min_ms": 0.0397065625,
+          "samples_ms": [
+            0.0413929375,
+            0.04168375,
+            0.041316624999999996,
+            0.0403809375,
+            0.041307375,
+            0.0412845,
+            0.040379624999999995,
+            0.041648250000000005,
+            0.0412815625,
+            0.0397065625,
+            0.041250249999999995,
+            0.0412515
+          ]
+        },
+        "torch_resident_per_op": {
+          "n": 12,
+          "median_ms": 0.014325656249999999,
+          "p95_ms": 0.014396,
+          "min_ms": 0.014312,
+          "samples_ms": [
+            0.014373375,
+            0.014331375,
+            0.0143271875,
+            0.014345875,
+            0.014324125,
+            0.0143159375,
+            0.014322375,
+            0.0143230625,
+            0.014396,
+            0.0143275,
+            0.014312,
+            0.014312125
+          ]
+        }
+      },
+      "torch_operation": "stable_sort",
+      "torch_canonical_indices": "checked before and after all timing intervals"
+    }
+  ],
+  "gpu_process_gate": "no foreign compute PIDs at preflight/postflight; not an exclusive reservation",
+  "provenance": {
+    "valid": true,
+    "source_after": {
+      "repository": "/home/ryospiralarchitect/scratch/spiraltorch-midk-canonical-candidate-817af465",
+      "commit": "817af4651505e2b0faa6f59377f39635bcec4f22",
+      "tree": "3cce196e5897d8b08cdb74e414ad3ace28d9d5cc",
+      "tracked_dirty": false,
+      "tracked_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "executable": {
+      "path": "/home/ryospiralarchitect/scratch/spiraltorch-resident-evidence-20260906/resident-canonical-candidate-817af465",
+      "sha256": "b24652e0b35f66432bcaf34d16bc59ac13eea27135ca09d5e9d128ab93e32cf5",
+      "device": 64512,
+      "inode": 42896349,
+      "size": 9335112,
+      "mtime_ns": 1788682147622985336,
+      "mode": 33277
+    },
+    "execution_image": {
+      "path": "/home/ryospiralarchitect/scratch/spiraltorch-resident-evidence-20260906/rank-execution-dwhxt2bz/resident_rank_bench",
+      "sha256": "b24652e0b35f66432bcaf34d16bc59ac13eea27135ca09d5e9d128ab93e32cf5",
+      "device": 64512,
+      "inode": 42896349,
+      "size": 9335112,
+      "mtime_ns": 1788682147622985336,
+      "mode": 33277
+    }
+  }
+}
