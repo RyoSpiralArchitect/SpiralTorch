@@ -1,0 +1,376 @@
+{
+  "schema": "spiraltorch.midk_tournament_review_replay.v1",
+  "status": "passed",
+  "source": "ed21f2000d49b3add759b8a4b53fb3b46b4e60ee",
+  "gpu_sources": {
+    "rankk_exact_2ce.wgsl": {
+      "sha256": "d2c2430ef6e86077770c574b347d64f1508d0a2b08df2e901e166e5a6c803804",
+      "bytes": 18010,
+      "unchanged_gpu_source": true
+    },
+    "rankk_exact_2ce_midk_tournament.wgsl": {
+      "sha256": "900c7d67214889512c5d590e7ddb38ca486cec950acddf7fb0d88ac539e11f9c",
+      "bytes": 9069,
+      "unchanged_gpu_source": true
+    }
+  },
+  "native": {
+    "cases": 36,
+    "observations": 2304,
+    "torch": "2.13.0+cu132",
+    "adapter": "NVIDIA GeForce RTX 5090",
+    "build_identity": {
+      "build_fingerprint": "sha256:00b02ae62e4f8876514109dfed4e8d9adde03c73100953d25556a7359a1238d2",
+      "manifest": {
+        "git": {
+          "commit": "ed21f2000d49b3add759b8a4b53fb3b46b4e60ee",
+          "describe": "v0.4.27-116-ged21f200",
+          "dirty": false,
+          "tree": "9fa457d17b721b7434c0a1f9aa1e38672fa1aebb"
+        },
+        "host": "unknown-host",
+        "id": "Ryo-ST-ryospiralarchitect-2026-09-06T16:44:19.564Z-98cf58514fdd41689c274062d4aab490",
+        "pkg": {
+          "name": "st-core",
+          "version": "1.10.0"
+        },
+        "profile": "release",
+        "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "seed": "98cf58514fdd41689c274062d4aab490",
+        "target": {
+          "arch": "x86_64",
+          "os": "linux",
+          "triple": "x86_64-unknown-linux-gnu"
+        },
+        "timestamp": "2026-09-06T16:44:19.564Z",
+        "user": "ryospiralarchitect"
+      },
+      "schema": "spiraltorch.native_build_identity.v1"
+    },
+    "hindsight_best_over_cuda_range": [
+      1.653465256934227,
+      5.469940232623381
+    ]
+  },
+  "browser": {
+    "cases": 44,
+    "version": "152.0.7977.77",
+    "adapters": {
+      "baseline": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "candidate": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "cells": [
+      {
+        "tiles": 32,
+        "k": 1,
+        "mean_ratio": 1.0116883117668514
+      },
+      {
+        "tiles": 32,
+        "k": 7,
+        "mean_ratio": 1.0190779012395128
+      },
+      {
+        "tiles": 32,
+        "k": 65,
+        "mean_ratio": 0.9880059972129308
+      },
+      {
+        "tiles": 32,
+        "k": 256,
+        "mean_ratio": 0.9841726616891076
+      },
+      {
+        "tiles": 33,
+        "k": 1,
+        "mean_ratio": 0.9812206572083506
+      },
+      {
+        "tiles": 33,
+        "k": 7,
+        "mean_ratio": 0.9102222220794949
+      },
+      {
+        "tiles": 33,
+        "k": 65,
+        "mean_ratio": 0.662145499402678
+      },
+      {
+        "tiles": 33,
+        "k": 256,
+        "mean_ratio": 0.5337629998464659
+      },
+      {
+        "tiles": 63,
+        "k": 1,
+        "mean_ratio": 1.0231910946902234
+      },
+      {
+        "tiles": 63,
+        "k": 7,
+        "mean_ratio": 0.937040065596403
+      },
+      {
+        "tiles": 63,
+        "k": 65,
+        "mean_ratio": 0.677495107594185
+      },
+      {
+        "tiles": 63,
+        "k": 256,
+        "mean_ratio": 0.5262166859623305
+      },
+      {
+        "tiles": 64,
+        "k": 1,
+        "mean_ratio": 0.9870609981312698
+      },
+      {
+        "tiles": 64,
+        "k": 7,
+        "mean_ratio": 0.9299835255937843
+      },
+      {
+        "tiles": 64,
+        "k": 65,
+        "mean_ratio": 0.67916337806828
+      },
+      {
+        "tiles": 64,
+        "k": 256,
+        "mean_ratio": 0.5265679442329947
+      },
+      {
+        "tiles": 65,
+        "k": 1,
+        "mean_ratio": 1.0017559262117575
+      },
+      {
+        "tiles": 65,
+        "k": 7,
+        "mean_ratio": 0.9303944316125479
+      },
+      {
+        "tiles": 65,
+        "k": 65,
+        "mean_ratio": 0.6763742264242057
+      },
+      {
+        "tiles": 65,
+        "k": 256,
+        "mean_ratio": 0.5249406175828254
+      },
+      {
+        "tiles": 127,
+        "k": 1,
+        "mean_ratio": 0.9992205767325196
+      },
+      {
+        "tiles": 127,
+        "k": 7,
+        "mean_ratio": 0.9296657381500882
+      },
+      {
+        "tiles": 127,
+        "k": 65,
+        "mean_ratio": 0.68276096562705
+      },
+      {
+        "tiles": 127,
+        "k": 256,
+        "mean_ratio": 0.531297904954157
+      },
+      {
+        "tiles": 128,
+        "k": 1,
+        "mean_ratio": 0.984459984430949
+      },
+      {
+        "tiles": 128,
+        "k": 7,
+        "mean_ratio": 0.9394150418876004
+      },
+      {
+        "tiles": 128,
+        "k": 65,
+        "mean_ratio": 0.6806837606587807
+      },
+      {
+        "tiles": 128,
+        "k": 256,
+        "mean_ratio": 0.5307298335470281
+      },
+      {
+        "tiles": 129,
+        "k": 1,
+        "mean_ratio": 0.9977678572758166
+      },
+      {
+        "tiles": 129,
+        "k": 7,
+        "mean_ratio": 0.9226666667025619
+      },
+      {
+        "tiles": 129,
+        "k": 65,
+        "mean_ratio": 0.675684277498319
+      },
+      {
+        "tiles": 129,
+        "k": 256,
+        "mean_ratio": 0.527829747424163
+      },
+      {
+        "tiles": 255,
+        "k": 1,
+        "mean_ratio": 1.000000000045625
+      },
+      {
+        "tiles": 255,
+        "k": 7,
+        "mean_ratio": 0.9394606494616398
+      },
+      {
+        "tiles": 255,
+        "k": 65,
+        "mean_ratio": 0.6979226774339158
+      },
+      {
+        "tiles": 255,
+        "k": 256,
+        "mean_ratio": 0.5387462150999703
+      },
+      {
+        "tiles": 256,
+        "k": 1,
+        "mean_ratio": 0.9933655007060744
+      },
+      {
+        "tiles": 256,
+        "k": 7,
+        "mean_ratio": 0.9402084477015378
+      },
+      {
+        "tiles": 256,
+        "k": 65,
+        "mean_ratio": 0.701936976024923
+      },
+      {
+        "tiles": 256,
+        "k": 256,
+        "mean_ratio": 0.5408105984076261
+      },
+      {
+        "tiles": 257,
+        "k": 1,
+        "mean_ratio": 0.9979591837001561
+      },
+      {
+        "tiles": 257,
+        "k": 7,
+        "mean_ratio": 0.9981167608706727
+      },
+      {
+        "tiles": 257,
+        "k": 65,
+        "mean_ratio": 0.9960855949507059
+      },
+      {
+        "tiles": 257,
+        "k": 256,
+        "mean_ratio": 0.9969289420632268
+      }
+    ],
+    "asset_sha256": {
+      "/": "e7651e6d9cead3aec58ffc6f615bb33702c8ebbd20051efff984491fc556e3ab",
+      "/module/spiraltorch_wasm.js": "1001d08f62332646038577b173eca616f7f0455e3f25baf5b24478fe78ed7a4b",
+      "/module/spiraltorch_wasm_bg.wasm": "b43fae8b3a3497b2f1f3ed9fa63ba24068c795367ff4c3394a41c40760e7f790",
+      "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "/baseline/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "/baseline/spiraltorch_wasm.js": "fb55b4a9997d2a6ae37287c175102d8e68bbf15c8ad10657475999ba0b59dada",
+      "/baseline/spiraltorch_wasm_bg.wasm": "a1dedb76d649a106ce2a760445b13391d248bc02c825f50ebc5978b1be16da2c"
+    },
+    "interpretation": "one matched replay, not independent seeds or a physical adapter attestation"
+  },
+  "python": {
+    "passed": 92,
+    "identity": {
+      "python": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/midk-seek-20260906/venv/bin/python",
+      "extension": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/midk-seek-20260906/venv/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": true,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      }
+    },
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    }
+  },
+  "raw_sha256": {
+    "backend-clippy-1.98.log": "bef195ced39ceac1929be51946851988c84fe72b8af55b8623edafdfab42c324",
+    "backend-clippy-ed21f200-linux.log": "b6d5031b10a1097e8e55508a5b1aa42f6a07749fd314c6145999394df0e5e102",
+    "backend-clippy.log": "f99e1a77e420ffe90a4e08d0e9198d5e7b844b88474d62e37eb0b6cc90728557",
+    "backend-full-ed21f200-linux.log": "e6d8ec8019b117347021f320693ea89f33458f4ba8bfd4e66c34e43076613aa0",
+    "backend-full-ed21f200-mac198.log": "b3e3ec78f0ceed14313cc7fa83037ce2b967a8e1001109f51fbec94f2d124f37",
+    "backend-full-green.log": "aefdb4671bc09190cc5794d2ff425fb7700e1d3356b37df1442a56761d5b1c94",
+    "baseline-assets.json": "27374f662122ca4058fd612dd5fab528947440c3f9f0306b67dd8a399ff0c106",
+    "build-ed21f200-linux.log": "229ce34a3c77a8dac48a7c6a53484a5c50289c7fe82a257293b3cd33534a9729",
+    "build-info-ed21f200.json": "303276c5594bf5635a8411b9878c7ea0d5dca51e5b10c36820d915cd7c076afb",
+    "build-products.sha256": "e2a1b9165e772ffadc4941f6bb2d70abebe5cd6ed391ba227b820172759d1668",
+    "catalog-red.log": "ff564adec808ae5bcff964ed7095141d9bdae5dbb49abf5df78d04a136110aa4",
+    "fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matched-browser-ed21f200.json": "1eff7c270d221be205a9d4cd66ff8b7d7328de4a114b17e144f15c33bfee3202",
+    "matched-browser-ed21f200.log": "3e5c37a39c123db661a0bf2ccd413418a3aca04acbaab96858cc7c7d637df3c6",
+    "python-adapter-ed21f200-ok.json": "2a32146cc5d9c43cb9fed88534d3a8a013e320564601f0aa63cafe5d6c63a8a0",
+    "python-adapter-ed21f200.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "python-catalog-red.log": "d6f4e7f26e93cb758ee5c7a035545e185542991401dfeeeda4144622f9e0f7fe",
+    "python-identity-ed21f200.json": "9123282f6e0ff10cee0b70fd9211bbe996148ef2bc6bef7271a36cac30429be8",
+    "python-rank-resident-all-ed21f200.log": "b69b0ba321a873c937a1fed984bb7235f715bb5d322e97f56b30043d821c0352",
+    "python-runtime-ed21f200.log": "728b31d4b0ce392935e2d4ca99f10ef1a45990754a92a0e5e7d0d33b7fd504b2",
+    "python-runtime-resident-ed21f200.log": "51d55241f9b696a4f0c475175b9ac9c6fdaad5cfeaa17168638662e105524da8",
+    "rank-suite-ed21f200.json": "c4b93b57fb1c960e3785b044a87e487973158dbe6c70bf6a4adb366d45e6632c",
+    "rank-suite-ed21f200.log": "87cf8ca762366ac328b17f7af529e010b0b2fec617281e12980695ec3c65f663",
+    "replay_review.py": "107e3415bc59aedc1aabd032722ae8d76e07198d57c130ab23a230266e2ae8f4",
+    "standalone-shader-red.log": "1867745691461da949fcf21e4932cea84db6fcf141172ea5ed9e0d05013eda3c",
+    "wasm-all-targets-ed21f200.log": "3c1dd21c0cb41b1848d98eea5525eda72ecdd11648d4482140f8195ca5ca94d5",
+    "wasm-all-targets.log": "645e6b51072d26fea2049307ab62766bfc16fd49eeb18876c5967a406a66eaa2",
+    "wasm-build-ed21f200.log": "3d66931ce24fd0589702de22f0e3505d4e0a84a3d134bb115b546823611c1554",
+    "wheel-build-ed21f200.log": "5f7b96b5dc47eae8d688685b6c70b8075ab6c1ad4b130e893d9214848ece0882",
+    "wheel-install-ed21f200.log": "da1ee43598524bbe93f8c411d3563345444bc2570651e8aa0aa3c480ad76d3be"
+  }
+}

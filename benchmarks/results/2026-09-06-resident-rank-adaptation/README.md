@@ -5,6 +5,10 @@ Rust's Black Cat session. This is an execution connection, not a second
 Python/JavaScript planner. TopK's new `rank_tile` is independent of FFT's
 `tile_cols`; MidK/BottomK retain `ctile`. Existing defaults are unchanged.
 
+The follow-up [cached MidK tournament study](../2026-09-07-midk-tournament/README.md)
+uses these controls to optimize the shared Rust/WASM kernel, including
+many-row regression evidence and matched browser comparisons.
+
 ## Measurements
 
 Two complete repetitions on Furnace's RTX 5090 passed: 72 cases and 4,608

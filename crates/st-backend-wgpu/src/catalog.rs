@@ -10,6 +10,8 @@
 //! trace planner choices, prepare Redis/telemetry payloads, and explain WGPU
 //! fallback behaviour without needing a GPU during report generation.
 
+use crate::rankk_exact_2ce::{Kind, MergeMode};
+
 const SOFTMAX_BINDINGS: &[&str] = &[
     "values:read_storage",
     "output:write_storage",
@@ -121,6 +123,14 @@ pub enum RankKernelKind {
 }
 
 impl RankKernelKind {
+    const fn exact_kind(self) -> Kind {
+        match self {
+            Self::TopK => Kind::TopK,
+            Self::MidK => Kind::MidK,
+            Self::BottomK => Kind::BottomK,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::TopK => "topk",
@@ -152,6 +162,7 @@ pub struct RankKernelReport {
     pub request: RankKernelRequest,
     pub primary: &'static KernelDescriptor,
     pub fallback: Option<&'static KernelDescriptor>,
+    /// First-stage geometry (tile sort for an exact two-command request).
     pub dispatch: DispatchGeometry,
     pub fft: FftKernelHints,
     pub stages: &'static [&'static str],
@@ -324,14 +335,28 @@ const KERNEL_CATALOG: &[KernelDescriptor] = &[
         family: "rank",
         operation: "rankk_exact",
         shader: "rankk_exact_2ce.wgsl",
-        entry_point: "rankk_exact_2ce_row_merge",
-        pipeline_label: "st.rankk.exact_2ce.row_merge",
+        entry_point: MergeMode::Streaming.entry_point(),
+        pipeline_label: MergeMode::Streaming.pipeline_label(),
         variant: "2ce_row_merge",
         subgroup: false,
         portable: true,
         stages: STAGE_RANK_EXACT_2CE,
         bindings: EXACT_RANK_2CE_BINDINGS,
         notes: "second command: exact TopK/MidK/BottomK ordered-run merge",
+    },
+    KernelDescriptor {
+        name: "rankk_exact_2ce_midk_tournament",
+        family: "rank",
+        operation: "rankk_exact",
+        shader: "rankk_exact_2ce_midk_tournament.wgsl",
+        entry_point: MergeMode::TournamentMidk.entry_point(),
+        pipeline_label: MergeMode::TournamentMidk.pipeline_label(),
+        variant: "2ce_midk_tournament",
+        subgroup: false,
+        portable: true,
+        stages: STAGE_RANK_EXACT_2CE,
+        bindings: EXACT_RANK_2CE_BINDINGS,
+        notes: "second command: exact MidK cached tile-head tournament for 33-256 tiles and k > 1",
     },
     KernelDescriptor {
         name: "midk_bottomk_scan_tiles",
@@ -639,11 +664,6 @@ pub fn rank_kernel_report(request: RankKernelRequest) -> RankKernelReport {
         }
         RankKernelKind::MidK | RankKernelKind::BottomK => descriptor("midk_bottomk_apply_fallback"),
     };
-    let primary = if request.use_two_stage {
-        descriptor("rankk_exact_2ce_row_merge")
-    } else {
-        single_command_primary
-    };
     let fallback = if request.use_two_stage {
         Some(single_command_primary)
     } else {
@@ -661,6 +681,12 @@ pub fn rank_kernel_report(request: RankKernelRequest) -> RankKernelReport {
     }
     .min(request.cols.max(1));
     let exact_tiles_x = tiles_for_cols_and_tile(request.cols, exact_tile);
+    let primary = if request.use_two_stage {
+        let mode = MergeMode::for_rank(request.kind.exact_kind(), request.k, exact_tiles_x);
+        descriptor(mode.entry_point())
+    } else {
+        single_command_primary
+    };
     let dispatch = if request.use_two_stage {
         DispatchGeometry {
             workgroups: if request.rows == 0 || request.cols == 0 {
@@ -783,6 +809,71 @@ mod tests {
     }
 
     #[test]
+    fn rank_report_selects_tournament_midk() {
+        let report = rank_kernel_report(RankKernelRequest {
+            kind: RankKernelKind::MidK,
+            rows: 2,
+            cols: 8193,
+            k: 65,
+            subgroup: false,
+            use_two_stage: true,
+            fft_tile: 0,
+            fft_radix: 0,
+            fft_segments: 0,
+            rank_tile: 32,
+            compaction_tile: 256,
+        });
+        assert_eq!(report.primary.name, "rankk_exact_2ce_midk_tournament");
+    }
+
+    #[test]
+    fn rank_report_matches_runtime_selector_without_frontend_heuristics() {
+        for kind in [
+            RankKernelKind::TopK,
+            RankKernelKind::MidK,
+            RankKernelKind::BottomK,
+        ] {
+            for cols in [257, 1023, 1025, 8192, 8193, 65535, 65537] {
+                for tile in [0, 1, 8, 256, 1024] {
+                    for k in [1, 2, 65] {
+                        let request = RankKernelRequest {
+                            kind,
+                            rows: 2,
+                            cols,
+                            k,
+                            subgroup: false,
+                            use_two_stage: true,
+                            fft_tile: 0,
+                            fft_radix: 0,
+                            fft_segments: 0,
+                            rank_tile: tile,
+                            compaction_tile: tile,
+                        };
+                        let report = rank_kernel_report(request);
+                        let plan = crate::rankk_exact_2ce::Plan::try_new(
+                            kind.exact_kind(),
+                            2,
+                            cols,
+                            k,
+                            if tile == 0 { 256 } else { tile },
+                        )
+                        .unwrap();
+                        let mode = MergeMode::for_rank(plan.kind(), plan.k(), plan.tiles_x());
+                        assert_eq!(report.primary.entry_point, mode.entry_point());
+                        assert_eq!(report.primary.pipeline_label, mode.pipeline_label());
+                        assert_eq!(report.dispatch.tiles_x, plan.tiles_x());
+                        let single = rank_kernel_report(RankKernelRequest {
+                            use_two_stage: false,
+                            ..request
+                        });
+                        assert_ne!(single.primary.name, "rankk_exact_2ce_midk_tournament");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn catalog_entry_points_exist_in_owned_wgsl() {
         for (shader, source) in [
             (
@@ -792,6 +883,10 @@ mod tests {
             (
                 "rankk_exact_2ce.wgsl",
                 include_str!("shaders/rankk_exact_2ce.wgsl"),
+            ),
+            (
+                "rankk_exact_2ce_midk_tournament.wgsl",
+                include_str!("shaders/rankk_exact_2ce_midk_tournament.wgsl"),
             ),
             (
                 "wgpu_compaction_scan.wgsl",
