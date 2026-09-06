@@ -133,3 +133,53 @@ Extraction and recomputation reproduced the committed summary byte-for-byte.
 
 Archive SHA-256: `22fb757b9de8d622892297d0318c643bf1d9f5b79d069541f53792931e1e9b7e`.
 Summary SHA-256: `535ad51f37ed527bad902481c58bb8cc9255cb2c3aa6a9d15d5957d1f00a6b45`.
+
+## Post-Review Revalidation
+
+The study above remains frozen at `2c72e26b`. Review found two additional
+diagnostic-path defects, reproduced before fixing them in
+`b7999e8f6ac1082a55a5f9f560859e145969da3e`:
+
+- Profiled output now stays stale until that particular profile successfully
+  validates and reads its timestamps. Uploads, newer profiles and ordinary
+  dispatch detach its publication token, so an older completion cannot publish
+  another operation's output. Failed or dropped profiles do not publish.
+- Native diagnostic encoding sharing the same actual device now rejects an
+  overlapping diagnostic error scope before query allocation or submission.
+  Pending readbacks do not hold the guard. Ordinary execution and independent
+  devices remain unrestricted; no execution/readback lock or retry was added.
+
+The browser regression injects one actual invalid WebGPU query count and checks
+rejection, stale output and recovery through ordinary dispatch. It restores the
+isolated test prototype immediately. Generated TypeScript constructor and
+profile signatures are also checked; this fixes the independent CI contract
+failure rather than disabling the check.
+
+Fresh products passed 86 live backend tests plus WGSL parsing on each of macOS
+and Furnace, 103 packaged Python tests, 72 native profile cases and 12 browser
+profile cases including the rank-only 1024-repetition boundary. The replay
+validates another 1,009 timestamp reports and the real browser rejection.
+
+One native before/after pair passes 72 cases and 4,608 Rust policy observations.
+For the 144 fixed controls, the mean-latency candidate/baseline ratios have
+median **0.998** and range **0.967-1.023**. One 44-case browser matched run has
+median **1.002** and range **0.908-1.157**. These are regression controls, not
+additional speedup evidence or a claim that every cell is unchanged. The
+original PyTorch comparison and its limitations remain in force.
+
+[review-summary.json](review-summary.json) and
+[review-logs.tar.xz](review-logs.tar.xz) preserve the separate raw reports,
+red/green tests, build logs, product hashes, source bundle and replay scripts.
+The installed Python extension is byte-checked against the new wheel; browser
+assets are checked against the captured products. Native reports retain their
+clean source/build binding. After extraction, run:
+
+```sh
+python -I analyze_review.py --repo /path/to/SpiralTorch --output recomputed.json
+```
+
+Extraction and recomputation reproduced the review summary byte-for-byte.
+The original archive and summary were not replaced.
+
+Review archive SHA-256: `a098243828e9c3b59c2853f0ca460214f209c0dd03586ae0ae8f76c353b5c711`.
+Review summary SHA-256: `1d0b40ce49e712b0de82c31befbc2caa74d515bc37ff4ad0f44273c7063061d0`.
