@@ -45,6 +45,7 @@ def main():
     print("        ch,")
     print("        algo_topk: 0,")
     print("        ctile,")
+    print("        rank_tile: None,")
     print("        mode_midk: 0,")
     print("        mode_bottomk: 0,")
     print("        tile_cols: (cols.max(1).div_ceil(1024) * 1024) as u32,")

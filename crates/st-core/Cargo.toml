@@ -121,6 +121,11 @@ path = "../../examples/resident_rank_bench.rs"
 required-features = ["wgpu-rt"]
 
 [[example]]
+name = "resident_rank_adaptation_bench"
+path = "../../examples/resident_rank_adaptation_bench.rs"
+required-features = ["wgpu-rt", "kdsl"]
+
+[[example]]
 name = "resident_matmul_rank_bench"
 path = "../../examples/resident_matmul_rank_bench.rs"
 required-features = ["wgpu-rt"]

@@ -300,6 +300,25 @@ pub struct WasmWgpuRank {
 
 #[wasm_bindgen(js_class = WgpuRank)]
 impl WasmWgpuRank {
+    /// Construct from Rust-owned candidate geometry, without rebuilding the plan in JS.
+    #[wasm_bindgen(js_name = createFromAdaptation)]
+    pub async fn create_from_adaptation(
+        session: &crate::rank_adaptation::WasmRankAdaptationSession,
+        candidate_index: Number,
+    ) -> Result<WasmWgpuRank, JsValue> {
+        let index = crate::utils::js_u32(candidate_index.as_ref(), "candidate index")?;
+        let spec = session
+            .wgpu_resident_candidate(index as usize)
+            .map_err(error)?;
+        let plan = Plan::try_new(spec.kind, spec.rows, spec.cols, spec.k, spec.tile_cols)
+            .map_err(error)?;
+        Ok(Self {
+            inner: ResidentRank::new_async(ensure_runtime().await?, plan)
+                .await
+                .map_err(error)?,
+        })
+    }
+
     #[wasm_bindgen(js_name = create)]
     pub async fn create(
         kind: JsString,

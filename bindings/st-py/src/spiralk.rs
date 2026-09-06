@@ -208,6 +208,9 @@ pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<
     if let Some(value) = out.hard.ctile {
         hard.set_item("compaction_tile", value)?;
     }
+    if let Some(value) = out.hard.rank_tile {
+        hard.set_item("rank_tile", value)?;
+    }
     if let Some(value) = out.hard.tile_cols {
         hard.set_item("tile_cols", value)?;
     }
@@ -259,6 +262,11 @@ pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<
             }
             SpiralKSoftRule::Ctile { val, w } => {
                 rule_dict.set_item("field", "compaction_tile")?;
+                rule_dict.set_item("value", *val)?;
+                rule_dict.set_item("weight", *w)?;
+            }
+            SpiralKSoftRule::RankTile { val, w } => {
+                rule_dict.set_item("field", "rank_tile")?;
                 rule_dict.set_item("value", *val)?;
                 rule_dict.set_item("weight", *w)?;
             }

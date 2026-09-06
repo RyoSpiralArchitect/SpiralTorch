@@ -1,7 +1,8 @@
 //! Static rank support shared by runtime dispatch and external native clients.
 
+use crate::backend::device_caps::BackendKind;
 use crate::backend::unison_heuristics::RankKind;
-use crate::ops::rank_entry::RankPlan;
+use crate::ops::rank_entry::{RankPlan, RankPlanError};
 use st_kernel_contracts::rank::{Exact2CeGeometry, Kind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +65,49 @@ pub(crate) fn exact_tile_cols(plan: &RankPlan) -> u32 {
     match plan.kind {
         RankKind::TopK => plan.choice.tile,
         RankKind::MidK | RankKind::BottomK => plan.choice.ctile,
+    }
+}
+
+/// Parameters consumed by the persistent exact two-command WGPU workspace.
+/// Device limits and runtime readiness are still checked during allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgpuResidentRankSpec {
+    pub kind: Kind,
+    pub rows: u32,
+    pub cols: u32,
+    pub k: u32,
+    pub tile_cols: u32,
+}
+
+impl WgpuResidentRankSpec {
+    /// Does not reinterpret a direct, CPU, or fallback-enabled plan as resident.
+    pub fn try_from_plan(plan: &RankPlan) -> Result<Self, RankPlanError> {
+        plan.validate()?;
+        if !plan.accelerator_fallback().is_strict() {
+            return Err(RankPlanError::DeclaredNativeRequiresStrictFallback);
+        }
+        if plan.device_caps.backend != BackendKind::Wgpu || !plan.choice.use_2ce {
+            return Err(RankPlanError::UnsupportedNativeExecution {
+                detail: "resident rank requires a WGPU exact two-command plan".into(),
+            });
+        }
+        if plan.rows == 0 || plan.cols == 0 || plan.k == 0 {
+            return Err(RankPlanError::UnsupportedNativeExecution {
+                detail: "resident rank workspace dimensions must be positive".into(),
+            });
+        }
+        let geometry =
+            Exact2CeGeometry::try_new(plan.rows, plan.cols, plan.k, exact_tile_cols(plan))
+                .map_err(|error| RankPlanError::UnsupportedNativeExecution {
+                    detail: error.to_string(),
+                })?;
+        Ok(Self {
+            kind: exact_kind(plan.kind),
+            rows: plan.rows,
+            cols: plan.cols,
+            k: plan.k,
+            tile_cols: geometry.tile_cols,
+        })
     }
 }
 

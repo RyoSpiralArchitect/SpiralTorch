@@ -1021,6 +1021,30 @@ and a launch that cannot honor the native contract must be abandoned rather than
 credited. Fallback-allowed plans use the currently executable Rust route and
 therefore collapse candidate scripts that would all run as the same software path.
 
+For strict two-command WebGPU candidates, allocate the actual resident workspaces
+without reconstructing `selection.plan` in JavaScript:
+
+```ts
+import { WgpuRank } from "spiraltorch-wasm";
+
+// Use a strict WGPU session whose scripts all specify "u2: true;".
+const workspaces = [];
+for (const candidate of session.snapshot().candidates) {
+  const workspace = await WgpuRank.createFromAdaptation(session, candidate.index);
+  workspace.upload(input); // the same Float32Array for every candidate
+  workspaces.push(workspace);
+}
+// Choose, dispatch the selected workspace, await synchronize(), validate readback,
+// then observe the whole completed batch's latency. Free all workspaces afterward.
+```
+
+Rust resolves the effective tile (`rank_tile` for TopK, `ctile` for MidK/BottomK)
+and rejects direct/fallback-enabled candidates before allocation. `tile_cols`
+remains the independent FFT knob. This factory never chooses or credits an arm;
+allocation and input upload belong outside the measured interval. See
+[resident rank adaptation](../../docs/backend_pytorch_benchmarks.md#resident-rank-adaptation)
+for the Python equivalent and benchmark boundaries.
+
 ## High-level Canvas utilities
 
 `types/canvas-view.ts` implements an opinionated orchestration layer around the raw

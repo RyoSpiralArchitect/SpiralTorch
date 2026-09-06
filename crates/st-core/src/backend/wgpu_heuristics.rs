@@ -47,13 +47,14 @@ pub struct Choice {
     pub wg: u32,
     pub kl: u32,
     pub ch: u32,
-    pub algo_topk: u8,    // 0=auto, 1=heap, 2=bitonic, 3=kway
-    pub ctile: u32,       // 0=auto
-    pub mode_midk: u8,    // 0=auto, 1=1CE, 2=2CE
-    pub mode_bottomk: u8, // 0=auto, 1=1CE, 2=2CE
-    pub tile_cols: u32,   // column tiles for ND FFT/fractional kernels
-    pub radix: u32,       // preferred FFT radix
-    pub segments: u32,    // ND segment count for GPU kernels
+    pub algo_topk: u8,          // 0=auto, 1=heap, 2=bitonic, 3=kway
+    pub ctile: u32,             // 0=auto
+    pub rank_tile: Option<u32>, // explicit TopK tile, otherwise preserve the prior default
+    pub mode_midk: u8,          // 0=auto, 1=1CE, 2=2CE
+    pub mode_bottomk: u8,       // 0=auto, 1=1CE, 2=2CE
+    pub tile_cols: u32,         // column tiles for ND FFT/fractional kernels
+    pub radix: u32,             // preferred FFT radix
+    pub segments: u32,          // ND segment count for GPU kernels
 }
 
 #[cfg_attr(not(feature = "logic"), allow(dead_code))]
@@ -68,6 +69,8 @@ pub(crate) const SOFT_NAME_CH: &str = "ch";
 pub(crate) const SOFT_NAME_ALGO: &str = "algo_topk";
 #[cfg_attr(not(feature = "logic"), allow(dead_code))]
 pub(crate) const SOFT_NAME_CTILE: &str = "ctile";
+#[cfg_attr(not(feature = "logic"), allow(dead_code))]
+pub(crate) const SOFT_NAME_RANK_TILE: &str = "rank_tile";
 #[cfg_attr(not(feature = "logic"), allow(dead_code))]
 pub(crate) const SOFT_NAME_MODE_MIDK: &str = "mode_midk";
 #[cfg_attr(not(feature = "logic"), allow(dead_code))]
@@ -153,6 +156,7 @@ fn fallback(rows: u32, cols: u32, k: u32, subgroup: bool) -> Choice {
         ch,
         algo_topk: 0,
         ctile,
+        rank_tile: None,
         mode_midk: 0,
         mode_bottomk: 0,
         tile_cols: canonical_fft_tile_hint(cols),
@@ -180,6 +184,7 @@ pub fn choose_bottomk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Ch
 #[derive(Default, Clone, Copy)]
 pub struct DslOverrides {
     pub use_2ce: Option<bool>,
+    pub rank_tile: Option<u32>,
     pub algo_topk: u8,
     pub ctile: u32,
     pub mode_midk: u8,
@@ -189,6 +194,9 @@ pub struct DslOverrides {
     pub segments: u32,
 }
 fn overlay(c: &mut Choice, o: &DslOverrides) {
+    if o.rank_tile.is_some() {
+        c.rank_tile = o.rank_tile;
+    }
     if let Some(use_2ce) = o.use_2ce {
         c.use_2ce = use_2ce;
     }
@@ -255,6 +263,7 @@ fn emit_wgpu_heuristic_choice_meta(
         overrides.use_2ce.is_some(),
         overrides.algo_topk != 0,
         overrides.ctile != 0,
+        overrides.rank_tile.is_some(),
         overrides.mode_midk != 0,
         overrides.mode_bottomk != 0,
         overrides.tile_cols != 0,
@@ -293,6 +302,7 @@ fn emit_wgpu_heuristic_choice_meta(
             "mode_bottomk": choice.mode_bottomk,
             "mode_bottomk_label": describe_midbottom_mode(choice.mode_bottomk),
             "compaction_tile": choice.ctile,
+            "rank_tile": choice.rank_tile,
             "tile_cols": choice.tile_cols,
             "fft_radix": choice.radix,
             "fft_segments": choice.segments,
@@ -303,6 +313,7 @@ fn emit_wgpu_heuristic_choice_meta(
             "override_mode_midk": overrides.mode_midk,
             "override_mode_bottomk": overrides.mode_bottomk,
             "override_ctile": overrides.ctile,
+            "override_rank_tile": overrides.rank_tile,
             "override_tile_cols": overrides.tile_cols,
             "override_radix": overrides.radix,
             "override_segments": overrides.segments,
@@ -470,6 +481,7 @@ fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f
     let mut ch_vote = NumericVote::default();
     let mut algo_vote = NumericVote::default();
     let mut ctile_vote = NumericVote::default();
+    let mut rank_tile_vote = NumericVote::default();
     let mut midk_vote = NumericVote::default();
     let mut bottomk_vote = NumericVote::default();
     let mut tile_cols_vote = NumericVote::default();
@@ -494,6 +506,7 @@ fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f
             SOFT_NAME_CH => ch_vote.push(score, weight),
             SOFT_NAME_ALGO => algo_vote.push(score, weight),
             SOFT_NAME_CTILE => ctile_vote.push(score, weight),
+            SOFT_NAME_RANK_TILE => rank_tile_vote.push(score, weight),
             SOFT_NAME_MODE_MIDK => midk_vote.push(score, weight),
             SOFT_NAME_MODE_BOTTOMK => bottomk_vote.push(score, weight),
             SOFT_NAME_TILE_COLS => tile_cols_vote.push(score, weight),
@@ -515,6 +528,13 @@ fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f
     influence += apply_numeric_vote_u32(&mut choice.ch, &ch_vote, 1, u32::MAX);
     influence += apply_numeric_vote_u8(&mut choice.algo_topk, &algo_vote, 0, 3);
     influence += apply_numeric_vote_u32(&mut choice.ctile, &ctile_vote, 1, u32::MAX);
+    if let Some(value) = rank_tile_vote.resolve() {
+        let tile = value.clamp(1.0, u32::MAX as f32).round() as u32;
+        if choice.rank_tile != Some(tile) {
+            choice.rank_tile = Some(tile);
+            influence += rank_tile_vote.influence();
+        }
+    }
     influence += apply_numeric_vote_u8(&mut choice.mode_midk, &midk_vote, 0, 2);
     influence += apply_numeric_vote_u8(&mut choice.mode_bottomk, &bottomk_vote, 0, 2);
     influence += apply_numeric_vote_u32(&mut choice.tile_cols, &tile_cols_vote, 1, u32::MAX);
@@ -773,6 +793,23 @@ mod tests {
     use super::*;
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
     use std::sync::{Arc, Mutex};
+
+    #[cfg(feature = "logic")]
+    #[test]
+    fn soft_rank_tile_leaves_fft_and_compaction_unchanged() {
+        let base = fallback(2, 4096, 7, false);
+        assert_eq!(base.rank_tile, None);
+        let rules = [SoftRule {
+            name: SOFT_NAME_RANK_TILE,
+            score: 64.0,
+            weight: 0.75,
+        }];
+        let (choice, influence) = synthesize_soft_choice(base, &rules).unwrap();
+        assert_eq!(choice.rank_tile, Some(64));
+        assert_eq!(choice.tile_cols, base.tile_cols);
+        assert_eq!(choice.ctile, base.ctile);
+        assert!(influence > 0.0);
+    }
 
     #[cfg(feature = "logic-learn")]
     #[test]

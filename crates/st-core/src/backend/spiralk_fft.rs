@@ -452,6 +452,7 @@ mod tests {
             ch: 8192,
             algo_topk: 2,
             ctile: 1024,
+            rank_tile: None,
             mode_midk: 2,
             mode_bottomk: 1,
             tile_cols,

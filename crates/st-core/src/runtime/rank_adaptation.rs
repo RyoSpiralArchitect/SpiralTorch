@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::backend::device_caps::BackendKind;
+use crate::backend::rank_support::WgpuResidentRankSpec;
 use crate::backend::unison_heuristics::RankKind;
 use crate::ops::rank_entry::{RankPlan, RankPlanError, RankPlanSnapshot};
 use crate::runtime::blackcat::{
@@ -85,6 +86,10 @@ pub enum RankAdaptationError {
     MissingSelection,
     #[error("rank adaptation expected selection {expected}, got {actual}")]
     SelectionMismatch { expected: u64, actual: u64 },
+    #[error("rank adaptation candidate {index} is outside 0..{candidates}")]
+    CandidateOutOfRange { index: usize, candidates: usize },
+    #[error("rank adaptation candidate {index} does not identify resident WGPU rank execution")]
+    ResidentExecutionMismatch { index: usize },
     #[error("rank adaptation exhausted its transport-safe selection IDs")]
     SelectionIdExhausted,
     #[error("rank adaptation elapsed_ms must be finite, got {value}")]
@@ -317,6 +322,32 @@ impl RankAdaptationSession {
             next_selection_id: 1,
             pending: None,
         })
+    }
+
+    /// Resolve one immutable candidate into the parameters used by resident WGPU
+    /// rank. Allocation and correctness validation remain the executor's job.
+    /// This does not choose, observe, or credit a candidate.
+    pub fn wgpu_resident_candidate(
+        &self,
+        index: usize,
+    ) -> Result<WgpuResidentRankSpec, RankAdaptationError> {
+        let candidate =
+            self.candidates
+                .get(index)
+                .ok_or(RankAdaptationError::CandidateOutOfRange {
+                    index,
+                    candidates: self.candidates.len(),
+                })?;
+        let spec = WgpuResidentRankSpec::try_from_plan(&candidate.plan)?;
+        let declared = declared_native_rank_execution_signature(&candidate.plan)?;
+        let native = wgpu_exact_2ce_execution_signature(
+            &candidate.plan,
+            &rank_execution_signature_prefix(&candidate.plan),
+        );
+        if candidate.execution_signature != declared && candidate.execution_signature != native {
+            return Err(RankAdaptationError::ResidentExecutionMismatch { index });
+        }
+        Ok(spec)
     }
 
     /// Selects one executable plan and opens exactly one observation slot.
@@ -659,11 +690,7 @@ fn wgpu_rank_execution_signature_with_state(
         return non_native_rank_execution_signature(plan, common);
     }
     match plan.choice.use_2ce {
-        true => {
-            let requested_tile = crate::backend::rank_support::exact_tile_cols(plan);
-            let tile = requested_tile.min(plan.cols.max(1));
-            format!("{common}/path=exact_2ce/tile={tile}")
-        }
+        true => wgpu_exact_2ce_execution_signature(plan, common),
         false if matches!(plan.kind, RankKind::TopK | RankKind::BottomK) => {
             wgpu_direct_execution_signature(
                 plan,
@@ -674,6 +701,12 @@ fn wgpu_rank_execution_signature_with_state(
         }
         false => format!("{common}/path=direct"),
     }
+}
+
+fn wgpu_exact_2ce_execution_signature(plan: &RankPlan, common: &str) -> String {
+    let requested_tile = crate::backend::rank_support::exact_tile_cols(plan);
+    let tile = requested_tile.min(plan.cols.max(1));
+    format!("{common}/path=exact_2ce/tile={tile}")
 }
 
 fn wgpu_direct_execution_signature(
@@ -790,6 +823,164 @@ mod tests {
             declared_native_rank_execution_signature,
         )
         .expect("strict external contract")
+    }
+
+    #[test]
+    fn resident_candidate_consumes_the_kind_specific_effective_tile() {
+        for kind in [RankKind::TopK, RankKind::MidK, RankKind::BottomK] {
+            let base = try_plan_rank_with_config(
+                kind,
+                2,
+                256,
+                8,
+                BackendKind::Wgpu.default_caps(),
+                ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
+            )
+            .unwrap();
+            let session = RankAdaptationSession::try_from_spiralk_with_execution_signature(
+                &base,
+                &[
+                    "u2: true; rank_tile: 64; ctile: 128;".into(),
+                    "u2: true; rank_tile: 512; ctile: 512;".into(),
+                ],
+                SoftBanditMode::UCB,
+                17,
+                declared_native_rank_execution_signature,
+            )
+            .unwrap();
+            let before = session.snapshot();
+            for (index, expected_tile) in [if kind == RankKind::TopK { 64 } else { 128 }, 256]
+                .into_iter()
+                .enumerate()
+            {
+                let spec = session.wgpu_resident_candidate(index).unwrap();
+                assert_eq!(
+                    (spec.rows, spec.cols, spec.k, spec.tile_cols),
+                    (2, 256, 8, expected_tile)
+                );
+                assert_eq!(spec.kind.as_str(), kind.as_str());
+                assert!(before.candidates[index]
+                    .execution_signature
+                    .ends_with(&format!("/tile={expected_tile}")));
+            }
+            assert_eq!(session.snapshot(), before);
+            assert!(matches!(
+                session.wgpu_resident_candidate(2),
+                Err(RankAdaptationError::CandidateOutOfRange {
+                    index: 2,
+                    candidates: 2
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn resident_candidate_rejects_direct_and_unrelated_execution_identities() {
+        let session = contract_test_session(17);
+        let before = session.snapshot();
+        assert!(session.wgpu_resident_candidate(0).is_err());
+        assert!(session.wgpu_resident_candidate(1).is_ok());
+        assert_eq!(session.snapshot(), before);
+        let unrelated = RankAdaptationSession::try_from_spiralk_with_execution_signature(
+            &base_plan(),
+            &["u2: true;".into()],
+            SoftBanditMode::UCB,
+            17,
+            |_| Ok("caller-owned-other-operation".into()),
+        )
+        .unwrap();
+        assert!(matches!(
+            unrelated.wgpu_resident_candidate(0),
+            Err(RankAdaptationError::ResidentExecutionMismatch { index: 0 })
+        ));
+        let native = RankAdaptationSession::try_from_spiralk_with_execution_signature(
+            &base_plan(),
+            &["u2: true;".into()],
+            SoftBanditMode::UCB,
+            17,
+            |plan| {
+                Ok(wgpu_exact_2ce_execution_signature(
+                    plan,
+                    &rank_execution_signature_prefix(plan),
+                ))
+            },
+        )
+        .unwrap();
+        assert!(native.wgpu_resident_candidate(0).is_ok());
+    }
+
+    #[test]
+    fn resident_spec_rejects_cpu_and_permitted_fallback_plans() {
+        for (backend, fallback) in [
+            (BackendKind::Cpu, AcceleratorFallback::Forbid),
+            (BackendKind::Wgpu, AcceleratorFallback::Allow),
+        ] {
+            let mut plan = try_plan_rank_with_config(
+                RankKind::TopK,
+                2,
+                256,
+                8,
+                backend.default_caps(),
+                ExecutionConfig::new(fallback, 1024),
+            )
+            .unwrap();
+            plan.choice.use_2ce = true;
+            assert!(WgpuResidentRankSpec::try_from_plan(&plan).is_err());
+        }
+        for (rows, cols, k) in [(0, 256, 8), (2, 256, 0), (2, 0, 0)] {
+            let mut plan = try_plan_rank_with_config(
+                RankKind::TopK,
+                rows,
+                cols,
+                k,
+                BackendKind::Wgpu.default_caps(),
+                ExecutionConfig::new(AcceleratorFallback::Forbid, 1024),
+            )
+            .unwrap();
+            plan.choice.use_2ce = true;
+            assert!(WgpuResidentRankSpec::try_from_plan(&plan).is_err());
+        }
+    }
+
+    #[test]
+    fn rank_tile_does_not_change_fft_and_unused_tiles_do_not_create_arms() {
+        let base = base_plan();
+        let session = RankAdaptationSession::try_from_spiralk_with_execution_signature(
+            &base,
+            &["u2: true; rank_tile: 32; tile_cols: 512;".into()],
+            SoftBanditMode::UCB,
+            17,
+            declared_native_rank_execution_signature,
+        )
+        .unwrap();
+        let plan = session.candidate_plans().next().unwrap();
+        assert_eq!(plan.choice.tile, 32);
+        assert_eq!(plan.choice.fft_tile, 512);
+        assert!(matches!(
+            base.try_with_choice_overrides(crate::ops::rank_entry::RankPlanChoiceOverrides {
+                rank_tile: Some(0),
+                ..Default::default()
+            }),
+            Err(RankPlanError::ZeroChoiceField { field: "rank_tile" })
+        ));
+        for scripts in [
+            [
+                "u2: true; rank_tile: 32; tile_cols: 512;",
+                "u2: true; rank_tile: 32; tile_cols: 1024;",
+            ],
+            ["u2: true; rank_tile: 512;", "u2: true; rank_tile: 1024;"],
+        ] {
+            assert!(matches!(
+                RankAdaptationSession::try_from_spiralk_with_execution_signature(
+                    &base,
+                    &scripts.map(str::to_owned),
+                    SoftBanditMode::UCB,
+                    17,
+                    declared_native_rank_execution_signature,
+                ),
+                Err(RankAdaptationError::DuplicatePlan { .. })
+            ));
+        }
     }
 
     #[test]

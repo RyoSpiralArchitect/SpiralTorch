@@ -143,6 +143,18 @@ pub struct WasmRankAdaptationSession {
     effective_backend: BackendKind,
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+impl WasmRankAdaptationSession {
+    pub(crate) fn wgpu_resident_candidate(
+        &self,
+        index: usize,
+    ) -> Result<st_core::backend::rank_support::WgpuResidentRankSpec, String> {
+        self.inner
+            .wgpu_resident_candidate(index)
+            .map_err(|error| error.to_string())
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_class = RankAdaptationSession)]
 impl WasmRankAdaptationSession {

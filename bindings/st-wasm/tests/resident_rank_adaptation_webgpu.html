@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust-owned resident rank adaptation</title>
+<pre id="result" data-status="running">Running</pre>
+<script type="module">
+const out=document.querySelector("#result");
+const report={schema:"spiraltorch.browser_resident_rank_adaptation.v1",cases:[],assertions:[],
+  boundary:"16 resident rank pairs plus completion fence per timing; allocation/upload/policy/readback excluded; validation reads between batches"};
+function assert(ok,label) { if(!ok) throw Error(label); report.assertions.push(label); }
+async function rejects(fn,label) { let caught=false; try { await fn(); } catch { caught=true; } assert(caught,label); }
+try {
+  const {default:init,RankAdaptationSession,WgpuRank}=await import("/module/spiraltorch_wasm.js"); await init();
+  const invalid=new RankAdaptationSession({rank_plan:{kind:"topk",rows:1,cols:256,k:8,backend:"wgpu",strict_accelerator:true},scripts:["u2: false;","u2: true;"]});
+  const before=JSON.stringify(invalid.snapshot());
+  for(const index of [0,2,-1,0.5,NaN,Infinity,4294967296,"1",true]) {
+    await rejects(()=>WgpuRank.createFromAdaptation(invalid,index),"reject invalid candidate "+String(index));
+    assert(JSON.stringify(invalid.snapshot())===before,"invalid factory leaves policy state untouched");
+  }
+  invalid.free();
+  for(const seed of [17,29,43]) for(const kind of ["topk","midk","bottomk"]) for(const policy of ["ucb","thompson_sampling"]) {
+    const rows=1,cols=seed===29 ? 8193 : 257,k=7;
+    const tiles=[32,128,256,512];
+    const scripts=tiles.map(tile=>`u2: true; rank_tile: ${tile}; ctile: ${tile};`);
+    const session=new RankAdaptationSession({rank_plan:{kind,rows,cols,k,backend:"wgpu",strict_accelerator:true},scripts,seed,policy});
+    const initial=session.snapshot(), workspaces=[];
+    const input=Float32Array.from({length:cols},(_,i)=>(i*37+seed)%101-50);
+    input[cols-1]=NaN; input[cols-2]=Infinity;
+    const ids=Array.from({length:cols-2},(_,i)=>i).sort((a,b)=>(kind==="topk" ? input[b]-input[a] : input[a]-input[b]) || a-b);
+    const offset=kind==="midk" ? Math.floor((ids.length-k)/2) : 0;
+    const expected=ids.slice(offset,offset+k);
+    function check(actual) {
+      assert(actual.values instanceof Float32Array && actual.indices instanceof Int32Array,"typed rank outputs");
+      assert(actual.generation===1n,"same immutable input generation");
+      assert(actual.values.length===k && actual.indices.length===k,"output cardinality");
+      assert(expected.every((id,i)=>actual.indices[i]===id && Object.is(actual.values[i],input[id])),"exact values and stable source indices");
+    }
+    for(let index=0;index<tiles.length;index++) {
+      const ws=await WgpuRank.createFromAdaptation(session,index);
+      assert(ws.kind===kind && JSON.stringify(ws.shape())===JSON.stringify([rows,cols,k]),"Rust candidate shape/kind");
+      assert(ws.tileCols===Math.min(tiles[index],cols),"Rust effective tile");
+      report.adapter ??= ws.adapterInfo();
+      ws.upload(input); ws.dispatch(); check(await ws.readback()); workspaces.push(ws);
+    }
+    assert(JSON.stringify(session.snapshot())===JSON.stringify(initial),"allocation neither chooses nor credits");
+    async function measure(ws) {
+      await ws.synchronize(); const start=performance.now(); ws.dispatch(16); await ws.synchronize();
+      const elapsed=performance.now()-start; check(await ws.readback()); return elapsed;
+    }
+    const controls=tiles.map(()=>[]);
+    for(let block=0;block<8;block++) for(let slot=0;slot<tiles.length;slot++) {
+      const index=(slot+block+seed%tiles.length)%tiles.length;
+      const elapsed=await measure(workspaces[index]); if(block>=2) controls[index].push(elapsed/16);
+    }
+    const observations=[];
+    for(let step=0;step<24;step++) {
+      const selection=session.choose(), ws=workspaces[selection.candidate_index];
+      assert(selection.execution_signature.endsWith(`/tile=${ws.tileCols}`),"selection matches executing workspace");
+      const elapsed=await measure(ws);
+      const observation=session.observe(selection.selection_id,elapsed,true);
+      assert(observation.credited && observation.elapsed_ms===elapsed,"real fenced latency credited by Rust");
+      observations.push({selection,observation,per_op_ms:elapsed/16});
+    }
+    const final=session.snapshot();
+    assert(Object.values(final.observation_counts.rank_plan_variant).reduce((a,b)=>a+b,0)===24,"only adaptive observations credited");
+    assert(session.pendingSelectionId()===undefined,"no unfinished selection");
+    for(const ws of workspaces) { check(await ws.readback()); ws.free(); } session.free();
+    report.cases.push({kind,rows,cols,k,seed,policy,initial,final,control_samples_per_op_ms:controls,observations,status:"passed"});
+  }
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+out.textContent=JSON.stringify(report,null,2); out.dataset.status=report.status;
+</script>

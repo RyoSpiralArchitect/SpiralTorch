@@ -10,8 +10,8 @@ use super::wgpu_heuristics::{Choice, DslOverrides};
 #[cfg(feature = "kdsl")]
 use super::wgpu_heuristics::{
     SOFT_NAME_ALGO, SOFT_NAME_CH, SOFT_NAME_CTILE, SOFT_NAME_KL, SOFT_NAME_MODE_BOTTOMK,
-    SOFT_NAME_MODE_MIDK, SOFT_NAME_RADIX, SOFT_NAME_SEGMENTS, SOFT_NAME_TILE_COLS,
-    SOFT_NAME_USE2CE, SOFT_NAME_WG,
+    SOFT_NAME_MODE_MIDK, SOFT_NAME_RADIX, SOFT_NAME_RANK_TILE, SOFT_NAME_SEGMENTS,
+    SOFT_NAME_TILE_COLS, SOFT_NAME_USE2CE, SOFT_NAME_WG,
 };
 #[cfg(feature = "kdsl")]
 use serde::Deserialize;
@@ -113,6 +113,7 @@ fn emit_kdsl_env_bridge_meta(
             "override_mode_midk": overrides.mode_midk,
             "override_mode_bottomk": overrides.mode_bottomk,
             "override_ctile": overrides.ctile,
+            "override_rank_tile": overrides.rank_tile,
             "override_tile_cols": overrides.tile_cols,
             "override_radix": overrides.radix,
             "override_segments": overrides.segments,
@@ -147,6 +148,7 @@ fn emit_kdsl_kv_bridge_meta(
             kl: 0,
             ch: 0,
             algo_topk: 0,
+            rank_tile: None,
             ctile: 0,
             mode_midk: 0,
             mode_bottomk: 0,
@@ -267,6 +269,7 @@ pub fn parse_env_dsl_plus_kind(
             || out.hard.midk.is_some()
             || out.hard.bottomk.is_some()
             || out.hard.ctile.is_some()
+            || out.hard.rank_tile.is_some()
             || out.hard.tile_cols.is_some()
             || out.hard.radix.is_some()
             || out.hard.segments.is_some()
@@ -284,6 +287,7 @@ pub fn parse_env_dsl_plus_kind(
                 ch: out.hard.ch.unwrap_or(if cols > 16_384 { 8192 } else { 0 }),
                 algo_topk: out.hard.algo.unwrap_or(0),
                 ctile: out.hard.ctile.unwrap_or(0),
+                rank_tile: out.hard.rank_tile,
                 mode_midk: out.hard.midk.unwrap_or(0),
                 mode_bottomk: out.hard.bottomk.unwrap_or(0),
                 tile_cols: out
@@ -346,6 +350,11 @@ pub fn parse_env_dsl_plus_kind(
                     weight: w,
                     score: val as f32,
                 }),
+                st_kdsl::SoftRule::RankTile { val, w } => soft.push(SoftRule {
+                    name: SOFT_NAME_RANK_TILE,
+                    weight: w,
+                    score: val as f32,
+                }),
                 st_kdsl::SoftRule::TileCols { val, w } => soft.push(SoftRule {
                     name: SOFT_NAME_TILE_COLS,
                     weight: w,
@@ -364,6 +373,7 @@ pub fn parse_env_dsl_plus_kind(
             }
         }
         ov.use_2ce = out.hard.use_2ce;
+        ov.rank_tile = out.hard.rank_tile;
         if let Some(a) = out.hard.algo {
             ov.algo_topk = a;
         }
@@ -491,6 +501,7 @@ pub fn parse_env_dsl_plus_kind_explain(
         || out.hard.midk.is_some()
         || out.hard.bottomk.is_some()
         || out.hard.ctile.is_some()
+        || out.hard.rank_tile.is_some()
         || out.hard.tile_cols.is_some()
         || out.hard.radix.is_some()
         || out.hard.segments.is_some()
@@ -508,6 +519,7 @@ pub fn parse_env_dsl_plus_kind_explain(
             ch: out.hard.ch.unwrap_or(if cols > 16_384 { 8192 } else { 0 }),
             algo_topk: out.hard.algo.unwrap_or(0),
             ctile: out.hard.ctile.unwrap_or(0),
+            rank_tile: out.hard.rank_tile,
             mode_midk: out.hard.midk.unwrap_or(0),
             mode_bottomk: out.hard.bottomk.unwrap_or(0),
             tile_cols: out
@@ -571,6 +583,11 @@ pub fn parse_env_dsl_plus_kind_explain(
                 weight: w,
                 score: val as f32,
             }),
+            st_kdsl::SoftRule::RankTile { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_RANK_TILE,
+                weight: w,
+                score: val as f32,
+            }),
             st_kdsl::SoftRule::TileCols { val, w } => soft.push(SoftRule {
                 name: SOFT_NAME_TILE_COLS,
                 weight: w,
@@ -590,6 +607,7 @@ pub fn parse_env_dsl_plus_kind_explain(
     }
 
     ov.use_2ce = out.hard.use_2ce;
+    ov.rank_tile = out.hard.rank_tile;
     if let Some(a) = out.hard.algo {
         ov.algo_topk = a;
     }
@@ -687,6 +705,7 @@ pub fn choose_from_kv(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Ch
                         ch: getu("ch").unwrap_or(if cols > 16_384 { 8192 } else { 0 }),
                         algo_topk: getu("algo_topk").unwrap_or(0) as u8,
                         ctile: getu("ctile").unwrap_or(0),
+                        rank_tile: getu("rank_tile"),
                         mode_midk: getu("mode_midk").unwrap_or(0) as u8,
                         mode_bottomk: getu("mode_bottomk").unwrap_or(0) as u8,
                         tile_cols: getu("tile_cols")
@@ -764,6 +783,32 @@ mod tests {
         assert_eq!(hard.tile_cols, 8_192);
         assert!(hard.tile_cols.is_power_of_two());
         assert_eq!(overrides.use_2ce, Some(false));
+    }
+
+    #[cfg(feature = "kdsl")]
+    #[test]
+    fn rank_tile_survives_normal_and_traced_bridges() {
+        let _env_lock = env_lock();
+        with_spiral_heur_k(
+            Some("rank_tile: 64; tile_cols: 1024; ctile: 128; soft (rank_tile, 256, 0.75, true);"),
+            || {
+                let normal = parse_env_dsl_plus_kind(2, 4096, 7, false, "topk");
+                let (hard, soft, overrides, trace) =
+                    parse_env_dsl_plus_kind_explain(2, 4096, 7, false, "topk", 100);
+                assert!(trace.is_some());
+                for (hard, soft, overrides) in [normal, (hard, soft, overrides)] {
+                    let hard = hard.expect("rank hard choice");
+                    assert_eq!(hard.rank_tile, Some(64));
+                    assert_eq!(hard.tile_cols, 1024);
+                    assert_eq!(hard.ctile, 128);
+                    assert_eq!(overrides.rank_tile, Some(64));
+                    assert_eq!(soft.len(), 1);
+                    assert_eq!(soft[0].name, SOFT_NAME_RANK_TILE);
+                    assert_eq!(soft[0].score, 256.0);
+                    assert_eq!(soft[0].weight, 0.75);
+                }
+            },
+        );
     }
 
     #[test]

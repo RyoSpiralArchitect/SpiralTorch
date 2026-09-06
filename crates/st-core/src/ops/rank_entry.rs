@@ -143,6 +143,7 @@ pub struct RankPlanChoiceOverrides {
     pub merge_kind: Option<u32>,
     pub merge_detail: Option<u32>,
     pub compaction_tile: Option<u32>,
+    pub rank_tile: Option<u32>,
     pub fft_tile: Option<u32>,
     pub fft_radix: Option<u32>,
     pub fft_segments: Option<u32>,
@@ -238,6 +239,7 @@ impl RankPlan {
             ("workgroup", overrides.workgroup),
             ("lanes", overrides.lanes),
             ("compaction_tile", overrides.compaction_tile),
+            ("rank_tile", overrides.rank_tile),
             ("fft_tile", overrides.fft_tile),
             ("fft_radix", overrides.fft_radix),
             ("fft_segments", overrides.fft_segments),
@@ -268,6 +270,9 @@ impl RankPlan {
         }
         if let Some(value) = overrides.compaction_tile {
             updated.choice.ctile = value;
+        }
+        if let Some(value) = overrides.rank_tile {
+            updated.choice.tile = value;
         }
         if let Some(value) = overrides.fft_tile {
             updated.choice.fft_tile = value;
@@ -336,6 +341,7 @@ impl RankPlan {
             merge_kind: resolved.merge_kind,
             merge_detail: resolved.merge_detail,
             compaction_tile: hard.ctile,
+            rank_tile: hard.rank_tile,
             fft_tile: hard.tile_cols,
             fft_radix: hard.radix,
             fft_segments: hard.segments,
