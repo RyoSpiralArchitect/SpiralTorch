@@ -57,6 +57,16 @@ non-finite exclusion use the same ordering as the CPU reference. Short prefixes
 and full-width bands retain the direct merge. No extra dispatch, storage buffer,
 planner tile rewrite or language-specific selection policy is introduced.
 
+The 256-lane merge workgroup skips leading reduction levels whose higher lanes
+contain only zero counts or invalid candidates. The first stride depends on the
+number of tile lanes, capped at 128; one tile needs no pairwise reduction, while
+129 or more tiles retain every level. This also reduces fragmented MidK prefix
+counting work without changing the <=32-tile parallel MidK branch. It does not
+change workgroup size, tile choice, dispatch count or any retained ordering step.
+The `--suite active-lanes` comparison crosses tile counts and small/wide k values;
+its [recorded results](../../benchmarks/results/2026-09-06-rank-active-lanes/README.md)
+include slower and unchanged controls, not an all-shape speedup claim.
+
 To reproduce the fragmented rank comparison against PyTorch CUDA on the same
 named GPU, build the native example and run:
 
