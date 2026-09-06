@@ -51,8 +51,8 @@ static PRIMARY_INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
 /// integrated/software primary cannot mask a higher-priority GL adapter.
 /// Browser requests stay on the event loop and retain the original descriptor.
 /// This does not share devices, serialize dispatch or retry device failures.
-/// The native primary instance lives for the process, avoiding loader teardown
-/// races between otherwise independent device lifetimes.
+/// The native primary instance lives for the process. This diagnostic candidate
+/// still fails concurrent device retirement on Furnace; it is not a lifetime fix.
 pub async fn request_headless_adapter() -> Result<wgpu::Adapter, WgpuRuntimeError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
