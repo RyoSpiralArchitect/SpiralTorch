@@ -43,5 +43,5 @@ def test_mean_tensors_preserves_order_and_rejects_nonfinite():
         st.mean_tensors_scaled([st.Tensor(1, 1, [1.0]), st.Tensor(1, 2, [1.0, 2.0])])
     with pytest.raises(ValueError):
         st.mean_tensors_scaled([st.Tensor(1, 1, [3.4028234663852886e38])], 2.0)
-    assert st.mean_tensors_scaled([st.Tensor(0, 3, [])]).shape == (0, 3)
+    assert st.mean_tensors_scaled([st.Tensor(0, 3, [])]).shape() == (0, 3)
     assert "mean_tensors_scaled" in st.__all__
