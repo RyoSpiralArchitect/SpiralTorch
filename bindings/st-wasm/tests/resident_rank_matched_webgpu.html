@@ -1,0 +1,77 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Matched resident MidK WebGPU controls</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import initCandidate, {WgpuRank as Candidate} from "/module/spiraltorch_wasm.js";
+import initBaseline, {WgpuRank as Baseline} from "/baseline/spiraltorch_wasm.js";
+
+const out=document.querySelector("#result");
+const report={schema:"spiraltorch.browser_rank_matched.v1",status:"running",cases:[],
+  boundary:"64 resident pairs plus completion fence; alternating arms; validation outside timing",
+  interpretation:"one deterministic fixture; separate devices in one browser; adapter identity may be anonymous",
+  repetitions:64,warmup_batches:4,retained_batches:16};
+function assert(ok, message) { if(!ok) throw Error(message); }
+function reference(input,rows,cols,k) {
+  const values=[],indices=[];
+  for(let row=0;row<rows;row++) {
+    const order=Array.from({length:cols},(_,i)=>i).filter(i=>Number.isFinite(input[row*cols+i]));
+    order.sort((i,j)=>{
+      const a=input[row*cols+i],b=input[row*cols+j];
+      if(a===0 && b===0 && !Object.is(a,b)) return Object.is(a,-0) ? -1 : 1;
+      return a-b || i-j;
+    });
+    const take=Math.min(k,order.length),start=Math.floor((order.length-take)/2);
+    for(const i of order.slice(start,start+take)) { values.push(input[row*cols+i]); indices.push(i); }
+    while(values.length<(row+1)*k) { values.push(NaN); indices.push(-1); }
+  }
+  return {values,indices};
+}
+function check(actual,expected) {
+  assert(actual.values instanceof Float32Array && actual.indices instanceof Int32Array,"typed readback");
+  assert(actual.values.length===expected.values.length && actual.indices.length===expected.indices.length,"readback length");
+  for(let i=0;i<expected.values.length;i++) {
+    assert(Object.is(actual.values[i],expected.values[i]),"value mismatch "+i);
+    assert(actual.indices[i]===expected.indices[i],"source index mismatch "+i);
+  }
+}
+try {
+  await initBaseline();
+  await initCandidate();
+  let caseIndex=0;
+  for(const tiles of [32,33,63,64,65,127,128,129,255,256,257]) for(const k of [1,7,65,256]) {
+    const rows=2,cols=tiles*32-1,tile=32;
+    const input=Float32Array.from({length:rows*cols},(_,i)=>{
+      if(i%251===0) return NaN;
+      if(i%127===0) return -0;
+      return (i*73%127-63)/8;
+    });
+    const expected=reference(input,rows,cols,k);
+    const baseline=await Baseline.create("midk",rows,cols,k,tile);
+    const candidate=await Candidate.create("midk",rows,cols,k,tile);
+    try {
+      if(!report.adapters) report.adapters={baseline:baseline.adapterInfo(),candidate:candidate.adapterInfo()};
+      baseline.upload(input); candidate.upload(input);
+      const samples=[];
+      for(let batch=0;batch<report.warmup_batches+report.retained_batches;batch++) {
+        const order=(caseIndex+batch)%2===0 ? ["baseline","candidate"] : ["candidate","baseline"];
+        const sample={order};
+        for(const arm of order) {
+          const ws=arm==="baseline" ? baseline : candidate;
+          await ws.synchronize();
+          const began=performance.now();
+          ws.dispatch(report.repetitions);
+          await ws.synchronize();
+          sample[arm+"_ms"]=(performance.now()-began)/report.repetitions;
+          check(await ws.readback(),expected);
+        }
+        if(batch>=report.warmup_batches) samples.push(sample);
+      }
+      report.cases.push({kind:"midk",rows,cols,k,tile_cols:tile,samples,status:"passed"});
+    } finally { baseline.free(); candidate.free(); }
+    caseIndex++;
+  }
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+out.textContent=JSON.stringify(report,null,2); out.dataset.status=report.status;
+</script>

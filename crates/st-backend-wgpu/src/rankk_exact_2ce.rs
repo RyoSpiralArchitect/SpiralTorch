@@ -700,7 +700,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<ParamsUniform>(), 32);
         for tiles in [1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257] {
             for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
-                for k in [1, 7] {
+                for k in [1, 2, 7] {
                     let plan = Plan::try_new(kind, 3, tiles * 8 - 1, k, 8).unwrap();
                     let mode = match (kind, tiles) {
                         (Kind::MidK, 1..=32) => MergeMode::ParallelMidk,
@@ -862,7 +862,7 @@ mod tests {
             // A sole finite candidate in the last partial tile must survive
             // every padded reduction level, also when tiles exceed 256 lanes.
             input[2 * cols as usize - 1] = -3.0;
-            for k in [1, 7.min(cols), 65.min(cols), 256.min(cols)] {
+            for k in [1, 2.min(cols), 7.min(cols), 65.min(cols), 256.min(cols)] {
                 for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
                     let plan = Plan::try_new(kind, 5, cols, k, 8).unwrap();
                     assert_eq!(plan.tiles_x(), tiles);
