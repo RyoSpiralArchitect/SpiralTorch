@@ -37,6 +37,14 @@ pub fn mean_tensors_scaled(partials: &[Tensor], scale: f32) -> PureResult<Tensor
         })
         .collect::<PureResult<Vec<_>>>()?;
     let len = first.len();
+    if rows > 1
+        && cols > 1
+        && logical
+            .iter()
+            .any(|tensor| tensor.layout() == Layout::ColMajor)
+    {
+        return mean_mixed_layouts(&logical, scale);
+    }
     let mut output = Vec::with_capacity(len);
     let mut scratch = vec![0.0f64; len.min(MEAN_BLOCK)];
     for start in (0..len).step_by(MEAN_BLOCK) {
@@ -48,25 +56,9 @@ pub fn mean_tensors_scaled(partials: &[Tensor], scale: f32) -> PureResult<Tensor
         for tensor in &logical {
             let data = tensor.data();
             let mut valid = true;
-            if tensor.layout() == Layout::ColMajor {
-                let mut offset = 0;
-                while offset < count {
-                    let index = start + offset;
-                    let row = index / cols;
-                    let col = index % cols;
-                    let width = (cols - col).min(count - offset);
-                    for (c, dst) in accum[offset..offset + width].iter_mut().enumerate() {
-                        let src = data[(col + c) * rows + row];
-                        *dst += f64::from(src);
-                        valid &= src.is_finite();
-                    }
-                    offset += width;
-                }
-            } else {
-                for (dst, &src) in accum.iter_mut().zip(&data[start..start + count]) {
-                    *dst += f64::from(src);
-                    valid &= src.is_finite();
-                }
+            for (dst, &src) in accum.iter_mut().zip(&data[start..start + count]) {
+                *dst += f64::from(src);
+                valid &= src.is_finite();
             }
             // No result is published until validation succeeds. Reducing the
             // validity mask lets finite inputs use SIMD without a second scan.
@@ -80,6 +72,57 @@ pub fn mean_tensors_scaled(partials: &[Tensor], scale: f32) -> PureResult<Tensor
             let value = (sum / partials.len() as f64 * f64::from(scale)) as f32;
             finite("mean_tensors_result_exceeds_finite_float32", value)?;
             output.push(value);
+        }
+    }
+    Tensor::from_vec(rows, cols, output)
+}
+
+fn mean_mixed_layouts(partials: &[Tensor], scale: f32) -> PureResult<Tensor> {
+    let (rows, cols) = partials[0].shape();
+    let mut output = vec![0.0; rows * cols];
+    let mut scratch = vec![0.0f64; MEAN_BLOCK];
+    // A 16x64 output tile keeps both source layouts local. Walking an entire
+    // row across many column-major partials otherwise thrashes source pages.
+    for row_start in (0..rows).step_by(16) {
+        let height = (rows - row_start).min(16);
+        for col_start in (0..cols).step_by(64) {
+            let width = (cols - col_start).min(64);
+            let accum = &mut scratch[..height * width];
+            accum.fill(0.0);
+            for tensor in partials {
+                let data = tensor.data();
+                let mut valid = true;
+                if tensor.layout() == Layout::ColMajor {
+                    for c in 0..width {
+                        let offset = (col_start + c) * rows + row_start;
+                        for (r, &src) in data[offset..offset + height].iter().enumerate() {
+                            accum[r * width + c] += f64::from(src);
+                            valid &= src.is_finite();
+                        }
+                    }
+                } else {
+                    for (r, row) in accum.chunks_exact_mut(width).enumerate() {
+                        let offset = (row_start + r) * cols + col_start;
+                        for (dst, &src) in row.iter_mut().zip(&data[offset..offset + width]) {
+                            *dst += f64::from(src);
+                            valid &= src.is_finite();
+                        }
+                    }
+                }
+                if !valid {
+                    return Err(TensorError::InvalidValue {
+                        label: "mean_tensors_partials_must_be_finite",
+                    });
+                }
+            }
+            for (r, row) in accum.chunks_exact(width).enumerate() {
+                let offset = (row_start + r) * cols + col_start;
+                for (dst, &sum) in output[offset..offset + width].iter_mut().zip(row) {
+                    let value = (sum / partials.len() as f64 * f64::from(scale)) as f32;
+                    finite("mean_tensors_result_exceeds_finite_float32", value)?;
+                    *dst = value;
+                }
+            }
         }
     }
     Tensor::from_vec(rows, cols, output)
