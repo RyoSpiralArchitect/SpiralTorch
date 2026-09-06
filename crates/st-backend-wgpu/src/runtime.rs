@@ -41,6 +41,9 @@ fn primary_adapter_is_final(device_type: wgpu::DeviceType) -> bool {
     device_type == wgpu::DeviceType::DiscreteGpu
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+static PRIMARY_INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
+
 /// Request a headless adapter with the existing high-performance/fallback policy.
 ///
 /// Native GL probing is lazy: a primary discrete GPU already wins wgpu's
@@ -48,15 +51,19 @@ fn primary_adapter_is_final(device_type: wgpu::DeviceType) -> bool {
 /// integrated/software primary cannot mask a higher-priority GL adapter.
 /// Browser requests stay on the event loop and retain the original descriptor.
 /// This does not share devices, serialize dispatch or retry device failures.
+/// The native primary instance lives for the process, avoiding loader teardown
+/// races between otherwise independent device lifetimes.
 pub async fn request_headless_adapter() -> Result<wgpu::Adapter, WgpuRuntimeError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let enabled = wgpu::Instance::enabled_backend_features();
         let primary = enabled & wgpu::Backends::PRIMARY;
         if enabled.contains(wgpu::Backends::GL) && !primary.is_empty() {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-                backends: primary,
-                ..Default::default()
+            let instance = PRIMARY_INSTANCE.get_or_init(|| {
+                wgpu::Instance::new(wgpu::InstanceDescriptor {
+                    backends: primary,
+                    ..Default::default()
+                })
             });
             if let Some(adapter) = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
