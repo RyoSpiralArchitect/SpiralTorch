@@ -4,17 +4,32 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), String> {
     use st_backend_wgpu::runtime::{read_buffer, upload_slice, WgpuRuntime};
-    use std::sync::Barrier;
+    use std::sync::{Barrier, Mutex};
+
+    struct ParkOnExit<'a>(Option<&'a Barrier>);
+    impl Drop for ParkOnExit<'_> {
+        fn drop(&mut self) {
+            if let Some(barrier) = self.0 {
+                barrier.wait();
+            }
+        }
+    }
 
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() > 3 {
-        return Err(
-            "usage: headless_lifecycle [threads=4] [rounds=4] [drop|destroy|join_then_drop]".into(),
-        );
+        return Err("usage: headless_lifecycle [threads=4] [rounds=4] [shutdown_mode]".into());
     }
     let shutdown = args.get(2).map(String::as_str).unwrap_or("drop");
-    if !matches!(shutdown, "drop" | "destroy" | "join_then_drop") {
-        return Err("shutdown must be drop, destroy or join_then_drop".into());
+    if !matches!(
+        shutdown,
+        "drop"
+            | "destroy"
+            | "join_then_drop"
+            | "worker_serial_drop"
+            | "worker_serial_drop_park"
+            | "worker_drop_park"
+    ) {
+        return Err("unknown shutdown mode".into());
     }
     let parse = |index: usize, default: usize, max: usize| -> Result<usize, String> {
         let value = args
@@ -33,11 +48,17 @@ fn main() -> Result<(), String> {
     let mut receipts = Vec::new();
     for round in 0..rounds {
         let barrier = Barrier::new(threads);
+        let exit_barrier = Barrier::new(threads);
+        let retirement = Mutex::new(());
         let results = std::thread::scope(|scope| {
             let handles = (0..threads)
                 .map(|worker| {
                     let barrier = &barrier;
+                    let exit_barrier = &exit_barrier;
+                    let retirement = &retirement;
                     scope.spawn(move || -> Result<_, String> {
+                        // Keep every worker alive through final Drop, also on unwind/error.
+                        let _exit = ParkOnExit(shutdown.ends_with("_park").then_some(exit_barrier));
                         barrier.wait();
                         eprintln!("round={round} worker={worker} phase=request");
                         let runtime = pollster::block_on(WgpuRuntime::request_headless(
@@ -83,6 +104,11 @@ fn main() -> Result<(), String> {
                             eprintln!("round={round} worker={worker} phase=runtime_retained");
                             Some(runtime)
                         } else {
+                            let _guard = if shutdown.starts_with("worker_serial_drop") {
+                                Some(retirement.lock().map_err(|_| "retirement lock poisoned")?)
+                            } else {
+                                None
+                            };
                             drop(runtime);
                             eprintln!("round={round} worker={worker} phase=runtime_dropped");
                             None
