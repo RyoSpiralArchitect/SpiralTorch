@@ -95,6 +95,40 @@ Additional final checks passed:
   all-targets check. Furnace's private toolchain initially lacked Clippy;
   installing that component and rerunning succeeded. No system toolchain changed.
 
+## Review Fix and Fresh Replay
+
+Review found two real gaps that the filtered rank tests above missed: direct
+consumers received a shader body without its prelude, and kernel reports still
+named the legacy merge for tournament plans. The failing syntax/catalog/Python
+tests are retained. Commit `ed21f2000d49b3add759b8a4b53fb3b46b4e60ee`
+restores complete cataloged WGSL and shares one Rust merge selector between
+execution and reports. The new Python report regression also runs in CI.
+
+Fresh verification from that clean commit passed:
+
+- Full backend: 74 library tests plus the standalone shader test on macOS
+  and Furnace/Linux, with real-device tests enabled.
+- Packaged Python: 92 rank/resident/SpiralK/report tests on Apple M4/Metal.
+  This wheel explicitly enables `wgpu-rt`; Python timings are not compared.
+- Strict backend Clippy on Rust 1.98, formatting, and WASM all-targets check.
+- Native comparison: 36 cases and 2,304 correctness-gated policy observations.
+  Hindsight-best fixed WGPU controls still take 1.65-5.47x PyTorch CUDA latency.
+- Matched browser: 44 cases. New-path mean-ratio ranges are 0.910-0.940 for
+  k=7, 0.662-0.702 for k=65, and 0.525-0.541 for k=256. Single-winner
+  controls span 0.981-1.023; legacy tile boundaries span 0.984-1.019.
+  This is one additional matched replay, not new independent seeds.
+
+[review-summary.json](review-summary.json) and
+[review-logs.tar.xz](review-logs.tar.xz) preserve this replay separately from
+the original study. The included `replay_review.py` rechecks both unchanged
+GPU source strings, native source binding, canonical outputs, policy receipts,
+request hashes, browser pairing, and product hashes. Extraction/recomputation
+reproduced the summary byte-for-byte. Commands and toolchain caveats are in
+the archive's `commands.md`.
+
+Review archive SHA-256: `20c96faa613b07e2bde87749fb56bc1c0b195b313cca72cd06fcc5b6e0ac36bb`.
+Review summary SHA-256: `d40a8873218ce06d39a645974ca823083edd06a6a32ec21e7ef85b9f56f595a9`.
+
 ## Negative Results and Reproduction
 
 `5eca8b88` is valid negative evidence: adding the tree to the legacy entry

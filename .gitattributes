@@ -5,3 +5,4 @@ vendor/wgpu-0.20.1/** -text linguist-vendored whitespace=cr-at-eol
 vendor/wgpu-0.20.1/README.md whitespace=cr-at-eol,-blank-at-eol
 # Recomputed benchmark data remains available without obscuring kernel review.
 benchmarks/results/2026-09-07-midk-tournament/summary.json linguist-generated=true
+benchmarks/results/2026-09-07-midk-tournament/review-summary.json linguist-generated=true
