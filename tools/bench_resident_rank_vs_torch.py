@@ -11,7 +11,23 @@ import tempfile
 import bench_rank_vs_torch as audit
 
 
+def foreign_gpu_processes():
+    completed = subprocess.run(
+        ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader,nounits"],
+        text=True, capture_output=True, check=True, timeout=10,
+    )
+    return sorted({int(line.strip()) for line in completed.stdout.splitlines()
+                   if line.strip()} - {os.getpid()})
+
+
+def require_uncontended_gpu():
+    foreign = foreign_gpu_processes()
+    if foreign:
+        raise RuntimeError(f"timing admission blocked by other GPU compute processes: {foreign}")
+
+
 def run(executable):
+    require_uncontended_gpu()
     import torch
 
     bench = audit.load_bench_module()
@@ -89,6 +105,8 @@ def run(executable):
                 samples["torch_resident_per_op"] = bench.summarize([v / 16 for v in timing["samples_ms"]])
                 report["cases"].append({"request": {k:v for k,v in r.items() if k != "input"}, "native": result, "timings": samples})
         after = audit.source_identity()
+        require_uncontended_gpu()
+        report["gpu_process_gate"] = "no foreign compute PIDs at preflight/postflight; not an exclusive reservation"
         report["provenance"] = {"valid": before == after and original == audit.file_identity(executable)
                                  and image_before == audit.file_identity(image), "source_after": after,
                                  "executable": original, "execution_image": image_before}

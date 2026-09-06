@@ -74,3 +74,6 @@ The harness requires a clean source-bound build, preserves exact requests by
 hash, verifies output against canonical PyTorch ranks, and checks source and
 execution-image stability. It crosses three seeds, three tiles, three rank
 kinds and two widths. Numerical failures are errors, not timing samples.
+The runner rejects other CUDA compute PIDs before and after measurement. This
+is a best-effort process check, not an exclusive GPU reservation; shared-load
+measurements must still be treated as provisional.
