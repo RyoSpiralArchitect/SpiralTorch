@@ -3,6 +3,7 @@
 const KIND_TOPK: u32 = 0u;
 const KIND_MIDK: u32 = 1u;
 const INVALID_INDEX: u32 = 0xffffffffu;
+const LOCAL_SORT_CAPACITY: u32 = 1024u;
 
 struct Params {
     rows: u32,
@@ -30,6 +31,8 @@ var<workgroup> merge_indices: array<u32, 256>;
 var<workgroup> merge_tiles: array<u32, 256>;
 var<workgroup> merge_start: u32;
 var<workgroup> merge_end: u32;
+var<workgroup> sort_values: array<f32, 1024>;
+var<workgroup> sort_indices: array<u32, 1024>;
 
 fn float_total_key(value: f32) -> u32 {
     let bits = bitcast<u32>(value);
@@ -76,6 +79,68 @@ fn swap_scratch(left: u32, right: u32) {
     scratch_indices[right] = index;
 }
 
+fn sort_tile_local(row: u32, tile: u32, lane: u32) {
+    let tile_state = row * params.tiles_x + tile;
+    let scratch_base = tile_state * params.tile_stride;
+    let column_base = tile * params.tile_cols;
+    let tile_length = min(params.tile_cols, params.cols - column_base);
+    for (var slot = lane; slot < params.tile_stride; slot = slot + 256u) {
+        var value = 0.0;
+        var index = INVALID_INDEX;
+        if (slot < tile_length) {
+            let column = column_base + slot;
+            let candidate = input_values[row * params.cols + column];
+            if (finite_f32(candidate)) {
+                value = candidate;
+                index = column;
+            }
+        }
+        sort_values[slot] = value;
+        sort_indices[slot] = index;
+    }
+    workgroupBarrier();
+
+    // Only this workgroup owns the tile. Keep compare/exchange traffic local,
+    // then publish the sorted run once for the separate row-merge pass.
+    for (var span = 2u; span <= params.tile_stride; span = span << 1u) {
+        for (var distance = span >> 1u; distance > 0u; distance = distance >> 1u) {
+            for (var slot = lane; slot < params.tile_stride; slot = slot + 256u) {
+                let partner = slot ^ distance;
+                if (partner > slot && partner < params.tile_stride) {
+                    let left_value = sort_values[slot];
+                    let left_index = sort_indices[slot];
+                    let right_value = sort_values[partner];
+                    let right_index = sort_indices[partner];
+                    let ascending_half = (slot & span) == 0u;
+                    let swap = select(
+                        candidate_before(left_value, left_index, right_value, right_index),
+                        candidate_before(right_value, right_index, left_value, left_index),
+                        ascending_half,
+                    );
+                    if (swap) {
+                        sort_values[slot] = right_value;
+                        sort_indices[slot] = right_index;
+                        sort_values[partner] = left_value;
+                        sort_indices[partner] = left_index;
+                    }
+                }
+            }
+            workgroupBarrier();
+        }
+    }
+    for (var slot = lane; slot < params.tile_stride; slot = slot + 256u) {
+        scratch_values[scratch_base + slot] = sort_values[slot];
+        scratch_indices[scratch_base + slot] = sort_indices[slot];
+    }
+    if (lane == 0u) {
+        var count = 0u;
+        for (; count < params.tile_stride; count = count + 1u) {
+            if (sort_indices[count] == INVALID_INDEX) { break; }
+        }
+        tile_counts[tile_state] = count;
+    }
+}
+
 @compute @workgroup_size(256)
 fn rankk_exact_2ce_tile_sort(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
@@ -84,6 +149,10 @@ fn rankk_exact_2ce_tile_sort(
     let tile = workgroup_id.x;
     let row = workgroup_id.y;
     if (row >= params.rows || tile >= params.tiles_x) {
+        return;
+    }
+    if (params.tile_stride <= LOCAL_SORT_CAPACITY) {
+        sort_tile_local(row, tile, local_id.x);
         return;
     }
 

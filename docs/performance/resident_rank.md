@@ -36,6 +36,12 @@ For MidK with at most 32 tiles, candidates find their global rank through
 parallel binary searches over the sorted tiles. This avoids serially discarding
 half of each row. More fragmented geometries retain the existing GPU merge.
 
+Tiles with a padded stride up to 1024 now sort in 8 KiB of workgroup memory,
+publishing their sorted run to global scratch only once. Larger tiles keep the
+storage-memory sorting network. Both paths use the same total-order comparator;
+requested tile geometry, output ordering, padding and snapshot semantics are
+unchanged. Device admission checks the workgroup storage requirement explicitly.
+
 ## Python And Rust
 
 ```python

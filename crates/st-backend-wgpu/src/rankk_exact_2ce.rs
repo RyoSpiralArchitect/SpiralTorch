@@ -25,6 +25,7 @@ pub use st_kernel_contracts::rank::{Kind, PlanError};
 
 const WORKGROUP_SIZE: u32 = 256;
 const STORAGE_BINDINGS: u32 = 7;
+const WORKGROUP_STORAGE_BYTES: u32 = 1024 * 8;
 const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
 
 /// Validated shape and tile geometry for exact two-command rank-k execution.
@@ -136,11 +137,21 @@ impl Plan {
     }
 
     fn validate_device(self, device: &wgpu::Device) -> Result<(), DispatchError> {
+        self.validate_limits(&device.limits())
+    }
+
+    fn validate_limits(self, limits: &wgpu::Limits) -> Result<(), DispatchError> {
         if self.is_empty() {
             return Ok(());
         }
 
-        let limits = device.limits();
+        if WORKGROUP_STORAGE_BYTES > limits.max_compute_workgroup_storage_size {
+            return Err(DispatchError::DeviceLimit {
+                resource: "workgroup_storage_size",
+                required: WORKGROUP_STORAGE_BYTES as u64,
+                available: limits.max_compute_workgroup_storage_size as u64,
+            });
+        }
         if WORKGROUP_SIZE > limits.max_compute_invocations_per_workgroup
             || WORKGROUP_SIZE > limits.max_compute_workgroup_size_x
         {
@@ -536,6 +547,24 @@ mod tests {
     }
 
     #[test]
+    fn plan_checks_local_sort_storage_before_pipeline_creation() {
+        let plan = Plan::try_new(Kind::MidK, 2, 2049, 7, 1024).unwrap();
+        let mut limits = wgpu::Limits {
+            max_compute_workgroup_storage_size: WORKGROUP_STORAGE_BYTES - 1,
+            ..wgpu::Limits::default()
+        };
+        assert!(matches!(
+            plan.validate_limits(&limits),
+            Err(DispatchError::DeviceLimit {
+                resource: "workgroup_storage_size",
+                ..
+            })
+        ));
+        limits.max_compute_workgroup_storage_size = WORKGROUP_STORAGE_BYTES;
+        assert!(plan.validate_limits(&limits).is_ok());
+    }
+
+    #[test]
     fn exact_rank_2ce_wgsl_parses_and_validates() {
         let module = naga::front::wgsl::parse_str(WGSL).expect("rank-k 2CE WGSL should parse");
         Validator::new(ValidationFlags::all(), Capabilities::all())
@@ -605,6 +634,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn local_and_storage_sort_boundaries_match_reference_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let (device, queue) = test_device().expect("requested runtime test requires WGPU");
+        let pipelines = Pipelines::new(&device).unwrap();
+        for (cols, tile) in [
+            (1, 1),
+            (1024, 256),
+            (1024, 1024),
+            (1025, 1024),
+            (1025, 1025),
+            (2049, 1023),
+            (2049, 1024),
+            (2049, 1025),
+            (2049, 2048),
+        ] {
+            let mut input = (0..cols * 2)
+                .map(|i| ((i * 37 % 101) as f32 - 50.0) / 7.0)
+                .collect::<Vec<_>>();
+            input[0] = -0.0;
+            if cols > 1 {
+                input[1] = 0.0;
+                input[cols as usize - 1] = f32::INFINITY;
+            }
+            input[cols as usize..].fill(f32::NAN);
+            for k in [1, 7.min(cols), cols] {
+                for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
+                    let plan = Plan::try_new(kind, 2, cols, k, tile).unwrap();
+                    let output = dispatch_host(&device, &queue, &pipelines, plan, &input).unwrap();
+                    let expected = cpu_reference(kind, 2, cols, k, &input);
+                    assert_eq!(
+                        output.indices, expected.indices,
+                        "{kind:?} cols={cols} tile={tile} k={k}"
+                    );
+                    for (a, b) in output.values.iter().zip(&expected.values) {
+                        assert!((a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -616,7 +689,10 @@ mod tests {
             &wgpu::DeviceDescriptor {
                 label: Some("st.rankk.exact_2ce.test_device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
+                required_limits: wgpu::Limits {
+                    max_compute_workgroup_storage_size: WORKGROUP_STORAGE_BYTES,
+                    ..adapter.limits()
+                },
             },
             None,
         ))
