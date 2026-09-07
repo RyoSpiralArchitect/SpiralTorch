@@ -8,6 +8,9 @@ use crate::{module::Module, Tensor, TensorError};
 use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
+mod portable;
+pub use portable::{DEFAULT_MAX_PLAN_JSON_BYTES, INFERENCE_PLAN_SCHEMA};
+
 /// Modules must emit operations equivalent to their ordinary forward semantics.
 #[derive(Clone, Debug)]
 pub enum InferenceOp {
@@ -31,6 +34,16 @@ pub enum InferenceError {
     Tensor(#[from] TensorError),
     #[error(transparent)]
     Layout(#[from] NdLayoutError),
+    #[error("unsupported inference plan schema: {0}")]
+    Schema(String),
+    #[error("inference plan JSON has {actual} bytes, exceeding the limit {limit}")]
+    JsonLimit { actual: usize, limit: usize },
+    #[error(
+        "portable inference plans require u32-addressable input, parameter, and stage buffers"
+    )]
+    PortableAddressSpace,
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
     #[cfg(feature = "wgpu")]
     #[error(transparent)]
     Gpu(#[from] st_backend_wgpu::resident_dense::DenseError),
@@ -61,6 +74,16 @@ impl InferencePlan {
             return Err(InferenceError::InvalidLayout);
         }
         let operations = module.inference_ops()?;
+        Self::from_operations(input, operations)
+    }
+
+    fn from_operations(
+        input: NdLayout,
+        operations: Vec<InferenceOp>,
+    ) -> Result<Self, InferenceError> {
+        if input.rank() == 0 || input.is_empty() || !input.is_contiguous() || input.offset() != 0 {
+            return Err(InferenceError::InvalidLayout);
+        }
         let source_operations = operations.len();
         let mut stages: Vec<FrozenLinear> = Vec::new();
         let mut width = *input.shape().last().unwrap();

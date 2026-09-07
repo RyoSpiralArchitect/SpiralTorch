@@ -2,7 +2,7 @@
 
 `st_nn::resident::InferencePlan` lowers existing `Linear`, `Gelu`, and nested
 `Sequential` modules into shared WGPU dense kernels. This is an explicit Rust
-inference path, not a second model definition API and not a change to ordinary
+inference path with Python/WASM clients, not a second model definition API or a change to ordinary
 `Module::forward` or backward.
 
 ```text
@@ -57,9 +57,76 @@ On WASM, request the runtime asynchronously with
 kernel, and sequential/tiled/compensated accumulation options; the default is
 8x8x16, scalar, sequential. This is not an autotuned fastest-kernel promise.
 
+## Python To Browser
+
+Use a wheel built from this source with the `nn` and `wgpu` features (the
+default build includes both). Define the model with existing modules:
+
+```python
+import spiraltorch as st
+
+model = st.nn.Sequential()
+model.add(st.nn.Linear(4, 7, name="up"))
+model.add(st.nn.Gelu())
+model.add(st.nn.Linear(7, 3, name="down"))
+
+plan = model.inference_plan([2, 5, 4])
+gpu = plan.compile_wgpu()
+gpu.upload_values([0.25] * 40)
+gpu.dispatch()
+snapshot = gpu.snapshot()
+assert snapshot.shape == (2, 5, 3)
+values = snapshot.read_values()  # the only output readback; validates every stage
+payload = plan.to_json()        # pass these exact bytes to the browser
+```
+
+For a 2D plan, `gpu(st.Tensor(...))` is a host-input/host-output convenience
+call with the same resident intermediate buffers. N-D plans deliberately use
+flat values plus snapshot shape, not a silently flattened 2D return value.
+`upload(Tensor)` accepts the exact leading-axes matrix in logical row-major
+order. Snapshot reads consume the snapshot once.
+
+Build the public WASM package with `bash scripts/build_wasm_web.sh --features
+webgpu`, then use its generated web module in a WebGPU-enabled secure context:
+
+```javascript
+import init, { InferencePlan } from "./pkg/spiraltorch_wasm.js";
+await init();
+const payload = await (await fetch("./plan.json")).text(); // Python's plan.to_json()
+const plan = InferencePlan.fromJson(payload);
+const pending = plan.compileWebGpu();
+plan.free(); // compilation already owns a Rust snapshot
+const gpu = await pending;
+gpu.upload(new Float32Array(40).fill(0.25));
+gpu.dispatch();
+const snapshot = gpu.snapshot();
+const shape = snapshot.shape; // Uint32Array([2, 5, 3])
+gpu.free();                  // the output snapshot owns its buffers
+const read = snapshot.readValues();
+snapshot.free();             // the pending read also owns its buffers
+const values = await read;
+```
+
+Rust `InferencePlan::{to_json, from_json}`, Python `nn.InferencePlan.from_json`,
+and WASM `InferencePlan.fromJson` share the same Rust parser and lowering.
+The wire schema is `spiraltorch.nn.inference_plan.v1`: contiguous input shape
+and fixed f32 Linear parameters with optional GELU. It is not a checkpoint,
+executable code, or a device image. The default import budget is 64 MiB of
+UTF-8 JSON; callers may explicitly raise `max_bytes`. It bounds transport
+size, not total parsing or GPU allocation memory. The portable format requires
+u32-addressable input, parameter, and stage buffers on every platform;
+device-specific limits are checked separately during compilation. Unknown
+fields, non-finite parameters, wrong shapes, and unknown schemas are rejected.
+
+A CPU-only Python build can create, export, and import plans, but
+`compile_wgpu()` raises `NotImplementedError`. WASM built with `--features nn`
+similarly handles plans while `compileWebGpu()` explicitly fails; `webgpu`
+includes `nn`. Neither client reconstructs NN operations or inserts a CPU
+fallback when resident compilation is unavailable.
+
 ## Boundaries
 
-- Plans own immutable parameter snapshots. Recompile after model updates;
+- Plans own immutable parameter snapshots. Rebuild the plan and recompile after model updates;
   changing the source model does not update an existing resident plan.
 - `dispatch()` means enqueued, not validated success. Reading a snapshot checks
   every stage's finite-value flags, including GELU square/cubic overflow that a
@@ -75,11 +142,30 @@ kernel, and sequential/tiled/compensated accumulation options; the default is
   or silently reinterpreted. Scalars/empty arrays have layout semantics but are
   not supported by this inference executor.
 - Existing `pure::Tensor` is still host-backed and two-dimensional. This does
-  not add general N-D broadcasting, device-resident autograd/optimizer updates,
-  or a Python/JS public NN compilation API. Rust browser execution is tested by
-  the example below; general client bindings are a subsequent step.
+  not add general N-D broadcasting or device-resident autograd/optimizer updates.
+  The public clients expose this explicit inference subset, not an automatic
+  replacement for all NN execution.
 
 ## Verification And Measurement
+
+`bindings/st-py/examples/resident_nn_roundtrip.py` executes the existing Python
+model and its resident plan against an independent small f64 oracle, then
+exports three 1D/2D/3D fixtures. The browser test imports those exact plan bytes:
+
+```bash
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I bindings/st-py/tests/test_nn_resident.py -v
+python -I bindings/st-py/examples/resident_nn_roundtrip.py --output /tmp/nn-fixture.json
+OUT_DIR=/tmp/nn-client-webgpu EXAMPLES_DIR=/tmp/no-example-sync \
+  bash scripts/build_wasm_web.sh --features webgpu
+cp /tmp/nn-fixture.json /tmp/nn-client-webgpu/nn-fixture.json
+node tools/test_resident_browser.cjs /tmp/nn-client-webgpu /path/to/chromium \
+  /tmp/new-nn-client-report.json '' '' '' '' nn-clients
+```
+
+The runner requires Playwright in the Node environment and launches an isolated
+headless browser, not the user's profile. For a plan-only WASM build, use
+`--features nn` and the `nn-clients-cpu` fixture. CPU-only Python tests omit
+the GPU opt-in environment variable.
 
 ```bash
 cargo test -p st-kernel-contracts

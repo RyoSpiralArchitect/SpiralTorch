@@ -245,6 +245,12 @@ jobs:
           node bindings/st-wasm/tests/tensor_mean.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
           node bindings/st-wasm/tests/rank_adaptation.cjs "$module"
+      - name: Portable NN plans without WebGPU
+        run: |
+          cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features nn
+          wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
+            --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu"
+          node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
       - name: Browser WebGPU binding build
         run: |
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib
@@ -444,6 +450,7 @@ jobs:
           python -P tests/test_backend_benchmark.py
           python -P tests/test_resident_benchmark.py
           python -P bindings/st-py/tests/test_wgpu_resident.py
+          python -P bindings/st-py/tests/test_nn_resident.py
           python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
         env:

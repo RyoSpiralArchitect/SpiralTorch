@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Python NN plan through WASM WebGPU</title>
+<pre id="result" data-status="running">Loading the Python-exported Rust plan</pre>
+<script type="module">
+import init, {InferencePlan} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+const report = {status: "error", cases: [], rejected: 0};
+function equal(a, b, label) {
+  if (JSON.stringify(Array.from(a)) !== JSON.stringify(Array.from(b))) throw Error(label);
+}
+function close(actual, expected) {
+  if (actual.length !== expected.length || !actual.every((a, i) =>
+      Number.isFinite(a) && Math.abs(a-expected[i]) <= 1e-5 + 1e-4*Math.abs(expected[i])))
+    throw Error("output differs from the Python fixture oracle");
+}
+async function reject(call) {
+  let rejected = false;
+  try { await call(); } catch { rejected = true; }
+  if (!rejected) throw Error("invalid input or state was accepted");
+  report.rejected++;
+}
+async function digest(text) {
+  const data = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(data), x => x.toString(16).padStart(2, "0")).join("");
+}
+try {
+  await init();
+  const response = await fetch("/fixture.json");
+  if (!response.ok) throw Error("Python fixture failed to load");
+  const fixture = await response.json();
+  if (fixture.status !== "passed" || fixture.schema !== "spiraltorch.nn.client_fixture.v1" || fixture.cases.length !== 3)
+    throw Error("invalid Python fixture");
+  const cpuOnly = new URLSearchParams(location.search).get("cpu_only") === "1";
+  for (const item of fixture.cases) {
+    if (await digest(item.plan_json) !== item.plan_sha256) throw Error("plan bytes changed");
+    const plan = InferencePlan.fromJson(item.plan_json);
+    equal(plan.inputShape, item.shape, "input shape mismatch");
+    equal(plan.outputShape, item.shape, "output shape mismatch");
+    if (plan.stageCount !== 2 || plan.sourceOperationCount !== 3) throw Error("lowering changed");
+    if (plan.toJson() !== item.plan_json) throw Error("plan canonical roundtrip changed");
+    await reject(() => InferencePlan.fromJson(item.plan_json, 1));
+    await reject(() => InferencePlan.fromJson(item.plan_json, true));
+    await reject(() => InferencePlan.fromJson({length: 0}));
+    const oversized = JSON.parse(item.plan_json);
+    oversized.input_shape = [4294967295, 2];
+    await reject(() => InferencePlan.fromJson(JSON.stringify(oversized)));
+    if (cpuOnly) {
+      await reject(() => plan.compileWebGpu());
+      plan.free();
+      report.cases.push({shape:item.shape, plan_sha256:item.plan_sha256, gpu:"explicitly unavailable"});
+      continue;
+    }
+    await reject(() => plan.compileWebGpu([true,8,16]));
+    await reject(() => plan.compileWebGpu([8,8]));
+    await reject(() => plan.compileWebGpu(undefined, "unknown"));
+    const options = item.shape.length === 3 ? [[8,8,16], "register_2x2", "compensated"] : [];
+    const pending = plan.compileWebGpu(...options);
+    plan.free();
+    const gpu = await pending;
+    const adapter = gpu.adapterInfo();
+    if (typeof adapter.device_type !== "string" || adapter.device_type === "Cpu")
+      throw Error("missing device identity or CPU fallback in WebGPU correctness run");
+    await reject(() => gpu.dispatch());
+    await reject(() => gpu.snapshot());
+    await reject(() => gpu.upload(new Float64Array(item.input)));
+    await reject(() => gpu.upload(item.input));
+    gpu.upload(new Float32Array(item.input));
+    await reject(() => gpu.snapshot());
+    const generation = gpu.dispatch();
+    const first = gpu.snapshot();
+    for (const values of [new Float32Array(item.input.length-1), new Float32Array(item.input.length).fill(NaN)])
+      await reject(() => gpu.upload(values));
+    if (gpu.generation !== generation) throw Error("invalid upload mutated generation");
+    const unchanged = gpu.snapshot();
+    gpu.upload(new Float32Array(item.replay_input));
+    await reject(() => gpu.snapshot());
+    gpu.dispatch();
+    const second = gpu.snapshot();
+    gpu.free();
+    for (const [snapshot, expected, pythonOutput] of [
+        [first, item.expected, item.python_output], [unchanged, item.expected, item.python_output],
+        [second, item.replay_expected, item.replay_python_output]]) {
+      equal(snapshot.shape, item.shape, "snapshot lost N-D shape");
+      const pending = snapshot.readValues();
+      await reject(() => snapshot.readValues());
+      snapshot.free();
+      const output = await pending;
+      close(output, expected);
+      close(output, pythonOutput);
+    }
+    report.cases.push({shape:item.shape, plan_sha256:item.plan_sha256, gpu:"passed", adapter, options});
+  }
+  if (!cpuOnly) {
+    const payload = JSON.stringify({schema:"spiraltorch.nn.inference_plan.v1", input_shape:[1],
+      stages:[{inner:1,cols:1,weight:[1],bias:[0],gelu:true}]});
+    const plan = InferencePlan.fromJson(payload);
+    const gpu = await plan.compileWebGpu();
+    plan.free();
+    for (const value of [1e20,-1e20,1e13,-1e13]) {
+      gpu.upload(new Float32Array([value])); gpu.dispatch();
+      const failure = gpu.snapshot();
+      gpu.upload(new Float32Array([0.25])); gpu.dispatch();
+      const success = gpu.snapshot();
+      await reject(() => failure.readValues());
+      failure.free();
+      const output = await success.readValues();
+      success.free();
+      if (!Number.isFinite(output[0])) throw Error("valid replay failed");
+    }
+    gpu.free();
+    report.intermediate_guard_cases = 4;
+  }
+  report.status = "passed";
+  report.cpu_only = cpuOnly;
+} catch (error) {
+  report.error = String(error.stack || error);
+}
+result.textContent = JSON.stringify(report);
+result.dataset.status = report.status;
+</script>
