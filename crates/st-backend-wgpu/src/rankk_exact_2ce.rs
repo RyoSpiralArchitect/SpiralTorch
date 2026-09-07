@@ -806,6 +806,28 @@ mod tests {
     }
 
     #[test]
+    fn pair_lane_mapping_covers_each_bitonic_endpoint_once() {
+        for exponent in 1..=10 {
+            let stride = 1u32 << exponent;
+            for bit in 0..exponent {
+                let distance = 1u32 << bit;
+                let mut visits = vec![0; stride as usize];
+                for lane in 0..256 {
+                    for pair in (lane..stride / 2).step_by(256) {
+                        let slot = (pair & (distance - 1)) | ((pair & !(distance - 1)) << 1);
+                        let partner = slot | distance;
+                        assert_eq!(partner, slot ^ distance);
+                        assert!(slot < partner && partner < stride);
+                        visits[slot as usize] += 1;
+                        visits[partner as usize] += 1;
+                    }
+                }
+                assert!(visits.iter().all(|&count| count == 1));
+            }
+        }
+    }
+
+    #[test]
     fn local_and_storage_sort_boundaries_match_reference_when_enabled() {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
@@ -814,6 +836,17 @@ mod tests {
         let pipelines = Pipelines::new(&device).unwrap();
         for (cols, tile) in [
             (1, 1),
+            (5, 2),
+            (9, 3),
+            (65, 31),
+            (67, 33),
+            (255, 127),
+            (259, 129),
+            (513, 255),
+            (515, 257),
+            (1025, 511),
+            (1027, 512),
+            (1029, 513),
             (1024, 32),
             (1025, 32),
             (1025, 256),

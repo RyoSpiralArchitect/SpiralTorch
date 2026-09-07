@@ -11,9 +11,10 @@ const report={schema:"spiraltorch.browser_rank_matched.v1",status:"running",case
   boundary:"64 resident pairs plus completion fence; alternating arms; validation outside timing",
   interpretation:"one deterministic fixture; separate devices in one browser; adapter identity may be anonymous",
   repetitions:64,warmup_batches:4,retained_batches:16};
-const pruning=new URLSearchParams(location.search).get("suite")==="pruning";
-report.fixture_suite=pruning ? "pruning" : "boundary";
-if(pruning) report.interpretation="three deterministic seeds including quantized ties; separate devices in one browser; adapter identity may be anonymous";
+const suite=new URLSearchParams(location.search).get("suite");
+const pruning=suite==="pruning",pairLanes=suite==="pair-lanes";
+report.fixture_suite=pairLanes ? "pair-lanes" : pruning ? "pruning" : "boundary";
+if(pruning || pairLanes) report.interpretation="three deterministic seeds including quantized ties; separate devices in one browser; adapter identity may be anonymous";
 function assert(ok, message) { if(!ok) throw Error(message); }
 function reference(input,rows,cols,k,kind) {
   const values=[],indices=[];
@@ -31,6 +32,10 @@ function reference(input,rows,cols,k,kind) {
   return {values,indices};
 }
 function requests() {
+  if(pairLanes) return [17,29,43].flatMap(seed=>["topk","midk","bottomk"].flatMap(kind=>
+    [[2,1023,32],[2,4095,128],[2,8191,256],[2,8193,512],
+     [64,8191,256],[64,8193,512],[2,8193,1024],[2,8193,2048]].map(([rows,cols,tile_cols])=>
+      ({kind,rows,cols,k:65,tile_cols,seed}))));
   if(!pruning) return [32,33,63,64,65,127,128,129,255,256,257].flatMap(tiles=>
     [1,7,65,256].map(k=>({kind:"midk",rows:2,cols:tiles*32-1,k,tile_cols:32})));
   return [17,29,43].flatMap(seed=>[
