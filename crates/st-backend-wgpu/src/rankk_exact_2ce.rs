@@ -25,6 +25,7 @@ pub use st_kernel_contracts::rank::{Kind, PlanError};
 
 const WORKGROUP_SIZE: u32 = 256;
 const PARALLEL_MIDK_MAX_TILES: u32 = 32;
+const PARALLEL_PREFIX_MIN_K: u32 = 64;
 const STORAGE_BINDINGS: u32 = 7;
 const WORKGROUP_STORAGE_BYTES: u32 = 1024 * 8;
 const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
@@ -49,9 +50,12 @@ impl MergeMode {
             if tiles_x <= WORKGROUP_SIZE && k > 1 {
                 return Self::TournamentMidk;
             }
-        } else if tiles_x > 1 && tiles_x <= PARALLEL_MIDK_MAX_TILES && k > 1 && k <= WORKGROUP_SIZE
+        } else if tiles_x > 1
+            && tiles_x <= PARALLEL_MIDK_MAX_TILES
+            && k >= PARALLEL_PREFIX_MIN_K
+            && k <= WORKGROUP_SIZE
         {
-            // At most one candidate per lane can belong to a short prefix.
+            // One candidate per lane; tiny prefixes retain the cheaper merge.
             return Self::ParallelPrefix;
         }
         Self::Streaming
@@ -736,12 +740,12 @@ mod tests {
         assert_eq!(std::mem::size_of::<ParamsUniform>(), 32);
         for tiles in [1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257] {
             for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
-                for k in [1, 2, 7, 65, 255, 256, 257] {
+                for k in [1, 2, 7, 63, 64, 65, 255, 256, 257] {
                     let plan = Plan::try_new(kind, 3, tiles * 512 - 1, k, 512).unwrap();
                     let mode = match (kind, tiles) {
                         (Kind::MidK, 1..=32) => MergeMode::ParallelMidk,
                         (Kind::MidK, 33..=256) if k > 1 => MergeMode::TournamentMidk,
-                        (Kind::TopK | Kind::BottomK, 2..=32) if (2..=256).contains(&k) => {
+                        (Kind::TopK | Kind::BottomK, 2..=32) if (64..=256).contains(&k) => {
                             MergeMode::ParallelPrefix
                         }
                         _ => MergeMode::Streaming,

@@ -35,7 +35,7 @@ function requests() {
   if(prefix) return [17,29,43].flatMap(seed=>[
     ...["topk","bottomk"].flatMap(kind=>[
       ...[[2,8193,512],[64,8193,512],[2,8193,256]].flatMap(([rows,cols,tile_cols])=>
-        [1,7,65,256,257].map(k=>({kind,rows,cols,k,tile_cols,seed}))),
+        [7,63,64,65,256,257].map(k=>({kind,rows,cols,k,tile_cols,seed}))),
       {kind,rows:2,cols:1024,k:65,tile_cols:1024,seed},
     ]),
     {kind:"midk",rows:2,cols:8193,k:65,tile_cols:512,seed},
