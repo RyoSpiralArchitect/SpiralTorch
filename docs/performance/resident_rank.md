@@ -99,7 +99,7 @@ Every control checks exact value bits and source indices. The v2 reports retain
 all samples and label the primary CUDA reference as the hindsight best fixed
 control, not an online policy choice. Key encoding, repair and gather remain
 inside timing. See the [canonical CUDA reference contract](../development/cuda_rank_reference.md)
-and [measured comparisons](../../benchmarks/results/2026-09-07-canonical-cuda-rank/README.md).
+and [measured comparisons](../../benchmarks/results/2026-09-07-canonical-cuda-rank-window/README.md).
 
 Tiles with a padded stride up to 1024 now sort in 8 KiB of workgroup memory,
 publishing their sorted run to global scratch only once. Larger tiles keep the

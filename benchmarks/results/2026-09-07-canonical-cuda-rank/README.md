@@ -1,7 +1,13 @@
 # Canonical CUDA Rank Reference
 
+This preserves the initial study. Review found that its stable-sort admission
+over-rejected mixed signed zeros even when the returned window was canonical.
+The [window-aware correction and rerun](../2026-09-07-canonical-cuda-rank-window/README.md)
+preserve these original logs and measure the corrected implementation separately.
+
 Compiled native and benchmark source: `dc840c9725d11a445d5df109da62e9e7c2479b2d`.
-Later commits are documentation/evidence only. Rust/backend/WASM source equals
+Its evidence commit adds only documentation/artifacts; the later admission fix
+is measured separately above. Rust/backend/WASM source equals
 `8a3624f89b60b1586167e5c2978b2d19848dadeb`; this study changes the comparison
 reference, not the WGPU implementation. It measures no new browser speedup.
 
@@ -101,10 +107,12 @@ not continuous/exclusive reservations. Existing CPU workloads remain untouched.
 [raw-logs.tar.xz](raw-logs.tar.xz) contains the full reports, generators, source
 bundle, native identities, tests/build logs and GPU-only availability records.
 It excludes large executables and private session listings. Extract and replay
-using the unchanged measured benchmark files, without Torch or GPU access:
+using a separate checkout of the unchanged measured source, without Torch or
+GPU access. The analyzer deliberately rejects changed benchmark files:
 
 ```sh
-python -I analyze_references.py --repo /path/to/SpiralTorch --output recomputed.json
+git worktree add --detach /path/to/measured-checkout dc840c9725d11a445d5df109da62e9e7c2479b2d
+python -I analyze_references.py --repo /path/to/measured-checkout --output recomputed.json
 ```
 
 The summary records hashes for all 35 raw files. A separate extraction and
