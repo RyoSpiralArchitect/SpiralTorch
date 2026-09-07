@@ -168,6 +168,15 @@ outside timing. CUDA reference work runs only after the native GPU process
 exits. These are separate-process wrapper diagnostics, not GPU-event timing,
 cross-framework interleaving, proof of convergence, or training-quality gains.
 
+Rank-only v2 reports also retain all eligible CUDA controls and select the
+hindsight lowest sample mean for the primary reference. Plain topk admission
+depends on retained/cutoff ties after f32 rounding, not duplicate values anywhere
+in the row. Exact index repair and packed integer-key controls include their
+construction/gather costs in every operation. The existing stable-sort control
+remains available; see the [reference contract](development/cuda_rank_reference.md)
+and [measured evidence](../benchmarks/results/2026-09-07-canonical-cuda-rank-window/README.md).
+This does not change the matmul-rank harness or seed Black Cat from CUDA controls.
+
 The browser fixture is selected with `rank-adaptation` in
 `tools/test_resident_browser.cjs`; it exercises real WebGPU dispatch and both
 UCB and Thompson sampling through the same Rust session.
