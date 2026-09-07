@@ -1111,6 +1111,70 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
+    fn parallel_prefix_order_padding_and_reuploads_match_reference_when_enabled() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
+            return;
+        }
+        let runtime = pollster::block_on(WgpuRuntime::request_headless("rank.prefix.bounds"))
+            .expect("requested runtime test requires WGPU");
+        let extremes = [
+            -f32::MAX,
+            -f32::MIN_POSITIVE,
+            -0.0,
+            0.0,
+            f32::MIN_POSITIVE,
+            f32::MAX,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+        ];
+        for (cols, tile) in [
+            (7, 4),
+            (511, 1024),
+            (513, 257),
+            (1025, 256),
+            (8191, 256),
+            (8193, 256),
+            (8193, 512),
+        ] {
+            for k in [1, 2, 7, 65, 255, 256, 257] {
+                if k > cols {
+                    continue;
+                }
+                for kind in [Kind::TopK, Kind::BottomK] {
+                    let plan = Plan::try_new(kind, 4, cols, k, tile).unwrap();
+                    let mut rank = ResidentRank::new(runtime.clone(), plan).unwrap();
+                    for iteration in 0..3 {
+                        let mut input = vec![f32::NAN; 4 * cols as usize];
+                        if iteration != 1 {
+                            for col in 0..cols as usize {
+                                input[col] = extremes[(col * 37 + iteration) % extremes.len()];
+                                input[3 * cols as usize + col] =
+                                    ((cols as usize - col) % 97) as f32;
+                            }
+                            input[2 * cols as usize] = -0.0;
+                            input[2 * cols as usize + cols as usize / 2] = -3.0;
+                            input[3 * cols as usize - 1] = 0.0;
+                        }
+                        let expected = cpu_reference(kind, 4, cols, k, &input);
+                        rank.upload(&input).unwrap();
+                        rank.dispatch(3).unwrap();
+                        let result = rank.snapshot().unwrap().read().unwrap();
+                        assert_eq!(
+                            result.indices, expected.indices,
+                            "{kind:?} cols={cols} tile={tile} k={k} iteration={iteration}"
+                        );
+                        for (a, b) in result.values.iter().zip(expected.values) {
+                            assert!((a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn parallel_midk_rank_bounds_preserve_total_order_when_enabled() {
         if std::env::var_os("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").is_none() {
             return;
