@@ -124,3 +124,7 @@ PyTorch is measured afterward. Rust retains intermediate finite guards while
 the eager PyTorch baseline does not add them for these finite fixtures. These
 results are diagnostic inference comparisons, not fastest-PyTorch or training
 throughput claims.
+
+The [first retained study](../benchmarks/results/2026-09-07-resident-nn/README.md)
+contains three complete MPS comparisons and browser correctness evidence,
+including slower cases and the still-unmeasured CUDA boundary.

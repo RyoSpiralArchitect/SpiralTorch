@@ -1,0 +1,4145 @@
+{
+  "schema": "spiraltorch.resident_nn_study.v1",
+  "status": "passed",
+  "source": {
+    "repository": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-nn-resident-sequential-v1",
+    "commit": "37e726f6a7bc0acf2c3983243faa7dc7cdb67b00",
+    "tree": "d49ecac0723b2dc5f3f211bf4e53ae72e2a0ba51",
+    "tracked_dirty": false,
+    "tracked_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "executable": {
+    "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-sequential-20260907/resident_mlp-37e726f6",
+    "sha256": "b59539531822a17ba1899e26665ef93efb52d0dfba66c47da766abaac722f3c1",
+    "device": 16777234,
+    "inode": 97543150,
+    "size": 7452320,
+    "mtime_ns": 1788759688078729786,
+    "mode": 33133
+  },
+  "torch": "2.12.1",
+  "torch_device": "mps",
+  "retained_samples_per_implementation": 324,
+  "full_matrix_runs": 3,
+  "estimator": "median of nine per-case sample-mean ratios: three seeds times three runs",
+  "measurement_boundary": "host-to-host eager inference; fixed model parameters, native legacy prepack/cache behavior unchanged; resident/Torch weights and bias device-persistent; fresh input upload and final readback each sample; native controls interleaved, PyTorch measured afterward; 2 warmups + 12 samples; compilation/setup excluded; no fastest-PyTorch claim",
+  "semantics": "Rust preserves intermediate finite guards on GPU; eager PyTorch does not add per-stage guards for these frozen finite fixtures; every output is checked outside timing; not backward/training throughput",
+  "contention": "unknown: macOS does not expose CUDA-style GPU process accounting; diagnostic only",
+  "groups": [
+    {
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "depth": 2,
+      "cases": 9,
+      "legacy_speedup_median": 1.6514228654405152,
+      "legacy_speedup_range": [
+        0.41912022609397404,
+        3.4634641369896815
+      ],
+      "resident_over_torch_median": 0.9787104280545501,
+      "resident_over_torch_range": [
+        0.6970262172360353,
+        3.8399349856975573
+      ],
+      "faster_than_legacy": 7,
+      "faster_than_torch": 5,
+      "max_abs_error": 7.450580596923828e-09
+    },
+    {
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "depth": 16,
+      "cases": 9,
+      "legacy_speedup_median": 4.842679000111589,
+      "legacy_speedup_range": [
+        3.711684613517529,
+        7.193035164591415
+      ],
+      "resident_over_torch_median": 1.2625443625549206,
+      "resident_over_torch_range": [
+        0.6682506896343834,
+        2.2962867385722694
+      ],
+      "faster_than_legacy": 9,
+      "faster_than_torch": 4,
+      "max_abs_error": 1.4901161193847656e-08
+    },
+    {
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "depth": 16,
+      "cases": 9,
+      "legacy_speedup_median": 5.40053752226858,
+      "legacy_speedup_range": [
+        3.5236191931640524,
+        11.35202820453175
+      ],
+      "resident_over_torch_median": 1.4556078342191157,
+      "resident_over_torch_range": [
+        0.7842299420201527,
+        1.8761993673589115
+      ],
+      "faster_than_legacy": 9,
+      "faster_than_torch": 2,
+      "max_abs_error": 4.470348358154297e-08
+    }
+  ],
+  "cases": [
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 0.7890520833333331,
+      "max_abs_error": 7.450580596923828e-09,
+      "resident_mean_ms": 1.882639,
+      "samples": [
+        {
+          "legacy_ms": 1.2298339999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.521667
+        },
+        {
+          "legacy_ms": 1.308709,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 5.602417
+        },
+        {
+          "legacy_ms": 1.707833,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.854333
+        },
+        {
+          "legacy_ms": 0.73175,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.8575
+        },
+        {
+          "legacy_ms": 0.6884159999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.48625
+        },
+        {
+          "legacy_ms": 0.507375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.30075
+        },
+        {
+          "legacy_ms": 0.5902919999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.36166699999999996
+        },
+        {
+          "legacy_ms": 0.525708,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.828417
+        },
+        {
+          "legacy_ms": 0.628917,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.158667
+        },
+        {
+          "legacy_ms": 0.5915,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.249708
+        },
+        {
+          "legacy_ms": 0.478416,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.285542
+        },
+        {
+          "legacy_ms": 0.479875,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 4.08475
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.3395420062588528,
+        4.270584002370015,
+        0.5137499974807724,
+        0.37408299976959825,
+        0.3912090032827109,
+        0.40487501246389,
+        0.4121249949093908,
+        0.2564589958637953,
+        0.3228330024285242,
+        0.2527499891584739,
+        0.2497079985914752,
+        0.36220799665898085
+      ],
+      "torch_mean_ms": 0.67917716660304,
+      "resident_over_legacy": 2.385950230366078,
+      "resident_over_torch": 2.7719409493934735
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 10.004059,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 2.2637289999999997,
+      "samples": [
+        {
+          "legacy_ms": 8.841833000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 5.612208
+        },
+        {
+          "legacy_ms": 8.608917,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.929542
+        },
+        {
+          "legacy_ms": 13.133583000000002,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.880666
+        },
+        {
+          "legacy_ms": 8.222833000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.943167
+        },
+        {
+          "legacy_ms": 9.222,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.772958
+        },
+        {
+          "legacy_ms": 9.146583999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 6.236249999999999
+        },
+        {
+          "legacy_ms": 9.244125,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.930375
+        },
+        {
+          "legacy_ms": 13.85225,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.901791
+        },
+        {
+          "legacy_ms": 9.064834000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.7602909999999999
+        },
+        {
+          "legacy_ms": 9.350875,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 5.908167
+        },
+        {
+          "legacy_ms": 9.104291,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.910833
+        },
+        {
+          "legacy_ms": 12.256583,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.3785
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        1.481375002185814,
+        3.28175000322517,
+        1.113000005716458,
+        0.8859579975251108,
+        0.8553340012440458,
+        0.8991669892566279,
+        4.928666006890126,
+        0.876874997629784,
+        0.8247500081779435,
+        0.833042009617202,
+        0.8272090053651482,
+        4.708750013378449
+      ],
+      "torch_mean_ms": 1.7929896700176566,
+      "resident_over_legacy": 0.2262810525207818,
+      "resident_over_torch": 1.2625443625549206
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 13.587552083333334,
+      "max_abs_error": 4.470348358154297e-08,
+      "resident_mean_ms": 1.557448,
+      "samples": [
+        {
+          "legacy_ms": 10.26725,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 6.092084
+        },
+        {
+          "legacy_ms": 14.943083,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.19825
+        },
+        {
+          "legacy_ms": 14.191375,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.3285829999999998
+        },
+        {
+          "legacy_ms": 16.465042,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.244042
+        },
+        {
+          "legacy_ms": 14.674332999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.38875
+        },
+        {
+          "legacy_ms": 15.602417,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.242875
+        },
+        {
+          "legacy_ms": 15.300417,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.186708
+        },
+        {
+          "legacy_ms": 14.658,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.106875
+        },
+        {
+          "legacy_ms": 13.33475,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.023042
+        },
+        {
+          "legacy_ms": 10.401041999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.063208
+        },
+        {
+          "legacy_ms": 13.659790999999998,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8739169999999999
+        },
+        {
+          "legacy_ms": 9.553125000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.941042
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.7651250052731484,
+        0.8313750004163012,
+        0.8371250005438924,
+        5.068624988780357,
+        0.8345420064870268,
+        0.7570000016130507,
+        0.7597910007461905,
+        0.8743749931454659,
+        3.4418329887557775,
+        1.7486249998910353,
+        0.7695420063100755,
+        0.7884170045144856
+      ],
+      "torch_mean_ms": 1.4563645830397338,
+      "resident_over_legacy": 0.11462314848532472,
+      "resident_over_torch": 1.0694080439317497
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 1.51377425,
+      "max_abs_error": 7.450580596923828e-09,
+      "resident_mean_ms": 0.43706941666666665,
+      "samples": [
+        {
+          "legacy_ms": 0.5158330000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.29500000000000004
+        },
+        {
+          "legacy_ms": 0.5247080000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.302167
+        },
+        {
+          "legacy_ms": 4.364042,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.295792
+        },
+        {
+          "legacy_ms": 0.804917,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.352541
+        },
+        {
+          "legacy_ms": 0.47979099999999997,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.287958
+        },
+        {
+          "legacy_ms": 0.481166,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.30124999999999996
+        },
+        {
+          "legacy_ms": 0.558666,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.294625
+        },
+        {
+          "legacy_ms": 5.493125,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.362542
+        },
+        {
+          "legacy_ms": 0.616209,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.298583
+        },
+        {
+          "legacy_ms": 0.521792,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.32787499999999997
+        },
+        {
+          "legacy_ms": 0.533667,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.290875
+        },
+        {
+          "legacy_ms": 3.271375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.835625
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        4.2605829949025065,
+        0.3904170007444918,
+        0.29158301185816526,
+        0.3026249905815348,
+        0.29666699992958456,
+        0.2718749892665073,
+        0.27783399855252355,
+        0.27633299760054797,
+        0.2927089954027906,
+        0.28087499958928674,
+        0.2919169928645715,
+        0.2911670017056167
+      ],
+      "torch_mean_ms": 0.627048747749844,
+      "resident_over_legacy": 0.288728267551563,
+      "resident_over_torch": 0.6970262172360353
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 9.129538166666666,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 1.2827049166666666,
+      "samples": [
+        {
+          "legacy_ms": 8.421290999999998,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.756292
+        },
+        {
+          "legacy_ms": 8.496292,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.7945829999999999
+        },
+        {
+          "legacy_ms": 8.629707999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.74925
+        },
+        {
+          "legacy_ms": 8.217291,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 5.325292
+        },
+        {
+          "legacy_ms": 8.665958,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.904084
+        },
+        {
+          "legacy_ms": 8.592832999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.811875
+        },
+        {
+          "legacy_ms": 12.487209,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.749875
+        },
+        {
+          "legacy_ms": 8.783375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.930875
+        },
+        {
+          "legacy_ms": 8.370792,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.753833
+        },
+        {
+          "legacy_ms": 8.515292,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.816792
+        },
+        {
+          "legacy_ms": 8.957292,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.762667
+        },
+        {
+          "legacy_ms": 11.417125,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.037041
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        4.090208007255569,
+        1.2077499995939434,
+        0.8741249912418425,
+        0.8558330009691417,
+        0.8621250017313287,
+        5.196084006456658,
+        0.9426250035176054,
+        0.8703329949639738,
+        0.8308329997817054,
+        5.49920900084544,
+        0.8863340044626966,
+        0.9185000089928508
+      ],
+      "torch_mean_ms": 1.9194965849843963,
+      "resident_over_legacy": 0.14050052623143824,
+      "resident_over_torch": 0.6682506896343834
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 10.318840333333332,
+      "max_abs_error": 3.725290298461914e-08,
+      "resident_mean_ms": 1.4833055833333333,
+      "samples": [
+        {
+          "legacy_ms": 9.287625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8690829999999999
+        },
+        {
+          "legacy_ms": 13.331249999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.836375
+        },
+        {
+          "legacy_ms": 9.832,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.878875
+        },
+        {
+          "legacy_ms": 12.912875000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.058083
+        },
+        {
+          "legacy_ms": 9.322709,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8583339999999999
+        },
+        {
+          "legacy_ms": 9.102167,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 4.097499999999999
+        },
+        {
+          "legacy_ms": 9.095083,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.97625
+        },
+        {
+          "legacy_ms": 8.748000000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.914417
+        },
+        {
+          "legacy_ms": 10.389208,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 3.561667
+        },
+        {
+          "legacy_ms": 9.351750000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.930916
+        },
+        {
+          "legacy_ms": 12.934584000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8955000000000001
+        },
+        {
+          "legacy_ms": 9.518833,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.9226669999999999
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        4.336333993705921,
+        1.0068749979836866,
+        0.7882500067353249,
+        0.7592500041937456,
+        0.8414590120082721,
+        0.7807919901097193,
+        5.525000000488944,
+        0.774750005803071,
+        0.7540410006185994,
+        0.7714579987805337,
+        5.5852079967735335,
+        0.7735830004094169
+      ],
+      "torch_mean_ms": 1.8914166673008974,
+      "resident_over_legacy": 0.14374731417655104,
+      "resident_over_torch": 0.7842299420201527
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 1.0957709166666665,
+      "max_abs_error": 3.725290298461914e-09,
+      "resident_mean_ms": 0.9080103333333334,
+      "samples": [
+        {
+          "legacy_ms": 0.5140830000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.289291
+        },
+        {
+          "legacy_ms": 0.5013329999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.306083
+        },
+        {
+          "legacy_ms": 2.215125,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 3.241791
+        },
+        {
+          "legacy_ms": 0.6252500000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.301875
+        },
+        {
+          "legacy_ms": 0.567417,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.289125
+        },
+        {
+          "legacy_ms": 0.581084,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 3.669
+        },
+        {
+          "legacy_ms": 0.775834,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.3105
+        },
+        {
+          "legacy_ms": 0.564834,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.360167
+        },
+        {
+          "legacy_ms": 0.525458,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.287333
+        },
+        {
+          "legacy_ms": 0.59525,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.295292
+        },
+        {
+          "legacy_ms": 5.1889579999999995,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.292458
+        },
+        {
+          "legacy_ms": 0.4946249999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.253209
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.2945000014733523,
+        0.27904199669137597,
+        4.708083011792041,
+        0.8173340029316023,
+        0.27725000109057873,
+        0.26666600024327636,
+        0.2684579958440736,
+        0.26383300428278744,
+        0.26149999757763,
+        0.2607079950394109,
+        0.2639169979374856,
+        0.26079200324602425
+      ],
+      "torch_mean_ms": 0.6851735840124699,
+      "resident_over_legacy": 0.828649783930659,
+      "resident_over_torch": 1.325226708268438
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 8.462395916666667,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 1.747461666666667,
+      "samples": [
+        {
+          "legacy_ms": 7.985291999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.753125
+        },
+        {
+          "legacy_ms": 8.235416,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 3.8406249999999997
+        },
+        {
+          "legacy_ms": 8.494667,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.759666
+        },
+        {
+          "legacy_ms": 8.52875,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.8057920000000001
+        },
+        {
+          "legacy_ms": 8.394208,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.743084
+        },
+        {
+          "legacy_ms": 8.343583,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.809166
+        },
+        {
+          "legacy_ms": 9.457959,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 3.7565
+        },
+        {
+          "legacy_ms": 8.451875,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.932458
+        },
+        {
+          "legacy_ms": 8.175792,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.7665000000000001
+        },
+        {
+          "legacy_ms": 8.577042,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.812708
+        },
+        {
+          "legacy_ms": 8.432917,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.743166
+        },
+        {
+          "legacy_ms": 8.47125,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 5.24675
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.8455000061076134,
+        4.8790000000735745,
+        0.8639580046292394,
+        0.8292910060845315,
+        0.849291987833567,
+        0.851666001835838,
+        4.448374995263293,
+        0.9372080094181001,
+        0.8548749901819974,
+        0.84787500964012,
+        0.8273330022348091,
+        5.110458005219698
+      ],
+      "torch_mean_ms": 1.8454025848768651,
+      "resident_over_legacy": 0.2064972714435454,
+      "resident_over_torch": 0.9469270721668934
+    },
+    {
+      "run": 1,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 9.985357583333334,
+      "max_abs_error": 2.9802322387695312e-08,
+      "resident_mean_ms": 1.9561145833333338,
+      "samples": [
+        {
+          "legacy_ms": 9.124125000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8967499999999999
+        },
+        {
+          "legacy_ms": 12.490792,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.258667
+        },
+        {
+          "legacy_ms": 9.518459,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.895416
+        },
+        {
+          "legacy_ms": 9.438625,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 5.14925
+        },
+        {
+          "legacy_ms": 9.56675,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.952375
+        },
+        {
+          "legacy_ms": 13.055000000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.263042
+        },
+        {
+          "legacy_ms": 9.280708,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.866541
+        },
+        {
+          "legacy_ms": 9.252125,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.923709
+        },
+        {
+          "legacy_ms": 9.533375,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 4.976208000000001
+        },
+        {
+          "legacy_ms": 9.496541,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.925125
+        },
+        {
+          "legacy_ms": 9.471458,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 4.430042
+        },
+        {
+          "legacy_ms": 9.596333,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.93625
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9985000069718808,
+        0.84283399337437,
+        0.821084002382122,
+        0.7558340003015473,
+        0.7543749961769208,
+        3.9539159915875643,
+        1.0134999902220443,
+        0.8210829982999712,
+        0.7683330040890723,
+        0.7510420109611005,
+        0.7525830005761236,
+        3.893082990543917
+      ],
+      "torch_mean_ms": 1.3438472487905528,
+      "resident_over_legacy": 0.19589830078777604,
+      "resident_over_torch": 1.4556078342191157
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 1.7148610833333338,
+      "max_abs_error": 7.450580596923828e-09,
+      "resident_mean_ms": 0.9507880833333332,
+      "samples": [
+        {
+          "legacy_ms": 2.450834,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 4.071833000000001
+        },
+        {
+          "legacy_ms": 0.846666,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.36658300000000005
+        },
+        {
+          "legacy_ms": 2.889542,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 4.31
+        },
+        {
+          "legacy_ms": 0.5321250000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.258042
+        },
+        {
+          "legacy_ms": 4.81775,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.295458
+        },
+        {
+          "legacy_ms": 0.8821249999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.301917
+        },
+        {
+          "legacy_ms": 0.57075,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.291875
+        },
+        {
+          "legacy_ms": 0.534167,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.296125
+        },
+        {
+          "legacy_ms": 4.218791,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.294583
+        },
+        {
+          "legacy_ms": 1.7325000000000002,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.306916
+        },
+        {
+          "legacy_ms": 0.567083,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.308292
+        },
+        {
+          "legacy_ms": 0.536,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.30783299999999997
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.4837920132558793,
+        0.3730409953277558,
+        0.29758299933746457,
+        0.3733749908860773,
+        0.27395800861995667,
+        0.32316699798684567,
+        0.2937499957624823,
+        0.3085409989580512,
+        0.2991250075865537,
+        0.34662499092519283,
+        0.31016601133160293,
+        0.3070410020882264
+      ],
+      "torch_mean_ms": 0.33251366767217405,
+      "resident_over_legacy": 0.554440294070467,
+      "resident_over_torch": 2.8593954948965203
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 15.810618166666666,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 2.2991492499999997,
+      "samples": [
+        {
+          "legacy_ms": 12.215917,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 3.6812910000000003
+        },
+        {
+          "legacy_ms": 12.526083999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.356209
+        },
+        {
+          "legacy_ms": 9.346250000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.008917
+        },
+        {
+          "legacy_ms": 14.033999999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.052583
+        },
+        {
+          "legacy_ms": 9.943417,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8668750000000001
+        },
+        {
+          "legacy_ms": 9.146415999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.933875
+        },
+        {
+          "legacy_ms": 15.907458,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 6.1358749999999995
+        },
+        {
+          "legacy_ms": 14.954709,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.0150000000000001
+        },
+        {
+          "legacy_ms": 15.03025,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.129292
+        },
+        {
+          "legacy_ms": 18.145625,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.346541
+        },
+        {
+          "legacy_ms": 29.804333999999997,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 4.341958
+        },
+        {
+          "legacy_ms": 28.672957999999998,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 3.7213749999999997
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9451660007471219,
+        1.0752920061349869,
+        1.031709005474113,
+        1.0241249983664602,
+        0.9668329876149073,
+        0.9837920079007745,
+        0.9723749972181395,
+        0.9949999948730692,
+        1.0510410065762699,
+        1.0296669934177771,
+        0.9939169976860285,
+        0.9460419969400391
+      ],
+      "torch_mean_ms": 1.0012465827458072,
+      "resident_over_legacy": 0.14541804917199683,
+      "resident_over_torch": 2.2962867385722694
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 19.036680583333332,
+      "max_abs_error": 4.470348358154297e-08,
+      "resident_mean_ms": 1.6769409166666671,
+      "samples": [
+        {
+          "legacy_ms": 35.131542,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 8.477375
+        },
+        {
+          "legacy_ms": 34.215500000000006,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.4941659999999999
+        },
+        {
+          "legacy_ms": 30.312042,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.4348340000000002
+        },
+        {
+          "legacy_ms": 21.155292,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.953708
+        },
+        {
+          "legacy_ms": 16.582459,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.936084
+        },
+        {
+          "legacy_ms": 15.670875,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.984583
+        },
+        {
+          "legacy_ms": 16.213666,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.933042
+        },
+        {
+          "legacy_ms": 5.5792910000000004,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.955583
+        },
+        {
+          "legacy_ms": 16.746083,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.878416
+        },
+        {
+          "legacy_ms": 15.169042000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.9804160000000001
+        },
+        {
+          "legacy_ms": 15.52575,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.07725
+        },
+        {
+          "legacy_ms": 6.138625,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.017834
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9954170091077685,
+        0.9175419982057065,
+        0.8840840018820018,
+        0.8927919989218935,
+        0.8797089976724237,
+        0.9440829890081659,
+        0.8797089976724237,
+        0.9437080007046461,
+        0.8905410068109632,
+        0.8988750050775707,
+        0.9065420017577708,
+        0.9125829965341836
+      ],
+      "torch_mean_ms": 0.9121320836129598,
+      "resident_over_legacy": 0.08808998550592027,
+      "resident_over_torch": 1.8384847400875273
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 0.9960900833333334,
+      "max_abs_error": 7.450580596923828e-09,
+      "resident_mean_ms": 1.2360728333333333,
+      "samples": [
+        {
+          "legacy_ms": 0.573541,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.310583
+        },
+        {
+          "legacy_ms": 0.486708,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.2535
+        },
+        {
+          "legacy_ms": 0.7315,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.30562500000000004
+        },
+        {
+          "legacy_ms": 1.161958,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.31841600000000003
+        },
+        {
+          "legacy_ms": 0.508875,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.305334
+        },
+        {
+          "legacy_ms": 0.486541,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 8.065334
+        },
+        {
+          "legacy_ms": 1.6388749999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.197208
+        },
+        {
+          "legacy_ms": 0.586208,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.535416
+        },
+        {
+          "legacy_ms": 0.688333,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.465625
+        },
+        {
+          "legacy_ms": 0.6769999999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.515375
+        },
+        {
+          "legacy_ms": 0.645625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.6892079999999999
+        },
+        {
+          "legacy_ms": 3.767917,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.87125
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.31350000062957406,
+        0.33900000562425703,
+        0.38462500378955156,
+        0.319957995088771,
+        0.30454200168605894,
+        0.3360839909873903,
+        0.30570900707971305,
+        0.3209589922334999,
+        0.317458005156368,
+        0.3113330021733418,
+        0.30583298939745873,
+        0.30379201052710414
+      ],
+      "torch_mean_ms": 0.3218994170310907,
+      "resident_over_legacy": 1.2409247456785408,
+      "resident_over_torch": 3.8399349856975573
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 6.464090583333333,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 0.8986596666666667,
+      "samples": [
+        {
+          "legacy_ms": 7.943416999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.750708
+        },
+        {
+          "legacy_ms": 6.3319589999999994,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.0592080000000001
+        },
+        {
+          "legacy_ms": 8.489666999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.119791
+        },
+        {
+          "legacy_ms": 5.710417,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.81375
+        },
+        {
+          "legacy_ms": 5.898167,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.799834
+        },
+        {
+          "legacy_ms": 7.056541999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.840125
+        },
+        {
+          "legacy_ms": 6.126917,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.9511670000000001
+        },
+        {
+          "legacy_ms": 6.114959,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.947916
+        },
+        {
+          "legacy_ms": 6.477250000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8866670000000001
+        },
+        {
+          "legacy_ms": 7.046917,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.9125840000000001
+        },
+        {
+          "legacy_ms": 5.911084,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.813333
+        },
+        {
+          "legacy_ms": 4.461791,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.888833
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9710830054245889,
+        0.9474160033278167,
+        0.970791996223852,
+        0.9520000021439046,
+        0.9612910071155056,
+        1.0432499984744936,
+        0.9506659989710897,
+        0.9420420101378113,
+        0.9247080015484244,
+        0.9217500046361238,
+        0.9549590031383559,
+        0.9162909991573542
+      ],
+      "torch_mean_ms": 0.9546873358582767,
+      "resident_over_legacy": 0.13902337151396407,
+      "resident_over_torch": 0.9413130696436438
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 6.207809,
+      "max_abs_error": 3.725290298461914e-08,
+      "resident_mean_ms": 0.9004687499999999,
+      "samples": [
+        {
+          "legacy_ms": 6.117083,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.849625
+        },
+        {
+          "legacy_ms": 5.5735,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.902542
+        },
+        {
+          "legacy_ms": 5.4845,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.91325
+        },
+        {
+          "legacy_ms": 6.1335,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.921667
+        },
+        {
+          "legacy_ms": 6.952,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8678750000000001
+        },
+        {
+          "legacy_ms": 6.194458,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.8238749999999999
+        },
+        {
+          "legacy_ms": 6.091958,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.858958
+        },
+        {
+          "legacy_ms": 6.157375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.950833
+        },
+        {
+          "legacy_ms": 6.4425,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.937208
+        },
+        {
+          "legacy_ms": 6.360042,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.903917
+        },
+        {
+          "legacy_ms": 6.3041670000000005,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.896125
+        },
+        {
+          "legacy_ms": 6.682625,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.9797499999999999
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9508330113021657,
+        0.9002089936984703,
+        0.9353749919682741,
+        0.8846249984344468,
+        0.8813750027911738,
+        1.0140840022359043,
+        0.9647080005379394,
+        0.879707993590273,
+        0.8772500004852191,
+        0.8810419967630878,
+        0.9091670071939006,
+        0.8820000075502321
+      ],
+      "torch_mean_ms": 0.9133646672125906,
+      "resident_over_legacy": 0.14505419706050876,
+      "resident_over_torch": 0.9858808670014065
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 0.6110000000000001,
+      "max_abs_error": 3.725290298461914e-09,
+      "resident_mean_ms": 0.317639,
+      "samples": [
+        {
+          "legacy_ms": 0.486375,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.29474999999999996
+        },
+        {
+          "legacy_ms": 0.832916,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.27558299999999997
+        },
+        {
+          "legacy_ms": 0.635584,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.35341700000000004
+        },
+        {
+          "legacy_ms": 0.586083,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.32249999999999995
+        },
+        {
+          "legacy_ms": 0.5473750000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.359875
+        },
+        {
+          "legacy_ms": 0.5401250000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.34004199999999996
+        },
+        {
+          "legacy_ms": 0.6082919999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.289958
+        },
+        {
+          "legacy_ms": 0.485667,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.27587500000000004
+        },
+        {
+          "legacy_ms": 1.106208,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.328042
+        },
+        {
+          "legacy_ms": 0.502584,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.32358400000000004
+        },
+        {
+          "legacy_ms": 0.46108299999999997,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.35991700000000004
+        },
+        {
+          "legacy_ms": 0.539708,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.288125
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.3754579956876114,
+        0.33041600545402616,
+        0.3532089904183522,
+        0.3294999914942309,
+        0.3215829929104075,
+        0.3037080023204908,
+        0.3067500074394047,
+        0.3264580009272322,
+        0.32133300555869937,
+        0.29999999969732016,
+        0.3112919948762283,
+        0.3148749965475872
+      ],
+      "torch_mean_ms": 0.3245484986109659,
+      "resident_over_legacy": 0.5198674304418984,
+      "resident_over_torch": 0.9787104280545501
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 5.419680583333334,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 0.8234445833333335,
+      "samples": [
+        {
+          "legacy_ms": 5.458208,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.936917
+        },
+        {
+          "legacy_ms": 5.730375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.849417
+        },
+        {
+          "legacy_ms": 5.663375,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.795583
+        },
+        {
+          "legacy_ms": 5.068625,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.9820420000000001
+        },
+        {
+          "legacy_ms": 4.894625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.813542
+        },
+        {
+          "legacy_ms": 5.426625,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.769417
+        },
+        {
+          "legacy_ms": 6.299625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.728708
+        },
+        {
+          "legacy_ms": 5.200584,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.810375
+        },
+        {
+          "legacy_ms": 5.0635840000000005,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.771542
+        },
+        {
+          "legacy_ms": 5.27475,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.809125
+        },
+        {
+          "legacy_ms": 5.353541,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.794458
+        },
+        {
+          "legacy_ms": 5.60225,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.820209
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9615409944672137,
+        1.0464160004630685,
+        0.9993749990826473,
+        1.0045000090030953,
+        0.7795830024406314,
+        0.7785000052535906,
+        0.7786250062054023,
+        0.9022909944178537,
+        0.8137499971780926,
+        0.7769999938318506,
+        0.8175410039257258,
+        0.7663330034120008
+      ],
+      "torch_mean_ms": 0.8687879174734311,
+      "resident_over_legacy": 0.15193599893425455,
+      "resident_over_torch": 0.9478085120336813
+    },
+    {
+      "run": 2,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 6.656368166666667,
+      "max_abs_error": 2.9802322387695312e-08,
+      "resident_mean_ms": 1.2325380833333335,
+      "samples": [
+        {
+          "legacy_ms": 6.8924579999999995,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.889
+        },
+        {
+          "legacy_ms": 5.874625,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.0173750000000001
+        },
+        {
+          "legacy_ms": 6.319083,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.151708
+        },
+        {
+          "legacy_ms": 7.733333999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.069583
+        },
+        {
+          "legacy_ms": 6.0287500000000005,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.09225
+        },
+        {
+          "legacy_ms": 6.807333,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.150125
+        },
+        {
+          "legacy_ms": 6.454083,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.060333
+        },
+        {
+          "legacy_ms": 6.536875,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.127417
+        },
+        {
+          "legacy_ms": 6.926792,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.092
+        },
+        {
+          "legacy_ms": 6.4984589999999995,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.5119580000000001
+        },
+        {
+          "legacy_ms": 7.241709,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.51725
+        },
+        {
+          "legacy_ms": 6.562917,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.1114580000000003
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.8990409987745807,
+        0.9520830062683672,
+        0.9878330020001158,
+        0.8990419883048162,
+        0.8789999992586672,
+        0.9067920036613941,
+        0.8756249881116673,
+        0.8853749895934016,
+        0.9081250027520582,
+        0.8687920053489506,
+        0.8756250026635826,
+        0.9585410007275641
+      ],
+      "torch_mean_ms": 0.9079894989554305,
+      "resident_over_legacy": 0.18516675347159411,
+      "resident_over_torch": 1.3574364954124143
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 0.7031388333333334,
+      "max_abs_error": 7.450580596923828e-09,
+      "resident_mean_ms": 0.35212499999999997,
+      "samples": [
+        {
+          "legacy_ms": 1.0561660000000002,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.507875
+        },
+        {
+          "legacy_ms": 0.958958,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.480167
+        },
+        {
+          "legacy_ms": 0.878375,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.504916
+        },
+        {
+          "legacy_ms": 0.672792,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.30354200000000003
+        },
+        {
+          "legacy_ms": 0.5970840000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.3015
+        },
+        {
+          "legacy_ms": 0.5944159999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.29325
+        },
+        {
+          "legacy_ms": 0.639,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.287333
+        },
+        {
+          "legacy_ms": 0.615334,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.289834
+        },
+        {
+          "legacy_ms": 0.6261669999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.294
+        },
+        {
+          "legacy_ms": 0.7497079999999999,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.30174999999999996
+        },
+        {
+          "legacy_ms": 0.519,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.35812499999999997
+        },
+        {
+          "legacy_ms": 0.530666,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.30320800000000003
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.4815840075025335,
+        0.43441700108814985,
+        0.41458300256635994,
+        0.41783299820963293,
+        0.40995799645315856,
+        0.49995898734778166,
+        0.4159579984843731,
+        0.4174589994363487,
+        0.4016250022687018,
+        0.4196660011075437,
+        0.4158329975325614,
+        0.4090830043423921
+      ],
+      "torch_mean_ms": 0.4281631663616281,
+      "resident_over_legacy": 0.500790147417544,
+      "resident_over_torch": 0.8224084359993591
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 5.2275867499999995,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 1.3616874166666666,
+      "samples": [
+        {
+          "legacy_ms": 5.206666,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.376625
+        },
+        {
+          "legacy_ms": 5.10825,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.365291
+        },
+        {
+          "legacy_ms": 5.0621670000000005,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.3679160000000001
+        },
+        {
+          "legacy_ms": 5.187667,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.378042
+        },
+        {
+          "legacy_ms": 5.175125,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.1762089999999998
+        },
+        {
+          "legacy_ms": 5.053084,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.396291
+        },
+        {
+          "legacy_ms": 5.208875,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.421208
+        },
+        {
+          "legacy_ms": 5.261583,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.385334
+        },
+        {
+          "legacy_ms": 5.177083,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.334458
+        },
+        {
+          "legacy_ms": 5.364583,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.384959
+        },
+        {
+          "legacy_ms": 5.391375,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.36975
+        },
+        {
+          "legacy_ms": 5.5345830000000005,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.384166
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        1.1037079966627061,
+        1.1802499939221889,
+        1.1792500008596107,
+        1.313750006374903,
+        1.0249579936498776,
+        0.9828750044107437,
+        1.0398330050520599,
+        1.044208009261638,
+        1.0514169989619404,
+        1.0462920035934076,
+        0.9592499991413206,
+        1.015166999422945
+      ],
+      "torch_mean_ms": 1.078413167609445,
+      "resident_over_legacy": 0.26048107507095253,
+      "resident_over_torch": 1.2626769197237875
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 5.961347166666667,
+      "max_abs_error": 4.470348358154297e-08,
+      "resident_mean_ms": 1.371434,
+      "samples": [
+        {
+          "legacy_ms": 7.375292,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.912625
+        },
+        {
+          "legacy_ms": 6.452541,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.9077500000000001
+        },
+        {
+          "legacy_ms": 4.39675,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.880708
+        },
+        {
+          "legacy_ms": 4.602708,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.8974169999999999
+        },
+        {
+          "legacy_ms": 6.054584,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.851625
+        },
+        {
+          "legacy_ms": 7.3430409999999995,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.980375
+        },
+        {
+          "legacy_ms": 7.128500000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.227667
+        },
+        {
+          "legacy_ms": 7.425083,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.2251250000000002
+        },
+        {
+          "legacy_ms": 7.310792,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.971625
+        },
+        {
+          "legacy_ms": 4.612833,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.8758750000000001
+        },
+        {
+          "legacy_ms": 4.470333,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.845333
+        },
+        {
+          "legacy_ms": 4.363709,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.881083
+        }
+      ],
+      "seed": 17,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.929834000999108,
+        0.9321669931523502,
+        0.9107920050155371,
+        0.8664170018164441,
+        0.8602080051787198,
+        0.8804999961284921,
+        1.069083999027498,
+        0.9585830121068284,
+        0.8867920114425942,
+        0.9219159983331338,
+        0.9301670070271939,
+        0.8975000091595575
+      ],
+      "torch_mean_ms": 0.9203300032822881,
+      "resident_over_legacy": 0.23005437557276973,
+      "resident_over_torch": 1.490154613137552
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 0.4739585,
+      "max_abs_error": 7.450580596923828e-09,
+      "resident_mean_ms": 0.2870000833333333,
+      "samples": [
+        {
+          "legacy_ms": 0.472125,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.28862499999999996
+        },
+        {
+          "legacy_ms": 0.485042,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.291417
+        },
+        {
+          "legacy_ms": 0.468667,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.28870799999999996
+        },
+        {
+          "legacy_ms": 0.47325,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.344708
+        },
+        {
+          "legacy_ms": 0.475542,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.28350000000000003
+        },
+        {
+          "legacy_ms": 0.473375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.297792
+        },
+        {
+          "legacy_ms": 0.47575,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.29025
+        },
+        {
+          "legacy_ms": 0.476291,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.255208
+        },
+        {
+          "legacy_ms": 0.47325,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.285417
+        },
+        {
+          "legacy_ms": 0.475459,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.249292
+        },
+        {
+          "legacy_ms": 0.46583399999999997,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.28200000000000003
+        },
+        {
+          "legacy_ms": 0.472917,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.287084
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.34425000194460154,
+        0.3480000013951212,
+        0.3367080062162131,
+        0.33870899642352015,
+        0.3547079977579415,
+        0.315792000037618,
+        0.3164999943692237,
+        0.32158399699255824,
+        0.32766698859632015,
+        0.326291992678307,
+        0.32129201281350106,
+        0.32287499925587326
+      ],
+      "torch_mean_ms": 0.3311980823733999,
+      "resident_over_legacy": 0.6055384244260485,
+      "resident_over_torch": 0.8665511626053535
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 5.155993166666666,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 1.3438124166666665,
+      "samples": [
+        {
+          "legacy_ms": 5.426834,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.197458
+        },
+        {
+          "legacy_ms": 5.033041,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.2120410000000001
+        },
+        {
+          "legacy_ms": 5.076833000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.336041
+        },
+        {
+          "legacy_ms": 5.142167,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.397292
+        },
+        {
+          "legacy_ms": 5.078125,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.362625
+        },
+        {
+          "legacy_ms": 5.02425,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.393667
+        },
+        {
+          "legacy_ms": 5.060667,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.3230410000000001
+        },
+        {
+          "legacy_ms": 5.079000000000001,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.361792
+        },
+        {
+          "legacy_ms": 5.161584,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.386083
+        },
+        {
+          "legacy_ms": 5.599208,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.3855
+        },
+        {
+          "legacy_ms": 5.14825,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.358667
+        },
+        {
+          "legacy_ms": 5.041959,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.411542
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        1.0264169977745041,
+        0.9387919999426231,
+        0.9989590034820139,
+        0.9961670002667233,
+        0.923334009712562,
+        0.9201250068144873,
+        1.1430839949753135,
+        1.0946660040644929,
+        1.020708994474262,
+        1.1895000061485916,
+        1.0345420014346018,
+        1.019125003949739
+      ],
+      "torch_mean_ms": 1.0254516685866595,
+      "resident_over_legacy": 0.26063114772036,
+      "resident_over_torch": 1.3104590472984372
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 5.825857583333334,
+      "max_abs_error": 3.725290298461914e-08,
+      "resident_mean_ms": 1.5664792500000002,
+      "samples": [
+        {
+          "legacy_ms": 7.31575,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.2546250000000003
+        },
+        {
+          "legacy_ms": 7.391542,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.248417
+        },
+        {
+          "legacy_ms": 7.345417,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.243417
+        },
+        {
+          "legacy_ms": 7.330583,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.248667
+        },
+        {
+          "legacy_ms": 4.347791999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.347959
+        },
+        {
+          "legacy_ms": 4.570875,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.875417
+        },
+        {
+          "legacy_ms": 4.384625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.739125
+        },
+        {
+          "legacy_ms": 6.61175,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.015292
+        },
+        {
+          "legacy_ms": 7.296541,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.2174579999999997
+        },
+        {
+          "legacy_ms": 4.421958,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.881791
+        },
+        {
+          "legacy_ms": 4.4647499999999996,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.8434999999999999
+        },
+        {
+          "legacy_ms": 4.428708,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.882083
+        }
+      ],
+      "seed": 29,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.900041006389074,
+        0.8822919917292893,
+        0.9086659993045032,
+        0.8674169948790222,
+        0.8868330041877925,
+        0.8865419949870557,
+        0.882957989233546,
+        0.9277909994125366,
+        0.8437920041615143,
+        0.8555830136174336,
+        0.9084170014830306,
+        0.8810410072328523
+      ],
+      "torch_mean_ms": 0.8859477505514709,
+      "resident_over_legacy": 0.26888389006991836,
+      "resident_over_torch": 1.7681395421173796
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 2,
+      "gpu_stages": 2,
+      "legacy_mean_ms": 0.48676058333333333,
+      "max_abs_error": 3.725290298461914e-09,
+      "resident_mean_ms": 0.2965349166666667,
+      "samples": [
+        {
+          "legacy_ms": 0.466583,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.28324999999999995
+        },
+        {
+          "legacy_ms": 0.467209,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.289334
+        },
+        {
+          "legacy_ms": 0.468417,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.28350000000000003
+        },
+        {
+          "legacy_ms": 0.468167,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.300834
+        },
+        {
+          "legacy_ms": 0.516625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.281375
+        },
+        {
+          "legacy_ms": 0.588209,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.3435
+        },
+        {
+          "legacy_ms": 0.476916,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.31375000000000003
+        },
+        {
+          "legacy_ms": 0.472542,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.287792
+        },
+        {
+          "legacy_ms": 0.47679200000000005,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.29058300000000004
+        },
+        {
+          "legacy_ms": 0.476834,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.293584
+        },
+        {
+          "legacy_ms": 0.479458,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.303
+        },
+        {
+          "legacy_ms": 0.483375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.287917
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "source_operations": 3,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.30508299823850393,
+        0.31812500674277544,
+        0.3174169978592545,
+        0.3118330059805885,
+        0.3044579934794456,
+        0.2988749911310151,
+        0.32087499857880175,
+        0.3615419991547242,
+        0.3075420099776238,
+        0.3186250105500221,
+        0.32104099227581173,
+        0.3206659894203767
+      ],
+      "torch_mean_ms": 0.31717349944907863,
+      "resident_over_legacy": 0.6092007586892051,
+      "resident_over_torch": 0.9349296747103382
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 5.134277750000001,
+      "max_abs_error": 1.4901161193847656e-08,
+      "resident_mean_ms": 1.3832742500000001,
+      "samples": [
+        {
+          "legacy_ms": 5.105625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.375958
+        },
+        {
+          "legacy_ms": 5.084333,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.398
+        },
+        {
+          "legacy_ms": 5.114040999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.381833
+        },
+        {
+          "legacy_ms": 5.139042,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.4020000000000001
+        },
+        {
+          "legacy_ms": 5.082708,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.366875
+        },
+        {
+          "legacy_ms": 4.988375,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.387709
+        },
+        {
+          "legacy_ms": 5.63475,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.357458
+        },
+        {
+          "legacy_ms": 5.004,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.397625
+        },
+        {
+          "legacy_ms": 5.2145,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.345333
+        },
+        {
+          "legacy_ms": 5.121084,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.3963750000000001
+        },
+        {
+          "legacy_ms": 5.07575,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.362042
+        },
+        {
+          "legacy_ms": 5.047125,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 1.428083
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9705000120447949,
+        1.007083003059961,
+        0.9799999970709905,
+        0.9494999976595864,
+        1.0294999956386164,
+        0.978374999249354,
+        0.9930419910233468,
+        0.9891670051729307,
+        1.0141669918084517,
+        1.0035840095952153,
+        0.9430000063730404,
+        0.9356249938718975
+      ],
+      "torch_mean_ms": 0.9827952502140155,
+      "resident_over_legacy": 0.2694194426859747,
+      "resident_over_torch": 1.4074897591322053
+    },
+    {
+      "run": 3,
+      "adapter": {
+        "backend": "Metal",
+        "device_type": "IntegratedGpu",
+        "name": "Apple M4"
+      },
+      "depth": 16,
+      "gpu_stages": 16,
+      "legacy_mean_ms": 5.876454833333334,
+      "max_abs_error": 2.9802322387695312e-08,
+      "resident_mean_ms": 1.6677326666666668,
+      "samples": [
+        {
+          "legacy_ms": 7.272709,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.2607500000000003
+        },
+        {
+          "legacy_ms": 7.278041,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.258
+        },
+        {
+          "legacy_ms": 7.362208,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 2.2272920000000003
+        },
+        {
+          "legacy_ms": 7.323166,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.023917
+        },
+        {
+          "legacy_ms": 4.607667,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.147625
+        },
+        {
+          "legacy_ms": 4.500833,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.783458
+        },
+        {
+          "legacy_ms": 4.439125000000001,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.020125
+        },
+        {
+          "legacy_ms": 7.099,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.3682090000000002
+        },
+        {
+          "legacy_ms": 6.897666999999999,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 1.9546670000000002
+        },
+        {
+          "legacy_ms": 4.369042,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 0.8647499999999999
+        },
+        {
+          "legacy_ms": 5.020625,
+          "order": [
+            1,
+            0
+          ],
+          "resident_ms": 0.844916
+        },
+        {
+          "legacy_ms": 4.3473749999999995,
+          "order": [
+            0,
+            1
+          ],
+          "resident_ms": 2.259083
+        }
+      ],
+      "seed": 43,
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "source_operations": 31,
+      "status": "passed",
+      "torch_samples_ms": [
+        0.9200000058626756,
+        0.9084580087801442,
+        0.8504160068696365,
+        0.8770839922362939,
+        0.9074160043383017,
+        0.8777499897405505,
+        0.8745000086491928,
+        0.8925419970182702,
+        0.9388329926878214,
+        0.8865830022841692,
+        0.8615419937996194,
+        0.8715419971849769
+      ],
+      "torch_mean_ms": 0.8888888332876377,
+      "resident_over_legacy": 0.28379911255451096,
+      "resident_over_torch": 1.8761993673589115
+    }
+  ],
+  "browser": {
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "name": ""
+    },
+    "boundary": "Rust Sequential -> InferencePlan -> shared ResidentDense, WASM CPU oracle; correctness only, not browser timing or training",
+    "build_manifest": {
+      "git": {
+        "commit": "37e726f6a7bc0acf2c3983243faa7dc7cdb67b00",
+        "describe": "v0.4.27-164-g37e726f6",
+        "dirty": false,
+        "tree": "d49ecac0723b2dc5f3f211bf4e53ae72e2a0ba51"
+      },
+      "host": "unknown-host",
+      "id": "Ryo-ST-ryospiralarchitect-2026-09-07T05:41:58.259Z-5fc36867d0b644168cd12d1d713fde48",
+      "pkg": {
+        "name": "st-core",
+        "version": "1.10.0"
+      },
+      "profile": "release",
+      "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "seed": "5fc36867d0b644168cd12d1d713fde48",
+      "target": {
+        "arch": "wasm32",
+        "os": "unknown",
+        "triple": "wasm32-unknown-unknown"
+      },
+      "timestamp": "2026-09-07T05:41:58.259Z",
+      "user": "ryospiralarchitect"
+    },
+    "cases": [
+      {
+        "gpu_stages": 2,
+        "max_abs_error": 7.450580596923828e-09,
+        "seed": 17,
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "snapshots": "owned across reupload and drop",
+        "source_operations": 4
+      },
+      {
+        "gpu_stages": 16,
+        "max_abs_error": 3.725290298461914e-09,
+        "seed": 17,
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "snapshots": "owned across reupload and drop",
+        "source_operations": 32
+      },
+      {
+        "gpu_stages": 2,
+        "max_abs_error": 7.450580596923828e-09,
+        "seed": 29,
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "snapshots": "owned across reupload and drop",
+        "source_operations": 4
+      },
+      {
+        "gpu_stages": 16,
+        "max_abs_error": 3.725290298461914e-09,
+        "seed": 29,
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "snapshots": "owned across reupload and drop",
+        "source_operations": 32
+      },
+      {
+        "gpu_stages": 2,
+        "max_abs_error": 7.450580596923828e-09,
+        "seed": 43,
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "snapshots": "owned across reupload and drop",
+        "source_operations": 4
+      },
+      {
+        "gpu_stages": 16,
+        "max_abs_error": 3.725290298461914e-09,
+        "seed": 43,
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "snapshots": "owned across reupload and drop",
+        "source_operations": 32
+      }
+    ],
+    "intermediate_guard_cases": 4,
+    "status": "passed",
+    "wasm_sha256": "211fb820559e5ed6099136a732d3e9427dcb9d005358141fde861c2b45cd8429",
+    "page_sha256": "dbe58d77767768fa3d54e222ccf081aa2ccfb686d05dda465e686174527c2fef",
+    "launch_flags": [
+      "--enable-unsafe-webgpu"
+    ],
+    "tiles_mnk_request": "",
+    "kernels_request": "",
+    "accumulations_request": "",
+    "shapes_request": "",
+    "fixture_request": "nn",
+    "asset_sha256": {
+      "/": "dbe58d77767768fa3d54e222ccf081aa2ccfb686d05dda465e686174527c2fef",
+      "/module/spiraltorch_wasm.js": "f322f7dfaf15967a680739c15e16bbdd2497bdcc4d9d8936e3e6f9866f0f2c59",
+      "/module/spiraltorch_wasm_bg.wasm": "211fb820559e5ed6099136a732d3e9427dcb9d005358141fde861c2b45cd8429"
+    },
+    "browser_version": "152.0.7977.77",
+    "page_errors": [],
+    "console_messages": [
+      {
+        "type": "error",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    ]
+  },
+  "raw_reports": [
+    {
+      "file": "mps-comparison-37e726f6.json",
+      "bytes": 24061840,
+      "sha256": "44c44cc25b88d6775e95b45626c826d181a578dbcd2aec8087e4072c8cef26cc"
+    },
+    {
+      "file": "mps-comparison-37e726f6-r2.json",
+      "bytes": 24062030,
+      "sha256": "f911cc79adf1bcb4597e5fa2a165350d99752322a54638eeaa0721bd28f91aae"
+    },
+    {
+      "file": "mps-comparison-37e726f6-r3.json",
+      "bytes": 24061869,
+      "sha256": "9c29e940fd88b41ea79522dfb8c61eea38ee98e0d12af8018b9020cf452e56a7"
+    },
+    {
+      "file": "browser-37e726f6.json",
+      "bytes": 3351,
+      "sha256": "22c4d11584aba09e67aa90dcbeef676c171692388516e441246591c83575bef9"
+    }
+  ],
+  "raw_files": [
+    {
+      "file": "analyze_nn.py",
+      "bytes": 6026,
+      "sha256": "71a2a24d0cda8c4197f669bea8aa1310ead57f84a1b6dc496a90d522b3e02f4a"
+    },
+    {
+      "file": "browser-37e726f6.json",
+      "bytes": 3351,
+      "sha256": "22c4d11584aba09e67aa90dcbeef676c171692388516e441246591c83575bef9"
+    },
+    {
+      "file": "browser-37e726f6.log",
+      "bytes": 146,
+      "sha256": "66ef192e2be55e4e57ffceb244bd43f8b7822f7c4098b2e37462defb6ac4fe21"
+    },
+    {
+      "file": "browser-bindgen.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "browser-example-build.log",
+      "bytes": 113290,
+      "sha256": "bb894c5f8799af6e0396d340eb813570c615e5326e5b4bcbfbc3b1f116b13ee0"
+    },
+    {
+      "file": "browser-frozen-build.log",
+      "bytes": 111779,
+      "sha256": "f7ca765351fff5b666995ef0d639d083cc0db898a50e49135ce62952013d5e6a"
+    },
+    {
+      "file": "clippy-backend-strict.log",
+      "bytes": 114457,
+      "sha256": "cc3c7fad8808215d71978600cf592fe73e6ed2c0451037f282864f14ab44ddc9"
+    },
+    {
+      "file": "clippy-browser-diagnostics.jsonl",
+      "bytes": 691795,
+      "sha256": "02130effea4dc12f879f6aafab07623c33a5c1583d97a7bd4b9030a24aaf92c6"
+    },
+    {
+      "file": "clippy-browser-diagnostics.log",
+      "bytes": 1623,
+      "sha256": "018bc5eb3c2891f4d62693bd8663cbdc7f5c7348a915ee48b9df5f727795f96f"
+    },
+    {
+      "file": "clippy-final-diagnostics.jsonl",
+      "bytes": 860393,
+      "sha256": "341f2072f5ab5469b80b771de4828a1c69998e73361664913ee5c1a9b6120389"
+    },
+    {
+      "file": "clippy-final-diagnostics.log",
+      "bytes": 446,
+      "sha256": "4d832c6476c4273da836413c646f7728f7a78d817cd967c437d58b40df6059fb"
+    },
+    {
+      "file": "clippy-native-diagnostics.jsonl",
+      "bytes": 863000,
+      "sha256": "6dc9578f8413dbf8924485dbcfd0e93f1bd485b622a981fb1b09d76708605da4"
+    },
+    {
+      "file": "clippy-native-diagnostics.log",
+      "bytes": 1866,
+      "sha256": "859fcbe70277a2234cf0a079aec7efc65867694eecdd19cb780095d39a611cea"
+    },
+    {
+      "file": "clippy-native.log",
+      "bytes": 136835,
+      "sha256": "64188e71415338d1319a1d651e617bf7a1df0dfb2d2c84e07453fd859c14717d"
+    },
+    {
+      "file": "dense-unit-tests-final.log",
+      "bytes": 114636,
+      "sha256": "cbe0685f2a2686f070b7f62192ec495537bff60d40cb01909a4177050a0291a4"
+    },
+    {
+      "file": "dense-unit-tests.log",
+      "bytes": 114932,
+      "sha256": "6e02d5210d303ab316b50d224cf61b66a4592d97efba592a2a19cde06f004274"
+    },
+    {
+      "file": "example-check.log",
+      "bytes": 115917,
+      "sha256": "5e85fb4fc609a1b59f81ad2615313fcce0f24dc85459d7dfa72232c722242820"
+    },
+    {
+      "file": "layout-tests-final.log",
+      "bytes": 1615,
+      "sha256": "1c9afe3f3698b5386808379fbbc775dd1a4bab223b29b389dc2b60127c82859f"
+    },
+    {
+      "file": "layout-tests.log",
+      "bytes": 1615,
+      "sha256": "54999379ef1728082b2d4d7c895ead7989739a92d1704b2a38368055101498fe"
+    },
+    {
+      "file": "lowering-tests-fixed.log",
+      "bytes": 1123,
+      "sha256": "f68fd513e60cf83052a79689ba8c61d3f3b7eed3c0c0f00cad747a734b4c29d3"
+    },
+    {
+      "file": "lowering-tests.log",
+      "bytes": 2721,
+      "sha256": "69cddd55ef1e353552ff136c7e60e04711c671fe0a78207f4e42226ba3bf996f"
+    },
+    {
+      "file": "mps-comparison-37e726f6-r2.json",
+      "bytes": 24062030,
+      "sha256": "f911cc79adf1bcb4597e5fa2a165350d99752322a54638eeaa0721bd28f91aae"
+    },
+    {
+      "file": "mps-comparison-37e726f6-r2.log",
+      "bytes": 48,
+      "sha256": "33ca37ec71b4eefc3e3c8bcb1dbc261b5540283f535013505926ab7a9f5e4c16"
+    },
+    {
+      "file": "mps-comparison-37e726f6-r3.json",
+      "bytes": 24061869,
+      "sha256": "9c29e940fd88b41ea79522dfb8c61eea38ee98e0d12af8018b9020cf452e56a7"
+    },
+    {
+      "file": "mps-comparison-37e726f6-r3.log",
+      "bytes": 48,
+      "sha256": "33ca37ec71b4eefc3e3c8bcb1dbc261b5540283f535013505926ab7a9f5e4c16"
+    },
+    {
+      "file": "mps-comparison-37e726f6.json",
+      "bytes": 24061840,
+      "sha256": "44c44cc25b88d6775e95b45626c826d181a578dbcd2aec8087e4072c8cef26cc"
+    },
+    {
+      "file": "mps-comparison-37e726f6.log",
+      "bytes": 48,
+      "sha256": "33ca37ec71b4eefc3e3c8bcb1dbc261b5540283f535013505926ab7a9f5e4c16"
+    },
+    {
+      "file": "native-expanded-tests.log",
+      "bytes": 115481,
+      "sha256": "1eddeac4eb59857af9bfcc898afb6a8a99ccaf0bbfc37ba617f0c1a7adcb6f25"
+    },
+    {
+      "file": "native-live-tests.log",
+      "bytes": 114579,
+      "sha256": "c686cb293f02a1d8159f0a077bf5962df280f0136f19fd898fc677d4b15bb414"
+    },
+    {
+      "file": "native-release-build.log",
+      "bytes": 115907,
+      "sha256": "4c5b873e9120403a42efa3563b4ec712c02c712c5affd2de32a8b7a00347b925"
+    },
+    {
+      "file": "native-test-build.log",
+      "bytes": 116522,
+      "sha256": "985fa294dd867e9713e604afa5957291910e0b878e8add4d7c7eda04ac6df355"
+    },
+    {
+      "file": "nn-cpu-regression-final.log",
+      "bytes": 59146,
+      "sha256": "f5d1ba4b53111dc3a580610260eb0c0737759b01386b48c2bbd7e7c7b4f9078b"
+    },
+    {
+      "file": "nn-cpu-regression.log",
+      "bytes": 59146,
+      "sha256": "cfce1c8b7c5d29d8ca4dd6bcdb9da204581f25f44a55b839bee30726bec2f18d"
+    },
+    {
+      "file": "product-sha256.txt",
+      "bytes": 783,
+      "sha256": "21c56af1c0e76ce6cc9fa5e903fc198ae3c2ab4c1a466bdb123ddfa3b5ba96ff"
+    },
+    {
+      "file": "python-tests-expanded.log",
+      "bytes": 102,
+      "sha256": "feabb4add9e2ca3374e538560634d1ec97dc4f4ce89aab12f3d726e36ea9b2f6"
+    },
+    {
+      "file": "python-tests-final.log",
+      "bytes": 102,
+      "sha256": "feabb4add9e2ca3374e538560634d1ec97dc4f4ce89aab12f3d726e36ea9b2f6"
+    },
+    {
+      "file": "python-tests.log",
+      "bytes": 468,
+      "sha256": "bf3d4ce09d203d17df27135cf6601319a98df625981d44311890366c68b9ce25"
+    },
+    {
+      "file": "rustfmt-check.log",
+      "bytes": 2970,
+      "sha256": "a9b0772e372f7fc86ec676e253c93de334dc5e6d1bf5b9b15fa73d53c3be51ec"
+    },
+    {
+      "file": "shared-matmul-live-regression.log",
+      "bytes": 115063,
+      "sha256": "fa610928a3579e62c18d4647306b893c23d144b006e19226810096cb01167ac2"
+    },
+    {
+      "file": "targeted-format-2.log",
+      "bytes": 540,
+      "sha256": "f8f8b06436c15bebaaad76ddb3111e5ab085302f42707e693d55a3b269c05c77"
+    },
+    {
+      "file": "targeted-format-3.log",
+      "bytes": 810,
+      "sha256": "d09627dc189b85e3ceea5c720276c200462b67f9cf57e5fe20db28f3540863a9"
+    },
+    {
+      "file": "targeted-format.log",
+      "bytes": 810,
+      "sha256": "d09627dc189b85e3ceea5c720276c200462b67f9cf57e5fe20db28f3540863a9"
+    },
+    {
+      "file": "wasm-nn-check-target-gated.log",
+      "bytes": 112565,
+      "sha256": "dbbe11cd0caccff4e47e539206a8f989d84d415a96761e028d74bbbbe93fa9e6"
+    },
+    {
+      "file": "wasm-nn-check.log",
+      "bytes": 113854,
+      "sha256": "c4ae66606cd7f9593e14fb210172e008542d5fe3b432325cb583d8e49cb84d74"
+    }
+  ]
+}
