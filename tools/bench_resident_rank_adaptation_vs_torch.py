@@ -9,10 +9,10 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-from time import perf_counter
 
 import bench_rank_vs_torch as audit
 import bench_resident_rank_vs_torch as resident
+import torch_rank_reference as cuda_reference
 
 
 def requests(bench):
@@ -85,7 +85,7 @@ def validate_native(result, request, tiles):
 
 
 def run(executable):
-    report = {"schema": "spiraltorch.resident_rank_adaptation_comparison.v1", "status": "error", "cases": []}
+    report = {"schema": "spiraltorch.resident_rank_adaptation_comparison.v2", "status": "error", "cases": []}
     try:
         resident.require_uncontended_gpu()
         bench = audit.load_bench_module()
@@ -126,45 +126,20 @@ def run(executable):
                     if result["adapter"]["name"] != torch.cuda.get_device_name():
                         raise RuntimeError("WGPU and CUDA must use the same named GPU")
                     host = torch.tensor(r["input"], dtype=torch.float32).reshape(r["rows"], r["cols"])
-                    values, indices = host.sort(dim=1, descending=r["kind"] == "topk", stable=True)
-                    start = (r["cols"] - r["k"]) // 2 if r["kind"] == "midk" else 0
-                    expected_values, expected_ids = values[:, start:start+r["k"]], indices[:, start:start+r["k"]]
-                    if result["values"] != expected_values.flatten().tolist() or result["indices"] != expected_ids.flatten().tolist():
+                    expected = cuda_reference.contract(r)
+                    actual = torch.tensor(result["values"], dtype=torch.float32)
+                    expected_bits = torch.tensor(expected["values"], dtype=torch.float32).view(torch.int32)
+                    if not torch.equal(actual.view(torch.int32), expected_bits) or result["indices"] != expected["indices"]:
                         raise ValueError("native output differs from canonical PyTorch reference")
                     device = host.cuda()
-                    operation = resident.cuda_rank_operation(r)
-                    stable_sort = operation == "stable_sort"
-                    shape = device.shape if stable_sort else (r["rows"], r["k"])
-                    output = torch.empty(shape, dtype=torch.float32, device="cuda")
-                    output_ids = torch.empty(shape, dtype=torch.int64, device="cuda")
-                    def op():
-                        if stable_sort:
-                            torch.sort(device, dim=1, descending=r["kind"] == "topk", stable=True, out=(output, output_ids))
-                        else:
-                            torch.topk(device, r["k"], dim=1, largest=r["kind"] == "topk", sorted=True, out=(output, output_ids))
-                    def check():
-                        view = output[:, start:start+r["k"]] if stable_sort else output
-                        ids = output_ids[:, start:start+r["k"]] if stable_sort else output_ids
-                        if not torch.equal(view.cpu(), expected_values) or not torch.equal(ids.cpu(), expected_ids):
-                            raise ValueError("CUDA output differs from canonical rank")
-                    op()
-                    check()
-                    timings = []
-                    for block in range(14):
-                        torch.cuda.synchronize()
-                        began = perf_counter()
-                        for _ in range(16):
-                            op()
-                        torch.cuda.synchronize()
-                        elapsed = (perf_counter() - began) * 1000 / 16
-                        check()
-                        if block >= 2:
-                            timings.append(elapsed)
+                    controls = cuda_reference.measure(r, device, torch, bench.summarize)
+                    operation = controls["best_fixed"]
                     report["cases"].append({"request": {key: value for key, value in r.items() if key != "input"},
                         "tiles": tiles, "default_candidate_index": tiles.index(256), "native": result,
                         "controls": [bench.summarize(samples) for samples in result["control_samples_per_op_ms"]],
                         "adaptive": bench.summarize([item["per_op_ms"] for item in result["observations"]]),
-                        "torch_timing": bench.summarize(timings), "torch_operation": operation})
+                        "torch_timing": controls["timings"][operation], "torch_operation": operation,
+                        "torch_controls": controls, "legacy_torch_operation": resident.cuda_rank_operation(r)})
             after = audit.source_identity()
             resident.require_uncontended_gpu()
             report["provenance"] = {"valid": before == after and original == audit.file_identity(executable) and image_before == audit.file_identity(image),

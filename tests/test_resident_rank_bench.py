@@ -1,6 +1,9 @@
 """Process admission checks must never turn other GPU work into a timing win."""
 import sys
 import math
+import os
+import random
+import struct
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import bench_resident_rank_vs_torch as bench
+import torch_rank_reference as reference
 
 
 class GpuAdmissionTest(unittest.TestCase):
@@ -94,6 +98,153 @@ class RankSuiteTest(unittest.TestCase):
         with patch.object(bench.subprocess, "run", return_value=SimpleNamespace(stdout="N/A\n")):
             with self.assertRaises(ValueError):
                 bench.require_uncontended_gpu()
+
+
+class CanonicalReferenceTest(unittest.TestCase):
+    def request(self, values, k, kind="topk"):
+        return dict(kind=kind, rows=1, cols=len(values), k=k, input=values, seed=17)
+
+    def test_ties_outside_retained_set_do_not_force_a_sort(self):
+        request = self.request([-5., -5., 7., 9.], 2)
+        admitted = reference.contract(request)
+        self.assertEqual(admitted["indices"], [3, 2])
+        self.assertIn("topk", admitted["operations"])
+        self.assertEqual(bench.cuda_rank_operation(request), "stable_sort")
+
+    def test_internal_ties_allow_repair_but_cutoff_ties_do_not(self):
+        for kind, values in [("topk", [0., 8., 8., 9.]), ("bottomk", [9., 1., 1., 0.])]:
+            admitted = reference.contract(self.request(values, 3, kind))
+            self.assertEqual(admitted["indices"], [3, 1, 2])
+            self.assertEqual(admitted["operations"], ["topk_index_repair", "stable_sort", "packed_topk"])
+            admitted = reference.contract(self.request(values, 2, kind))
+            self.assertEqual(admitted["operations"], ["stable_sort", "packed_topk"])
+
+    def test_mixed_signed_zeros_require_total_order(self):
+        values = [0., -0., 0., -0., -1., 1.]
+        for kind, expected in [("topk", [5, 0, 2]), ("bottomk", [4, 1, 3]), ("midk", [1, 3, 0])]:
+            admitted = reference.contract(self.request(values, 3, kind))
+            self.assertEqual(admitted["indices"], expected)
+            self.assertEqual(admitted["operations"], ["packed_topk"])
+
+    def test_admission_uses_f32_not_python_double_ties(self):
+        admitted = reference.contract(self.request([1., 1. + 2**-25, 0.], 1))
+        self.assertEqual(admitted["input"], [1., 1., 0.])
+        self.assertEqual(admitted["indices"], [0])
+        self.assertNotIn("topk", admitted["operations"])
+
+    def test_invalid_inputs_fail_closed(self):
+        valid = self.request([1., 2.], 1)
+        for change in [dict(kind="max"), dict(rows=True), dict(cols=0), dict(k=0), dict(k=3),
+                       dict(cols=2**32), dict(input=[1.]), dict(input=[float("nan"), 0.]),
+                       dict(input=[float("inf"), 0.]), dict(input=[1e40, 0.])]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                reference.contract(dict(valid, **change))
+
+    def test_packed_integer_order_matches_independent_numeric_order(self):
+        rng = random.Random(29)
+        values = [-0., 0., -1., 1.]
+        for _ in range(10000):
+            value = struct.unpack("<f", struct.pack("<I", rng.getrandbits(32)))[0]
+            if math.isfinite(value):
+                values.append(value)
+        # Python's numeric order plus a signed-zero discriminator is independent
+        # of the integer transform used by the eager Torch control.
+        expected = sorted(values, key=lambda value: (value, math.copysign(1, value)))
+        actual = sorted(values, key=reference.total_key)
+        self.assertEqual([struct.pack("<f", value) for value in actual],
+                         [struct.pack("<f", value) for value in expected])
+
+
+@unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_TORCH_RANK_TESTS"), "opt-in live Torch controls")
+class LiveCanonicalReferenceTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import torch
+        cls.torch = torch
+        cls.device = os.environ.get("SPIRALTORCH_TORCH_RANK_DEVICE", "cpu")
+        if cls.device not in ("cpu", "cuda"):
+            raise ValueError("live rank tests require explicit cpu or cuda")
+        if cls.device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("requested live CUDA test cannot fall back to CPU")
+        torch.set_num_threads(1)
+
+    def check(self, control, admitted):
+        torch = self.torch
+        expected = torch.tensor(admitted["values"], dtype=torch.float32).view(torch.int32)
+        self.assertTrue(torch.equal(control.values.cpu().reshape(-1).view(torch.int32), expected))
+        self.assertEqual(control.indices.cpu().reshape(-1).tolist(), admitted["indices"])
+
+    def test_all_admitted_controls_across_boundaries_and_extremes(self):
+        torch = self.torch
+        rng = random.Random(43)
+        extreme = [0., -0., 1., -1., 3.4028234663852886e38, -3.4028234663852886e38,
+                   2**-149, -(2**-149)]
+        with torch.inference_mode():
+            for cols in [1, 2, 3, 7, 31, 32, 33, 64, 65, 127, 128, 129, 257, 1025]:
+                for fixture in ("distinct", "ties", "extreme"):
+                    data = ([rng.uniform(-1, 1) for _ in range(2 * cols)] if fixture == "distinct"
+                            else [rng.choice(extreme if fixture == "extreme" else [0., 1., -1., 2.])
+                                  for _ in range(2 * cols)])
+                    for kind in ("topk", "midk", "bottomk"):
+                        for k in sorted({1, min(7, cols), cols}):
+                            request = dict(kind=kind, rows=2, cols=cols, k=k, seed=43, input=data)
+                            admitted = reference.contract(request)
+                            device = torch.tensor(data, dtype=torch.float32, device=self.device).reshape(2, cols)
+                            for operation in admitted["operations"]:
+                                with self.subTest(cols=cols, fixture=fixture, kind=kind, k=k, operation=operation):
+                                    control = reference.RankControl(torch, device, admitted, operation)
+                                    pointers = (control.values.data_ptr(), control.indices.data_ptr())
+                                    for _ in range(2):
+                                        control.run()
+                                        self.check(control, admitted)
+                                        self.assertEqual(pointers, (control.values.data_ptr(), control.indices.data_ptr()))
+
+    def test_packed_control_rebuilds_keys_after_in_place_upload(self):
+        torch = self.torch
+        with torch.inference_mode():
+            for kind in ("topk", "midk", "bottomk"):
+                request = dict(kind=kind, rows=1, cols=5, k=3, seed=17, input=[-0., 0., 1., 1., -2.])
+                admitted = reference.contract(request)
+                device = torch.tensor(admitted["input"], device=self.device).reshape(1, 5)
+                control = reference.RankControl(torch, device, admitted, "packed_topk")
+                for values in (request["input"], [2., -1., -1., 0., -0.], [1., 1., 1., 1., 1.]):
+                    device.copy_(torch.tensor(values, device=self.device).reshape(1, 5))
+                    control.run()
+                    self.check(control, reference.contract(dict(request, input=values)))
+
+    def test_control_admission_and_tensor_layout_are_enforced(self):
+        torch = self.torch
+        admitted = reference.contract(dict(kind="topk", rows=2, cols=2, k=1, input=[1., 1., 1., 1.]))
+        device = torch.ones((2, 2), device=self.device)
+        with self.assertRaises(ValueError):
+            reference.RankControl(torch, device, admitted, "topk")
+        for bad in (device.T, device.double(), device.clone().requires_grad_(), device[:1]):
+            with self.assertRaises(ValueError):
+                reference.RankControl(torch, bad, admitted, "packed_topk")
+
+    def test_timing_boundary_requires_cuda_and_retains_all_controls(self):
+        torch = self.torch
+        request = dict(kind="topk", rows=1, cols=5, k=3, seed=17, input=[0., 8., 8., 9., 1.])
+        with torch.inference_mode():
+            device = torch.tensor(request["input"], device=self.device).reshape(1, 5)
+            summarize = bench.audit.load_bench_module().summarize
+            if self.device == "cpu":
+                with self.assertRaisesRegex(ValueError, "requires CUDA"):
+                    reference.measure(request, device, torch, summarize)
+                return
+            report = reference.measure(request, device, torch, summarize)
+            self.assertEqual(report["operations"], ["topk_index_repair", "stable_sort", "packed_topk"])
+            self.assertEqual(len(report["samples"]), 12)
+            self.assertEqual(report["repetitions"], 16)
+            for name in report["operations"]:
+                samples = report["timings"][name]["samples_ms"]
+                self.assertEqual(samples, [pair["per_op_ms"][name] for pair in report["samples"]])
+                self.assertTrue(all(math.isfinite(value) and value > 0 for value in samples))
+            self.assertEqual(report["best_fixed"], min(report["operations"], key=lambda name:
+                sum(report["timings"][name]["samples_ms"]) / 12))
+            device[0, 0] = 42
+            with self.assertRaisesRegex(ValueError, "fixture differs"):
+                reference.measure(request, device, torch, summarize)
 
 
 if __name__ == "__main__":

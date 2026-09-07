@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 
 import bench_rank_vs_torch as audit
+import torch_rank_reference as cuda_reference
 
 
 def foreign_gpu_processes():
@@ -102,14 +103,14 @@ def run(executable, suite="standard", resident_only=False):
         results = [json.loads(line) for line in native.stdout.splitlines()]
         if len(results) != len(requests):
             raise RuntimeError("native result cardinality mismatch")
-        report = {"schema": "spiraltorch.resident_rank_comparison.v1", "status": "passed",
+        report = {"schema": "spiraltorch.resident_rank_comparison.v2", "status": "passed",
                   "suite": suite, "resident_only_requested": resident_only,
                   "comparison": "separate-process wrapper diagnostics, not interleaved cross-framework or GPU-event timings",
                   "boundaries": {
                       "host_api": "upload, allocate outputs/scratch, two submits, two maps; pipelines prebuilt",
                       "resident_host_to_host": "reuse device buffers; upload, one compute submit, combined snapshot/map",
                       "resident_dispatch_fence_per_op": "16 resident rank pairs, one submit then completion fence; divided by 16; no upload/readback",
-                      "torch_resident_per_op": "16 Python enqueue calls with preallocated CUDA outputs then synchronize; divided by 16; no upload/readback",
+                      "torch_resident_per_op": "hindsight best eligible CUDA control; 16 resident operations including key encoding/repair/gather then completion; divided by 16; no upload/readback",
                   }, "torch": torch.__version__, "torch_device": torch.cuda.get_device_name(),
                   "request_sha256": hashlib.sha256(payload.encode()).hexdigest(), "source": before,
                   "native_build_identity": identity, "build_source_binding": binding, "cases": []}
@@ -119,46 +120,19 @@ def run(executable, suite="standard", resident_only=False):
                 if result["adapter"]["name"] != torch.cuda.get_device_name():
                     raise RuntimeError("WGPU and PyTorch must select the same named GPU")
                 host = torch.tensor(r["input"], dtype=torch.float32).reshape(r["rows"], r["cols"])
-                expected, expected_ids = host.sort(dim=1, descending=r["kind"] == "topk", stable=True)
-                start = (r["cols"] - r["k"]) // 2 if r["kind"] == "midk" else 0
-                expected = expected[:, start:start + r["k"]]
-                expected_ids = expected_ids[:, start:start + r["k"]]
-                if result["values"] != expected.flatten().tolist() or result["indices"] != expected_ids.flatten().tolist():
+                expected = cuda_reference.contract(r)
+                actual = torch.tensor(result["values"], dtype=torch.float32)
+                expected_bits = torch.tensor(expected["values"], dtype=torch.float32).view(torch.int32)
+                if not torch.equal(actual.view(torch.int32), expected_bits) or result["indices"] != expected["indices"]:
                     raise RuntimeError("native output differs from canonical PyTorch reference")
                 device = host.cuda()
-                operation = cuda_rank_operation(r)
-                stable_sort = operation == "stable_sort"
-                shape = device.shape if stable_sort else (r["rows"], r["k"])
-                out_values = torch.empty(shape, dtype=torch.float32, device="cuda")
-                out_ids = torch.empty(shape, dtype=torch.int64, device="cuda")
-
-                def op():
-                    if stable_sort:
-                        torch.sort(device, dim=1, descending=r["kind"] == "topk",
-                                   stable=True, out=(out_values, out_ids))
-                    else:
-                        torch.topk(device, r["k"], dim=1, largest=r["kind"] == "topk", sorted=True, out=(out_values, out_ids))
-
-                def repeated():
-                    for _ in range(16):
-                        op()
-
-                op()
-                def validate_cuda():
-                    view = out_values[:, start:start + r["k"]] if stable_sort else out_values
-                    ids = out_ids[:, start:start + r["k"]] if stable_sort else out_ids
-                    bench.correctness(view, expected.double(), torch, 0, 0)
-                    require_canonical_indices(ids.cpu().tolist(), expected_ids.tolist())
-                    if not torch.equal(device.gather(1, out_ids), out_values):
-                        raise RuntimeError("PyTorch rank indices do not point to returned values")
-
-                validate_cuda()
-                timing = bench.paired_timings({"torch": repeated}, 2, 12, torch.cuda.synchronize, r["seed"])["torch"]
-                validate_cuda()
+                controls = cuda_reference.measure(r, device, torch, bench.summarize)
+                operation = controls["best_fixed"]
                 samples = {key: bench.summarize(v) for key, v in result["samples_ms"].items()}
-                samples["torch_resident_per_op"] = bench.summarize([v / 16 for v in timing["samples_ms"]])
+                samples["torch_resident_per_op"] = controls["timings"][operation]
                 report["cases"].append({"request": {k:v for k,v in r.items() if k != "input"},
                     "native": result, "timings": samples, "torch_operation": operation,
+                    "torch_controls": controls, "legacy_torch_operation": cuda_rank_operation(r),
                     "torch_canonical_indices": "checked before and after all timing intervals"})
         after = audit.source_identity()
         require_uncontended_gpu()
@@ -181,7 +155,7 @@ def main():
     try:
         report = run(args.executable.resolve(strict=True), args.suite, args.resident_only)
     except Exception as error:
-        report = {"schema": "spiraltorch.resident_rank_comparison.v1", "status": "error", "error": str(error)}
+        report = {"schema": "spiraltorch.resident_rank_comparison.v2", "status": "error", "error": str(error)}
     audit.write_report_exclusive(args.output, report)
     print(json.dumps({"status": report["status"], "cases": len(report.get("cases", [])), "error": report.get("error")}))
     raise SystemExit(report["status"] != "passed")
