@@ -129,6 +129,56 @@ fn swap_scratch(left: u32, right: u32) {
     scratch_indices[right] = index;
 }
 
+// Finite indices form a sorted prefix. Empty/full tiles need only endpoints.
+fn local_finite_count(length: u32) -> u32 {
+    if (length == 0u || sort_indices[0] == INVALID_INDEX) { return 0u; }
+    if (sort_indices[length - 1u] != INVALID_INDEX) { return length; }
+    var low = 1u;
+    var high = length - 1u;
+    // Bracket sparse prefixes first; a full-width search penalizes tiny counts.
+    var probe = low;
+    loop {
+        if (probe >= high) { break; }
+        if (sort_indices[probe] == INVALID_INDEX) { high = probe; break; }
+        low = probe + 1u;
+        probe = probe + min(probe + 1u, high - probe);
+    }
+    loop {
+        if (low >= high) { break; }
+        let middle = low + (high - low) / 2u;
+        if (sort_indices[middle] == INVALID_INDEX) {
+            high = middle;
+        } else {
+            low = middle + 1u;
+        }
+    }
+    return low;
+}
+
+fn storage_finite_count(base: u32, length: u32) -> u32 {
+    if (length == 0u || scratch_indices[base] == INVALID_INDEX) { return 0u; }
+    if (scratch_indices[base + length - 1u] != INVALID_INDEX) { return length; }
+    var low = 1u;
+    var high = length - 1u;
+    var probe = low;
+    loop {
+        if (probe >= high) { break; }
+        if (scratch_indices[base + probe] == INVALID_INDEX) { high = probe; break; }
+        low = probe + 1u;
+        probe = probe + min(probe + 1u, high - probe);
+    }
+    loop {
+        if (low >= high) { break; }
+        let middle = low + (high - low) / 2u;
+        if (scratch_indices[base + middle] == INVALID_INDEX) {
+            high = middle;
+        } else {
+            low = middle + 1u;
+        }
+    }
+    return low;
+}
+
 fn sort_local_pairs(lane: u32) {
     for (var span = 2u; span <= params.tile_stride; span = span << 1u) {
         for (var distance = span >> 1u; distance > 0u; distance = distance >> 1u) {
@@ -218,11 +268,7 @@ fn sort_tile_local(row: u32, tile: u32, lane: u32) {
         scratch_indices[scratch_base + slot] = sort_indices[slot];
     }
     if (lane == 0u) {
-        var count = 0u;
-        for (; count < params.tile_stride; count = count + 1u) {
-            if (sort_indices[count] == INVALID_INDEX) { break; }
-        }
-        tile_counts[tile_state] = count;
+        tile_counts[tile_state] = local_finite_count(tile_length);
     }
 }
 
@@ -317,17 +363,7 @@ fn rankk_exact_2ce_tile_sort(
     }
 
     if (local_id.x == 0u) {
-        var count = 0u;
-        loop {
-            if (count >= params.tile_stride) {
-                break;
-            }
-            if (scratch_indices[scratch_base + count] == INVALID_INDEX) {
-                break;
-            }
-            count = count + 1u;
-        }
-        tile_counts[tile_state] = count;
+        tile_counts[tile_state] = storage_finite_count(scratch_base, tile_length);
     }
 }
 
