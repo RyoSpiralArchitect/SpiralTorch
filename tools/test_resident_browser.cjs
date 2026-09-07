@@ -11,8 +11,8 @@ async function main() {
   if (!moduleDir || !executablePath || !outputPath) {
     throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean] [BASELINE_MODULE_DIR]");
   }
-  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean"].includes(fixture)) throw Error("unknown fixture");
-  const matched=fixture === "rank-matched" || fixture === "rank-pruning-matched";
+  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean"].includes(fixture)) throw Error("unknown fixture");
+  const matched=fixture === "rank-matched" || fixture === "rank-pruning-matched" || fixture === "rank-pair-lanes-matched";
   if(matched !== Boolean(baselineDir)) throw Error("matched rank fixtures require BASELINE_MODULE_DIR; other fixtures must omit it");
   const rankFixture = fixture === "rank" || fixture === "rank-active-lanes" || fixture === "rank-tournament";
   const fd = fs.openSync(outputPath, "wx");
@@ -85,6 +85,7 @@ async function main() {
     if(fixture === "rank-active-lanes") params.set("suite","active-lanes");
     if(fixture === "rank-tournament") params.set("suite","tournament");
     if(fixture === "rank-pruning-matched") params.set("suite","pruning");
+    if(fixture === "rank-pair-lanes-matched") params.set("suite","pair-lanes");
     const query = "?"+params.toString();
     await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:300000})]);

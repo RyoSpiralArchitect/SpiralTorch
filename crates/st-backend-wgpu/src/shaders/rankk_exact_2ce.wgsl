@@ -152,25 +152,26 @@ fn sort_tile_local(row: u32, tile: u32, lane: u32) {
     // then publish the sorted run once for the separate row-merge pass.
     for (var span = 2u; span <= params.tile_stride; span = span << 1u) {
         for (var distance = span >> 1u; distance > 0u; distance = distance >> 1u) {
-            for (var slot = lane; slot < params.tile_stride; slot = slot + 256u) {
-                let partner = slot ^ distance;
-                if (partner > slot && partner < params.tile_stride) {
-                    let left_value = sort_values[slot];
-                    let left_index = sort_indices[slot];
-                    let right_value = sort_values[partner];
-                    let right_index = sort_indices[partner];
-                    let ascending_half = (slot & span) == 0u;
-                    let swap = select(
-                        candidate_before(left_value, left_index, right_value, right_index),
-                        candidate_before(right_value, right_index, left_value, left_index),
-                        ascending_half,
-                    );
-                    if (swap) {
-                        sort_values[slot] = right_value;
-                        sort_indices[slot] = right_index;
-                        sort_values[partner] = left_value;
-                        sort_indices[partner] = left_index;
-                    }
+            // Insert a zero bit at `distance`: each lane owns one disjoint
+            // compare/exchange pair, rather than visiting both endpoints.
+            for (var pair = lane; pair < params.tile_stride / 2u; pair = pair + 256u) {
+                let slot = (pair & (distance - 1u)) | ((pair & ~(distance - 1u)) << 1u);
+                let partner = slot | distance;
+                let left_value = sort_values[slot];
+                let left_index = sort_indices[slot];
+                let right_value = sort_values[partner];
+                let right_index = sort_indices[partner];
+                let ascending_half = (slot & span) == 0u;
+                let swap = select(
+                    candidate_before(left_value, left_index, right_value, right_index),
+                    candidate_before(right_value, right_index, left_value, left_index),
+                    ascending_half,
+                );
+                if (swap) {
+                    sort_values[slot] = right_value;
+                    sort_indices[slot] = right_index;
+                    sort_values[partner] = left_value;
+                    sort_indices[partner] = left_index;
                 }
             }
             workgroupBarrier();
