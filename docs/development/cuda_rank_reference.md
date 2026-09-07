@@ -36,8 +36,9 @@ in ascending order and returns its requested window.
 
 ## Measurement
 
-Output/scratch buffers and geometry-only index words are allocated before
-timing. No value-dependent keys or corrected indices are cached across
+Explicit output/scratch buffers and geometry-only index words are allocated
+before timing; any internal PyTorch workspace costs remain in the timed calls.
+No value-dependent keys or corrected indices are cached across
 operations. Sixteen complete operations plus a completion fence form each
 batch. Controls rotate within the same process; two warmup batches precede
 twelve retained batches. Exact value-bit/index checks run before measurement

@@ -92,11 +92,14 @@ one seed is quantized to exercise ties. `--resident-only` excludes intervening
 host maps/uploads from the fixed-input timing intervals. Correctness is checked
 before and after all intervals. The default suite and rotated host/resident
 comparison remain available. These are host-API/fence timings, not GPU events.
-CUDA uses stable sort for MidK and for any TopK/BottomK row with tied values;
-tie-free TopK/BottomK retain `torch.topk`. Every timed CUDA case checks exact
-source indices as well as values before and after all intervals. Each report
-records the chosen CUDA operation; tied controls cannot receive credit for a
-weaker ordering contract.
+CUDA now measures eligible plain topk, index-repaired topk, stable sort and
+packed integer-key topk controls. Admission uses retained/cutoff ties after f32
+rounding; the old duplicate-anywhere rule remains labeled as the legacy choice.
+Every control checks exact value bits and source indices. The v2 reports retain
+all samples and label the primary CUDA reference as the hindsight best fixed
+control, not an online policy choice. Key encoding, repair and gather remain
+inside timing. See the [canonical CUDA reference contract](../development/cuda_rank_reference.md)
+and [measured comparisons](../../benchmarks/results/2026-09-07-canonical-cuda-rank/README.md).
 
 Tiles with a padded stride up to 1024 now sort in 8 KiB of workgroup memory,
 publishing their sorted run to global scratch only once. Larger tiles keep the
@@ -357,8 +360,8 @@ pass, but one native invocation cannot mix the two modes.
 The comparison separates the existing host API, a persistent-buffer
 host-to-host call, and batched resident dispatch plus completion fence. The
 PyTorch reference uses preallocated CUDA outputs, with the same 16 repetitions
-and no upload/readback in the resident interval. MidK uses stable full sort in
-PyTorch. This is an API throughput diagnostic, not GPU-event kernel timing or
+and no upload/readback in the resident interval. MidK compares stable full sort
+with exact integer-key selection in PyTorch. This is an API throughput diagnostic, not GPU-event kernel timing or
 an interleaved cross-framework experiment. Do not compare resident times with
 PyTorch host-to-host times as a speedup claim.
 
