@@ -1122,7 +1122,7 @@ mod tests {
             31, 32, 127, 128, 255, 256, 257, 511, 512, 1023, 1024, 1025, 2048,
         ] {
             let cols = tile + 7;
-            let counts = [0, 1, 2, 3, 7, tile / 2, tile - 1, tile];
+            let counts = [0, 1, 2, 3, 7, 8, 9, tile / 2, tile - 1, tile];
             let rows = counts.len() as u32;
             for k in [7, cols] {
                 for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {

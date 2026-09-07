@@ -135,6 +135,14 @@ fn local_finite_count(length: u32) -> u32 {
     if (sort_indices[length - 1u] != INVALID_INDEX) { return length; }
     var low = 1u;
     var high = length - 1u;
+    // Bracket sparse prefixes first; a full-width search penalizes tiny counts.
+    var probe = low;
+    loop {
+        if (probe >= high) { break; }
+        if (sort_indices[probe] == INVALID_INDEX) { high = probe; break; }
+        low = probe + 1u;
+        probe = probe + min(probe + 1u, high - probe);
+    }
     loop {
         if (low >= high) { break; }
         let middle = low + (high - low) / 2u;
@@ -152,6 +160,13 @@ fn storage_finite_count(base: u32, length: u32) -> u32 {
     if (scratch_indices[base + length - 1u] != INVALID_INDEX) { return length; }
     var low = 1u;
     var high = length - 1u;
+    var probe = low;
+    loop {
+        if (probe >= high) { break; }
+        if (scratch_indices[base + probe] == INVALID_INDEX) { high = probe; break; }
+        low = probe + 1u;
+        probe = probe + min(probe + 1u, high - probe);
+    }
     loop {
         if (low >= high) { break; }
         let middle = low + (high - low) / 2u;
