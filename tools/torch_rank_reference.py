@@ -40,15 +40,19 @@ def contract(request):
     for row in range(rows):
         data = values[row * cols:(row + 1) * cols]
         zeros = {total_key(value) for value in data if value == 0}
-        stable_safe &= len(zeros) < 2
         order = sorted(range(cols), key=lambda index: (
             -total_key(data[index]) if kind == "topk" else total_key(data[index]), index))
+        ids = order[start:start + k]
+        window_matches = True
+        # Stable numeric order only diverges at mixed zeros; inspect the output, not the whole row.
+        if len(zeros) == 2:
+            numeric_order = sorted(range(cols), key=lambda index: -data[index] if kind == "topk" else data[index])
+            window_matches = numeric_order[start:start + k] == ids
+        stable_safe &= window_matches
         prefix = [data[index] for index in order[:min(k + 1, cols)]]
         topk_safe &= all(a != b for a, b in zip(prefix, prefix[1:]))
         cutoff_unique = k == cols or prefix[k - 1] != prefix[k]
-        selected_zeros = {total_key(value) for value in prefix[:k] if value == 0}
-        repair_safe &= cutoff_unique and len(selected_zeros) < 2
-        ids = order[start:start + k]
+        repair_safe &= cutoff_unique and window_matches
         expected_indices.extend(ids)
         expected_values.extend(data[index] for index in ids)
     operations = []

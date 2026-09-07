@@ -15,8 +15,8 @@ not on Python double uniqueness. A changed input requires new admission.
 | Control | Condition | Work Included In Every Operation |
 | --- | --- | --- |
 | `topk` | TopK/BottomK; retained values and cutoff are untied | Sorted float32 topk |
-| `topk_index_repair` | Internal ties, unique cutoff, no mixed signed zeros in the retained set | Unsorted topk, index sort, value gather, stable value sort, index gather |
-| `stable_sort` | No mixed signed zeros within an input row | Full stable float32 sort; take the requested view |
+| `topk_index_repair` | Internal ties, unique cutoff, stable numeric order matches the returned window | Unsorted topk, index sort, value gather, stable value sort, index gather |
+| `stable_sort` | Stable numeric order matches the returned window | Full stable float32 sort; take the requested view |
 | `packed_topk` | All admitted fixtures, including MidK and tied cutoffs | Exact integer key construction, integer topk, value gather |
 
 Equal values outside the retained set need not force full sorting. Internal
@@ -26,6 +26,12 @@ the subsequent stable value sort canonical. A cutoff tie cannot be repaired
 from an arbitrary topk subset; the omitted lower source index may be the right
 answer. Plain PyTorch topk does not promise stable tied indices; see its
 [API documentation](https://docs.pytorch.org/docs/stable/generated/torch.topk.html).
+
+Mixed signed zeros alone do not forbid stable sort or index repair. Their
+numeric stable order may already be canonical, or they may lie outside the
+returned window. Compare the actual window's source indices with the total-f32
+reference. Index repair additionally requires an untied numeric cutoff, so it
+cannot recover a canonical source index omitted by the initial topk selection.
 
 Packed keys use a signed 32-bit monotone transform of finite f32 bits as the
 high word, and a source-index tie breaker as the low word. TopK reverses the

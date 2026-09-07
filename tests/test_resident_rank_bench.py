@@ -132,6 +132,28 @@ class CanonicalReferenceTest(unittest.TestCase):
         self.assertEqual(admitted["indices"], [0])
         self.assertNotIn("topk", admitted["operations"])
 
+    def test_stable_sort_admission_checks_the_returned_window(self):
+        for kind, values, k in [("topk", [3., -0., 0.], 1),
+                                ("bottomk", [-3., 0., -0.], 1),
+                                ("midk", [0., -0., -4., -3., -2., -1., 2.], 1),
+                                ("topk", [0., -0., -1.], 2),
+                                ("bottomk", [-0., 0., 1.], 2),
+                                ("midk", [-2., -0., 0., 1., 2.], 3)]:
+            with self.subTest(kind=kind, values=values, k=k):
+                admitted = reference.contract(self.request(values, k, kind))
+                self.assertIn("stable_sort", admitted["operations"])
+        for kind, values in [("topk", [-0., 0., -1.]), ("bottomk", [0., -0., 1.])]:
+            admitted = reference.contract(self.request(values, 2, kind))
+            self.assertEqual(admitted["operations"], ["packed_topk"])
+        admitted = reference.contract(self.request([0., -0., -2., -1., 2.], 1, "midk"))
+        self.assertEqual(admitted["operations"], ["packed_topk"])
+
+    def test_repair_admission_accepts_already_canonical_signed_zeros(self):
+        for kind, values in [("topk", [0., -0., -1.]), ("bottomk", [-0., 0., 1.])]:
+            admitted = reference.contract(self.request(values, 2, kind))
+            self.assertIn("topk_index_repair", admitted["operations"])
+            self.assertNotIn("topk", admitted["operations"])
+
     def test_invalid_inputs_fail_closed(self):
         valid = self.request([1., 2.], 1)
         for change in [dict(kind="max"), dict(rows=True), dict(cols=0), dict(k=0), dict(k=3),
@@ -211,6 +233,23 @@ class LiveCanonicalReferenceTest(unittest.TestCase):
                     device.copy_(torch.tensor(values, device=self.device).reshape(1, 5))
                     control.run()
                     self.check(control, reference.contract(dict(request, input=values)))
+
+    def test_zero_window_controls_preserve_exact_values_and_indices(self):
+        torch = self.torch
+        with torch.inference_mode():
+            for kind, data, k in [("topk", [3., -0., 0.], 1),
+                                  ("bottomk", [-3., 0., -0.], 1),
+                                  ("topk", [0., -0., -1.], 2),
+                                  ("bottomk", [-0., 0., 1.], 2),
+                                  ("midk", [-2., -0., 0., 1., 2.], 3)]:
+                request = dict(kind=kind, rows=1, cols=len(data), k=k, input=data)
+                admitted = reference.contract(request)
+                self.assertIn("stable_sort", admitted["operations"])
+                device = torch.tensor(data, dtype=torch.float32, device=self.device).reshape(1, len(data))
+                for name in admitted["operations"]:
+                    control = reference.RankControl(torch, device, admitted, name)
+                    control.run()
+                    self.check(control, admitted)
 
     def test_control_admission_and_tensor_layout_are_enforced(self):
         torch = self.torch
