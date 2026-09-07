@@ -727,6 +727,16 @@ fn parameter_value_fingerprint(name: &str, value: &Tensor) -> String {
 /// High-level module trait inspired by PyTorch's `nn.Module` but expressed in
 /// pure Rust so it can be used from WebGPU, HIP, or CPU flows alike.
 pub trait Module {
+    /// Explicit, snapshot-based inference lowering. Unknown modules cannot
+    /// silently execute on CPU inside a resident GPU plan.
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        Err(crate::resident::InferenceError::UnsupportedModule(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
     /// Runs a forward pass.
     fn forward(&self, input: &Tensor) -> PureResult<Tensor>;
 

@@ -19,6 +19,10 @@ num-complex = "0.4"
 nalgebra = "0.32"
 st-softlogic = { path = "../st-softlogic" }
 st-core = { path = "../st-core", default-features = false }
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Preserve native Faer acceleration without importing its threadpool into WASM.
 st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 
 [package.metadata.spiraltorch]

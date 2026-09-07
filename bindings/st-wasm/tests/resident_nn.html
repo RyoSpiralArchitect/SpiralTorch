@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust Sequential resident inference fixture</title>
+<pre id="result" data-status="running">Running Rust NN WebGPU checks</pre>
+<script type="module">
+import init, {run_resident_nn_fixture} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  if (!navigator.gpu) throw Error("WebGPU is unavailable; no CPU fallback");
+  await init();
+  const report = JSON.parse(await run_resident_nn_fixture());
+  if (report.status !== "passed" || report.cases?.length !== 6 || report.intermediate_guard_cases !== 4)
+    throw Error("Incomplete Rust resident NN fixture");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

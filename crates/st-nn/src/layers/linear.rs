@@ -84,6 +84,16 @@ impl Linear {
 }
 
 impl Module for Linear {
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        self.validate_parameters()?;
+        Ok(vec![crate::resident::InferenceOp::Linear {
+            weight: self.weight.value().snapshot(),
+            bias: self.bias.value().snapshot(),
+        }])
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         if input.shape().1 != self.weight.value().shape().0 {
             return Err(TensorError::ShapeMismatch {

@@ -65,6 +65,16 @@ impl Sequential {
 }
 
 impl Module for Sequential {
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        let mut operations = Vec::new();
+        for layer in &self.layers {
+            operations.extend(layer.inference_ops()?);
+        }
+        Ok(operations)
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let mut activ = input.clone();
         for layer in &self.layers {

@@ -14,6 +14,28 @@ pub const FUSED_ATTENTION_ONLINE_WGSL: &str = include_str!("shaders/fused_attent
 pub const DENSE_MATMUL_WGSL: &str = include_str!("shaders/dense_matmul.wgsl");
 pub const ROUNDED_ADD_WGSL: &str = include_str!("shaders/rounded_add.wgsl");
 
+/// Same matrix kernel, with on-device finite guards for high-level inference.
+/// Binding 7 is a u32 flag array; uniform word 5 selects the stage's flag.
+pub fn checked_dense_matmul_source(
+    tile: [u32; 3],
+    kernel: MatmulKernel,
+    accumulation: MatmulAccumulation,
+) -> Result<String, &'static str> {
+    let mut source = dense_matmul_source_with_options(tile, false, kernel, accumulation)?;
+    let start = source
+        .find("fn apply_fusions(")
+        .ok_or("missing fusion function")?;
+    let end = source[start..]
+        .find("@compute")
+        .ok_or("missing compute entry")?
+        + start;
+    source.replace_range(
+        start..end,
+        include_str!("shaders/dense_checked_fusions.wgsl"),
+    );
+    Ok(source)
+}
+
 /// Accumulation policy is independent of the output tile and thread geometry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum MatmulAccumulation {

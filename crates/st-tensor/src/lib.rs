@@ -42,6 +42,7 @@ pub use execution_capability::{
     TensorExecutionBackend, TensorExecutionComponent, TensorExecutionWorkload,
     TensorExecutionWorkloadKey, TensorUtilOperation,
 };
+pub use st_kernel_contracts::layout::{NdLayout, NdLayoutError};
 
 #[cfg(feature = "wgpu_frac")]
 pub use backend::wgpu_frac;
