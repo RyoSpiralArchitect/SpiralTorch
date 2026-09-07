@@ -127,6 +127,35 @@ fn swap_scratch(left: u32, right: u32) {
     scratch_indices[right] = index;
 }
 
+fn sort_local_pairs(lane: u32) {
+    for (var span = 2u; span <= params.tile_stride; span = span << 1u) {
+        for (var distance = span >> 1u; distance > 0u; distance = distance >> 1u) {
+            // Insert a zero bit at `distance` to enumerate disjoint pairs.
+            for (var pair = lane; pair < params.tile_stride / 2u; pair = pair + 256u) {
+                let slot = (pair & (distance - 1u)) | ((pair & ~(distance - 1u)) << 1u);
+                let partner = slot | distance;
+                let left_value = sort_values[slot];
+                let left_index = sort_indices[slot];
+                let right_value = sort_values[partner];
+                let right_index = sort_indices[partner];
+                let ascending_half = (slot & span) == 0u;
+                let swap = select(
+                    candidate_before(left_value, left_index, right_value, right_index),
+                    candidate_before(right_value, right_index, left_value, left_index),
+                    ascending_half,
+                );
+                if (swap) {
+                    sort_values[slot] = right_value;
+                    sort_indices[slot] = right_index;
+                    sort_values[partner] = left_value;
+                    sort_indices[partner] = left_index;
+                }
+            }
+            workgroupBarrier();
+        }
+    }
+}
+
 fn sort_tile_local(row: u32, tile: u32, lane: u32) {
     let tile_state = row * params.tiles_x + tile;
     let scratch_base = tile_state * params.tile_stride;
@@ -150,31 +179,36 @@ fn sort_tile_local(row: u32, tile: u32, lane: u32) {
 
     // Only this workgroup owns the tile. Keep compare/exchange traffic local,
     // then publish the sorted run once for the separate row-merge pass.
-    for (var span = 2u; span <= params.tile_stride; span = span << 1u) {
-        for (var distance = span >> 1u; distance > 0u; distance = distance >> 1u) {
-            // Insert a zero bit at `distance`: each lane owns one disjoint
-            // compare/exchange pair, rather than visiting both endpoints.
-            for (var pair = lane; pair < params.tile_stride / 2u; pair = pair + 256u) {
-                let slot = (pair & (distance - 1u)) | ((pair & ~(distance - 1u)) << 1u);
-                let partner = slot | distance;
-                let left_value = sort_values[slot];
-                let left_index = sort_indices[slot];
-                let right_value = sort_values[partner];
-                let right_index = sort_indices[partner];
-                let ascending_half = (slot & span) == 0u;
-                let swap = select(
-                    candidate_before(left_value, left_index, right_value, right_index),
-                    candidate_before(right_value, right_index, left_value, left_index),
-                    ascending_half,
-                );
-                if (swap) {
-                    sort_values[slot] = right_value;
-                    sort_indices[slot] = right_index;
-                    sort_values[partner] = left_value;
-                    sort_indices[partner] = left_index;
+    // Pair enumeration removes a loop visit only above the 256-lane width.
+    // Smaller tiles retain the original path without pair-address arithmetic.
+    if (params.tile_stride > 256u) {
+        sort_local_pairs(lane);
+    } else {
+        for (var span = 2u; span <= params.tile_stride; span = span << 1u) {
+            for (var distance = span >> 1u; distance > 0u; distance = distance >> 1u) {
+                for (var slot = lane; slot < params.tile_stride; slot = slot + 256u) {
+                    let partner = slot ^ distance;
+                    if (partner > slot && partner < params.tile_stride) {
+                        let left_value = sort_values[slot];
+                        let left_index = sort_indices[slot];
+                        let right_value = sort_values[partner];
+                        let right_index = sort_indices[partner];
+                        let ascending_half = (slot & span) == 0u;
+                        let swap = select(
+                            candidate_before(left_value, left_index, right_value, right_index),
+                            candidate_before(right_value, right_index, left_value, left_index),
+                            ascending_half,
+                        );
+                        if (swap) {
+                            sort_values[slot] = right_value;
+                            sort_indices[slot] = right_index;
+                            sort_values[partner] = left_value;
+                            sort_indices[partner] = left_index;
+                        }
+                    }
                 }
+                workgroupBarrier();
             }
-            workgroupBarrier();
         }
     }
     for (var slot = lane; slot < params.tile_stride; slot = slot + 256u) {
