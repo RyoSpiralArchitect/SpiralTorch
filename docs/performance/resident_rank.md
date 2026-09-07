@@ -104,6 +104,17 @@ storage-memory sorting network. Both paths use the same total-order comparator;
 requested tile geometry, output ordering, padding and snapshot semantics are
 unchanged. Device admission checks the workgroup storage requirement explicitly.
 
+For padded strides 512 and 1024, lanes enumerate disjoint compare/exchange pairs
+directly by inserting a zero bit at the sorting-network distance. This halves
+per-lane loop visits without changing the comparators or network stage order. Tiles
+up to 256 retain the original single-visit path: pair-address arithmetic made
+small tiles slower in the initial browser experiment. Larger storage-memory
+tiles also remain unchanged. This is shared Rust-owned WGSL, not a client-side
+policy or a tile rewrite. The `rank-pair-lanes-matched` browser fixture compares
+all three rank kinds across three seeds, including an unchanged 2048-stride
+control. See the [pair-lane study](../../benchmarks/results/2026-09-07-rank-pair-lanes/README.md)
+for retained negative candidates, A/A controls and native/PyTorch CUDA results.
+
 ## Python And Rust
 
 ```python
