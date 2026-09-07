@@ -4,6 +4,8 @@ const KIND_TOPK: u32 = 0u;
 const KIND_MIDK: u32 = 1u;
 const INVALID_INDEX: u32 = 0xffffffffu;
 const LOCAL_SORT_CAPACITY: u32 = 1024u;
+const MERGE_PARALLEL_MIDK: u32 = 1u;
+const MERGE_PARALLEL_PREFIX: u32 = 3u;
 
 struct Params {
     rows: u32,
@@ -13,7 +15,7 @@ struct Params {
     tile_stride: u32,
     tiles_x: u32,
     kind: u32,
-    _pad: u32,
+    merge_mode: u32,
 };
 
 @group(0) @binding(0) var<storage, read> input_values: array<f32>;
@@ -334,8 +336,10 @@ fn rankk_exact_2ce_row_merge(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let parallel_midk = params.kind == KIND_MIDK && params.tiles_x <= 32u;
-    let row = select(workgroup_id.x, workgroup_id.y, parallel_midk);
+    // Rust owns both admission and the matching dispatch grid.
+    let parallel = params.merge_mode == MERGE_PARALLEL_MIDK ||
+        params.merge_mode == MERGE_PARALLEL_PREFIX;
+    let row = select(workgroup_id.x, workgroup_id.y, parallel);
     if (row >= params.rows) {
         return;
     }
@@ -358,11 +362,10 @@ fn rankk_exact_2ce_row_merge(
     let rank_end = workgroupUniformLoad(&merge_end);
     let rank_start = workgroupUniformLoad(&merge_start);
 
-    if (parallel_midk) {
+    if (parallel) {
         // Every tile is sorted by the same total (value, source-index) order.
         // Binary-search other tiles to compute each candidate's global rank,
-        // avoiding a serial merge through half the row just to discard it.
-        // Keep the original merge for extremely fragmented tile geometries.
+        // This serves MidK and Rust-admitted short TopK/BottomK prefixes.
         // Each workgroup owns one tile's candidates. Valid global ranks have
         // unique destinations; initialize ONLY the disjoint missing-value tail.
         let take = rank_end - rank_start;
@@ -374,9 +377,14 @@ fn rankk_exact_2ce_row_merge(
         }
         let own_tile = workgroup_id.x;
         let own_state = row * params.tiles_x + own_tile;
+        let own_count = tile_counts[own_state];
+        // Global rank is at least the candidate's rank in its own tile.
+        // Preserve the existing MidK walk; prefixes need only their first k.
+        let own_end = select(own_count, min(own_count, rank_end),
+            params.merge_mode == MERGE_PARALLEL_PREFIX);
         var own_offset = local_id.x;
         loop {
-            if (own_offset >= tile_counts[own_state]) { break; }
+            if (own_offset >= own_end) { break; }
             let address = own_state * params.tile_stride + own_offset;
             let value = scratch_values[address];
             let index = scratch_indices[address];

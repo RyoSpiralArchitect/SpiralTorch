@@ -25,6 +25,7 @@ pub use st_kernel_contracts::rank::{Kind, PlanError};
 
 const WORKGROUP_SIZE: u32 = 256;
 const PARALLEL_MIDK_MAX_TILES: u32 = 32;
+const PARALLEL_PREFIX_MIN_K: u32 = 64;
 const STORAGE_BINDINGS: u32 = 7;
 const WORKGROUP_STORAGE_BYTES: u32 = 1024 * 8;
 const WGSL: &str = include_str!("shaders/rankk_exact_2ce.wgsl");
@@ -36,6 +37,7 @@ pub(crate) enum MergeMode {
     Streaming = 0,
     ParallelMidk = 1,
     TournamentMidk = 2,
+    ParallelPrefix = 3,
 }
 
 impl MergeMode {
@@ -48,21 +50,36 @@ impl MergeMode {
             if tiles_x <= WORKGROUP_SIZE && k > 1 {
                 return Self::TournamentMidk;
             }
+        } else if tiles_x > 1
+            && tiles_x <= PARALLEL_MIDK_MAX_TILES
+            && k >= PARALLEL_PREFIX_MIN_K
+            && k <= WORKGROUP_SIZE
+        {
+            // One candidate per lane; tiny prefixes retain the cheaper merge.
+            return Self::ParallelPrefix;
         }
         Self::Streaming
+    }
+
+    const fn is_parallel(self) -> bool {
+        matches!(self, Self::ParallelMidk | Self::ParallelPrefix)
     }
 
     pub(crate) const fn entry_point(self) -> &'static str {
         match self {
             Self::TournamentMidk => "rankk_exact_2ce_midk_tournament",
-            Self::Streaming | Self::ParallelMidk => "rankk_exact_2ce_row_merge",
+            Self::Streaming | Self::ParallelMidk | Self::ParallelPrefix => {
+                "rankk_exact_2ce_row_merge"
+            }
         }
     }
 
     pub(crate) const fn pipeline_label(self) -> &'static str {
         match self {
             Self::TournamentMidk => "st.rankk.exact_2ce.row_merge_tournament",
-            Self::Streaming | Self::ParallelMidk => "st.rankk.exact_2ce.row_merge",
+            Self::Streaming | Self::ParallelMidk | Self::ParallelPrefix => {
+                "st.rankk.exact_2ce.row_merge"
+            }
         }
     }
 }
@@ -148,7 +165,7 @@ impl Plan {
 
     // One Rust-owned mode selects the pipeline and its matching dispatch grid.
     const fn merge_workgroups(self) -> (u32, u32) {
-        if matches!(self.merge_mode(), MergeMode::ParallelMidk) {
+        if self.merge_mode().is_parallel() {
             (self.tiles_x, self.rows)
         } else {
             (self.rows, 1)
@@ -184,7 +201,7 @@ impl Plan {
             tile_stride: self.tile_stride,
             tiles_x: self.tiles_x,
             kind: self.kind.as_uniform(),
-            _pad: 0,
+            merge_mode: self.merge_mode() as u32,
         }
     }
 
@@ -267,7 +284,7 @@ struct ParamsUniform {
     tile_stride: u32,
     tiles_x: u32,
     kind: u32,
-    _pad: u32,
+    merge_mode: u32,
 }
 
 /// Device-owned pipelines shared by repeated exact rank-k dispatches.
@@ -643,10 +660,12 @@ mod tests {
 
     #[test]
     fn exact_rank_2ce_wgsl_parses_and_validates() {
-        assert!(WGSL.contains(&format!(
-            "params.kind == KIND_MIDK && params.tiles_x <= {}u;",
-            PARALLEL_MIDK_MAX_TILES
-        )));
+        for (name, mode) in [
+            ("MERGE_PARALLEL_MIDK", MergeMode::ParallelMidk),
+            ("MERGE_PARALLEL_PREFIX", MergeMode::ParallelPrefix),
+        ] {
+            assert!(WGSL.contains(&format!("const {name}: u32 = {}u;", mode as u32)));
+        }
         for (source, tournament) in [(WGSL, false), (TOURNAMENT_WGSL, true)] {
             // Catalog consumers load complete files, while one canonical
             // prelude owns their shared ordering and search primitives.
@@ -721,18 +740,21 @@ mod tests {
         assert_eq!(std::mem::size_of::<ParamsUniform>(), 32);
         for tiles in [1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257] {
             for kind in [Kind::TopK, Kind::MidK, Kind::BottomK] {
-                for k in [1, 2, 7] {
-                    let plan = Plan::try_new(kind, 3, tiles * 8 - 1, k, 8).unwrap();
+                for k in [1, 2, 7, 63, 64, 65, 255, 256, 257] {
+                    let plan = Plan::try_new(kind, 3, tiles * 512 - 1, k, 512).unwrap();
                     let mode = match (kind, tiles) {
                         (Kind::MidK, 1..=32) => MergeMode::ParallelMidk,
                         (Kind::MidK, 33..=256) if k > 1 => MergeMode::TournamentMidk,
+                        (Kind::TopK | Kind::BottomK, 2..=32) if (64..=256).contains(&k) => {
+                            MergeMode::ParallelPrefix
+                        }
                         _ => MergeMode::Streaming,
                     };
                     assert_eq!(plan.merge_mode(), mode);
-                    assert_eq!(plan.params()._pad, 0);
+                    assert_eq!(plan.params().merge_mode, mode as u32);
                     assert_eq!(
                         plan.merge_workgroups(),
-                        if mode == MergeMode::ParallelMidk {
+                        if mode.is_parallel() {
                             (tiles, 3)
                         } else {
                             (3, 1)

@@ -4,6 +4,8 @@ const KIND_TOPK: u32 = 0u;
 const KIND_MIDK: u32 = 1u;
 const INVALID_INDEX: u32 = 0xffffffffu;
 const LOCAL_SORT_CAPACITY: u32 = 1024u;
+const MERGE_PARALLEL_MIDK: u32 = 1u;
+const MERGE_PARALLEL_PREFIX: u32 = 3u;
 
 struct Params {
     rows: u32,
@@ -13,7 +15,7 @@ struct Params {
     tile_stride: u32,
     tiles_x: u32,
     kind: u32,
-    _pad: u32,
+    merge_mode: u32,
 };
 
 @group(0) @binding(0) var<storage, read> input_values: array<f32>;
