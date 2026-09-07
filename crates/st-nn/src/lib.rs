@@ -48,6 +48,7 @@ pub mod mixed_precision;
 pub mod module;
 pub mod optim;
 pub mod plan;
+pub mod resident;
 pub mod roundtable;
 pub mod schedule;
 pub mod trainer;

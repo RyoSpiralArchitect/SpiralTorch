@@ -9,9 +9,13 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 st-logic = { path = "../st-logic" }
 st-core = { path = "../st-core", default-features = false }
-st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"] }
 st-frac = { path = "../st-frac" }
 ndarray = "0.15"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Preserve native Faer acceleration without importing its threadpool into WASM.
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

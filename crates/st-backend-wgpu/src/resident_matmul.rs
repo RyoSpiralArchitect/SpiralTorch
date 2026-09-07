@@ -111,7 +111,7 @@ impl MatmulShape {
         ]
     }
 
-    fn validate(
+    pub(crate) fn validate(
         self,
         limits: &wgpu::Limits,
         tile: MatmulTile,

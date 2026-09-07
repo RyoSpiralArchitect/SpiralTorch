@@ -3305,12 +3305,15 @@ dependencies = [
  "serde",
  "serde_json",
  "spiral-config",
+ "st-backend-wgpu",
  "st-core",
  "st-frac",
  "st-tensor",
  "st-text",
  "tempfile",
  "thiserror 2.0.17",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

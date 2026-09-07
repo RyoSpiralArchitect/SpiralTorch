@@ -17,13 +17,14 @@ psychoid = ["st-core/psychoid"]
 collapse = ["psi", "st-core/collapse"]
 golden = ["st-core/golden"]
 kdsl = ["st-core/kdsl"]
-wgpu = ["st-core/wgpu-rt", "st-tensor/wgpu"]
+wgpu = ["st-core/wgpu-rt", "st-tensor/wgpu", "dep:st-backend-wgpu"]
 cuda = ["st-core/cuda", "st-tensor/cuda"]
 hip = ["st-core/hip", "st-tensor/hip"]
 selfsup = []
 
 [dependencies]
-st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
+st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"] }
 st-core = { path = "../st-core", default-features = false }
 st-frac = { path = "../st-frac" }
 st-text = { path = "../st-text" }
@@ -39,11 +40,28 @@ thiserror = "2"
 num-complex = "0.4"
 nalgebra = "0.32"
 
-[dev-dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Preserve native Faer acceleration without importing its threadpool into WASM.
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
+
+[[example]]
+name = "resident_mlp"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_browser"
+crate-type = ["cdylib"]
+required-features = ["wgpu"]
 
 [[example]]
 name = "ecosystem_integration_demo"

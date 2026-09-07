@@ -108,6 +108,12 @@ impl Gelu {
 }
 
 impl Module for Gelu {
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        Ok(vec![crate::resident::InferenceOp::Gelu])
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         validate_finite_tensor("gelu_input", input)?;
