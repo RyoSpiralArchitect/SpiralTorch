@@ -69,6 +69,63 @@ pub fn training_dense_matmul_source(
     Ok(source)
 }
 
+/// Attributes known by the resident training plan, not runtime routing policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrainingMatmulKind {
+    Forward { gelu: bool },
+    WeightGradient,
+    InputGradient,
+}
+
+impl TrainingMatmulKind {
+    pub(crate) fn flags(self) -> u32 {
+        match self {
+            Self::Forward { gelu } => 1 | if gelu { 4 } else { 0 },
+            Self::WeightGradient => 64,
+            Self::InputGradient => 0,
+        }
+    }
+
+    pub(crate) fn validation_mask(self) -> u32 {
+        match self {
+            Self::Forward { .. } => 0,
+            Self::WeightGradient => 256,
+            Self::InputGradient => 512,
+        }
+    }
+}
+
+/// Specialize only resident training. The public dynamic-flags generator and
+/// canonical tile loads remain unchanged for host tensors and other clients.
+pub(crate) fn training_dense_stage_source(
+    tile: [u32; 3],
+    kernel: MatmulKernel,
+    accumulation: MatmulAccumulation,
+    kind: TrainingMatmulKind,
+) -> Result<String, &'static str> {
+    let mut source = training_dense_matmul_source(
+        tile,
+        kernel,
+        accumulation,
+        matches!(kind, TrainingMatmulKind::Forward { .. }),
+        kind == TrainingMatmulKind::InputGradient,
+    )?;
+    for (field, value) in [
+        ("params.flags", format!("{}u", kind.flags())),
+        (
+            "params.validation_mask",
+            format!("{}u", kind.validation_mask()),
+        ),
+        ("params.output_scale", "1.0".to_owned()),
+    ] {
+        if !source.contains(field) {
+            return Err("missing canonical training stage attribute");
+        }
+        source = source.replace(field, &value);
+    }
+    Ok(source)
+}
+
 /// Accumulation policy is independent of the output tile and thread geometry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum MatmulAccumulation {

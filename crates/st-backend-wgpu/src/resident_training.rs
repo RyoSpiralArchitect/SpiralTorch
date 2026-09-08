@@ -5,13 +5,15 @@ use crate::{
     resident_dense::{self, DenseActivation, DenseError, DenseLayer, Uniforms},
     resident_matmul::{MatmulAccumulation, MatmulError, MatmulKernel, MatmulShape, MatmulTile},
     runtime::{self, Shared, WgpuContext, WgpuRuntime, WgpuRuntimeError},
-    shader_sources::training_dense_matmul_source,
+    shader_sources::{training_dense_stage_source, TrainingMatmulKind},
 };
 use bytemuck::{Pod, Zeroable};
 use st_kernel_contracts::layout::NdLayout;
 use thiserror::Error;
 
 mod readback;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod stage_tests;
 pub use readback::{
     LayerGradient, ParameterReadback, StepReadback, TrainingState, TrainingStateReadback,
 };
@@ -121,12 +123,15 @@ fn groups(len: usize, limits: &wgpu::Limits) -> Result<[u32; 3], TrainingError> 
     Ok([x, y, 1])
 }
 
+struct MatrixPipeline {
+    pipeline: Shared<wgpu::ComputePipeline>,
+    kind: TrainingMatmulKind,
+}
+
 struct MatrixPass<'a> {
     shape: MatmulShape,
     tile: MatmulTile,
-    flags: u32,
     stage: u32,
-    mask: u32,
     operands: [&'a wgpu::Buffer; 6],
     validation: &'a wgpu::Buffer,
     tape: &'a wgpu::Buffer,
@@ -135,15 +140,13 @@ struct MatrixPass<'a> {
 fn matrix_pass(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    pipeline: &Shared<wgpu::ComputePipeline>,
+    pipeline: &MatrixPipeline,
     descriptor: MatrixPass<'_>,
 ) -> Result<Pass, TrainingError> {
     let MatrixPass {
         shape,
         tile,
-        flags,
         stage,
-        mask,
         operands,
         validation,
         tape,
@@ -153,10 +156,10 @@ fn matrix_pass(
         rows: rows as u32,
         cols: cols as u32,
         inner: inner as u32,
-        flags,
+        flags: pipeline.kind.flags(),
         output_scale: 1.,
         validation_index: stage,
-        padding: [mask, 0],
+        padding: [pipeline.kind.validation_mask(), 0],
     };
     let uniform = runtime::upload_slice(
         device,
@@ -177,7 +180,7 @@ fn matrix_pass(
     ];
     let [tm, tn, _] = tile.dimensions();
     Ok(Pass {
-        pipeline: pipeline.clone(),
+        pipeline: pipeline.pipeline.clone(),
         binding: binding(device, layout, &buffers),
         groups: [(cols as u32).div_ceil(tn), (rows as u32).div_ceil(tm), 1],
     })
@@ -292,24 +295,29 @@ impl ResidentDenseTraining {
         let unused_out = empty("training.unused_out", 1)?;
         let unused_aux = empty("training.unused_aux", 1)?;
         let matrix_layout = resident_dense::dense_layout(device, true);
-        let matrix = |save, transpose| -> Result<Shared<wgpu::ComputePipeline>, TrainingError> {
-            let source = training_dense_matmul_source(
-                tile.dimensions(),
-                kernel,
-                accumulation,
-                save,
-                transpose,
-            )
-            .map_err(TrainingError::Shader)?;
-            Ok(Shared::new(resident_dense::dense_pipeline(
-                device,
-                &matrix_layout,
-                source,
-            )))
+        let matrix = |kind| -> Result<MatrixPipeline, TrainingError> {
+            let source = training_dense_stage_source(tile.dimensions(), kernel, accumulation, kind)
+                .map_err(TrainingError::Shader)?;
+            Ok(MatrixPipeline {
+                pipeline: Shared::new(resident_dense::dense_pipeline(
+                    device,
+                    &matrix_layout,
+                    source,
+                )),
+                kind,
+            })
         };
-        let forward = matrix(true, false)?;
-        let dw = matrix(false, false)?;
-        let dx = matrix(false, true)?;
+        // Compile each required activation once, shared by all matching stages.
+        let mut forward = [None, None];
+        for layer in layers {
+            let gelu = layer.activation == DenseActivation::Gelu;
+            let slot = &mut forward[usize::from(gelu)];
+            if slot.is_none() {
+                *slot = Some(matrix(TrainingMatmulKind::Forward { gelu })?);
+            }
+        }
+        let dw = matrix(TrainingMatmulKind::WeightGradient)?;
+        let dx = matrix(TrainingMatmulKind::InputGradient)?;
         let entries: Vec<_> = (0..9)
             .map(|i| wgpu::BindGroupLayoutEntry {
                 binding: i,
@@ -405,17 +413,13 @@ impl ResidentDenseTraining {
             passes.push(matrix_pass(
                 device,
                 &matrix_layout,
-                &forward,
+                forward[usize::from(layers[i].activation == DenseActivation::Gelu)]
+                    .as_ref()
+                    .unwrap(),
                 MatrixPass {
                     shape,
                     tile,
-                    flags: 1 | if layers[i].activation == DenseActivation::Gelu {
-                        4
-                    } else {
-                        0
-                    },
                     stage: i as u32,
-                    mask: 0,
                     operands: [
                         &activations[i],
                         &weights[i],
@@ -483,9 +487,7 @@ impl ResidentDenseTraining {
                 MatrixPass {
                     shape: MatmulShape::new(k, r, n)?,
                     tile,
-                    flags: 64,
                     stage: i as u32,
-                    mask: 256,
                     operands: [
                         &activations[i],
                         &deltas[i],
@@ -518,9 +520,7 @@ impl ResidentDenseTraining {
                 MatrixPass {
                     shape: MatmulShape::new(r, n, k)?,
                     tile,
-                    flags: 0,
                     stage: i as u32,
-                    mask: 512,
                     operands: [
                         &deltas[i],
                         &weights[i],
@@ -750,6 +750,7 @@ impl ResidentDenseTraining {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shader_sources::training_dense_matmul_source;
 
     #[test]
     fn only_measured_metal_coalesces_training_dispatches() {
@@ -804,6 +805,60 @@ mod tests {
                         source.contains("rhs_packed[col * params.inner + k]"),
                         transpose
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn static_training_attributes_preserve_the_public_dynamic_contract() {
+        for (kind, flags, mask) in [
+            (TrainingMatmulKind::Forward { gelu: false }, 1, 0),
+            (TrainingMatmulKind::Forward { gelu: true }, 5, 0),
+            (TrainingMatmulKind::WeightGradient, 64, 256),
+            (TrainingMatmulKind::InputGradient, 0, 512),
+        ] {
+            assert_eq!(kind.flags(), flags);
+            assert_eq!(kind.validation_mask(), mask);
+            for tile in [[8, 8, 16], [4, 16, 8], [16, 4, 32]] {
+                for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+                    for accumulation in [
+                        MatmulAccumulation::Sequential,
+                        MatmulAccumulation::Tiled,
+                        MatmulAccumulation::Compensated,
+                    ] {
+                        let save = matches!(kind, TrainingMatmulKind::Forward { .. });
+                        let transpose = kind == TrainingMatmulKind::InputGradient;
+                        let dynamic = training_dense_matmul_source(
+                            tile,
+                            kernel,
+                            accumulation,
+                            save,
+                            transpose,
+                        )
+                        .unwrap();
+                        let specialized =
+                            training_dense_stage_source(tile, kernel, accumulation, kind).unwrap();
+                        validate(&specialized);
+                        for field in [
+                            "params.flags",
+                            "params.validation_mask",
+                            "params.output_scale",
+                        ] {
+                            assert!(dynamic.contains(field));
+                            assert!(!specialized.contains(field));
+                        }
+                        assert_eq!(specialized.contains("preactivation[index] = value"), save);
+                        assert_eq!(
+                            specialized.contains("rhs_packed[col * params.inner + k]"),
+                            transpose
+                        );
+                        assert_eq!(
+                            specialized.matches("record_nonfinite(").count(),
+                            dynamic.matches("record_nonfinite(").count()
+                        );
+                        assert!(specialized.contains(&format!("flag | {mask}u")));
+                    }
                 }
             }
         }
