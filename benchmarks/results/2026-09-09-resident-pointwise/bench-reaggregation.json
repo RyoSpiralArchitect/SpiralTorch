@@ -1,0 +1,150 @@
+{
+  "status": "passed",
+  "cases": [
+    {
+      "config": {
+        "shape": [
+          8,
+          16,
+          64
+        ],
+        "seed": 17,
+        "iterations": 20
+      },
+      "median_ms": {
+        "sequential": 7.013375,
+        "batched": 5.3120625,
+        "fused": 0.403458,
+        "torch": 1.1601880105445161
+      },
+      "rust_over_torch": {
+        "sequential": 6.045033163813149,
+        "batched": 4.578622129965699,
+        "fused": 0.3477522576798939
+      },
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          8,
+          16,
+          64
+        ],
+        "seed": 29,
+        "iterations": 20
+      },
+      "median_ms": {
+        "sequential": 6.3958960000000005,
+        "batched": 5.576729,
+        "fused": 0.36402049999999997,
+        "torch": 1.0422289924463257
+      },
+      "rust_over_torch": {
+        "sequential": 6.136747342815246,
+        "batched": 5.350771318412733,
+        "fused": 0.3492711320048476
+      },
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          8,
+          16,
+          64
+        ],
+        "seed": 43,
+        "iterations": 20
+      },
+      "median_ms": {
+        "sequential": 5.4353745,
+        "batched": 5.3709375,
+        "fused": 0.4329995,
+        "torch": 0.9929789957823232
+      },
+      "rust_over_torch": {
+        "sequential": 5.473806115825959,
+        "batched": 5.408913504528343,
+        "fused": 0.43606108672908966
+      },
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          16,
+          32,
+          128
+        ],
+        "seed": 17,
+        "iterations": 20
+      },
+      "median_ms": {
+        "sequential": 6.480625,
+        "batched": 5.6739584999999995,
+        "fused": 0.5293545,
+        "torch": 1.6269790066871792
+      },
+      "rust_over_torch": {
+        "sequential": 3.9832259502817515,
+        "batched": 3.4874196143152427,
+        "fused": 0.32536037516418886
+      },
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          16,
+          32,
+          128
+        ],
+        "seed": 29,
+        "iterations": 20
+      },
+      "median_ms": {
+        "sequential": 6.751479,
+        "batched": 6.624521,
+        "fused": 0.5556460000000001,
+        "torch": 1.233479502843693
+      },
+      "rust_over_torch": {
+        "sequential": 5.473523463044971,
+        "batched": 5.3705967425706485,
+        "fused": 0.4504703959157818
+      },
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          16,
+          32,
+          128
+        ],
+        "seed": 43,
+        "iterations": 20
+      },
+      "median_ms": {
+        "sequential": 6.788520999999999,
+        "batched": 6.0515005,
+        "fused": 0.571375,
+        "torch": 1.2174580042483285
+      },
+      "rust_over_torch": {
+        "sequential": 5.57597960365894,
+        "batched": 4.970603075328468,
+        "fused": 0.4693180364383681
+      },
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    }
+  ],
+  "boundary": "full record reaggregation and capture agreement, not independent GPU re-execution or absent-binary attestation"
+}

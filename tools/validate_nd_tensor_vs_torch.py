@@ -193,6 +193,8 @@ def validate(paths, devices, output, source_ref="HEAD"):
                                 "device": device,
                                 "shape": shape,
                                 "seed": case["seed"],
+                                "iterations": case["iterations"],
+                                "pointwise_mode": case.get("pointwise_mode") or "legacy",
                                 "max_abs_error": error,
                             }
                         )

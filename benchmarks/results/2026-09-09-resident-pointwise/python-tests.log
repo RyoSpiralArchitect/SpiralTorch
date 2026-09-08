@@ -1,0 +1,16 @@
+test_fixed_bounded_recipes (test_nd_tensor_bench.Admission.test_fixed_bounded_recipes) ... ok
+test_fixture_binds_all_inputs_and_identity (test_nd_tensor_bench.Admission.test_fixture_binds_all_inputs_and_identity) ... ok
+test_sample_rejects_bad_timings_guards_shapes_and_captures (test_nd_tensor_bench.Admission.test_sample_rejects_bad_timings_guards_shapes_and_captures) ... ok
+test_pointwise_reaggregation_checks_each_lane_and_execution (test_nd_tensor_bench.Reaggregation.test_pointwise_reaggregation_checks_each_lane_and_execution) ... ok
+test_recomputes_all_intervals_without_selection (test_nd_tensor_bench.Reaggregation.test_recomputes_all_intervals_without_selection) ... ok
+test_rejects_changed_medians_and_captures (test_nd_tensor_bench.Reaggregation.test_rejects_changed_medians_and_captures) ... ok
+test_cleanup_kills_worker_that_ignores_termination (test_nd_tensor_bench.WorkerDeadlines.test_cleanup_kills_worker_that_ignores_termination) ... ok
+test_complete_response_and_clean_exit (test_nd_tensor_bench.WorkerDeadlines.test_complete_response_and_clean_exit) ... ok
+test_deadline_retains_error_report_and_never_restarts (test_nd_tensor_bench.WorkerDeadlines.test_deadline_retains_error_report_and_never_restarts) ... ok
+test_eof_oversize_and_exit_hang_are_bounded (test_nd_tensor_bench.WorkerDeadlines.test_eof_oversize_and_exit_hang_are_bounded) ... ok
+test_silent_and_partial_responses_have_deadlines_without_restart (test_nd_tensor_bench.WorkerDeadlines.test_silent_and_partial_responses_have_deadlines_without_restart) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 3.522s
+
+OK

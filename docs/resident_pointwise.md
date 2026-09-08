@@ -10,6 +10,9 @@ This is explicit lowering, not an automatic optimizer for arbitrary
 ordinary immutable `NdTensor`, ready for `set_input_tensor`,
 `upload_batch_tensors`, or further resident operations.
 
+The [first complete four-lane record](../benchmarks/results/2026-09-09-resident-pointwise/README.md)
+retains native M4 timings, native/browser NN fixtures, and independent Torch replay.
+
 ## Rust Usage
 
 Enable `st-tensor/wgpu_dense` for WGPU. The same API also evaluates host tensors
