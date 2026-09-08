@@ -3,6 +3,7 @@
 
 use crate::{
     resident_matmul::{MatmulError, MatmulShape, MatmulTile},
+    resident_tensor::{ResidentTensor, TensorDevice, TensorError},
     runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError},
     shader_sources::{checked_dense_matmul_source, MatmulAccumulation, MatmulKernel},
 };
@@ -28,6 +29,8 @@ pub struct DenseLayer {
 
 #[derive(Debug, Error)]
 pub enum DenseError {
+    #[error(transparent)]
+    Tensor(#[from] TensorError),
     #[error("dense inference requires a nonempty contiguous last-axis layout at offset zero")]
     InvalidLayout,
     #[error("dense chain requires at least one layer and u32-addressable stage count")]
@@ -176,6 +179,7 @@ pub struct ResidentDense {
     generation: u64,
     input_ready: bool,
     output_generation: Option<u64>,
+    input_source: Option<ResidentTensor>,
     // Retire all resources before the last owning device handle.
     runtime: WgpuRuntime,
 }
@@ -292,6 +296,7 @@ impl ResidentDense {
             generation: 0,
             input_ready: false,
             output_generation: None,
+            input_source: None,
             runtime,
         })
     }
@@ -332,6 +337,36 @@ impl ResidentDense {
             bytemuck::cast_slice(values),
         );
         self.generation = generation;
+        self.input_source = None;
+        self.input_ready = true;
+        self.output_generation = None;
+        Ok(())
+    }
+
+    /// Copy a logical N-D view on-device, retaining its deferred finite guard.
+    /// There is no host transfer; shape/device failures leave the old input intact.
+    pub fn set_input_tensor(&mut self, input: &ResidentTensor) -> Result<(), DenseError> {
+        input.require_context(self.runtime.context())?;
+        if input.layout().shape() != self.input_layout.shape() {
+            return Err(DenseError::InvalidLayout);
+        }
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(DenseError::GenerationOverflow)?;
+        let input = input.contiguous()?;
+        let context = self.runtime.context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(
+            input.values(),
+            0,
+            &self.buffers[0],
+            0,
+            self.input_layout.len() as u64 * 4,
+        );
+        context.queue().submit(Some(encoder.finish()));
+        self.input_source = Some(input);
+        self.generation = generation;
         self.input_ready = true;
         self.output_generation = None;
         Ok(())
@@ -345,6 +380,9 @@ impl ResidentDense {
         let context = self.runtime.context();
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&self.validation, 0, None);
+        if let Some(input) = &self.input_source {
+            encoder.copy_buffer_to_buffer(input.flags(), 0, &self.validation, 0, 4);
+        }
         let [tm, tn, _] = self.tile.dimensions();
         for (shape, binding) in self.shapes.iter().zip(&self.bindings) {
             let (rows, _, cols) = shape.dimensions();
@@ -386,6 +424,25 @@ impl ResidentDense {
             generation: self.generation,
             context: context.clone(),
         })
+    }
+
+    /// Immutable GPU output for further N-D operations, including all stage guards.
+    pub fn tensor_snapshot(&self, device: &TensorDevice) -> Result<ResidentTensor, DenseError> {
+        if self.output_generation != Some(self.generation) {
+            return Err(DenseError::StaleOutput);
+        }
+        if !device
+            .runtime()
+            .context()
+            .shares_handles_with(self.runtime.context())
+        {
+            return Err(TensorError::DeviceMismatch.into());
+        }
+        Ok(device.capture(
+            &self.output_layout,
+            self.buffers.last().unwrap(),
+            &self.validation,
+        )?)
     }
 }
 

@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Rust N-D tensor and NN integration</title>
+<pre id="result" data-status="running">Running resident N-D tensor checks</pre>
+<script type="module">
+import init, {run_resident_nd_tensor_fixture} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU fallback");
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) throw Error("No browser WebGPU adapter");
+  const fallback = adapter.info?.isFallbackAdapter ?? adapter.isFallbackAdapter ?? null;
+  if (fallback === true) throw Error("Software adapter is not hardware GPU evidence");
+  await init();
+  const report = JSON.parse(await run_resident_nd_tensor_fixture());
+  report.browser_adapter_probe = {
+    vendor: adapter.info?.vendor ?? null, architecture: adapter.info?.architecture ?? null,
+    is_fallback_adapter: fallback,
+    boundary: "Separate adapter observation, not attestation of the Rust runtime device"
+  };
+  if (report.status !== "passed" || report.cases?.length !== 3 || report.guards?.input_and_target_rejections !== 4)
+    throw Error("Incomplete N-D fixture");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

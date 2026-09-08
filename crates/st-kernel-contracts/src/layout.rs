@@ -12,6 +12,8 @@ pub enum NdLayoutError {
     InvalidSlice,
     #[error("reshape requires contiguous storage and the same element count")]
     InvalidReshape,
+    #[error("dimensions cannot be broadcast to the requested shape")]
+    InvalidBroadcast,
 }
 
 /// Element strides, not byte strides. Views never allocate or move tensor data.
@@ -125,6 +127,41 @@ impl NdLayout {
         Ok(next)
     }
 
+    /// Read-only expansion. Expanded dimensions have zero element stride.
+    pub fn broadcast_to(&self, shape: &[usize]) -> Result<Self, NdLayoutError> {
+        if shape.len() < self.rank() {
+            return Err(NdLayoutError::InvalidBroadcast);
+        }
+        let mut next = Self::contiguous(shape)?;
+        next.strides.fill(0);
+        next.offset = self.offset;
+        let leading = shape.len() - self.rank();
+        for axis in 0..self.rank() {
+            if self.shape[axis] == shape[leading + axis] {
+                next.strides[leading + axis] = self.strides[axis];
+            } else if self.shape[axis] != 1 {
+                return Err(NdLayoutError::InvalidBroadcast);
+            }
+        }
+        Ok(next)
+    }
+
+    /// Exclusive upper storage bound, including offsets and gaps, not logical length.
+    pub fn required_storage_len(&self) -> Result<usize, NdLayoutError> {
+        if self.is_empty() {
+            return Ok(0);
+        }
+        self.shape
+            .iter()
+            .zip(&self.strides)
+            .try_fold(self.offset, |end, (&n, &s)| {
+                end.checked_add((n - 1).checked_mul(s).ok_or(NdLayoutError::Overflow)?)
+                    .ok_or(NdLayoutError::Overflow)
+            })?
+            .checked_add(1)
+            .ok_or(NdLayoutError::Overflow)
+    }
+
     /// Resolve a row-major logical index into the original storage.
     pub fn storage_index(&self, mut logical: usize) -> Option<usize> {
         if logical >= self.len {
@@ -140,9 +177,53 @@ impl NdLayout {
     }
 }
 
+/// Right-aligned broadcasting, including scalar and zero-sized axes.
+pub fn broadcast_shape(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdLayoutError> {
+    let rank = lhs.len().max(rhs.len());
+    let mut shape = vec![1; rank];
+    for (axis, out) in shape.iter_mut().enumerate() {
+        let a = axis.checked_sub(rank - lhs.len()).map_or(1, |i| lhs[i]);
+        let b = axis.checked_sub(rank - rhs.len()).map_or(1, |i| rhs[i]);
+        *out = if a == b || b == 1 {
+            a
+        } else if a == 1 {
+            b
+        } else {
+            return Err(NdLayoutError::InvalidBroadcast);
+        };
+    }
+    NdLayout::contiguous(&shape)?;
+    Ok(shape)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn broadcasting_uses_zero_strides_and_preserves_storage_bounds() {
+        let base = NdLayout::contiguous(&[2, 1, 3]).unwrap();
+        let view = base
+            .narrow(0, 1, 1)
+            .unwrap()
+            .broadcast_to(&[4, 5, 3])
+            .unwrap();
+        assert_eq!(view.strides(), &[0, 0, 1]);
+        assert_eq!(view.required_storage_len().unwrap(), 6);
+        for i in 0..view.len() {
+            assert_eq!(view.storage_index(i), Some(3 + i % 3));
+        }
+        assert!(!view.is_contiguous());
+        assert!(view.reshape(&[60]).is_err());
+        assert_eq!(broadcast_shape(&[2, 1, 3], &[5, 1]).unwrap(), [2, 5, 3]);
+        assert_eq!(broadcast_shape(&[0, 3], &[1, 3]).unwrap(), [0, 3]);
+        assert_eq!(broadcast_shape(&[], &[0, 3]).unwrap(), [0, 3]);
+        assert!(broadcast_shape(&[2, 3], &[4, 3]).is_err());
+        assert!(base.broadcast_to(&[1, 3]).is_err());
+        let empty = base.broadcast_to(&[2, 0, 3]).unwrap();
+        assert_eq!(empty.required_storage_len().unwrap(), 0);
+        assert_eq!(empty.storage_index(0), None);
+    }
 
     #[test]
     fn scalar_empty_and_overflow() {

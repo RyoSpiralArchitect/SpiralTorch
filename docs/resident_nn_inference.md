@@ -9,6 +9,10 @@ For explicit GPU-resident MSE/VJP/SGD from the same Rust module graph, see
 [resident training](resident_nn_training.md). The examples below use the
 inference subset; the same plan also exposes explicit Python/WASM training clients.
 
+Rust callers can connect [resident N-D tensors](resident_nd_tensor.md) with
+`set_input_tensor` and `tensor_snapshot`: preprocessing, NN execution and
+postprocessing stay on the GPU, with explicit device copies and inherited guards.
+
 ```text
 Sequential(Linear -> Gelu -> Linear)
                   |

@@ -62,6 +62,19 @@ name = "resident_mlp"
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_nd_tensor"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_nd_bench"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_nd_tensor_browser"
+crate-type = ["cdylib"]
+required-features = ["wgpu"]
+
+[[example]]
 name = "resident_browser"
 crate-type = ["cdylib"]
 required-features = ["wgpu"]
