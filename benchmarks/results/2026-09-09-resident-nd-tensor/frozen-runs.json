@@ -1,0 +1,67 @@
+{
+  "status": "passed",
+  "source": "6d9392be7fb355c277e8322d039aa2f1b481790c",
+  "steps": [
+    {
+      "name": "native-fixture",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/resident_nd_tensor"
+      ],
+      "returncode": 0,
+      "seconds": 1.1861888749990612
+    },
+    {
+      "name": "browser-fixture",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nd-tensor-v1/tools/test_resident_browser.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/wasm",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/browser-nd.json",
+        "",
+        "",
+        "",
+        "",
+        "nd-tensor"
+      ],
+      "returncode": 0,
+      "seconds": 1.1526728750031907
+    },
+    {
+      "name": "torch-numeric-replay",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nd-tensor-v1/tools/validate_nd_tensor_vs_torch.py",
+        "--reports",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/native-nd.json",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/browser-nd.json",
+        "--devices",
+        "cpu",
+        "mps",
+        "--source",
+        "6d9392be7fb355c277e8322d039aa2f1b481790c",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/torch-replay.json"
+      ],
+      "returncode": 0,
+      "seconds": 2.8483192499843426
+    },
+    {
+      "name": "torch-mps-benchmark",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nd-tensor-v1/tools/bench_nd_tensor_vs_torch.py",
+        "--binary",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/resident_nd_bench",
+        "--torch-device",
+        "mps",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/mps-bench.json"
+      ],
+      "returncode": 0,
+      "seconds": 2.5499210830021184
+    }
+  ]
+}

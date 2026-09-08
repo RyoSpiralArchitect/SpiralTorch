@@ -138,3 +138,9 @@ includes terminal host readback for both implementations. Rust checks every
 intermediate's validity; eager Torch does not, so the cost contracts differ.
 Keep failures and slower cases. One device and this bounded workload do not
 establish a general performance advantage or a training-quality improvement.
+
+The [first measured baseline](../benchmarks/results/2026-09-09-resident-nd-tensor/README.md)
+passes native/browser numeric and SGD replay, but this unfused 60-operation
+elementwise chain is still 3.4-5.3 times slower than eager Torch MPS on the
+tested M4. Full compressed records and a no-selection revalidator are included;
+GPU residency is not itself a measured speedup.

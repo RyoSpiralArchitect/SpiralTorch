@@ -1,0 +1,157 @@
+{
+  "schema": "spiraltorch.nd_tensor.torch_validation.v1",
+  "status": "passed",
+  "torch_version": "2.12.1",
+  "checks": [
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/native-nd.json",
+      "sha256": "34bc1ca02cc8639761009458f4fdc494882d9fc426161d75cde146c1592664b7",
+      "device": "cpu",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "seed": 17,
+      "max_abs_error": 1.862645149230957e-09
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/native-nd.json",
+      "sha256": "34bc1ca02cc8639761009458f4fdc494882d9fc426161d75cde146c1592664b7",
+      "device": "cpu",
+      "shape": [
+        3,
+        5,
+        7
+      ],
+      "seed": 29,
+      "max_abs_error": 1.4901161193847656e-08
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/native-nd.json",
+      "sha256": "34bc1ca02cc8639761009458f4fdc494882d9fc426161d75cde146c1592664b7",
+      "device": "cpu",
+      "shape": [
+        2,
+        4,
+        11
+      ],
+      "seed": 43,
+      "max_abs_error": 1.4901161193847656e-08
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/native-nd.json",
+      "sha256": "34bc1ca02cc8639761009458f4fdc494882d9fc426161d75cde146c1592664b7",
+      "device": "mps",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "seed": 17,
+      "max_abs_error": 9.313225746154785e-10
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/native-nd.json",
+      "sha256": "34bc1ca02cc8639761009458f4fdc494882d9fc426161d75cde146c1592664b7",
+      "device": "mps",
+      "shape": [
+        3,
+        5,
+        7
+      ],
+      "seed": 29,
+      "max_abs_error": 1.4901161193847656e-08
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/native-nd.json",
+      "sha256": "34bc1ca02cc8639761009458f4fdc494882d9fc426161d75cde146c1592664b7",
+      "device": "mps",
+      "shape": [
+        2,
+        4,
+        11
+      ],
+      "seed": 43,
+      "max_abs_error": 7.450580596923828e-09
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/browser-nd.json",
+      "sha256": "0aba2697af323345fa6dbcb170a04dbea2bc94189d0d3ed77482fa304be9299a",
+      "device": "cpu",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "seed": 17,
+      "max_abs_error": 1.862645149230957e-09
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/browser-nd.json",
+      "sha256": "0aba2697af323345fa6dbcb170a04dbea2bc94189d0d3ed77482fa304be9299a",
+      "device": "cpu",
+      "shape": [
+        3,
+        5,
+        7
+      ],
+      "seed": 29,
+      "max_abs_error": 1.4901161193847656e-08
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/browser-nd.json",
+      "sha256": "0aba2697af323345fa6dbcb170a04dbea2bc94189d0d3ed77482fa304be9299a",
+      "device": "cpu",
+      "shape": [
+        2,
+        4,
+        11
+      ],
+      "seed": 43,
+      "max_abs_error": 1.4901161193847656e-08
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/browser-nd.json",
+      "sha256": "0aba2697af323345fa6dbcb170a04dbea2bc94189d0d3ed77482fa304be9299a",
+      "device": "mps",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "seed": 17,
+      "max_abs_error": 9.313225746154785e-10
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/browser-nd.json",
+      "sha256": "0aba2697af323345fa6dbcb170a04dbea2bc94189d0d3ed77482fa304be9299a",
+      "device": "mps",
+      "shape": [
+        3,
+        5,
+        7
+      ],
+      "seed": 29,
+      "max_abs_error": 1.4901161193847656e-08
+    },
+    {
+      "source": "benchmarks/results/2026-09-09-resident-nd-tensor/browser-nd.json",
+      "sha256": "0aba2697af323345fa6dbcb170a04dbea2bc94189d0d3ed77482fa304be9299a",
+      "device": "mps",
+      "shape": [
+        2,
+        4,
+        11
+      ],
+      "seed": 43,
+      "max_abs_error": 7.450580596923828e-09
+    }
+  ],
+  "fallback_enabled": false,
+  "source": {
+    "commit": "6d9392be7fb355c277e8322d039aa2f1b481790c",
+    "tree": "82b1b14a8f5354911bcdf824dd794f9204cca2e6",
+    "tracked_dirty": false
+  }
+}

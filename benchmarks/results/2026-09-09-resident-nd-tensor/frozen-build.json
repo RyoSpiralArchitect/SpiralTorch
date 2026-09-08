@@ -1,0 +1,130 @@
+{
+  "status": "passed",
+  "source": "6d9392be7fb355c277e8322d039aa2f1b481790c",
+  "steps": [
+    {
+      "name": "frozen-format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "returncode": 0,
+      "seconds": 2.3051823749847244
+    },
+    {
+      "name": "frozen-native-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor",
+        "--example",
+        "resident_nd_bench"
+      ],
+      "returncode": 0,
+      "seconds": 70.65364779200172
+    },
+    {
+      "name": "frozen-wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--example",
+        "resident_nd_tensor_browser"
+      ],
+      "returncode": 0,
+      "seconds": 46.19184154100367
+    },
+    {
+      "name": "frozen-wasm-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "--target",
+        "web",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/wasm",
+        "--out-name",
+        "spiraltorch_wasm",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_nd_tensor_browser.wasm"
+      ],
+      "returncode": 0,
+      "seconds": 0.059582167014013976
+    }
+  ],
+  "products": {
+    "resident_nd_tensor": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/resident_nd_tensor",
+      "sha256": "ed25fafedfc25b71620d43f4848e63fb744ee84c9b4636dfb36f6f6232203dbd"
+    },
+    "resident_nd_bench": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/resident_nd_bench",
+      "sha256": "8aaf8544e3720415a4bed308864ddbd1da3f5ce92976233b3c1f36dc2803461a"
+    },
+    "wasm/spiraltorch_wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/wasm/spiraltorch_wasm.d.ts",
+      "sha256": "59e8b209bb353add88eabcb9e3f6a288cf28ffeda47087e678fe92f7a3bd123a"
+    },
+    "wasm/spiraltorch_wasm.js": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/wasm/spiraltorch_wasm.js",
+      "sha256": "17121d3c13b97ccb7b190028a093d642f587106b6483235aadb2852ad4487065"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/wasm/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "e96e29c5258825dfe194809fab9e54c0c98919377e5944b312d4f2cfba16dbc0"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nd-tensor-20260909/frozen/wasm/spiraltorch_wasm_bg.wasm",
+      "sha256": "c76a38d6df60e0413aead6aa2e8b736160de323cb15f0bc83eb5716962e2668d"
+    }
+  },
+  "native_identity": {
+    "build_fingerprint": "sha256:b9f00b6b10803b9b639ca196dd868c45532d99652da2d4f69c975a47c7ea34bb",
+    "manifest": {
+      "git": {
+        "commit": "6d9392be7fb355c277e8322d039aa2f1b481790c",
+        "describe": "v0.4.27-188-g6d9392be",
+        "dirty": false,
+        "tree": "82b1b14a8f5354911bcdf824dd794f9204cca2e6"
+      },
+      "host": "unknown-host",
+      "id": "Ryo-ST-ryospiralarchitect-2026-09-08T18:51:31.674Z-c8f0cf9d0a3941128061b460ab356fa2",
+      "pkg": {
+        "name": "st-core",
+        "version": "1.10.0"
+      },
+      "profile": "release",
+      "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "seed": "c8f0cf9d0a3941128061b460ab356fa2",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "triple": "aarch64-apple-darwin"
+      },
+      "timestamp": "2026-09-08T18:51:31.674Z",
+      "user": "ryospiralarchitect"
+    },
+    "schema": "spiraltorch.native_build_identity.v1"
+  }
+}

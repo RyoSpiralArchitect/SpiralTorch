@@ -13,6 +13,13 @@ spec = importlib.util.spec_from_file_location(
 bench = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bench)
 
+spec = importlib.util.spec_from_file_location(
+    "nd_validation",
+    Path(__file__).resolve().parents[1] / "tools/validate_nd_tensor_bench.py",
+)
+validation = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(validation)
+
 
 class Admission(unittest.TestCase):
     def test_fixed_bounded_recipes(self):
@@ -78,6 +85,84 @@ class Admission(unittest.TestCase):
         uncaptured = copy.copy(valid)
         uncaptured["values"] = None
         bench.validate_sample(uncaptured, [2, 3, 4], False, True)
+
+
+class Reaggregation(unittest.TestCase):
+    def row(self):
+        config = bench.recipes()[0]
+        shape, seed = config["shape"], config["seed"]
+        fixture = dict(
+            config,
+            schema="spiraltorch.nd_bench.fixture.v1",
+            identity={},
+            gain=0.75,
+            input=[
+                ((i * 13 + seed) % 61) / 64.0 - 0.46875 for i in range(math.prod(shape))
+            ],
+            bias=[(i % 5) / 32.0 - 0.0625 for i in range(shape[2])],
+        )
+        samples = []
+        out = [shape[1] - 1, shape[0], shape[2]]
+        for iteration in range(10):
+            samples.append(
+                dict(
+                    iteration=iteration,
+                    warmup=iteration < 2,
+                    order=(
+                        ["rust", "torch"]
+                        if (iteration + 1) % 2 == 0
+                        else ["torch", "rust"]
+                    ),
+                )
+            )
+            for lane, elapsed in (("rust", 2.0), ("torch", 1.0)):
+                samples[-1][lane] = dict(
+                    shape=out,
+                    elapsed_ms=elapsed,
+                    finite_checked=True,
+                    values=[0.0] * math.prod(out) if iteration == 2 else None,
+                )
+        return dict(
+            fixture=fixture,
+            intervals=samples,
+            max_abs_error=0.0,
+            median_ms=dict(rust=2.0, torch=1.0),
+            torch_over_rust=0.5,
+        )
+
+    def test_recomputes_all_intervals_without_selection(self):
+        row = self.row()
+        result = validation.validate_case(row, bench.recipes()[0], {}, 0)
+        self.assertEqual(result["rust_over_torch"], 2.0)
+        self.assertEqual(result["retained_per_lane"], 8)
+        for key, value in (
+            ("iteration", 2),
+            ("warmup", False),
+            ("warmup", 1),
+            ("order", ["rust", "torch"]),
+        ):
+            bad = copy.deepcopy(row)
+            bad["intervals"][0][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validation.validate_case(bad, bench.recipes()[0], {}, 0)
+        row["intervals"].pop()
+        with self.assertRaises(ValueError):
+            validation.validate_case(row, bench.recipes()[0], {}, 0)
+
+    def test_rejects_changed_medians_and_captures(self):
+        for key, value in (
+            ("median_ms", dict(rust=1.0, torch=1.0)),
+            ("torch_over_rust", 2.0),
+            ("max_abs_error", 1.0),
+        ):
+            row = self.row()
+            row[key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validation.validate_case(row, bench.recipes()[0], {}, 0)
+        row = self.row()
+        row["intervals"][2]["rust"]["values"][0] = 1.0
+        with self.assertRaises(ValueError):
+            validation.validate_case(row, bench.recipes()[0], {}, 0)
 
 
 if __name__ == "__main__":

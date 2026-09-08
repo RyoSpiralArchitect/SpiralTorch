@@ -1,0 +1,296 @@
+{
+  "runtime_tests_enabled": true,
+  "checks": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "returncode": 0,
+      "seconds": 2.1095810830011033
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-kernel-contracts"
+      ],
+      "returncode": 0,
+      "seconds": 2.207136040990008
+    },
+    {
+      "name": "contracts-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-kernel-contracts",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 0.5399220410035923
+    },
+    {
+      "name": "tensor-cpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu",
+        "--lib"
+      ],
+      "returncode": 0,
+      "seconds": 2.3912900839932263
+    },
+    {
+      "name": "tensor-cpu-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 3.5648588750045747
+    },
+    {
+      "name": "backend",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "seconds": 17.137630750017706
+    },
+    {
+      "name": "backend-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 0.17919133399846032
+    },
+    {
+      "name": "tensor-wgpu-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 2.595935332996305
+    },
+    {
+      "name": "wasm-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "-p",
+        "st-tensor",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--no-default-features",
+        "--features",
+        "st-tensor/cpu,st-tensor/wgpu_dense",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 2.72696141700726
+    },
+    {
+      "name": "nn",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--lib",
+        "--test",
+        "resident_inference",
+        "--test",
+        "resident_training",
+        "--test",
+        "resident_nd_tensor",
+        "--test",
+        "training_gradient_reduction",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "seconds": 31.156572124978993
+    },
+    {
+      "name": "nn-example-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor",
+        "--example",
+        "resident_nd_bench",
+        "--test",
+        "resident_nd_tensor",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 101,
+      "seconds": 22.38098675000947
+    },
+    {
+      "name": "wasm-example",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor_browser",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 101,
+      "seconds": 17.90602691701497
+    },
+    {
+      "name": "python-binding",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "bindings/st-py/Cargo.toml"
+      ],
+      "returncode": 0,
+      "seconds": 29.992285582993645
+    },
+    {
+      "name": "wasm-binding",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "-p",
+        "spiraltorch-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--features",
+        "webgpu"
+      ],
+      "returncode": 0,
+      "seconds": 20.14044908300275
+    },
+    {
+      "name": "browser-runner",
+      "command": [
+        "node",
+        "--check",
+        "tools/test_resident_browser.cjs"
+      ],
+      "returncode": 0,
+      "seconds": 0.028507084003649652
+    }
+  ],
+  "status": "failed",
+  "boundary": "Pre-freeze full local test run. Both attempted -D warnings st-nn checks hit 22 existing lib warnings in unchanged source; later ordinary example clippy passed after fixing two new fixture warnings. No baseline lint suppression or unrelated cleanup. All raw logs retained locally.",
+  "followups": [
+    {
+      "log": "recheck-wasm-clippy.log",
+      "outcome": "passed",
+      "sha256": "7974b68dac37ce7c623d50cc2afc0d5159f1730e00752088e52a73bfe51aea44"
+    },
+    {
+      "log": "final-nn-clippy.log",
+      "outcome": "passed",
+      "sha256": "2dd1863e7543ad23e096238fc10a2634568b4857c5dc44d64f74a761fe14426f"
+    },
+    {
+      "log": "strict-doc.log",
+      "outcome": "passed",
+      "sha256": "455a057f6d75e11ca62b6b8b95ac4c6072e0fc988b16537f234b6072cd434351"
+    }
+  ]
+}
