@@ -11950,16 +11950,7 @@ pub fn gelu_derivative(value: f32) -> PureResult<f32> {
 }
 
 fn gelu_prime(x: f32) -> f32 {
-    const SQRT_2_OVER_PI: f32 = 0.797_884_6;
-    const KAPPA: f32 = 0.044_715;
-    // The tanh approximation is saturated here; avoid infinity times zero.
-    if x.abs() >= 10.0 {
-        return if x > 0.0 { 1.0 } else { 0.0 };
-    }
-    let x2 = x * x;
-    let inner = SQRT_2_OVER_PI * (x + KAPPA * x * x2);
-    let t = inner.tanh();
-    0.5 * (1.0 + t) + 0.5 * x * (1.0 - t * t) * SQRT_2_OVER_PI * (1.0 + 3.0 * KAPPA * x2)
+    st_kernel_contracts::elementwise::gelu_derivative(x).unwrap_or(f32::NAN)
 }
 
 fn add_bias_gelu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {

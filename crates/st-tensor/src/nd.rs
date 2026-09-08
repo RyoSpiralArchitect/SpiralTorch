@@ -12,6 +12,9 @@ pub use st_kernel_contracts::pointwise::{
 use st_kernel_contracts::{elementwise::ElementwiseOp, layout::broadcast_shape};
 use thiserror::Error;
 
+mod vjp;
+pub use vjp::NdPointwiseVjpPlan;
+
 #[derive(Debug, Error)]
 pub enum NdTensorError {
     #[error(transparent)]
@@ -62,6 +65,10 @@ pub struct NdPointwisePlan {
 }
 
 impl NdPointwisePlan {
+    /// Add reverse-mode kernels explicitly; forward-only preparation stays unchanged.
+    pub fn into_vjp(self) -> Result<NdPointwiseVjpPlan, NdTensorError> {
+        NdPointwiseVjpPlan::from_forward(self)
+    }
     pub fn new(chain: PointwiseChain, inputs: &[&NdTensor]) -> Result<Self, NdTensorError> {
         let layouts: Vec<_> = inputs.iter().map(|t| t.layout().clone()).collect();
         chain.validate_layouts(&layouts)?;

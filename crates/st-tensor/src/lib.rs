@@ -46,8 +46,8 @@ pub use execution_capability::{
 #[cfg(feature = "wgpu_dense")]
 pub use nd::WgpuTensorDevice;
 pub use nd::{
-    NdPointwisePlan, NdTensor, NdTensorError, PointwiseChain, PointwiseError, PointwiseExecution,
-    PointwiseStep,
+    NdPointwisePlan, NdPointwiseVjpPlan, NdTensor, NdTensorError, PointwiseChain, PointwiseError,
+    PointwiseExecution, PointwiseStep,
 };
 pub use st_kernel_contracts::elementwise::ElementwiseOp;
 pub use st_kernel_contracts::layout::{NdLayout, NdLayoutError};

@@ -99,3 +99,67 @@ samples rotate/reverse lane order; every raw interval and one full capture per
 lane are retained. Rust checks intermediate finiteness; eager Torch is not
 given matching guards. This is not a general speedup, browser timing, CUDA,
 `torch.compile`, or training-throughput claim.
+
+## Resident Reverse Mode
+
+`NdPointwisePlan::into_vjp()` opts into `NdPointwiseVjpPlan` preparation.
+`NdPointwiseVjpPlan::new(chain, inputs)` is the direct constructor.
+Forward-only plans do not compile backward shaders or allocate a tape.
+
+```rust
+use st_tensor::{NdPointwisePlan, NdTensor, NdTensorError, PointwiseExecution};
+
+fn forward_and_vjp(
+    forward: NdPointwisePlan,
+    inputs: &[&NdTensor],
+    cotangent: &NdTensor,
+) -> Result<(NdTensor, Vec<NdTensor>), NdTensorError> {
+    let plan = forward.into_vjp()?;
+    let output = plan.forward(inputs, PointwiseExecution::Fused)?;
+    let gradients = plan.vjp(inputs, cotangent)?;
+    Ok((output, gradients))
+}
+```
+
+The explicit cotangent has the output's exact shape. It may be strided; packing
+stays on GPU. Each gradient is a fresh contiguous tensor in its input slot's
+**logical shape**. Broadcast axes are summed, not averaged, and repeated use
+of the same slot accumulates its contributions. Two distinct slots remain
+distinct even if they reference the same tensor. This does not scatter a
+permuted/narrowed/broadcast view's gradient back to its underlying root.
+
+The GPU recomputes the checked forward chain, then evaluates reverse-mode
+contributions in one dispatch. Global scratch is `input_count * output_len`
+floats, not one global activation tensor per operation. Unbroadcast uses a
+fixed 256-lane two-stage reduction with checked additions, no float atomics.
+Slots that need no reduction use GPU copies. Preparation rejects unsupported
+sizes or binding budgets explicitly; VJP needs `input_count + 5` storage
+bindings. CPU uses the same logical mapping and addition order.
+
+All returned gradients inherit **all** failures: a bad forward remains invalid
+even with a zero seed, and overflow in a late gain reduction also invalidates
+the earlier input gradient. Empty domains preserve inherited failures. ReLU
+uses derivative zero at zero; GELU uses the shared saturated tanh derivative.
+
+`ResidentDenseTraining::input_gradient_tensor(device)` freezes a completed
+step's pre-update input VJP and whole-step guard on GPU. Pass it as the
+cotangent above to connect an existing Linear/GELU graph backward into
+pointwise preprocessing without intermediate readback. A new batch invalidates
+the unfrozen step; an already captured gradient survives reuse.
+
+This is a gradient bridge, **not** a whole-graph optimizer transaction.
+The fixture uses a zero-rate dense probe: external gains are not yet members
+of the dense SGD group. Do not update dense parameters first and claim a later
+external gain update is atomic with them. Ordinary `Scaler.backward()` also
+has a legacy per-row averaging policy; the mathematical VJP here sums axes.
+Graph-owned Scaler/ReLU lowering, common parameter roles, portable graph
+serialization, view adjoints, and Python/JavaScript VJP bindings remain work.
+
+The native/browser fixture now includes six VJP shapes (scalar, empty,
+multi-axis and two-stage broadcasts), the NN backward bridge and failure
+guards. Replay with `tools/validate_pointwise_vjp_vs_torch.py`.
+The frozen `resident_pointwise_vjp_bench` worker and
+`tools/bench_pointwise_vjp_vs_torch.py` compare a 33-operation residual chain's
+forward and all-input VJP with eager Torch. Both include terminal host output
+and all gradients, not uploads or compilation. Retain the complete JSON and
+recheck it with the controller's `--verify` option.

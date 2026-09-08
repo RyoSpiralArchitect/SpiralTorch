@@ -8,6 +8,8 @@ use st_backend_wgpu::{
 };
 use st_nn::{layers::Gelu, module::Module, resident::InferencePlan, Linear, Sequential};
 use st_tensor::ElementwiseOp;
+#[path = "resident_pointwise_vjp.rs"]
+mod vjp_fixture;
 use st_tensor::{
     NdLayout, NdPointwisePlan, NdTensor, PointwiseChain, PointwiseExecution, PointwiseStep, Tensor,
     WgpuTensorDevice,
@@ -477,6 +479,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         json!({"schema":"spiraltorch.resident_nd_tensor.fixture.v1","status":"passed",
         "adapter":format!("{:?}",runtime.adapter_info()),"cases":cases,"guards":guards(&runtime,&device).await?,
         "pointwise_cases":pointwise_cases,"pointwise_guards":pointwise_guards(&runtime,&device).await?,
+        "pointwise_vjp":vjp_fixture::run(&runtime,&device).await?,
         "build_fingerprint":st_core::build_fingerprint(),
         "build_manifest":serde_json::from_str::<Value>(st_core::build_manifest_json())?,
         "boundary":"Rust CPU snapshot / WGPU immutable tensor; preprocessing and NN bridges stay on device; explicit terminal reads; no general autograd claim"}),
