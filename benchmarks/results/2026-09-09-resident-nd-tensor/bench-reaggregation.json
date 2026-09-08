@@ -1,0 +1,114 @@
+{
+  "status": "passed",
+  "cases": [
+    {
+      "config": {
+        "shape": [
+          8,
+          16,
+          64
+        ],
+        "seed": 17,
+        "iterations": 20
+      },
+      "median_ms": {
+        "rust": 5.9022495,
+        "torch": 1.2602920032804832
+      },
+      "rust_over_torch": 4.683239665598696,
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          8,
+          16,
+          64
+        ],
+        "seed": 29,
+        "iterations": 20
+      },
+      "median_ms": {
+        "rust": 4.750166,
+        "torch": 0.992291999864392
+      },
+      "rust_over_torch": 4.787064695320696,
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          8,
+          16,
+          64
+        ],
+        "seed": 43,
+        "iterations": 20
+      },
+      "median_ms": {
+        "rust": 4.860146,
+        "torch": 0.916499993763864
+      },
+      "rust_over_torch": 5.3029416618329135,
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          16,
+          32,
+          128
+        ],
+        "seed": 17,
+        "iterations": 20
+      },
+      "median_ms": {
+        "rust": 5.6606875,
+        "torch": 1.5191665006568655
+      },
+      "rust_over_torch": 3.726179781842478,
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          16,
+          32,
+          128
+        ],
+        "seed": 29,
+        "iterations": 20
+      },
+      "median_ms": {
+        "rust": 6.046646,
+        "torch": 1.7708334926282987
+      },
+      "rust_over_torch": 3.4145762575483443,
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    },
+    {
+      "config": {
+        "shape": [
+          16,
+          32,
+          128
+        ],
+        "seed": 43,
+        "iterations": 20
+      },
+      "median_ms": {
+        "rust": 6.718021,
+        "torch": 1.9746460020542145
+      },
+      "rust_over_torch": 3.402139417906438,
+      "max_abs_error": 3.3306690738754696e-16,
+      "retained_per_lane": 8
+    }
+  ],
+  "boundary": "full record reaggregation and capture agreement, not independent GPU re-execution or absent-binary attestation"
+}

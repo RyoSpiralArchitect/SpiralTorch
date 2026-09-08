@@ -67,6 +67,10 @@ WASM package with `--features webgpu`. Older installed/PyPI wheels may not have
 these methods. This source change alone is not a PyPI release. CPU-only builds
 still import the plan/classes but explicitly reject GPU compilation.
 
+Rust [resident N-D tensors](resident_nd_tensor.md) additionally connect through
+`upload_batch_tensors` and `prediction_tensor`. These device-copy bridges avoid
+CPU readback and retain upstream finite guards in the whole-step SGD decision.
+
 ```python
 import spiraltorch as st
 

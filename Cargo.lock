@@ -3413,6 +3413,7 @@ dependencies = [
  "st-frac",
  "st-kdsl",
  "st-kernel-contracts",
+ "thiserror 2.0.17",
  "wgpu",
 ]
 

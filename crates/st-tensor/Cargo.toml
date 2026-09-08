@@ -52,6 +52,7 @@ spiral-config = { path = "../spiral-config" }
 # automation layers and WASM bindings.
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = "1.0"
+thiserror = "2"
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
 faer = { version = "0.23", default-features = false, features = ["std", "rayon"], optional = true }
 # Parallel execution for tiled CPU kernels.

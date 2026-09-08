@@ -4,6 +4,7 @@
 use crate::{
     resident_dense::{self, DenseActivation, DenseError, DenseLayer, Uniforms},
     resident_matmul::{MatmulAccumulation, MatmulError, MatmulKernel, MatmulShape, MatmulTile},
+    resident_tensor::{ResidentTensor, TensorDevice, TensorError},
     runtime::{self, Shared, WgpuContext, WgpuRuntime, WgpuRuntimeError},
     shader_sources::{training_dense_stage_source, TrainingMatmulKind},
 };
@@ -20,6 +21,8 @@ pub use readback::{
 
 #[derive(Debug, Error)]
 pub enum TrainingError {
+    #[error(transparent)]
+    Tensor(#[from] TensorError),
     #[error(transparent)]
     Dense(#[from] DenseError),
     #[error(transparent)]
@@ -206,6 +209,7 @@ pub struct ResidentDenseTraining {
     batch_generation: u64,
     submitted_steps: u64,
     last_step: Option<u64>,
+    batch_sources: Option<[ResidentTensor; 2]>,
     runtime: WgpuRuntime,
 }
 
@@ -604,6 +608,7 @@ impl ResidentDenseTraining {
             batch_generation: 0,
             submitted_steps: 0,
             last_step: None,
+            batch_sources: None,
             runtime,
         })
     }
@@ -652,6 +657,50 @@ impl ResidentDenseTraining {
         queue.write_buffer(&self.activations[0], 0, bytemuck::cast_slice(input));
         queue.write_buffer(&self.target, 0, bytemuck::cast_slice(target));
         self.batch_generation = generation;
+        self.batch_sources = None;
+        self.last_step = None;
+        Ok(())
+    }
+
+    /// Prepare a resident N-D batch without host readback. Upstream failures are
+    /// included in the existing all-layer SGD decision on every step using it.
+    pub fn upload_batch_tensors(
+        &mut self,
+        input: &ResidentTensor,
+        target: &ResidentTensor,
+    ) -> Result<(), TrainingError> {
+        input.require_context(self.runtime.context())?;
+        target.require_context(self.runtime.context())?;
+        if input.layout().shape() != self.input.shape()
+            || target.layout().shape() != self.output.shape()
+        {
+            return Err(DenseError::InvalidLayout.into());
+        }
+        let generation = self
+            .batch_generation
+            .checked_add(1)
+            .ok_or(TrainingError::Overflow)?;
+        let input = input.contiguous()?;
+        let target = target.contiguous()?;
+        let context = self.runtime.context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(
+            input.values(),
+            0,
+            &self.activations[0],
+            0,
+            self.input.len() as u64 * 4,
+        );
+        encoder.copy_buffer_to_buffer(
+            target.values(),
+            0,
+            &self.target,
+            0,
+            self.output.len() as u64 * 4,
+        );
+        context.queue().submit(Some(encoder.finish()));
+        self.batch_sources = Some([input, target]);
+        self.batch_generation = generation;
         self.last_step = None;
         Ok(())
     }
@@ -675,6 +724,16 @@ impl ResidentDenseTraining {
             .write_buffer(&self.step_config, 0, bytemuck::bytes_of(&learning_rate));
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&self.validation, 0, None);
+        if let Some([input, target]) = &self.batch_sources {
+            encoder.copy_buffer_to_buffer(input.flags(), 0, &self.validation, 0, 4);
+            encoder.copy_buffer_to_buffer(
+                target.flags(),
+                0,
+                &self.validation,
+                self.specs.len() as u64 * 4,
+                4,
+            );
+        }
         let chunk_size =
             dispatches_per_pass(self.runtime.adapter_info().backend, self.passes.len());
         for chunk in self.passes.chunks(chunk_size) {
@@ -732,6 +791,26 @@ impl ResidentDenseTraining {
             step,
             batch_generation: self.batch_generation,
         })
+    }
+
+    /// Pre-update prediction plus the whole step's acceptance guard, frozen on GPU.
+    pub fn prediction_tensor(
+        &self,
+        device: &TensorDevice,
+    ) -> Result<ResidentTensor, TrainingError> {
+        self.last_step.ok_or(TrainingError::StaleStep)?;
+        if !device
+            .runtime()
+            .context()
+            .shares_handles_with(self.runtime.context())
+        {
+            return Err(TensorError::DeviceMismatch.into());
+        }
+        Ok(device.capture(
+            &self.output,
+            self.activations.last().unwrap(),
+            &self.validation,
+        )?)
     }
 
     /// Export parameters even before a step or after a numerically rejected step.

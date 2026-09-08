@@ -18,6 +18,7 @@ pub mod execution_capability;
 mod hardmax;
 mod indexing;
 mod memory;
+pub mod nd;
 mod normalization;
 pub mod observability;
 
@@ -42,6 +43,9 @@ pub use execution_capability::{
     TensorExecutionBackend, TensorExecutionComponent, TensorExecutionWorkload,
     TensorExecutionWorkloadKey, TensorUtilOperation,
 };
+#[cfg(feature = "wgpu_dense")]
+pub use nd::WgpuTensorDevice;
+pub use nd::{NdTensor, NdTensorError};
 pub use st_kernel_contracts::layout::{NdLayout, NdLayoutError};
 
 #[cfg(feature = "wgpu_frac")]
