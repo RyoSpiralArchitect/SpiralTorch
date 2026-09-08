@@ -129,8 +129,18 @@ def forward(torch, inputs):
     return ((torch.nn.functional.gelu(x * gain, approximate="tanh") + x) * scale).relu()
 
 
-def replay(torch, np, fixture, device):
-    checks = []
+def is_empty_mps_reference_gap(error, device, numel, allowed):
+    return (
+        allowed
+        and device == "mps"
+        and numel == 0
+        and isinstance(error, RuntimeError)
+        and "[srcBuf length] > 0" in str(error)
+        and "Placeholder tensor is empty!" in str(error)
+    )
+
+
+def replay(torch, np, fixture, device, allow_empty_mps_gap=False):
     for index, case in enumerate(fixture["cases"] + [fixture["nn_bridge"]]):
         error = 0.0
 
@@ -159,7 +169,23 @@ def replay(torch, np, fixture, device):
                 case["cotangent"], dtype=torch.float32, device=device
             ).reshape(y.shape)
             compare(case["output"], y)
-            gradients = torch.autograd.grad(y, inputs, grad_outputs=cotangent)
+            try:
+                gradients = torch.autograd.grad(y, inputs, grad_outputs=cotangent)
+            except RuntimeError as error:
+                if not is_empty_mps_reference_gap(
+                    error, device, y.numel(), allow_empty_mps_gap
+                ):
+                    raise
+                yield {
+                    "status": "reference_unsupported",
+                    "device": device,
+                    "case": index,
+                    "shape": case["shape"],
+                    "nn_bridge": False,
+                    "error": str(error),
+                    "fallback_used": False,
+                }
+                continue
         else:
             compare(case["processed"], y)
             y.retain_grad()
@@ -184,19 +210,17 @@ def replay(torch, np, fixture, device):
             if actual["shape"] != list(expected.shape):
                 raise ValueError("gradient shape mismatch")
             compare(actual["values"], expected)
-        checks.append(
-            {
-                "device": device,
-                "case": index,
-                "shape": case["shape"],
-                "nn_bridge": index == len(RECIPES),
-                "max_abs_error": error,
-            }
-        )
-    return checks
+        yield {
+            "status": "passed",
+            "device": device,
+            "case": index,
+            "shape": case["shape"],
+            "nn_bridge": index == len(RECIPES),
+            "max_abs_error": error,
+        }
 
 
-def validate(paths, devices, output, source_ref):
+def validate(paths, devices, output, source_ref, allow_empty_mps_gap=False):
     os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"
     import numpy as np
     import torch
@@ -235,7 +259,9 @@ def validate(paths, devices, output, source_ref):
                 for device in devices:
                     if device == "mps" and not torch.backends.mps.is_available():
                         raise RuntimeError("MPS unavailable; no fallback")
-                    for check in replay(torch, np, fixture, device):
+                    for check in replay(
+                        torch, np, fixture, device, allow_empty_mps_gap
+                    ):
                         report["checks"].append(
                             dict(
                                 check,
@@ -243,7 +269,12 @@ def validate(paths, devices, output, source_ref):
                                 sha256=hashlib.sha256(raw).hexdigest(),
                             )
                         )
-            report["status"] = "passed"
+            report["reference_gaps"] = sum(
+                c["status"] == "reference_unsupported" for c in report["checks"]
+            )
+            report["status"] = (
+                "passed_with_reference_gaps" if report["reference_gaps"] else "passed"
+            )
         except BaseException as error:
             report["error"] = repr(error)
             raise
@@ -255,7 +286,12 @@ def validate(paths, devices, output, source_ref):
             {
                 "status": report["status"],
                 "checks": len(report["checks"]),
-                "max_abs_error": max(c["max_abs_error"] for c in report["checks"]),
+                "reference_gaps": report["reference_gaps"],
+                "max_abs_error": max(
+                    c["max_abs_error"]
+                    for c in report["checks"]
+                    if c["status"] == "passed"
+                ),
             }
         )
     )
@@ -269,5 +305,16 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--source", default="HEAD")
+    parser.add_argument(
+        "--allow-mps-empty-reference-gap",
+        action="store_true",
+        help="record only the observed empty-buffer MPS backward assertion as unsupported; never fall back",
+    )
     args = parser.parse_args()
-    validate(args.reports, args.devices, args.output, args.source)
+    validate(
+        args.reports,
+        args.devices,
+        args.output,
+        args.source,
+        args.allow_mps_empty_reference_gap,
+    )

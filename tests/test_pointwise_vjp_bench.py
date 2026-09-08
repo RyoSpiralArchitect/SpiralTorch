@@ -40,6 +40,25 @@ def fixture(config):
 
 
 class Admission(unittest.TestCase):
+    def test_reference_gap_is_explicit_and_narrow(self):
+        error = RuntimeError(
+            "[srcBuf length] > 0 INTERNAL ASSERT FAILED. Placeholder tensor is empty!"
+        )
+        self.assertTrue(validation.is_empty_mps_reference_gap(error, "mps", 0, True))
+        for device, size, allowed in (
+            ("cpu", 0, True),
+            ("mps", 1, True),
+            ("mps", 0, False),
+        ):
+            self.assertFalse(
+                validation.is_empty_mps_reference_gap(error, device, size, allowed)
+            )
+        self.assertFalse(
+            validation.is_empty_mps_reference_gap(
+                RuntimeError("out of memory"), "mps", 0, True
+            )
+        )
+
     def test_fixed_recipes_and_input_identity(self):
         self.assertEqual(len(bench.recipes()), 6)
         config = bench.recipes()[0]

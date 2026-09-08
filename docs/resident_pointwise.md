@@ -163,3 +163,10 @@ The frozen `resident_pointwise_vjp_bench` worker and
 forward and all-input VJP with eager Torch. Both include terminal host output
 and all gradients, not uploads or compilation. Retain the complete JSON and
 recheck it with the controller's `--verify` option.
+
+The first Torch 2.12.1 MPS replay hit an internal empty-buffer assertion on the
+empty tensor's backward; Torch CPU and both SpiralTorch clients passed that
+case. The replay is strict by default. The explicit
+`--allow-mps-empty-reference-gap` option records only that observed assertion
+as `reference_unsupported`, without fallback, and reports
+`passed_with_reference_gaps` rather than a full pass.
