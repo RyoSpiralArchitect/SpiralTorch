@@ -145,11 +145,11 @@ impl Module for Linear {
             return Tensor::zeros(rows, input_cols);
         }
 
-        let batch = rows as f32;
+        // grad_output already carries the loss reduction; a VJP sums shared rows.
         let grad_w = relabel_non_finite(
             input.matmul_lhs_transpose_scaled_with_backend(
                 grad_output,
-                1.0 / batch,
+                1.0,
                 current_matmul_backend(),
             ),
             "linear_weight_grad",
@@ -158,7 +158,7 @@ impl Module for Linear {
 
         let bias_backend = current_tensor_util_backend_for_values(grad_output.data().len());
         let summed = relabel_non_finite(
-            grad_output.try_sum_axis0_scaled_with_backend(1.0 / batch, bias_backend),
+            grad_output.try_sum_axis0_scaled_with_backend(1.0, bias_backend),
             "linear_bias_grad",
         )?;
         validate_finite_slice("linear_bias_grad", &summed)?;
