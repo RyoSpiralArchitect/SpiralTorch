@@ -1,5 +1,8 @@
 # N-D Tensors On Shared Rust Storage
 
+For shape-preserving GPU batching and fusion on this storage, see
+[prepared pointwise chains](resident_pointwise.md).
+
 `st_tensor::NdTensor` joins the existing host `Tensor` snapshot owner, shared
 `NdLayout`, and native/browser WGPU storage. It is an explicit migration path,
 not a replacement device router or an automatic change to ordinary

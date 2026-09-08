@@ -6,11 +6,16 @@ use crate::{Layout, NdLayout, NdLayoutError, Tensor, TensorError};
 pub use st_backend_wgpu::resident_tensor::TensorDevice as WgpuTensorDevice;
 #[cfg(feature = "wgpu_dense")]
 use st_backend_wgpu::resident_tensor::{ResidentTensor, TensorError as DeviceError};
+pub use st_kernel_contracts::pointwise::{
+    PointwiseChain, PointwiseError, PointwiseExecution, PointwiseStep,
+};
 use st_kernel_contracts::{elementwise::ElementwiseOp, layout::broadcast_shape};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum NdTensorError {
+    #[error(transparent)]
+    Pointwise(#[from] PointwiseError),
     #[error(transparent)]
     Layout(#[from] NdLayoutError),
     #[error(transparent)]
@@ -43,6 +48,88 @@ enum Storage {
 #[derive(Clone, Debug)]
 pub struct NdTensor {
     storage: Storage,
+}
+
+/// A shape-preserving chain prepared for one device and exact input layouts.
+/// GPU execution modes vary scheduling only; CPU uses the same checked steps.
+/// New inputs can be supplied without recompiling, and outputs remain immutable.
+#[derive(Debug)]
+pub struct NdPointwisePlan {
+    chain: PointwiseChain,
+    layouts: Vec<NdLayout>,
+    #[cfg(feature = "wgpu_dense")]
+    gpu: Option<st_backend_wgpu::resident_tensor::pointwise::PointwisePlan>,
+}
+
+impl NdPointwisePlan {
+    pub fn new(chain: PointwiseChain, inputs: &[&NdTensor]) -> Result<Self, NdTensorError> {
+        let layouts: Vec<_> = inputs.iter().map(|t| t.layout().clone()).collect();
+        chain.validate_layouts(&layouts)?;
+        #[cfg(feature = "wgpu_dense")]
+        let gpu = if let Some(first) = inputs[0].as_wgpu() {
+            for input in inputs {
+                let input = input.as_wgpu().ok_or(NdTensorError::DeviceMismatch)?;
+                if !first
+                    .device()
+                    .runtime()
+                    .context()
+                    .shares_handles_with(input.device().runtime().context())
+                {
+                    return Err(NdTensorError::DeviceMismatch);
+                }
+            }
+            Some(
+                st_backend_wgpu::resident_tensor::pointwise::PointwisePlan::new(
+                    first.device().clone(),
+                    chain.clone(),
+                    layouts.clone(),
+                )?,
+            )
+        } else {
+            if inputs.iter().any(|t| t.is_wgpu()) {
+                return Err(NdTensorError::DeviceMismatch);
+            }
+            None
+        };
+        Ok(Self {
+            chain,
+            layouts,
+            #[cfg(feature = "wgpu_dense")]
+            gpu,
+        })
+    }
+
+    pub fn run(
+        &self,
+        inputs: &[&NdTensor],
+        execution: PointwiseExecution,
+    ) -> Result<NdTensor, NdTensorError> {
+        if inputs.len() != self.layouts.len() {
+            return Err(PointwiseError::Operands.into());
+        }
+        for (input, layout) in inputs.iter().zip(&self.layouts) {
+            if input.layout() != layout {
+                return Err(PointwiseError::LayoutMismatch.into());
+            }
+        }
+        #[cfg(feature = "wgpu_dense")]
+        if let Some(gpu) = &self.gpu {
+            let inputs: Result<Vec<_>, _> = inputs
+                .iter()
+                .map(|t| t.as_wgpu().ok_or(NdTensorError::DeviceMismatch))
+                .collect();
+            return Ok(NdTensor::from_wgpu(gpu.run(&inputs?, execution)?));
+        }
+        let _ = execution;
+        if inputs.iter().any(|t| t.is_wgpu()) {
+            return Err(NdTensorError::DeviceMismatch);
+        }
+        let mut current = inputs[0].clone();
+        for step in self.chain.steps() {
+            current = current.apply(step.op, step.rhs.map(|i| inputs[i]))?;
+        }
+        Ok(current)
+    }
 }
 
 impl NdTensor {
@@ -295,6 +382,58 @@ impl Tensor {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_pointwise_reuses_layouts_without_retaining_input_values() {
+        let first = NdTensor::from_vec(&[2], vec![-2., 3.]).unwrap();
+        let rhs = NdTensor::from_vec(&[], vec![0.5]).unwrap();
+        let chain = PointwiseChain::new(
+            2,
+            vec![
+                PointwiseStep {
+                    op: ElementwiseOp::Multiply,
+                    rhs: Some(1),
+                },
+                PointwiseStep {
+                    op: ElementwiseOp::Relu,
+                    rhs: None,
+                },
+                PointwiseStep {
+                    op: ElementwiseOp::Add,
+                    rhs: Some(0),
+                },
+            ],
+        )
+        .unwrap();
+        let plan = NdPointwisePlan::new(chain.clone(), &[&first, &rhs]).unwrap();
+        for mode in [
+            PointwiseExecution::Sequential,
+            PointwiseExecution::Batched,
+            PointwiseExecution::Fused,
+        ] {
+            assert_eq!(
+                plan.run(&[&first, &rhs], mode)
+                    .unwrap()
+                    .read_values()
+                    .unwrap(),
+                vec![-2., 4.5]
+            );
+            let second = NdTensor::from_vec(&[2], vec![4., -6.]).unwrap();
+            assert_eq!(
+                plan.run(&[&second, &rhs], mode)
+                    .unwrap()
+                    .read_values()
+                    .unwrap(),
+                vec![6., -6.]
+            );
+            assert!(plan.run(&[&rhs, &first], mode).is_err());
+            assert!(plan.run(&[&first], mode).is_err());
+        }
+        assert!(NdPointwisePlan::new(chain, &[&rhs, &first]).is_err());
+        let huge = NdTensor::from_vec(&[2], vec![-f32::MAX; 2]).unwrap();
+        let two = NdTensor::from_vec(&[], vec![2.]).unwrap();
+        assert!(plan.run(&[&huge, &two], PointwiseExecution::Fused).is_err());
+    }
 
     fn host(tensor: &NdTensor) -> &Tensor {
         match &tensor.storage {

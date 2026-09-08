@@ -7,11 +7,7 @@
 @group(0) @binding(5) var<storage, read> b_flags: array<u32>;
 @group(0) @binding(6) var<storage, read_write> flags: array<atomic<u32>>;
 
-fn check(x: f32) {
-    if ((bitcast<u32>(x) & 0x7f800000u) == 0x7f800000u) {
-        atomicOr(&flags[0], INVALID_TENSOR_FLAG);
-    }
-}
+CHECKED_ELEMENTWISE
 
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
@@ -36,22 +32,5 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
         ai += coordinate * params[9u + rank + d];
         bi += coordinate * params[9u + 2u * rank + d];
     }
-    let x = a[ai];
-    check(x);
-    var value = x;
-    switch params[2] {
-        case OP_ADD: { let y = b[bi]; check(y); value = x + y; }
-        case OP_MULTIPLY: { let y = b[bi]; check(y); value = x * y; }
-        case OP_RELU: { value = max(x, 0.0); }
-        case OP_GELU: {
-            let square = x * x;
-            let cubic = square * x;
-            let inner = 0.7978846 * (x + 0.044715 * cubic);
-            check(square); check(cubic); check(inner);
-            value = 0.5 * x * (1.0 + tanh(clamp(inner, -10.0, 10.0)));
-        }
-        default: {}
-    }
-    check(value);
-    out[i] = value;
+    out[i] = checked_apply(params[2], a[ai], b[bi]);
 }

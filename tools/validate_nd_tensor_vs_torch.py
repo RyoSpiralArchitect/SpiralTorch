@@ -55,10 +55,28 @@ def validate(paths, devices, output, source_ref="HEAD"):
                 ]
                 if len(recipes) != 3 or set(recipes) != expected_recipes:
                     raise ValueError("incomplete or changed recipes")
+                pointwise = source.get("pointwise_cases", [])
+                if "pointwise_cases" in source:
+                    expected = {
+                        (shape, seed, iterations, mode)
+                        for shape, seed, iterations in expected_recipes
+                        for mode in ("Sequential", "Batched", "Fused")
+                    }
+                    actual = [
+                        (
+                            tuple(c["shape"]),
+                            c["seed"],
+                            c["iterations"],
+                            c["pointwise_mode"],
+                        )
+                        for c in pointwise
+                    ]
+                    if len(actual) != 9 or set(actual) != expected:
+                        raise ValueError("incomplete pointwise recipes")
                 for device in devices:
                     if device == "mps" and not torch.backends.mps.is_available():
                         raise RuntimeError("MPS unavailable; no fallback")
-                    for case in source["cases"]:
+                    for case in source["cases"] + pointwise:
                         error = 0.0
 
                         def compare(actual, expected):

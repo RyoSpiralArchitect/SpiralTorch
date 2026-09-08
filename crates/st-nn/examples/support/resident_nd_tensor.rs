@@ -7,7 +7,11 @@ use st_backend_wgpu::{
     runtime::WgpuRuntime,
 };
 use st_nn::{layers::Gelu, module::Module, resident::InferencePlan, Linear, Sequential};
-use st_tensor::{NdLayout, NdTensor, Tensor, WgpuTensorDevice};
+use st_tensor::ElementwiseOp;
+use st_tensor::{
+    NdLayout, NdPointwisePlan, NdTensor, PointwiseChain, PointwiseExecution, PointwiseStep, Tensor,
+    WgpuTensorDevice,
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -76,9 +80,41 @@ fn pipeline(
     bias: &NdTensor,
     gain: &NdTensor,
     iterations: usize,
+    execution: Option<PointwiseExecution>,
 ) -> Result<NdTensor> {
     let length = root.shape()[1] - 1;
     let mut value = root.permute(&[1, 0, 2])?.narrow(0, 1, length)?;
+    if let Some(mode) = execution {
+        let steps = if iterations == 0 {
+            vec![PointwiseStep {
+                op: ElementwiseOp::Identity,
+                rhs: None,
+            }]
+        } else {
+            [
+                PointwiseStep {
+                    op: ElementwiseOp::Add,
+                    rhs: Some(1),
+                },
+                PointwiseStep {
+                    op: ElementwiseOp::Multiply,
+                    rhs: Some(2),
+                },
+                PointwiseStep {
+                    op: ElementwiseOp::Gelu,
+                    rhs: None,
+                },
+            ]
+            .repeat(iterations)
+        };
+        let inputs = if iterations == 0 {
+            vec![&value]
+        } else {
+            vec![&value, bias, gain]
+        };
+        let plan = NdPointwisePlan::new(PointwiseChain::new(inputs.len(), steps)?, &inputs)?;
+        return Ok(plan.run(&inputs, mode)?);
+    }
     for _ in 0..iterations {
         value = value.add(bias)?.mul(gain)?.gelu()?;
     }
@@ -91,6 +127,7 @@ async fn case(
     shape: [usize; 3],
     seed: usize,
     iterations: usize,
+    execution: Option<PointwiseExecution>,
 ) -> Result<Value> {
     let width = shape[2];
     let data: Vec<_> = (0..shape.iter().product())
@@ -103,12 +140,13 @@ async fn case(
     let b = NdTensor::from_vec(&[width], bias.clone())?;
     let g = NdTensor::from_vec(&[], vec![0.75])?;
     let gpu_g = g.to_wgpu(device)?;
-    let host = pipeline(root.clone(), &b, &g, iterations)?;
+    let host = pipeline(root.clone(), &b, &g, iterations, None)?;
     let input = pipeline(
         root.to_wgpu(device)?,
         &b.to_wgpu(device)?,
         &gpu_g,
         iterations,
+        execution,
     )?;
     if !input.is_wgpu() {
         return Err("resident pipeline changed device".into());
@@ -205,7 +243,7 @@ async fn case(
             .collect::<Vec<_>>(),
     )?;
     Ok(
-        json!({"shape":shape,"seed":seed,"iterations":iterations,"input":data,"bias":bias,"gain":0.75,
+        json!({"shape":shape,"seed":seed,"iterations":iterations,"pointwise_mode":execution.map(|mode| format!("{mode:?}")),"input":data,"bias":bias,"gain":0.75,
         "processed_shape":input.shape(),"processed":values(&input).await?,"layers":layers,
         "output_shape":output.shape(),"output":output_values,"targets":target_data,
         "steps":8,"learning_rate":0.02,"training":state_json(&trained),"max_abs_error":error,
@@ -298,6 +336,120 @@ async fn guards(runtime: &WgpuRuntime, device: &WgpuTensorDevice) -> Result<Valu
     )
 }
 
+async fn pointwise_guards(runtime: &WgpuRuntime, device: &WgpuTensorDevice) -> Result<Value> {
+    let scalar =
+        |x| Ok::<_, Box<dyn std::error::Error>>(NdTensor::from_wgpu(device.upload(&[], &[x])?));
+    let relu = PointwiseStep {
+        op: ElementwiseOp::Relu,
+        rhs: None,
+    };
+    let x = scalar(-0.5)?;
+    let two = scalar(2.)?;
+    let huge = scalar(-f32::MAX)?;
+    let bad = huge.mul(&two)?.relu()?;
+    let empty = NdTensor::from_vec(&[0, 3], vec![])?.to_wgpu(device)?;
+    let foreign_device =
+        WgpuTensorDevice::new(WgpuRuntime::request_headless("pointwise.foreign").await?)?;
+    let foreign = NdTensor::from_wgpu(foreign_device.upload(&[], &[1.])?);
+    let same_device = WgpuTensorDevice::new(runtime.clone())?;
+    let same = NdTensor::from_wgpu(same_device.upload(&[], &[0.25])?);
+    let add_chain = PointwiseChain::new(
+        2,
+        vec![
+            PointwiseStep {
+                op: ElementwiseOp::Add,
+                rhs: Some(1),
+            },
+            relu,
+        ],
+    )?;
+    let plan = NdPointwisePlan::new(add_chain.clone(), &[&x, &two])?;
+    if NdPointwisePlan::new(add_chain.clone(), &[&x, &empty]).is_ok() {
+        return Err("shape-changing program accepted".into());
+    }
+    let empty_plan = NdPointwisePlan::new(add_chain, &[&empty, &x])?;
+    let mut checks = Vec::new();
+    for mode in [
+        PointwiseExecution::Sequential,
+        PointwiseExecution::Batched,
+        PointwiseExecution::Fused,
+    ] {
+        let frozen = plan.run(&[&x, &two], mode)?;
+        close(&values(&plan.run(&[&same, &two], mode)?).await?, &[2.25])?;
+        close(&values(&frozen).await?, &[1.5])?;
+        if plan.run(&[&foreign, &two], mode).is_ok()
+            || plan.run(&[&x], mode).is_ok()
+            || plan.run(&[&empty, &two], mode).is_ok()
+            || plan
+                .run(&[&x, &NdTensor::from_vec(&[], vec![1.])?], mode)
+                .is_ok()
+        {
+            return Err("pointwise input contract accepted wrong inputs".into());
+        }
+        if values(&plan.run(&[&x, &bad], mode)?).await.is_ok()
+            || values(&empty_plan.run(&[&empty, &bad], mode)?)
+                .await
+                .is_ok()
+        {
+            return Err("pointwise erased inherited failure".into());
+        }
+        if !values(&empty_plan.run(&[&empty, &huge], mode)?)
+            .await?
+            .is_empty()
+        {
+            return Err("empty program evaluated outside its domain".into());
+        }
+        for op in [
+            ElementwiseOp::Multiply,
+            ElementwiseOp::Add,
+            ElementwiseOp::Gelu,
+        ] {
+            let steps = vec![
+                PointwiseStep {
+                    op,
+                    rhs: op.is_binary().then_some(1),
+                },
+                relu,
+            ];
+            let rhs = if op == ElementwiseOp::Add {
+                &huge
+            } else {
+                &two
+            };
+            let inputs = if op.is_binary() {
+                vec![&huge, rhs]
+            } else {
+                vec![&huge]
+            };
+            let reject = NdPointwisePlan::new(PointwiseChain::new(inputs.len(), steps)?, &inputs)?;
+            let out = reject.run(&inputs, mode)?;
+            if values(&out).await.is_ok() || values(&out.broadcast_to(&[0, 3])?).await.is_ok() {
+                return Err("pointwise masked intermediate overflow".into());
+            }
+        }
+        let negative_zero = scalar(-0.)?;
+        let identity = NdPointwisePlan::new(
+            PointwiseChain::new(
+                1,
+                vec![PointwiseStep {
+                    op: ElementwiseOp::Identity,
+                    rhs: None,
+                }],
+            )?,
+            &[&negative_zero],
+        )?;
+        if values(&identity.run(&[&negative_zero], mode)?).await?[0].to_bits() != (-0f32).to_bits()
+        {
+            return Err("pointwise identity lost negative zero".into());
+        }
+        checks.push(json!({"mode":format!("{mode:?}"),"status":"passed",
+            "inherited_and_empty_failures":true,"masked_add_mul_gelu_rejected":true,
+            "immutable_reuse":true,"same_queue_wrapper_accepted":true,
+            "foreign_queue_and_mixed_host_rejected":true,"negative_zero":true}));
+    }
+    Ok(json!({"status":"passed","checks":checks}))
+}
+
 pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     if format!("{:?}", runtime.adapter_info().device_type) == "Cpu" {
         return Err("software adapter is not GPU evidence".into());
@@ -306,11 +458,25 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
     let mut cases = Vec::new();
     for (shape, seed, iterations) in [([2, 3, 4], 17, 0), ([3, 5, 7], 29, 1), ([2, 4, 11], 43, 20)]
     {
-        cases.push(case(&runtime, &device, shape, seed, iterations).await?);
+        cases.push(case(&runtime, &device, shape, seed, iterations, None).await?);
+    }
+    let mut pointwise_cases = Vec::new();
+    for mode in [
+        PointwiseExecution::Sequential,
+        PointwiseExecution::Batched,
+        PointwiseExecution::Fused,
+    ] {
+        for (shape, seed, iterations) in
+            [([2, 3, 4], 17, 0), ([3, 5, 7], 29, 1), ([2, 4, 11], 43, 20)]
+        {
+            pointwise_cases
+                .push(case(&runtime, &device, shape, seed, iterations, Some(mode)).await?);
+        }
     }
     Ok(
         json!({"schema":"spiraltorch.resident_nd_tensor.fixture.v1","status":"passed",
         "adapter":format!("{:?}",runtime.adapter_info()),"cases":cases,"guards":guards(&runtime,&device).await?,
+        "pointwise_cases":pointwise_cases,"pointwise_guards":pointwise_guards(&runtime,&device).await?,
         "build_fingerprint":st_core::build_fingerprint(),
         "build_manifest":serde_json::from_str::<Value>(st_core::build_manifest_json())?,
         "boundary":"Rust CPU snapshot / WGPU immutable tensor; preprocessing and NN bridges stay on device; explicit terminal reads; no general autograd claim"}),

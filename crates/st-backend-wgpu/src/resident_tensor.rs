@@ -8,11 +8,15 @@ use st_kernel_contracts::{
 };
 use thiserror::Error;
 
+pub mod pointwise;
+
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
 pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    Pointwise(#[from] st_kernel_contracts::pointwise::PointwiseError),
     #[error(transparent)]
     Layout(#[from] NdLayoutError),
     #[error(transparent)]
@@ -46,8 +50,14 @@ struct Kernels {
 pub struct TensorDevice(Shared<Kernels>);
 
 fn source() -> String {
-    let mut source = include_str!("shaders/resident_tensor.wgsl")
-        .replace("INVALID_TENSOR_FLAG", &format!("{INVALID_TENSOR_FLAG}u"));
+    substitute_ops(include_str!("shaders/resident_tensor.wgsl").replace(
+        "CHECKED_ELEMENTWISE",
+        include_str!("shaders/checked_elementwise.wgsl"),
+    ))
+}
+
+fn substitute_ops(source: String) -> String {
+    let mut source = source.replace("INVALID_TENSOR_FLAG", &format!("{INVALID_TENSOR_FLAG}u"));
     for (name, op) in [
         ("OP_ADD", ElementwiseOp::Add),
         ("OP_MULTIPLY", ElementwiseOp::Multiply),
@@ -207,6 +217,21 @@ impl TensorDevice {
         b: Operand<'_>,
         shape: &[usize],
     ) -> Result<ResidentTensor, TensorError> {
+        let context = self.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let output = self.encode(&mut encoder, op, a, b, shape)?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(output)
+    }
+
+    fn encode(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        op: ElementwiseOp,
+        a: Operand<'_>,
+        b: Operand<'_>,
+        shape: &[usize],
+    ) -> Result<ResidentTensor, TensorError> {
         let layout = NdLayout::contiguous(shape)?;
         let context = self.runtime().context();
         let device = context.device();
@@ -255,7 +280,6 @@ impl TensorDevice {
             layout: &self.0.layout,
             entries: &entries,
         });
-        let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("tensor.elementwise"),
@@ -265,7 +289,6 @@ impl TensorDevice {
             pass.set_bind_group(0, &binding, &[]);
             pass.dispatch_workgroups(x, y, 1);
         }
-        context.queue().submit(Some(encoder.finish()));
         Ok(ResidentTensor {
             storage: Shared::new(Storage { values, flags }),
             layout,
