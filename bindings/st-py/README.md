@@ -76,6 +76,36 @@ print("route contract:", runtime["runtime_device_route_contract_version"])
 PY
 ```
 
+## Resident NN Inference
+
+Wheels built from this source expose `Linear.inference_plan(shape)` and
+`Sequential.inference_plan(shape)`. Existing Linear/GELU chains can keep
+weights and intermediate activations on WGPU instead of reading back every
+layer:
+
+```python
+import spiraltorch as st
+
+model = st.nn.Sequential()
+model.add(st.nn.Linear(4, 7, name="up"))
+model.add(st.nn.Gelu())
+model.add(st.nn.Linear(7, 3, name="down"))
+plan = model.inference_plan([2, 5, 4])
+gpu = plan.compile_wgpu()
+gpu.upload_values([0.25] * 40)
+gpu.dispatch()
+snapshot = gpu.snapshot()
+print(snapshot.shape, snapshot.read_values())  # (2, 5, 3), one final readback
+```
+
+The same Rust-owned plan can be exported with `plan.to_json()` and imported
+by `st.nn.InferencePlan.from_json(...)` or the browser's
+`InferencePlan.fromJson(...)`. Source model updates require a new plan.
+This is explicit inference, not resident backward or a general N-D Tensor.
+CPU-only wheels support plan transport but reject GPU compilation rather
+than silently falling back. See the [resident NN guide](../../docs/resident_nn_inference.md)
+for browser use, validation, and the retained PyTorch comparison boundaries.
+
 ## Rust-owned protocol catalog
 
 The admission-certified catalog is generated and replayed by `st-core`; Python

@@ -1398,6 +1398,14 @@ impl PyLinear {
         Ok(Self { inner: Some(inner) })
     }
 
+    /// Freeze the existing Rust module without consuming or changing its parameters.
+    pub fn inference_plan(
+        &self,
+        input_shape: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::nn_resident::PyInferencePlan> {
+        crate::nn_resident::plan_for(self.inner()?, input_shape)
+    }
+
     pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
         let output = self
             .inner()?
@@ -3827,6 +3835,14 @@ impl PySequential {
             inner: Sequential::new(),
             training: true,
         }
+    }
+
+    /// Freeze the existing Rust module; unsupported layers fail rather than fall back.
+    pub fn inference_plan(
+        &self,
+        input_shape: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::nn_resident::PyInferencePlan> {
+        crate::nn_resident::plan_for(&self.inner, input_shape)
     }
 
     pub fn add(&mut self, layer: &Bound<PyAny>) -> PyResult<()> {
@@ -10816,6 +10832,7 @@ impl PyZRelativityModule {
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
+    crate::nn_resident::register(&module)?;
     module.add_class::<PyIdentity>()?;
     module.add_class::<PyLinear>()?;
     module.add_class::<PyLoraLinear>()?;

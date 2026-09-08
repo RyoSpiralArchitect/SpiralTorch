@@ -9,6 +9,42 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Rust-owned immutable NN parameter plan, available with nn or webgpu. */
+    export class InferencePlan {
+        private constructor();
+        static fromJson(payload: string, max_bytes?: number | null): InferencePlan;
+        toJson(): string;
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly sourceOperationCount: number;
+        /** Requires webgpu; the plan may be freed while the returned promise runs. */
+        compileWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentInference>;
+        free(): void;
+    }
+
+    export class ResidentInference {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly generation: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        upload(values: Float32Array): void;
+        dispatch(): bigint;
+        snapshot(): InferenceSnapshot;
+        free(): void;
+    }
+
+    /** Output and validation flags are captured at snapshot request time. */
+    export class InferenceSnapshot {
+        private constructor();
+        readonly shape: Uint32Array;
+        readonly generation: bigint;
+        readValues(): Promise<Float32Array>;
+        free(): void;
+    }
+
     /** Ordered-f64 arithmetic means in WASM linear memory, not GPU storage. */
     export class TensorMeanBatch {
         constructor(rows: number, cols: number, partial_count: number, data: Float32Array);

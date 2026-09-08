@@ -46,9 +46,13 @@ mod cobol_bridge;
 mod fft;
 #[cfg(target_arch = "wasm32")]
 mod mellin;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+mod nn_resident;
 #[cfg(target_arch = "wasm32")]
 mod tuner;
 mod utils;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+pub use nn_resident::*;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
 mod wgpu_resident;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]

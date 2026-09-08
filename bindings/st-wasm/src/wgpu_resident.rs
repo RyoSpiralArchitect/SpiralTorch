@@ -51,7 +51,7 @@ async fn create_workspace(
     })
 }
 
-async fn ensure_runtime() -> Result<runtime::WgpuRuntime, JsValue> {
+pub(crate) async fn ensure_runtime() -> Result<runtime::WgpuRuntime, JsValue> {
     let runtime = match runtime::default_runtime() {
         Some(runtime) => runtime,
         None => {

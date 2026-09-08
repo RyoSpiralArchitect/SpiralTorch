@@ -19,6 +19,8 @@ mod json;
 mod julia_bridge;
 mod kv;
 mod nn;
+#[cfg(feature = "nn")]
+mod nn_resident;
 mod ops;
 mod planner;
 mod plugin;

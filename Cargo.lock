@@ -3110,6 +3110,7 @@ dependencies = [
  "st-backend-wgpu",
  "st-core",
  "st-frac",
+ "st-nn",
  "st-tensor",
  "time",
  "wasm-bindgen",

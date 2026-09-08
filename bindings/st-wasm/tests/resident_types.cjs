@@ -46,7 +46,33 @@ function checkRankContract(types, label) {
 }
 
 const shipped = fs.readFileSync(path.join(__dirname, "../types/spiraltorch-wasm.d.ts"), "utf8");
+function checkNnContract(types, label) {
+  const get = name => {
+    const declaration = types.match(new RegExp("^( *)export class " + name + " \\{[\\s\\S]*?^\\1\\}", "m"))?.[0];
+    assert.ok(declaration, label + " must export " + name);
+    assert.match(declaration, /private constructor\(\)/);
+    return declaration;
+  };
+  const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
+  assert.match(plan, /static fromJson\(payload: string, max_bytes\?: number(?: \| null)?\): InferencePlan/);
+  assert.match(plan, /compileWebGpu\([^\n]*\): Promise<ResidentInference>/);
+  for (const declaration of [plan, gpu]) {
+    assert.match(declaration, /readonly inputShape: Uint32Array/);
+    assert.match(declaration, /readonly outputShape: Uint32Array/);
+    assert.match(declaration, /readonly stageCount: number/);
+  }
+  assert.match(gpu, /upload\(values: Float32Array\): void/);
+  assert.match(gpu, /snapshot\(\): InferenceSnapshot/);
+  assert.match(gpu, /dispatch\(\): bigint/);
+  assert.match(gpu, /adapterInfo\(\): \{ name: string; backend: string; device_type: string \}/);
+  assert.match(snapshot, /readonly shape: Uint32Array/);
+  assert.match(snapshot, /readonly generation: bigint/);
+  assert.match(snapshot, /readValues\(\): Promise<Float32Array>/);
+  console.log(label + " resident NN TypeScript contract passed");
+}
+
 for (const [source, label] of [[types, "generated"], [shipped, "shipped"]]) {
   checkMatmulContract(source, label);
   checkRankContract(source, label);
+  checkNnContract(source, label);
 }

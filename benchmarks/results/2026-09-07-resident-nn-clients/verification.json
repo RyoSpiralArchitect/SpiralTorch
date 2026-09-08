@@ -1,0 +1,215 @@
+{
+  "attribution": "Frozen source/build logs; installed extension bytes match wheels. Not embedded Git attestation or reproducible-build proof.",
+  "boundary": "Public-client correctness, not timing. Browser adapter is anonymous. No CUDA or resident training claim.",
+  "browser_reports": {
+    "browser-clients-cpu-final.json": {
+      "accumulations_request": "",
+      "asset_sha256": {
+        "/": "5dddea6145244aa9db9af9d150bdac8c99069d2b41f182c16c1a58d485b52e39",
+        "/fixture.json": "f0c16ffca84391c4542194b4c7b9c73ad620afed22e2dc5780c7d5e8e978b24c",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "f7dc8e19467818ba9cfbad65c615c970dc7f5b59a65d5a6d4cbb7140371e2159",
+        "/module/spiraltorch_wasm_bg.wasm": "5c94706f54e23a0439eeaf4caff50d6e6570c52192b436c8fb1555ad66cd4b95"
+      },
+      "browser_version": "152.0.7977.77",
+      "cases": [
+        {
+          "gpu": "explicitly unavailable",
+          "plan_sha256": "90c36cae99a732d940d89d0cdfcac00d9f3cb36df4f0d377a7e79670eb2fa1f1",
+          "shape": [
+            2
+          ]
+        },
+        {
+          "gpu": "explicitly unavailable",
+          "plan_sha256": "30779262f717a1f0b47c5bf5b58ab656ec0f76c3539aed241132d6525cfc0ec2",
+          "shape": [
+            2,
+            2
+          ]
+        },
+        {
+          "gpu": "explicitly unavailable",
+          "plan_sha256": "373bd3649ebba8e8d3b9ca5dd45682addb0539a00e5727985d3a783fb57eae10",
+          "shape": [
+            2,
+            3,
+            2
+          ]
+        }
+      ],
+      "console_messages": [],
+      "cpu_only": true,
+      "fixture_request": "nn-clients-cpu",
+      "kernels_request": "",
+      "launch_flags": [
+        "--enable-unsafe-webgpu"
+      ],
+      "page_errors": [],
+      "page_sha256": "5dddea6145244aa9db9af9d150bdac8c99069d2b41f182c16c1a58d485b52e39",
+      "rejected": 15,
+      "shapes_request": "",
+      "status": "passed",
+      "tiles_mnk_request": "",
+      "wasm_sha256": "5c94706f54e23a0439eeaf4caff50d6e6570c52192b436c8fb1555ad66cd4b95"
+    },
+    "browser-clients-final.json": {
+      "accumulations_request": "",
+      "asset_sha256": {
+        "/": "5dddea6145244aa9db9af9d150bdac8c99069d2b41f182c16c1a58d485b52e39",
+        "/fixture.json": "f0c16ffca84391c4542194b4c7b9c73ad620afed22e2dc5780c7d5e8e978b24c",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e2866446087d4173bcc4bb0e3fd3a8947f8fbfaa495d4aabf09561318d790b89",
+        "/module/spiraltorch_wasm_bg.wasm": "a42a8e68280600fe65e838460ea2b6acf093a137e3b33a2184dcdfea308cfc13"
+      },
+      "browser_version": "152.0.7977.77",
+      "cases": [
+        {
+          "adapter": {
+            "backend": "BrowserWebGpu",
+            "device_type": "Other",
+            "name": ""
+          },
+          "gpu": "passed",
+          "options": [],
+          "plan_sha256": "90c36cae99a732d940d89d0cdfcac00d9f3cb36df4f0d377a7e79670eb2fa1f1",
+          "shape": [
+            2
+          ]
+        },
+        {
+          "adapter": {
+            "backend": "BrowserWebGpu",
+            "device_type": "Other",
+            "name": ""
+          },
+          "gpu": "passed",
+          "options": [],
+          "plan_sha256": "30779262f717a1f0b47c5bf5b58ab656ec0f76c3539aed241132d6525cfc0ec2",
+          "shape": [
+            2,
+            2
+          ]
+        },
+        {
+          "adapter": {
+            "backend": "BrowserWebGpu",
+            "device_type": "Other",
+            "name": ""
+          },
+          "gpu": "passed",
+          "options": [
+            [
+              8,
+              8,
+              16
+            ],
+            "register_2x2",
+            "compensated"
+          ],
+          "plan_sha256": "373bd3649ebba8e8d3b9ca5dd45682addb0539a00e5727985d3a783fb57eae10",
+          "shape": [
+            2,
+            3,
+            2
+          ]
+        }
+      ],
+      "console_messages": [],
+      "cpu_only": false,
+      "fixture_request": "nn-clients",
+      "intermediate_guard_cases": 4,
+      "kernels_request": "",
+      "launch_flags": [
+        "--enable-unsafe-webgpu"
+      ],
+      "page_errors": [],
+      "page_sha256": "5dddea6145244aa9db9af9d150bdac8c99069d2b41f182c16c1a58d485b52e39",
+      "rejected": 58,
+      "shapes_request": "",
+      "status": "passed",
+      "tiles_mnk_request": "",
+      "wasm_sha256": "a42a8e68280600fe65e838460ea2b6acf093a137e3b33a2184dcdfea308cfc13"
+    }
+  },
+  "fixture_sha256": "f0c16ffca84391c4542194b4c7b9c73ad620afed22e2dc5780c7d5e8e978b24c",
+  "products": {
+    "cpu": {
+      "build_info": {
+        "features": {
+          "cpu": true,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "kdsl": true,
+          "logic": false,
+          "logic-learn": false,
+          "mps": false,
+          "nn": true,
+          "rec": true,
+          "robotics": true,
+          "selfsup": true,
+          "text": true,
+          "wgpu": false,
+          "wgpu-rt": false
+        },
+        "package": "spiraltorch-py",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "family": "unix",
+          "os": "macos",
+          "pointer_width": 64
+        },
+        "version": "0.4.27"
+      },
+      "extension": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nn-clients-20260907/venv-cpu/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so",
+      "extension_sha256": "4c8d09c1be61da19ae7c2fa3259432959cb0c773ef4f1c40e127b67714bef818",
+      "plan": "spiraltorch.nn",
+      "prefix": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nn-clients-20260907/venv-cpu",
+      "wgpu": false,
+      "wheel": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nn-clients-20260907/wheels-cpu-8597915c/spiraltorch-0.4.27-cp38-abi3-macosx_11_0_arm64.whl",
+      "wheel_sha256": "b59b07d5d4f60b239589ed2df841e7d921b7f79e76275d2b7f8a2ae1b7ff7757"
+    },
+    "gpu": {
+      "build_info": {
+        "features": {
+          "cpu": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "kdsl": true,
+          "logic": false,
+          "logic-learn": false,
+          "mps": false,
+          "nn": true,
+          "rec": true,
+          "robotics": true,
+          "selfsup": true,
+          "text": true,
+          "wgpu": true,
+          "wgpu-rt": false
+        },
+        "package": "spiraltorch-py",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "family": "unix",
+          "os": "macos",
+          "pointer_width": 64
+        },
+        "version": "0.4.27"
+      },
+      "extension": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nn-clients-20260907/venv/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so",
+      "extension_sha256": "062e41fd223caee355b98d20457a7c5a554a69cabdfe4dd77f5bce3fd08c04ab",
+      "plan": "spiraltorch.nn",
+      "prefix": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nn-clients-20260907/venv",
+      "wgpu": true,
+      "wheel": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-nn-clients-20260907/wheels-8597915c/spiraltorch-0.4.27-cp38-abi3-macosx_11_0_arm64.whl",
+      "wheel_sha256": "71b00204e9a978ec78af3c07f3ffa3257cd31a6d87efe2b7b3410a426fc0741b"
+    }
+  },
+  "source_commit": "8597915cefe0e6ad658068cd8b929da70969a9b3",
+  "source_tree": "4909a220054134beb220d9a16258ed2f56664a84",
+  "status": "passed"
+}

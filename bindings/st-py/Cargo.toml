@@ -42,7 +42,7 @@ golden = ["st-nn/golden", "st-core/golden"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = ["st-core/cpu", "st-tensor/cpu"]
-wgpu = ["st-core/wgpu", "st-tensor/wgpu", "st-frac/wgpu", "dep:st-backend-wgpu"]
+wgpu = ["st-core/wgpu", "st-tensor/wgpu", "st-frac/wgpu", "dep:st-backend-wgpu", "st-nn?/wgpu"]
 "wgp" = ["wgpu"]
 "wgpu-rt" = ["st-core/wgpu-rt", "wgpu"]
 mps = ["st-core/mps", "st-tensor/mps"]
