@@ -11,6 +11,8 @@ use bytemuck::{Pod, Zeroable};
 use st_kernel_contracts::layout::NdLayout;
 use thiserror::Error;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod profile_tests;
 mod readback;
 pub use readback::{
     LayerGradient, ParameterReadback, StepReadback, TrainingState, TrainingStateReadback,
