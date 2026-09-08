@@ -76,6 +76,16 @@ impl Pass {
     }
 }
 
+fn dispatches_per_pass(backend: wgpu::Backend, dispatches: usize) -> usize {
+    // Metal benefits consistently; browser deferred readback can regress.
+    // Preserve the existing path on BrowserWebGpu and unmeasured backends.
+    if backend == wgpu::Backend::Metal {
+        dispatches.max(1)
+    } else {
+        1
+    }
+}
+
 fn binding(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -665,13 +675,15 @@ impl ResidentDenseTraining {
             .write_buffer(&self.step_config, 0, bytemuck::bytes_of(&learning_rate));
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&self.validation, 0, None);
-        {
+        let chunk_size =
+            dispatches_per_pass(self.runtime.adapter_info().backend, self.passes.len());
+        for chunk in self.passes.chunks(chunk_size) {
             // Compute usage scopes are per dispatch, so wgpu retains the resource barriers.
             let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("dense.training.step"),
                 timestamp_writes: None,
             });
-            for pass in &self.passes {
+            for pass in chunk {
                 pass.encode(&mut compute);
             }
         }
@@ -738,6 +750,25 @@ impl ResidentDenseTraining {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_measured_metal_coalesces_training_dispatches() {
+        for count in [0, 1, 17, 59, 115] {
+            assert_eq!(
+                dispatches_per_pass(wgpu::Backend::Metal, count),
+                count.max(1)
+            );
+            for backend in [
+                wgpu::Backend::Empty,
+                wgpu::Backend::Vulkan,
+                wgpu::Backend::Dx12,
+                wgpu::Backend::Gl,
+                wgpu::Backend::BrowserWebGpu,
+            ] {
+                assert_eq!(dispatches_per_pass(backend, count), 1);
+            }
+        }
+    }
 
     fn validate(source: &str) {
         let module = naga::front::wgsl::parse_str(source).unwrap();
