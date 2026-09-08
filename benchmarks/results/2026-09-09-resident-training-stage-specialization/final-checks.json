@@ -1,0 +1,170 @@
+{
+  "source": "e15f463d8f257406fb0d0ef4cbc94a026ef6c161",
+  "started": "2026-09-08T17:15:30.288486+00:00",
+  "checks": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "log": "final-format.log",
+      "returncode": 0,
+      "elapsed_seconds": 4.5412657909910195
+    },
+    {
+      "name": "benchmark-admission",
+      "command": [
+        "python3",
+        "-I",
+        "tests/test_resident_training_bench.py",
+        "-v"
+      ],
+      "log": "final-benchmark-admission.log",
+      "returncode": 0,
+      "elapsed_seconds": 0.6223762910231017
+    },
+    {
+      "name": "client-validation",
+      "command": [
+        "python3",
+        "-I",
+        "tests/test_resident_training_client_validation.py",
+        "-v"
+      ],
+      "log": "final-client-validation.log",
+      "returncode": 0,
+      "elapsed_seconds": 0.3446429169853218
+    },
+    {
+      "name": "browser-runner-syntax",
+      "command": [
+        "node",
+        "--check",
+        "tools/bench_resident_training_browser.cjs"
+      ],
+      "log": "final-browser-runner-syntax.log",
+      "returncode": 0,
+      "elapsed_seconds": 0.07780966701102443
+    },
+    {
+      "name": "backend-clippy-native",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "log": "final-backend-clippy-native.log",
+      "returncode": 0,
+      "elapsed_seconds": 8.371565207984531
+    },
+    {
+      "name": "backend-clippy-wasm",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "log": "final-backend-clippy-wasm.log",
+      "returncode": 0,
+      "elapsed_seconds": 8.87603274997673
+    },
+    {
+      "name": "backend-tests",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "final-backend-tests.log",
+      "returncode": 0,
+      "elapsed_seconds": 38.9444357920147
+    },
+    {
+      "name": "nn-tests",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--lib",
+        "--test",
+        "training_gradient_reduction",
+        "--test",
+        "resident_inference",
+        "--test",
+        "resident_training",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "final-nn-tests.log",
+      "returncode": 0,
+      "elapsed_seconds": 67.12186787498649
+    },
+    {
+      "name": "python-binding-check",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "bindings/st-py/Cargo.toml"
+      ],
+      "log": "final-python-binding-check.log",
+      "returncode": 0,
+      "elapsed_seconds": 33.7350236249913
+    },
+    {
+      "name": "wasm-binding-check",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "-p",
+        "spiraltorch-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--features",
+        "webgpu"
+      ],
+      "log": "final-wasm-binding-check.log",
+      "returncode": 0,
+      "elapsed_seconds": 24.05576316700899
+    }
+  ],
+  "runtime_tests_enabled": true,
+  "status": "passed"
+}
