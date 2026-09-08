@@ -1,0 +1,143 @@
+{
+  "schema": "spiraltorch.local_raw_manifest.v1",
+  "raw_bundled": false,
+  "local_directory": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-transpose-20260909",
+  "files": [
+    {
+      "file": "repeat-plan.md",
+      "bytes": 946,
+      "sha256": "ed13533ec324a768ad9b903b9f81d136814c6154bd24a28103e8fe7d4645c7cc"
+    },
+    {
+      "file": "baseline-profile.log",
+      "bytes": 203133,
+      "sha256": "24f1c82629502b880b1aa0c8c322728e12fbf6d75434ead7b888403fc51c5d09"
+    },
+    {
+      "file": "candidate-profile.log",
+      "bytes": 202981,
+      "sha256": "b8c8896a1b04d55bdf7db87550a48f8796e38a6b78010cab8bd5ea3cdbb1b632"
+    },
+    {
+      "file": "profile-build.log",
+      "bytes": 114727,
+      "sha256": "438b6aa271e8afa039d3f33306e2612b3bbd0163b70704774366f54547020821"
+    },
+    {
+      "file": "candidate-backend-build.log",
+      "bytes": 114348,
+      "sha256": "e3fe59ed60c40723a1445df778426c48865cac0286aae8103b5177fd74034480"
+    },
+    {
+      "file": "candidate-backend-tests.log",
+      "bytes": 9164,
+      "sha256": "8a9d9196e30ee4d0cbaea0701da0088b462eb07427b72013e2f25b4280b64ffe"
+    },
+    {
+      "file": "baseline-native-build.log",
+      "bytes": 115953,
+      "sha256": "849348199a0cc0a87e82c229b6e442f1a078109279adb60668e50c97b79ed2c1"
+    },
+    {
+      "file": "candidate-native-build.log",
+      "bytes": 115021,
+      "sha256": "a18ab57aadb7d4dbb02b919a3de76b7879853d5e8bbcb6641d7989bfe94ac818"
+    },
+    {
+      "file": "baseline-wasm-build.log",
+      "bytes": 112670,
+      "sha256": "c00685c84713506140f2e65517f19f862843f8235920a78f9719c68a3a8a72e2"
+    },
+    {
+      "file": "candidate-wasm-build.log",
+      "bytes": 111980,
+      "sha256": "6c2ebc9d864b3e94c070b191e727ff54f460f232e8d1eacf6ea1a4899412d6ff"
+    },
+    {
+      "file": "format-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "benchmark-tests.log",
+      "bytes": 980,
+      "sha256": "c7dc438dd2d4d02a67e8621ee2aaff1857fca064af033fd4e5234491bc7aeedf"
+    },
+    {
+      "file": "backend-clippy-native.log",
+      "bytes": 114481,
+      "sha256": "49399f80e1a2ec34eb9bb34682498230416a9db8b2308c6a28f50686538efba5"
+    },
+    {
+      "file": "backend-clippy-wasm.log",
+      "bytes": 111295,
+      "sha256": "ae3aaee11f16bd83e63302444c372dad0a956fb1ff083f0842e3e7cb5525dd1f"
+    },
+    {
+      "file": "native-correctness.json",
+      "bytes": 213798,
+      "sha256": "d48cb3c48156aa2a9668423f11294011070914790affc1eef4f2224b65b733c5"
+    },
+    {
+      "file": "browser-correctness.json",
+      "bytes": 214835,
+      "sha256": "b5a4325c4e1929c7f6b3a666417c5269414319e9958c9668fbb208073badbbc9"
+    },
+    {
+      "file": "correctness-torch.json",
+      "bytes": 831100,
+      "sha256": "7cd2c95e18edc0818d7e84bdc77a98de47ebfa589bc2bc5919cb1d9c3f1c9c4c"
+    },
+    {
+      "file": "native-throughput.json",
+      "bytes": 482086534,
+      "sha256": "793c3f243f91149df60b8df06daca006ab7476b90488d8f9493fbb164b0b56b2"
+    },
+    {
+      "file": "browser-throughput.json",
+      "bytes": 180158576,
+      "sha256": "ffa281c55699369a25477f5208b9c06ff56d281de888fc7c133e98322e3bc7c8"
+    },
+    {
+      "file": "browser-throughput.json.progress.jsonl",
+      "bytes": 149725,
+      "sha256": "4d8e93ec0faf866c31e3d8d371dc02291d1dc2272936400399c22f488836e5af"
+    },
+    {
+      "file": "browser-throughput.json.cases.jsonl",
+      "bytes": 180157137,
+      "sha256": "23d196c2fcd0cc9ec02a8f3dd39f84db5f539be0b388d415e7ae094518cb9948"
+    },
+    {
+      "file": "throughput-validation.json",
+      "bytes": 41255,
+      "sha256": "ad793c48b7562a31a68b90ae0989bc8e57104a88c8c9f72fbe17fc3f3bd82036"
+    },
+    {
+      "file": "native-throughput-repeat.json",
+      "bytes": 482086552,
+      "sha256": "acb27a47868bbdce5d90f0f7d6e7f0898f0ec284fe655d0e512d72996cf7c3e4"
+    },
+    {
+      "file": "browser-throughput-repeat.json",
+      "bytes": 180158549,
+      "sha256": "1e35478116609307ea643d15b9418208fc5bff321ad91638f34baa4feb290e9d"
+    },
+    {
+      "file": "browser-throughput-repeat.json.progress.jsonl",
+      "bytes": 149790,
+      "sha256": "c54be5478a2fdaa1ede88935bc2fea5dae97f533695aaaad60c4ec4ab235f73a"
+    },
+    {
+      "file": "browser-throughput-repeat.json.cases.jsonl",
+      "bytes": 180157110,
+      "sha256": "cad36dbafd4de677c1c63e1ffcd214069f9fa97d3b5b7bb08eb7ca7e8ca2fe6a"
+    },
+    {
+      "file": "throughput-repeat-validation.json",
+      "bytes": 41329,
+      "sha256": "34667f92657f2fdca8f01735104aca820b1a1babd1ae8fdb534f380ba7726313"
+    }
+  ],
+  "boundary": "Raw captures remain in the durable local log directory, not bundled in this small experiment record. Hashes alone cannot reproduce or independently revalidate absent raw data."
+}

@@ -1,0 +1,581 @@
+{
+  "schema": "spiraltorch.training_transpose_experiment.v1",
+  "decision": "not_promoted",
+  "baseline": "00a955a701aa21821fdca34a7c16d27d712aa997",
+  "candidate": "753119911d9b3f3d22a1c8d0092ec33f70c96401",
+  "runs": [
+    {
+      "repeat": false,
+      "groups": [
+        {
+          "depth": 2,
+          "shape": [
+            2,
+            16,
+            32
+          ],
+          "old_over_candidate": {
+            "native_immediate": {
+              "min": 0.7534672338838443,
+              "max": 1.0730752952333882,
+              "per_seed": [
+                1.0730752952333882,
+                0.7783604376569322,
+                0.7534672338838443
+              ]
+            },
+            "native_deferred": {
+              "min": 1.0602231226642689,
+              "max": 3.760368290281262,
+              "per_seed": [
+                3.760368290281262,
+                1.39877997658489,
+                1.0602231226642689
+              ]
+            },
+            "browser_immediate": {
+              "min": 0.9999999909689933,
+              "max": 1.0909090946035938,
+              "per_seed": [
+                1.0909090946035938,
+                0.9999999909689933,
+                1.0781249999272404
+              ]
+            },
+            "browser_deferred": {
+              "min": 0.6170212794289216,
+              "max": 1.8571428556223304,
+              "per_seed": [
+                0.6170212794289216,
+                1.8571428556223304,
+                1.030303037692036
+              ]
+            }
+          }
+        },
+        {
+          "depth": 8,
+          "shape": [
+            4,
+            16,
+            64
+          ],
+          "old_over_candidate": {
+            "native_immediate": {
+              "min": 0.8290900724663886,
+              "max": 1.0220098972817417,
+              "per_seed": [
+                0.9734247422172866,
+                1.0220098972817417,
+                0.8290900724663886
+              ]
+            },
+            "native_deferred": {
+              "min": 0.8700971967178832,
+              "max": 1.0400136152670973,
+              "per_seed": [
+                1.0400136152670973,
+                0.8700971967178832,
+                0.9394552803804233
+              ]
+            },
+            "browser_immediate": {
+              "min": 0.9874999988824129,
+              "max": 1.0063694282750184,
+              "per_seed": [
+                0.9874999988824129,
+                1.0,
+                1.0063694282750184
+              ]
+            },
+            "browser_deferred": {
+              "min": 1.1782178265442393,
+              "max": 1.3300970875752816,
+              "per_seed": [
+                1.2314814812259747,
+                1.1782178265442393,
+                1.3300970875752816
+              ]
+            }
+          }
+        },
+        {
+          "depth": 16,
+          "shape": [
+            4,
+            32,
+            128
+          ],
+          "old_over_candidate": {
+            "native_immediate": {
+              "min": 1.0079107936218152,
+              "max": 1.125920288621113,
+              "per_seed": [
+                1.0079107936218152,
+                1.027302712277021,
+                1.125920288621113
+              ]
+            },
+            "native_deferred": {
+              "min": 0.992687848491874,
+              "max": 1.4049497088001421,
+              "per_seed": [
+                1.247294270291348,
+                1.4049497088001421,
+                0.992687848491874
+              ]
+            },
+            "browser_immediate": {
+              "min": 0.9658246655049996,
+              "max": 1.0109546164008416,
+              "per_seed": [
+                0.9937500003696187,
+                1.0109546164008416,
+                0.9658246655049996
+              ]
+            },
+            "browser_deferred": {
+              "min": 0.9893390198197899,
+              "max": 1.0064794825451213,
+              "per_seed": [
+                0.9893390198197899,
+                1.0043196548127409,
+                1.0064794825451213
+              ]
+            }
+          }
+        }
+      ],
+      "all_native_state_fingerprints_match": true,
+      "max_abs_error": 1.4901161193847656e-08,
+      "browser_intervals_revalidated": 360
+    },
+    {
+      "repeat": true,
+      "groups": [
+        {
+          "depth": 2,
+          "shape": [
+            2,
+            16,
+            32
+          ],
+          "old_over_candidate": {
+            "native_immediate": {
+              "min": 0.7170098306027338,
+              "max": 1.0175782845571915,
+              "per_seed": [
+                0.9058561689317575,
+                0.7170098306027338,
+                1.0175782845571915
+              ]
+            },
+            "native_deferred": {
+              "min": 0.9944896600600581,
+              "max": 1.1289308263505475,
+              "per_seed": [
+                1.1289308263505475,
+                1.064311600040683,
+                0.9944896600600581
+              ]
+            },
+            "browser_immediate": {
+              "min": 0.9571428554398673,
+              "max": 0.9999999956808229,
+              "per_seed": [
+                0.9894179884752212,
+                0.9999999956808229,
+                0.9571428554398673
+              ]
+            },
+            "browser_deferred": {
+              "min": 0.9062500052386895,
+              "max": 1.0270270172307925,
+              "per_seed": [
+                1.0270270172307925,
+                0.9062500052386895,
+                0.9722222236019594
+              ]
+            }
+          }
+        },
+        {
+          "depth": 8,
+          "shape": [
+            4,
+            16,
+            64
+          ],
+          "old_over_candidate": {
+            "native_immediate": {
+              "min": 1.0020702950075857,
+              "max": 1.0244659918813914,
+              "per_seed": [
+                1.0244659918813914,
+                1.0020702950075857,
+                1.008077998056328
+              ]
+            },
+            "native_deferred": {
+              "min": 1.0153358631278078,
+              "max": 1.342416621214836,
+              "per_seed": [
+                1.342416621214836,
+                1.0242886112567966,
+                1.0153358631278078
+              ]
+            },
+            "browser_immediate": {
+              "min": 1.058064516401936,
+              "max": 1.1371527773425678,
+              "per_seed": [
+                1.1371527773425678,
+                1.0921052655829453,
+                1.058064516401936
+              ]
+            },
+            "browser_deferred": {
+              "min": 0.8771929842906939,
+              "max": 1.3448275852323854,
+              "per_seed": [
+                1.3448275852323854,
+                0.8771929842906939,
+                1.1666666692536738
+              ]
+            }
+          }
+        },
+        {
+          "depth": 16,
+          "shape": [
+            4,
+            32,
+            128
+          ],
+          "old_over_candidate": {
+            "native_immediate": {
+              "min": 0.9023065790914029,
+              "max": 1.054073507096965,
+              "per_seed": [
+                0.9023065790914029,
+                1.0060292846064172,
+                1.054073507096965
+              ]
+            },
+            "native_deferred": {
+              "min": 0.9901300703250715,
+              "max": 1.0058966694788474,
+              "per_seed": [
+                0.9901300703250715,
+                1.0026800208578914,
+                1.0058966694788474
+              ]
+            },
+            "browser_immediate": {
+              "min": 0.9349710978520301,
+              "max": 0.9910581231780227,
+              "per_seed": [
+                0.9910581231780227,
+                0.9613670130255376,
+                0.9349710978520301
+              ]
+            },
+            "browser_deferred": {
+              "min": 0.9871794879387508,
+              "max": 0.9956989256257004,
+              "per_seed": [
+                0.9871794879387508,
+                0.9915074302375073,
+                0.9956989256257004
+              ]
+            }
+          }
+        }
+      ],
+      "all_native_state_fingerprints_match": true,
+      "max_abs_error": 1.4901161193847656e-08,
+      "browser_intervals_revalidated": 360
+    }
+  ],
+  "correctness": {
+    "native": {
+      "vjp_cases": 18,
+      "vjp_max_abs_error": 2.9802322387695312e-08,
+      "learning": [
+        {
+          "seed": 17,
+          "steps": 128,
+          "max_abs_error": 1.1920928955078125e-07,
+          "parameter_reuploads": 0,
+          "intermediate_host_readbacks": 0
+        },
+        {
+          "seed": 29,
+          "steps": 128,
+          "max_abs_error": 1.4901161193847656e-07,
+          "parameter_reuploads": 0,
+          "intermediate_host_readbacks": 0
+        },
+        {
+          "seed": 43,
+          "steps": 128,
+          "max_abs_error": 7.450580596923828e-08,
+          "parameter_reuploads": 0,
+          "intermediate_host_readbacks": 0
+        }
+      ],
+      "guards": {
+        "host_rejection_cases": 10,
+        "nonfinite_cases": [
+          {
+            "case": "input_gradient_overflow",
+            "flags": 577,
+            "stage": 0
+          },
+          {
+            "case": "loss_square_overflow",
+            "flags": 32577,
+            "stage": 0
+          },
+          {
+            "case": "gelu_positive_overflow",
+            "flags": 29023,
+            "stage": 0
+          },
+          {
+            "case": "gelu_negative_overflow",
+            "flags": 30,
+            "stage": 0
+          },
+          {
+            "case": "gelu_positive_square_cubic_overflow",
+            "flags": 28,
+            "stage": 0
+          },
+          {
+            "case": "gelu_negative_square_cubic_overflow",
+            "flags": 28,
+            "stage": 0
+          }
+        ],
+        "recovery": "valid step succeeds before rejected snapshot is read",
+        "saturated_gelu_cases": 4,
+        "transactional_rollback": "bitwise unchanged across all layers"
+      }
+    },
+    "browser": {
+      "vjp_cases": 18,
+      "vjp_max_abs_error": 2.9802322387695312e-08,
+      "learning": [
+        {
+          "seed": 17,
+          "steps": 128,
+          "max_abs_error": 5.960464477539063e-08,
+          "parameter_reuploads": 0,
+          "intermediate_host_readbacks": 0
+        },
+        {
+          "seed": 29,
+          "steps": 128,
+          "max_abs_error": 5.960464477539063e-08,
+          "parameter_reuploads": 0,
+          "intermediate_host_readbacks": 0
+        },
+        {
+          "seed": 43,
+          "steps": 128,
+          "max_abs_error": 1.043081283569336e-07,
+          "parameter_reuploads": 0,
+          "intermediate_host_readbacks": 0
+        }
+      ],
+      "guards": {
+        "host_rejection_cases": 10,
+        "nonfinite_cases": [
+          {
+            "case": "input_gradient_overflow",
+            "flags": 577,
+            "stage": 0
+          },
+          {
+            "case": "loss_square_overflow",
+            "flags": 32577,
+            "stage": 0
+          },
+          {
+            "case": "gelu_positive_overflow",
+            "flags": 29023,
+            "stage": 0
+          },
+          {
+            "case": "gelu_negative_overflow",
+            "flags": 30,
+            "stage": 0
+          },
+          {
+            "case": "gelu_positive_square_cubic_overflow",
+            "flags": 28,
+            "stage": 0
+          },
+          {
+            "case": "gelu_negative_square_cubic_overflow",
+            "flags": 28,
+            "stage": 0
+          }
+        ],
+        "recovery": "valid step succeeds before rejected snapshot is read",
+        "saturated_gelu_cases": 4,
+        "transactional_rollback": "bitwise unchanged across all layers"
+      }
+    }
+  },
+  "torch_replay": {
+    "status": "passed",
+    "devices": [
+      "cpu",
+      "mps"
+    ]
+  },
+  "profiles": [
+    {
+      "file": "baseline-profile.log",
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "median_us": {
+        "forward": 104.667,
+        "loss_partials": 13.312999999999999,
+        "loss_reduce": 12.437000000000001,
+        "delta": 16.854,
+        "weight_gradient": 102.5005,
+        "bias_gradient": 61.5,
+        "input_gradient": 95.833,
+        "prepare_sgd": 19.687,
+        "decide_sgd": 8.271,
+        "commit_sgd": 10.833
+      },
+      "production_state_exact": true,
+      "boundary": "private timestamp device; one compute pass per dispatch, including on Metal; changes scheduling and excludes host/readback cost; diagnostic only, not production throughput"
+    },
+    {
+      "file": "baseline-profile.log",
+      "shape": [
+        4,
+        16,
+        64
+      ],
+      "depth": 8,
+      "median_us": {
+        "forward": 730.9375,
+        "loss_partials": 14.0,
+        "loss_reduce": 12.646,
+        "delta": 73.1665,
+        "weight_gradient": 728.3340000000001,
+        "bias_gradient": 438.1035,
+        "input_gradient": 668.0,
+        "prepare_sgd": 78.9375,
+        "decide_sgd": 11.375,
+        "commit_sgd": 97.562
+      },
+      "production_state_exact": true,
+      "boundary": "private timestamp device; one compute pass per dispatch, including on Metal; changes scheduling and excludes host/readback cost; diagnostic only, not production throughput"
+    },
+    {
+      "file": "baseline-profile.log",
+      "shape": [
+        4,
+        32,
+        128
+      ],
+      "depth": 16,
+      "median_us": {
+        "forward": 1267.312,
+        "loss_partials": 7.7705,
+        "loss_reduce": 4.5625,
+        "delta": 73.8535,
+        "weight_gradient": 1213.3125,
+        "bias_gradient": 516.125,
+        "input_gradient": 1247.04,
+        "prepare_sgd": 73.7085,
+        "decide_sgd": 4.8335,
+        "commit_sgd": 91.5415
+      },
+      "production_state_exact": true,
+      "boundary": "private timestamp device; one compute pass per dispatch, including on Metal; changes scheduling and excludes host/readback cost; diagnostic only, not production throughput"
+    },
+    {
+      "file": "candidate-profile.log",
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "median_us": {
+        "forward": 70.604,
+        "loss_partials": 7.6045,
+        "loss_reduce": 7.5835,
+        "delta": 9.771,
+        "weight_gradient": 58.4795,
+        "bias_gradient": 35.1665,
+        "input_gradient": 53.6665,
+        "prepare_sgd": 11.1665,
+        "decide_sgd": 4.667,
+        "commit_sgd": 6.3755
+      },
+      "production_state_exact": true,
+      "boundary": "private timestamp device; one compute pass per dispatch, including on Metal; changes scheduling and excludes host/readback cost; diagnostic only, not production throughput"
+    },
+    {
+      "file": "candidate-profile.log",
+      "shape": [
+        4,
+        16,
+        64
+      ],
+      "depth": 8,
+      "median_us": {
+        "forward": 732.249,
+        "loss_partials": 14.271,
+        "loss_reduce": 13.3955,
+        "delta": 73.021,
+        "weight_gradient": 732.2705000000001,
+        "bias_gradient": 439.9375,
+        "input_gradient": 666.52,
+        "prepare_sgd": 80.1875,
+        "decide_sgd": 11.3955,
+        "commit_sgd": 92.729
+      },
+      "production_state_exact": true,
+      "boundary": "private timestamp device; one compute pass per dispatch, including on Metal; changes scheduling and excludes host/readback cost; diagnostic only, not production throughput"
+    },
+    {
+      "file": "candidate-profile.log",
+      "shape": [
+        4,
+        32,
+        128
+      ],
+      "depth": 16,
+      "median_us": {
+        "forward": 1327.374,
+        "loss_partials": 7.438,
+        "loss_reduce": 4.6455,
+        "delta": 74.188,
+        "weight_gradient": 1271.709,
+        "bias_gradient": 540.355,
+        "input_gradient": 1301.0194999999999,
+        "prepare_sgd": 73.876,
+        "decide_sgd": 4.9795,
+        "commit_sgd": 100.292
+      },
+      "production_state_exact": true,
+      "boundary": "private timestamp device; one compute pass per dispatch, including on Metal; changes scheduling and excludes host/readback cost; diagnostic only, not production throughput"
+    }
+  ],
+  "boundary": "Two whole fixed matrices, not selective retries. Ratios of eight-sample medians across three seeds, not confidence intervals. Native timing varies substantially; browser largest shapes do not show consistent gains. Correctness is not a performance promotion gate.",
+  "profile_provenance": "Split-pass diagnostic changes Metal scheduling and excludes host/readback cost. Its test executable hash was not captured; compile logs/source context are retained, not independent binary attestation."
+}
