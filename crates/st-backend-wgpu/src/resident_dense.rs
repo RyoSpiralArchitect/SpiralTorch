@@ -60,14 +60,107 @@ pub enum DenseError {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct Uniforms {
-    rows: u32,
-    cols: u32,
-    inner: u32,
-    flags: u32,
-    output_scale: f32,
-    validation_index: u32,
-    padding: [u32; 2],
+pub(crate) struct Uniforms {
+    pub rows: u32,
+    pub cols: u32,
+    pub inner: u32,
+    pub flags: u32,
+    pub output_scale: f32,
+    pub validation_index: u32,
+    pub padding: [u32; 2],
+}
+
+pub(crate) fn validate_layers(
+    limits: &wgpu::Limits,
+    input_layout: &NdLayout,
+    layers: &[DenseLayer],
+    tile: MatmulTile,
+    kernel: MatmulKernel,
+) -> Result<(Vec<MatmulShape>, NdLayout), DenseError> {
+    if input_layout.rank() == 0
+        || input_layout.is_empty()
+        || !input_layout.is_contiguous()
+        || input_layout.offset() != 0
+    {
+        return Err(DenseError::InvalidLayout);
+    }
+    if layers.is_empty() || u32::try_from(layers.len()).is_err() {
+        return Err(DenseError::EmptyChain);
+    }
+    let mut width = *input_layout.shape().last().unwrap();
+    let rows = input_layout.len() / width;
+    let mut shapes = Vec::with_capacity(layers.len());
+    for (i, layer) in layers.iter().enumerate() {
+        if layer.inner != width
+            || layer.inner.checked_mul(layer.cols) != Some(layer.weights.len())
+            || layer.bias.len() != layer.cols
+        {
+            return Err(DenseError::InvalidStage(i));
+        }
+        if !layer
+            .weights
+            .iter()
+            .chain(&layer.bias)
+            .all(|v| v.is_finite())
+        {
+            return Err(DenseError::NonFiniteInput("parameters"));
+        }
+        let shape = MatmulShape::new(rows, width, layer.cols)?;
+        shape.validate(limits, tile, kernel)?;
+        shapes.push(shape);
+        width = layer.cols;
+    }
+    let mut dimensions = input_layout.shape().to_vec();
+    *dimensions.last_mut().unwrap() = width;
+    Ok((shapes, NdLayout::contiguous(&dimensions)?))
+}
+
+pub(crate) fn dense_layout(device: &wgpu::Device, tape: bool) -> wgpu::BindGroupLayout {
+    let entries: Vec<_> = (0..if tape { 9 } else { 8 })
+        .map(|binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: if binding == 6 {
+                    wgpu::BufferBindingType::Uniform
+                } else {
+                    wgpu::BufferBindingType::Storage {
+                        read_only: ![2, 7, 8].contains(&binding),
+                    }
+                },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        })
+        .collect();
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("dense.bindings"),
+        entries: &entries,
+    })
+}
+
+pub(crate) fn dense_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    source: String,
+) -> wgpu::ComputePipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("dense.layout"),
+        bind_group_layouts: &[layout],
+        push_constant_ranges: &[],
+    });
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("dense.checked.shader"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("dense.checked"),
+        layout: Some(&pipeline_layout),
+        module: &module,
+        entry_point: "main",
+        compilation_options: Default::default(),
+    })
 }
 
 pub struct ResidentDense {
@@ -96,16 +189,6 @@ impl ResidentDense {
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<Self, DenseError> {
-        if input_layout.rank() == 0
-            || input_layout.is_empty()
-            || !input_layout.is_contiguous()
-            || input_layout.offset() != 0
-        {
-            return Err(DenseError::InvalidLayout);
-        }
-        if layers.is_empty() || u32::try_from(layers.len()).is_err() {
-            return Err(DenseError::EmptyChain);
-        }
         let context = runtime.context();
         let device = context.device();
         let limits = device.limits();
@@ -113,32 +196,9 @@ impl ResidentDense {
         {
             return Err(MatmulError::DeviceLimit("checked dense bindings").into());
         }
-        let mut width = *input_layout.shape().last().unwrap();
-        let rows = input_layout.len() / width;
-        let mut shapes = Vec::with_capacity(layers.len());
-        for (i, layer) in layers.iter().enumerate() {
-            if layer.inner != width
-                || layer.inner.checked_mul(layer.cols) != Some(layer.weights.len())
-                || layer.bias.len() != layer.cols
-            {
-                return Err(DenseError::InvalidStage(i));
-            }
-            if !layer
-                .weights
-                .iter()
-                .chain(&layer.bias)
-                .all(|value| value.is_finite())
-            {
-                return Err(DenseError::NonFiniteInput("parameters"));
-            }
-            let shape = MatmulShape::new(rows, width, layer.cols)?;
-            shape.validate(&limits, tile, kernel)?;
-            shapes.push(shape);
-            width = layer.cols;
-        }
-        let mut dimensions = input_layout.shape().to_vec();
-        *dimensions.last_mut().unwrap() = width;
-        let output_layout = NdLayout::contiguous(&dimensions)?;
+        let (shapes, output_layout) =
+            validate_layers(&limits, &input_layout, layers, tile, kernel)?;
+        let rows = shapes[0].dimensions().0;
         let snapshot_len = output_layout
             .len()
             .checked_add(layers.len())
@@ -166,46 +226,10 @@ impl ResidentDense {
             layers.len(),
             storage | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         )?;
-        let entries: Vec<_> = (0..8)
-            .map(|binding| wgpu::BindGroupLayoutEntry {
-                binding,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: if binding == 6 {
-                        wgpu::BufferBindingType::Uniform
-                    } else {
-                        wgpu::BufferBindingType::Storage {
-                            read_only: binding != 2 && binding != 7,
-                        }
-                    },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            })
-            .collect();
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("dense.bindings"),
-            entries: &entries,
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("dense.layout"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        });
+        let layout = dense_layout(device, false);
         let source = checked_dense_matmul_source(tile.dimensions(), kernel, accumulation)
             .map_err(|_| MatmulError::UnsupportedKernelTile)?;
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("dense.checked.shader"),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
-        });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("dense.checked"),
-            layout: Some(&pipeline_layout),
-            module: &module,
-            entry_point: "main",
-            compilation_options: Default::default(),
-        });
+        let pipeline = dense_pipeline(device, &layout, source);
         let dummy = runtime::upload_slice(device, "dense.unused", &[0.0f32], storage)?;
         let mut bindings = Vec::with_capacity(layers.len());
         for (i, layer) in layers.iter().enumerate() {

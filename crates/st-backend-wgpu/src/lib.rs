@@ -18,6 +18,7 @@ pub mod rankk_exact_2ce;
 pub mod render;
 pub mod resident_dense;
 pub mod resident_matmul;
+pub mod resident_training;
 pub mod runtime;
 pub mod shader_sources;
 pub mod softmax;

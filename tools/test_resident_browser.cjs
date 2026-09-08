@@ -9,9 +9,9 @@ const {chromium} = require("playwright");
 async function main() {
   const [moduleDir, executablePath, outputPath, tiles, kernels, accumulations, shapes, fixture, baselineDir] = process.argv.slice(2);
   if (!moduleDir || !executablePath || !outputPath) {
-    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-pair-lanes-matched|rank-prefix-matched|rank-count-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean|nn|nn-clients|nn-clients-cpu] [BASELINE_MODULE_DIR]");
+    throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-pair-lanes-matched|rank-prefix-matched|rank-count-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean|nn|nn-training|nn-clients|nn-clients-cpu] [BASELINE_MODULE_DIR]");
   }
-  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-clients", "nn-clients-cpu"].includes(fixture)) throw Error("unknown fixture");
+  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-clients", "nn-clients-cpu"].includes(fixture)) throw Error("unknown fixture");
   const nnClientFixture = fixture === "nn-clients" || fixture === "nn-clients-cpu";
   const matched=fixture === "rank-matched" || fixture === "rank-pruning-matched" || fixture === "rank-pair-lanes-matched" || fixture === "rank-prefix-matched" || fixture === "rank-count-matched";
   if(matched !== Boolean(baselineDir)) throw Error("matched rank fixtures require BASELINE_MODULE_DIR; other fixtures must omit it");
@@ -26,6 +26,7 @@ async function main() {
       ["/module/spiraltorch_wasm_bg.wasm", [path.join(moduleDir,"spiraltorch_wasm_bg.wasm"), "application/wasm"]],
     ]);
     const moduleRoot = path.resolve(moduleDir);
+    if(fixture === "nn-training") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_training.html"), "text/html"]);
     if(nnClientFixture) files.set("/fixture.json", [path.join(moduleRoot,"nn-fixture.json"), "application/json"]);
     function addGeneratedAssets(dir, root=moduleRoot, prefix="/module/") {
       for(const entry of fs.readdirSync(dir,{withFileTypes:true})) {

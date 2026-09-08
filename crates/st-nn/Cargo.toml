@@ -64,6 +64,15 @@ crate-type = ["cdylib"]
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_training"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_training_browser"
+crate-type = ["cdylib"]
+required-features = ["wgpu"]
+
+[[example]]
 name = "ecosystem_integration_demo"
 path = "../../examples/ecosystem_integration_demo.rs"
 
