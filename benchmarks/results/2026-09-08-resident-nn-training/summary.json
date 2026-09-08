@@ -1,0 +1,425 @@
+{
+  "schema": "spiraltorch.resident_training.study.v1",
+  "status": "passed",
+  "commit": "2321c6fd518dcedbc228b8323e4de0ccb5f0f90c",
+  "tree": "c20ba4913e450a147619d3a2cfc425976c6c8d4a",
+  "date": "2026-09-08",
+  "native": {
+    "adapter": {
+      "backend": "Metal",
+      "name": "Apple M4"
+    },
+    "vjp_cases": 18,
+    "max_vjp_abs_error": 2.9802322387695312e-8,
+    "guards": {
+      "host_rejection_cases": 10,
+      "nonfinite_cases": [
+        {
+          "case": "input_gradient_overflow",
+          "flags": 577,
+          "stage": 0
+        },
+        {
+          "case": "loss_square_overflow",
+          "flags": 32577,
+          "stage": 0
+        },
+        {
+          "case": "gelu_positive_overflow",
+          "flags": 29023,
+          "stage": 0
+        },
+        {
+          "case": "gelu_negative_overflow",
+          "flags": 30,
+          "stage": 0
+        },
+        {
+          "case": "gelu_positive_square_cubic_overflow",
+          "flags": 28,
+          "stage": 0
+        },
+        {
+          "case": "gelu_negative_square_cubic_overflow",
+          "flags": 28,
+          "stage": 0
+        }
+      ],
+      "recovery": "valid step succeeds before rejected snapshot is read",
+      "saturated_gelu_cases": 4,
+      "transactional_rollback": "bitwise unchanged across all layers"
+    },
+    "learning": [
+      {
+        "seed": 17,
+        "steps": 128,
+        "shape": [
+          2,
+          16,
+          4
+        ],
+        "initial_mse": 0.14218813180923462,
+        "final_mse": 0.013794777914881706,
+        "loss_reduction_percent": 90.29822127954439,
+        "max_abs_error": 1.1920928955078125e-7,
+        "exported_inference": "passed"
+      },
+      {
+        "seed": 29,
+        "steps": 128,
+        "shape": [
+          2,
+          16,
+          4
+        ],
+        "initial_mse": 0.13536861538887024,
+        "final_mse": 0.005683853756636381,
+        "loss_reduction_percent": 95.80120270839107,
+        "max_abs_error": 1.4901161193847656e-7,
+        "exported_inference": "passed"
+      },
+      {
+        "seed": 43,
+        "steps": 128,
+        "shape": [
+          2,
+          16,
+          4
+        ],
+        "initial_mse": 0.09850212931632996,
+        "final_mse": 0.00704549765214324,
+        "loss_reduction_percent": 92.84736512698389,
+        "max_abs_error": 7.450580596923828e-8,
+        "exported_inference": "passed"
+      }
+    ],
+    "batch_duplication_factors": [
+      1,
+      2,
+      5
+    ]
+  },
+  "browser": {
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "name": ""
+    },
+    "vjp_cases": 18,
+    "max_vjp_abs_error": 2.9802322387695312e-8,
+    "guards": {
+      "host_rejection_cases": 10,
+      "nonfinite_cases": [
+        {
+          "case": "input_gradient_overflow",
+          "flags": 577,
+          "stage": 0
+        },
+        {
+          "case": "loss_square_overflow",
+          "flags": 32577,
+          "stage": 0
+        },
+        {
+          "case": "gelu_positive_overflow",
+          "flags": 29023,
+          "stage": 0
+        },
+        {
+          "case": "gelu_negative_overflow",
+          "flags": 30,
+          "stage": 0
+        },
+        {
+          "case": "gelu_positive_square_cubic_overflow",
+          "flags": 28,
+          "stage": 0
+        },
+        {
+          "case": "gelu_negative_square_cubic_overflow",
+          "flags": 28,
+          "stage": 0
+        }
+      ],
+      "recovery": "valid step succeeds before rejected snapshot is read",
+      "saturated_gelu_cases": 4,
+      "transactional_rollback": "bitwise unchanged across all layers"
+    },
+    "learning": [
+      {
+        "seed": 17,
+        "steps": 128,
+        "shape": [
+          2,
+          16,
+          4
+        ],
+        "initial_mse": 0.14218813180923462,
+        "final_mse": 0.013794777914881706,
+        "loss_reduction_percent": 90.29822127954439,
+        "max_abs_error": 5.960464477539063e-8,
+        "exported_inference": "passed"
+      },
+      {
+        "seed": 29,
+        "steps": 128,
+        "shape": [
+          2,
+          16,
+          4
+        ],
+        "initial_mse": 0.13536861538887024,
+        "final_mse": 0.005683853756636381,
+        "loss_reduction_percent": 95.80120270839107,
+        "max_abs_error": 5.960464477539063e-8,
+        "exported_inference": "passed"
+      },
+      {
+        "seed": 43,
+        "steps": 128,
+        "shape": [
+          2,
+          16,
+          4
+        ],
+        "initial_mse": 0.09850212931632996,
+        "final_mse": 0.00704549765214324,
+        "loss_reduction_percent": 92.84736512698389,
+        "max_abs_error": 1.043081283569336e-7,
+        "exported_inference": "passed"
+      }
+    ],
+    "batch_duplication_factors": [
+      1,
+      2,
+      5
+    ]
+  },
+  "browser_runtime": {
+    "version": "152.0.7977.77",
+    "adapter_probe": {
+      "vendor": "apple",
+      "architecture": "metal-3",
+      "device": "",
+      "description": "",
+      "is_fallback_adapter": false,
+      "boundary": "Separate browser adapter observation, not a device identity receipt for the Rust runtime"
+    },
+    "wasm_sha256": "63f5e97f064ab5ea11b98e07d04b7f4b10d4dee97ee32023047e8b77c20cb7a2",
+    "page_errors": [],
+    "console_messages": []
+  },
+  "torch": {
+    "version": "2.12.1",
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "results": [
+      {
+        "source_file": "native-training-final.json",
+        "source_sha256": "e338b848bcbae4855fb28dc961ac86f8762b81bacae2b7ba9cc00311b03bdc59",
+        "devices": [
+          {
+            "device": "cpu",
+            "vjp_cases": 3,
+            "learning_cases": 3,
+            "compared_states": 12,
+            "max_abs_error": 1.1920928955078125e-7
+          },
+          {
+            "device": "mps",
+            "vjp_cases": 3,
+            "learning_cases": 3,
+            "compared_states": 12,
+            "max_abs_error": 7.450580596923828e-8
+          }
+        ]
+      },
+      {
+        "source_file": "browser-training-final.json",
+        "source_sha256": "e513f8ba0d3f0454d0b09a3c4e8d55843b133a2242c683389336e0875c88b588",
+        "devices": [
+          {
+            "device": "cpu",
+            "vjp_cases": 3,
+            "learning_cases": 3,
+            "compared_states": 12,
+            "max_abs_error": 1.1920928955078125e-7
+          },
+          {
+            "device": "mps",
+            "vjp_cases": 3,
+            "learning_cases": 3,
+            "compared_states": 12,
+            "max_abs_error": 7.450580596923828e-8
+          }
+        ]
+      }
+    ],
+    "boundary": "float32 mean-MSE, tanh GELU, exact VJP and plain SGD; correctness only, no timing/quality claim"
+  },
+  "inference": {
+    "cases": [
+      {
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "depth": 2,
+        "seed": 17,
+        "legacy_ms": 1.0212708333333333,
+        "resident_ms": 0.6014235,
+        "torch_ms": 0.3885000866527359,
+        "speedup_over_legacy": 1.6980893385997275,
+        "resident_over_torch": 1.5480652917783968
+      },
+      {
+        "shape": [
+          2,
+          8,
+          64
+        ],
+        "depth": 16,
+        "seed": 17,
+        "legacy_ms": 7.119173666666666,
+        "resident_ms": 1.5759687500000001,
+        "torch_ms": 1.086669995856937,
+        "speedup_over_legacy": 4.517331747007462,
+        "resident_over_torch": 1.4502735476350455
+      },
+      {
+        "shape": [
+          4,
+          8,
+          128
+        ],
+        "depth": 16,
+        "seed": 17,
+        "legacy_ms": 8.679621416666668,
+        "resident_ms": 2.27604525,
+        "torch_ms": 0.822889085005348,
+        "speedup_over_legacy": 3.813466106030479,
+        "resident_over_torch": 2.765919844452923
+      },
+      {
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "depth": 2,
+        "seed": 29,
+        "legacy_ms": 1.0176458333333331,
+        "resident_ms": 0.4937360833333333,
+        "torch_ms": 0.29681950642649707,
+        "speedup_over_legacy": 2.061112946137047,
+        "resident_over_torch": 1.6634219538923722
+      },
+      {
+        "shape": [
+          2,
+          8,
+          64
+        ],
+        "depth": 16,
+        "seed": 29,
+        "legacy_ms": 5.9336287500000005,
+        "resident_ms": 1.5536388333333333,
+        "torch_ms": 0.9485312427083651,
+        "speedup_over_legacy": 3.819181538652323,
+        "resident_over_torch": 1.6379416548232921
+      },
+      {
+        "shape": [
+          4,
+          8,
+          128
+        ],
+        "depth": 16,
+        "seed": 29,
+        "legacy_ms": 6.441673583333334,
+        "resident_ms": 1.7653438333333333,
+        "torch_ms": 0.9317743339731047,
+        "speedup_over_legacy": 3.6489625769786307,
+        "resident_over_torch": 1.8946044862664024
+      },
+      {
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "depth": 2,
+        "seed": 43,
+        "legacy_ms": 0.5661599166666665,
+        "resident_ms": 0.29834725000000006,
+        "torch_ms": 0.3275554142116259,
+        "speedup_over_legacy": 1.8976542155715075,
+        "resident_over_torch": 0.9108298536846804
+      },
+      {
+        "shape": [
+          2,
+          8,
+          64
+        ],
+        "depth": 16,
+        "seed": 43,
+        "legacy_ms": 5.441559083333334,
+        "resident_ms": 1.3568991666666665,
+        "torch_ms": 0.9338472518720664,
+        "speedup_over_legacy": 4.010289944168046,
+        "resident_over_torch": 1.4530204634071746
+      },
+      {
+        "shape": [
+          4,
+          8,
+          128
+        ],
+        "depth": 16,
+        "seed": 43,
+        "legacy_ms": 6.429253583333332,
+        "resident_ms": 1.4115659166666668,
+        "torch_ms": 0.8015693359387418,
+        "speedup_over_legacy": 4.554695963838268,
+        "resident_over_torch": 1.76100288943007
+      }
+    ],
+    "device_admission": {
+      "device": "mps",
+      "name": "Apple M4",
+      "contention": "unknown: macOS does not expose CUDA-style GPU process accounting; diagnostic only"
+    },
+    "boundary": "host-to-host eager inference; fixed model parameters, native legacy prepack/cache behavior unchanged; resident/Torch weights and bias device-persistent; fresh input upload and final readback each sample; native controls interleaved, PyTorch measured afterward; 2 warmups + 12 samples; compilation/setup excluded; no fastest-PyTorch claim",
+    "semantics": "Rust preserves intermediate finite guards on GPU; eager PyTorch does not add per-stage guards for these frozen finite fixtures; every output is checked outside timing; not backward/training throughput",
+    "slower_than_torch": 8,
+    "deep_speedup_over_legacy_range": [
+      3.6489625769786307,
+      4.554695963838268
+    ]
+  },
+  "browser_inference": {
+    "cases": 6,
+    "overflow_cases": 4
+  },
+  "artifacts": {
+    "native-training-final.json": "e338b848bcbae4855fb28dc961ac86f8762b81bacae2b7ba9cc00311b03bdc59",
+    "browser-training-final.json": "e513f8ba0d3f0454d0b09a3c4e8d55843b133a2242c683389336e0875c88b588",
+    "torch-training-final.json": "826c0fe35c2a3dd58693c9fafe8cba0033c24a470c1c45623c41952f785648be",
+    "browser-inference-final.json": "6a59ddec17e24a9079d21e521875b109a59b60412a0e3a0bc32ea373e8f9c503",
+    "inference-vs-torch-final.json": "9eb88f85e17de870d45cec45b05a1eb85229f7c556d47d4efc74ea2d37096424",
+    "resident-training-2321c6fd": "23d8f584ef82df66942992d9fbaa6f44b5cf8ea08dc38e6682d87dd28d30785f",
+    "resident-mlp-2321c6fd": "b9b9467e401ea8fec9a2ba5aefd2026461f85b2559d2fbe7a486375fd7504571"
+  },
+  "boundaries": [
+    "Synthetic finite fixture correctness; no language-model quality or training-throughput claim.",
+    "Native Metal and real Chrome WebGPU run the same Rust graph and shaders; browser adapter probe is separate, not identity attestation.",
+    "Three seeds, not independent evidence from counting duplicate control replays as new seeds.",
+    "Inference is one diagnostic run with 12 samples per case, not a matched pre-change performance comparison; macOS GPU contention unknown.",
+    "Rust/native and WASM Rust training core only; public Python/JS training clients and CUDA remain out of scope.",
+    "Submitted attempt counters are not committed-step counters; per-attempt failures must be captured to retain their individual receipt.",
+    "Binary hashes refer to locally retained immutable build products; binaries are not in the raw-log archive."
+  ]
+}
