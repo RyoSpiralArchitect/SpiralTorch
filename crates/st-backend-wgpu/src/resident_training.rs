@@ -69,11 +69,7 @@ struct Pass {
 }
 
 impl Pass {
-    fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("dense.training.pass"),
-            timestamp_writes: None,
-        });
+    fn encode<'a>(&'a self, pass: &mut wgpu::ComputePass<'a>) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.binding, &[]);
         pass.dispatch_workgroups(self.groups[0], self.groups[1], self.groups[2]);
@@ -669,8 +665,15 @@ impl ResidentDenseTraining {
             .write_buffer(&self.step_config, 0, bytemuck::bytes_of(&learning_rate));
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&self.validation, 0, None);
-        for pass in &self.passes {
-            pass.encode(&mut encoder);
+        {
+            // Compute usage scopes are per dispatch, so wgpu retains the resource barriers.
+            let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("dense.training.step"),
+                timestamp_writes: None,
+            });
+            for pass in &self.passes {
+                pass.encode(&mut compute);
+            }
         }
         context.queue().submit(Some(encoder.finish()));
         self.submitted_steps = attempt;
