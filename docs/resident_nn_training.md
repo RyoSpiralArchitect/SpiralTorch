@@ -53,6 +53,13 @@ In WASM Rust, request `WgpuRuntime::request_headless(...).await` and use
 `snapshot.read_async().await`. Python and JavaScript expose this same core;
 their bindings do not implement a second loss, derivative, or optimizer.
 
+During workspace construction, Rust specializes the known forward activation,
+transpose and validation attributes for each training matrix stage. Matching layers reuse the
+same pipeline, with only required forward variants compiled. The generic
+host-tensor shader path is unchanged. Reuse a compiled training workspace across
+steps: pipeline preparation can dominate a one-shot call. See the
+[measured stage-specialization results and limits](resident_nn_training_stage_specialization.md).
+
 ## Python And Browser Clients
 
 Build a current-source Python wheel with `wgpu` (enabled by default), or a

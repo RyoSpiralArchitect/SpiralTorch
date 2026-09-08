@@ -1,0 +1,213 @@
+{
+  "schema": "spiraltorch.local_raw_manifest.v1",
+  "raw_bundled": false,
+  "local_directory": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-specialization-20260909",
+  "files": [
+    {
+      "file": "measurement-plan.md",
+      "bytes": 1435,
+      "sha256": "4338b79eec621a22958b9693c806d34bd265d9f2f5ef14090bd6f2e71fd09e88"
+    },
+    {
+      "file": "native-build.log",
+      "bytes": 116018,
+      "sha256": "85f5a0ee384ce89566a28b094656dc4b638d717ce95f2a32cc732715d63bb61d"
+    },
+    {
+      "file": "wasm-build.log",
+      "bytes": 112658,
+      "sha256": "0dabb58a005a4b97ef83f97f5503153f4cce1e220deb75d78b66e87287909a1e"
+    },
+    {
+      "file": "backend-tests.log",
+      "bytes": 123907,
+      "sha256": "d714db1b24d9f3a4d85ab9ed60fd2e673888abe1e4e89764a39ab13386031eef"
+    },
+    {
+      "file": "native-correctness.json",
+      "bytes": 213798,
+      "sha256": "cabe512b0f354dff4ed014e0485fbe7926fd908dc49a7990339200f3ef978700"
+    },
+    {
+      "file": "native-correctness.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "browser-correctness.json",
+      "bytes": 214835,
+      "sha256": "53e9ec062d02468546019f8005e28c87defb35a185d2ead135a0ade98c2f81ab"
+    },
+    {
+      "file": "browser-correctness.log",
+      "bytes": 152,
+      "sha256": "0e2d12974195022204b8522323fa60e8fff838270f8c5179286c39f7f91ce821"
+    },
+    {
+      "file": "correctness-torch.json",
+      "bytes": 831110,
+      "sha256": "5b1331852621afe276d32347f590cf12448fbd855b5a0057603a91831ec9962b"
+    },
+    {
+      "file": "correctness-torch.log",
+      "bytes": 168,
+      "sha256": "43768a5c60334e21dd66914e90dc3a6201839aa1419919ddb015f7cc52b67cf7"
+    },
+    {
+      "file": "summary.json",
+      "bytes": 27010,
+      "sha256": "7f4d4dca89b0f0aaf4a04ffd49f6144bc1b24f0fb283dee85d85effc2026c387"
+    },
+    {
+      "file": "final-checks.json",
+      "bytes": 3763,
+      "sha256": "8cf344678051acc915af5af010f2b8b8eb13c3cdd55274071a0947dc2e718316"
+    },
+    {
+      "file": "native-throughput.json",
+      "bytes": 482086545,
+      "sha256": "6546861d54854adf16d97d4e5a2b71b94d566278e8b554eab54c92d329319384"
+    },
+    {
+      "file": "native-throughput.log",
+      "bytes": 2720,
+      "sha256": "5192f5f35efe92efdc6e5cb7b85d0efe22d5215ca0ab2875242731bfb575794c"
+    },
+    {
+      "file": "native-throughput.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "native-throughput.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "browser-throughput.json",
+      "bytes": 180158603,
+      "sha256": "b97d8fc8b9a2bbfe353144838c4ed3a0242683885c51583579e9a77ea3e04178"
+    },
+    {
+      "file": "browser-throughput.log",
+      "bytes": 1608,
+      "sha256": "59beb5702c9a3c7250566cb5c6e5d52861e196a9fa9b7e473daca60236bfe109"
+    },
+    {
+      "file": "browser-throughput.json.cases.jsonl",
+      "bytes": 180157164,
+      "sha256": "5ecbc0b97f490e5020214696315c8a47e9e374349cd3056ccaa102dce53d3f2c"
+    },
+    {
+      "file": "browser-throughput.json.progress.jsonl",
+      "bytes": 149815,
+      "sha256": "5bfe63a5ec68da01125cd99fcca9ecf281f67b5f3f827c95cc8069a487500ee0"
+    },
+    {
+      "file": "throughput-validation.json",
+      "bytes": 41350,
+      "sha256": "c1030cd4e41838b455eebf2af52d84306dde353393560daa33aab7f57615b624"
+    },
+    {
+      "file": "native-throughput-repeat.json",
+      "bytes": 482086554,
+      "sha256": "244099361f173832a3009369f274f42b6b49dc32dec7d971207d1c2406084ef7"
+    },
+    {
+      "file": "native-throughput-repeat.log",
+      "bytes": 2715,
+      "sha256": "8e5bd74161297643285b6daae5d55f7d6d2ca15592575fc1041eb8bf8432529e"
+    },
+    {
+      "file": "native-throughput-repeat.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "native-throughput-repeat.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "browser-throughput-repeat.json",
+      "bytes": 180158771,
+      "sha256": "056d830051823a104e152416deceff2d6410f4f7da87de601484d6e937c1efe3"
+    },
+    {
+      "file": "browser-throughput-repeat.log",
+      "bytes": 1608,
+      "sha256": "59beb5702c9a3c7250566cb5c6e5d52861e196a9fa9b7e473daca60236bfe109"
+    },
+    {
+      "file": "browser-throughput-repeat.json.cases.jsonl",
+      "bytes": 180157332,
+      "sha256": "318af006ac0905b9c7593a8618c23bee22cac11fd99ddac5353c582c50d95a40"
+    },
+    {
+      "file": "browser-throughput-repeat.json.progress.jsonl",
+      "bytes": 150032,
+      "sha256": "b6fbd24e13a435978e5aae4a33cbe419b02dc4a82e5c27770c178fb3a2a58430"
+    },
+    {
+      "file": "throughput-repeat-validation.json",
+      "bytes": 41384,
+      "sha256": "7ea5d966798fda080d9f4ee1a2afd6ff87166e78b0c8cc372d4e5e90b9b6d691"
+    },
+    {
+      "file": "final-backend-clippy-native.log",
+      "bytes": 114496,
+      "sha256": "69c35cb9a4eb144d0cb785dcaba9b65a170b68b5e36a1ec0e6b902081c8c9986"
+    },
+    {
+      "file": "final-backend-clippy-wasm.log",
+      "bytes": 111310,
+      "sha256": "a61d1d2b9ae90fe63762af5d5cd51b1658f1aefb21f5b81699b90f3fb2dcb29c"
+    },
+    {
+      "file": "final-backend-tests.log",
+      "bytes": 124576,
+      "sha256": "0d2455bf2528e41f7b4135791bd29c7bb6e748cbe59240b9d829b78a0feb4b5a"
+    },
+    {
+      "file": "final-benchmark-admission.log",
+      "bytes": 980,
+      "sha256": "14c7f291d019b43b5c499dfb3b540851c9cbde9f397c5b1e73e75d82ea7b296b"
+    },
+    {
+      "file": "final-browser-runner-syntax.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "final-checks.log",
+      "bytes": 2436,
+      "sha256": "feb1e190b5ca3a72e80e02f1e23a0de277e64912b1972c3a344f1912fc0918a9"
+    },
+    {
+      "file": "final-client-validation.log",
+      "bytes": 570,
+      "sha256": "0c1d5c841885b9fd0e6c102d870d8f5ec323eaadba0bc4e608bc84ae33a33dea"
+    },
+    {
+      "file": "final-format.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "final-nn-tests.log",
+      "bytes": 180262,
+      "sha256": "94152ea100b6301d52ea8ade0c12878f5c1e823d4dd59b1361938d6cb4f20ffa"
+    },
+    {
+      "file": "final-python-binding-check.log",
+      "bytes": 117906,
+      "sha256": "e7581bdda00e9e9508810a40b9d80476298a7e1900e1f17976193dcb059481fb"
+    },
+    {
+      "file": "final-wasm-binding-check.log",
+      "bytes": 112827,
+      "sha256": "8bacf60ee41fa5941e0a4ebf85127403ba0293f48ac0d79b1d9d73e966d09cab"
+    }
+  ],
+  "boundary": "Full raw captures remain local, not bundled. Compact validations contain product/source identities; hashes do not independently validate absent raw arrays."
+}
