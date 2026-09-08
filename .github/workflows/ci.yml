@@ -199,6 +199,12 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
         run: cargo test --locked --release -p st-backend-wgpu midk_bottomk
+      - name: Resident NN training and specialized GPU stages
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+        run: |
+          cargo test --locked --release -p st-backend-wgpu resident_training -- --test-threads=1
+          cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
         run: cargo test --locked -p st-nn --features wgpu --release --lib
 
