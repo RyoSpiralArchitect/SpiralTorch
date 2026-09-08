@@ -69,14 +69,20 @@ struct Pass {
 }
 
 impl Pass {
-    fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("dense.training.pass"),
-            timestamp_writes: None,
-        });
+    fn encode<'a>(&'a self, pass: &mut wgpu::ComputePass<'a>) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.binding, &[]);
         pass.dispatch_workgroups(self.groups[0], self.groups[1], self.groups[2]);
+    }
+}
+
+fn dispatches_per_pass(backend: wgpu::Backend, dispatches: usize) -> usize {
+    // Metal benefits consistently; browser deferred readback can regress.
+    // Preserve the existing path on BrowserWebGpu and unmeasured backends.
+    if backend == wgpu::Backend::Metal {
+        dispatches.max(1)
+    } else {
+        1
     }
 }
 
@@ -669,8 +675,17 @@ impl ResidentDenseTraining {
             .write_buffer(&self.step_config, 0, bytemuck::bytes_of(&learning_rate));
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&self.validation, 0, None);
-        for pass in &self.passes {
-            pass.encode(&mut encoder);
+        let chunk_size =
+            dispatches_per_pass(self.runtime.adapter_info().backend, self.passes.len());
+        for chunk in self.passes.chunks(chunk_size) {
+            // Compute usage scopes are per dispatch, so wgpu retains the resource barriers.
+            let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("dense.training.step"),
+                timestamp_writes: None,
+            });
+            for pass in chunk {
+                pass.encode(&mut compute);
+            }
         }
         context.queue().submit(Some(encoder.finish()));
         self.submitted_steps = attempt;
@@ -735,6 +750,25 @@ impl ResidentDenseTraining {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_measured_metal_coalesces_training_dispatches() {
+        for count in [0, 1, 17, 59, 115] {
+            assert_eq!(
+                dispatches_per_pass(wgpu::Backend::Metal, count),
+                count.max(1)
+            );
+            for backend in [
+                wgpu::Backend::Empty,
+                wgpu::Backend::Vulkan,
+                wgpu::Backend::Dx12,
+                wgpu::Backend::Gl,
+                wgpu::Backend::BrowserWebGpu,
+            ] {
+                assert_eq!(dispatches_per_pass(backend, count), 1);
+            }
+        }
+    }
 
     fn validate(source: &str) {
         let module = naga::front::wgsl::parse_str(source).unwrap();

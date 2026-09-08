@@ -23,6 +23,7 @@ jobs:
           python3 -I tests/test_resident_rank_adaptation_bench.py
           python3 -I tests/test_matmul_rank_bench.py
           python3 -I tests/test_resident_training_client_validation.py
+          python3 -I tests/test_resident_training_bench.py
       - name: Verify generated workspace inventory
         run: python3 tools/list_workspace_crates.py --check-doc docs/development/workspace_crates.md
 
@@ -220,6 +221,7 @@ jobs:
           cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser
+          cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_bench_browser
       - name: build (wasm32)
         run: cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release
       - uses: actions/setup-node@v4

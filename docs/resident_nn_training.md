@@ -157,6 +157,17 @@ reserializing with JS can lose signed-zero parameter bits.
   accumulation, checkpoint/resume format, LoRA lowering, or automatic host-model
   synchronization. Existing `pure::Tensor` remains host-backed and 2D.
 
+## Measured Pass Encoding
+
+The resident path also has a source-bound training benchmark against its prior
+implementation and eager PyTorch. Native Metal groups one step's dispatches into
+one compute pass; BrowserWebGpu and unmeasured backends keep one pass per dispatch.
+This changes encoding overhead, not the math, dispatch order, finite guards, or
+snapshot acceptance contract. Browser measurements were mixed, so the native
+optimization is deliberately not applied everywhere.
+
+See [the measured workload, results, and reproduction commands](resident_nn_training_benchmarks.md).
+
 ## Gradient Reduction Correction
 
 `Linear::backward` and `LoraLinear::backward` previously divided parameter

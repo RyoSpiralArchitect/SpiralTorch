@@ -3305,6 +3305,7 @@ dependencies = [
  "rand_distr",
  "serde",
  "serde_json",
+ "sha2",
  "spiral-config",
  "st-backend-wgpu",
  "st-core",

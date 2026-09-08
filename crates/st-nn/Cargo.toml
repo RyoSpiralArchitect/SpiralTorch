@@ -40,6 +40,9 @@ thiserror = "2"
 num-complex = "0.4"
 nalgebra = "0.32"
 
+[dev-dependencies]
+sha2 = "0.10"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tempfile = "3"
 
@@ -69,6 +72,15 @@ required-features = ["wgpu"]
 
 [[example]]
 name = "resident_training_browser"
+crate-type = ["cdylib"]
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_training_bench"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_training_bench_browser"
 crate-type = ["cdylib"]
 required-features = ["wgpu"]
 
