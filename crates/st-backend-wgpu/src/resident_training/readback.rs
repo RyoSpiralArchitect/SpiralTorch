@@ -184,6 +184,19 @@ pub struct TrainingStateReadback {
     pub(super) batch_generation: u64,
 }
 impl TrainingStateReadback {
+    pub fn input_layout(&self) -> &NdLayout {
+        &self.input
+    }
+    pub fn output_layout(&self) -> &NdLayout {
+        &self.output
+    }
+    pub fn submitted_step(&self) -> u64 {
+        self.step
+    }
+    pub fn batch_generation(&self) -> u64 {
+        self.batch_generation
+    }
+
     fn decode(
         bytes: &[u8],
         specs: &[Spec],

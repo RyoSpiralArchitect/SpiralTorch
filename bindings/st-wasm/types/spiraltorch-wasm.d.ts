@@ -20,6 +20,69 @@ declare module "spiraltorch-wasm" {
         readonly sourceOperationCount: number;
         /** Requires webgpu; the plan may be freed while the returned promise runs. */
         compileWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentInference>;
+        /** Mean-MSE, VJP and plain SGD use the same Rust core as native training. */
+        compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentTraining>;
+        free(): void;
+    }
+
+    export class ResidentTraining {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly submittedSteps: bigint;
+        readonly batchGeneration: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        uploadBatch(input: Float32Array, target: Float32Array): void;
+        /** Submitted attempt, not acceptance. Read its owning snapshot. */
+        step(learning_rate: number): bigint;
+        lossSnapshot(): TrainingLossSnapshot;
+        stateSnapshot(): TrainingSnapshot;
+        parameterSnapshot(): TrainingParametersSnapshot;
+        free(): void;
+    }
+
+    export class TrainingLossSnapshot {
+        private constructor();
+        readonly submittedStep: bigint;
+        readonly batchGeneration: bigint;
+        read(): Promise<number>;
+        free(): void;
+    }
+
+    export class TrainingSnapshot {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly submittedStep: bigint;
+        readonly batchGeneration: bigint;
+        readState(): Promise<TrainingState>;
+        free(): void;
+    }
+
+    export class TrainingParametersSnapshot {
+        private constructor();
+        readPlan(): Promise<InferencePlan>;
+        free(): void;
+    }
+
+    /** Immutable host snapshot: pre-update loss/VJP and post-update parameters. */
+    export class TrainingState {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly submittedStep: bigint;
+        readonly batchGeneration: bigint;
+        readonly loss: number;
+        predictionValues(): Float32Array;
+        inputGradientValues(): Float32Array;
+        layerShape(stage: number): Uint32Array;
+        weightValues(stage: number): Float32Array;
+        biasValues(stage: number): Float32Array;
+        weightGradientValues(stage: number): Float32Array;
+        biasGradientValues(stage: number): Float32Array;
+        toPlan(): InferencePlan;
         free(): void;
     }
 

@@ -125,7 +125,7 @@ fn decide_sgd() {
 @compute @workgroup_size(256)
 fn commit_sgd(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     // Separate dispatch after the all-layer decision, never a workgroup-local vote.
-    if (atomicLoad(&validation[p.stages + 1u]) != 0u) { return; }
+    if (atomicLoad(&validation[p.stages + 1u]) != 0u || step.rate == 0.0) { return; }
     let i = index(wid, lane);
     if (i < p.len) { out[i] = a[i]; }
     if (i < p.cols) { aux[i] = b[i]; }

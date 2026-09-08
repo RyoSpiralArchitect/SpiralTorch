@@ -175,6 +175,31 @@ impl InferencePlan {
         Self::from_operations(self.input.clone(), operations)
     }
 
+    /// Import a resident parameter readback without changing its source graph.
+    #[cfg(feature = "wgpu")]
+    pub fn with_dense_parameters(
+        &self,
+        layers: Vec<st_backend_wgpu::resident_dense::DenseLayer>,
+    ) -> Result<Self, InferenceError> {
+        use st_backend_wgpu::resident_dense::DenseActivation;
+        if layers.len() != self.stages.len() {
+            return Err(InferenceError::Shape(layers.len()));
+        }
+        let mut parameters = Vec::with_capacity(layers.len());
+        for (index, (layer, original)) in layers.into_iter().zip(&self.stages).enumerate() {
+            if (layer.inner, layer.cols) != original.weight.shape()
+                || (layer.activation == DenseActivation::Gelu) != original.gelu
+            {
+                return Err(InferenceError::Shape(index));
+            }
+            parameters.push((
+                Tensor::from_vec(layer.inner, layer.cols, layer.weights)?,
+                Tensor::from_vec(1, layer.cols, layer.bias)?,
+            ));
+        }
+        self.with_parameters(parameters)
+    }
+
     #[cfg(feature = "wgpu")]
     pub fn compile_wgpu(
         &self,
@@ -366,5 +391,63 @@ mod tests {
         invalid[0].0.data_mut()[0] = f32::NAN;
         assert!(plan.with_parameters(invalid).is_err());
         assert_eq!(plan.stages[0].weight.data(), original);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn dense_parameter_export_rejects_graph_and_value_corruption() {
+        use st_backend_wgpu::resident_dense::{DenseActivation, DenseLayer};
+        let mut model = Sequential::new();
+        model.push(Linear::new("up", 2, 3).unwrap());
+        model.push(Gelu::new());
+        model.push(Linear::new("down", 3, 1).unwrap());
+        let plan =
+            InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 5, 2]).unwrap()).unwrap();
+        let original = plan.to_json().unwrap();
+        let layers = || {
+            vec![
+                DenseLayer {
+                    inner: 2,
+                    cols: 3,
+                    weights: vec![0.5; 6],
+                    bias: vec![0.25; 3],
+                    activation: DenseActivation::Gelu,
+                },
+                DenseLayer {
+                    inner: 3,
+                    cols: 1,
+                    weights: vec![-0.125; 3],
+                    bias: vec![0.0],
+                    activation: DenseActivation::None,
+                },
+            ]
+        };
+        let updated = plan.with_dense_parameters(layers()).unwrap();
+        assert_eq!(updated.input_layout(), plan.input_layout());
+        assert_eq!(updated.output_layout(), plan.output_layout());
+        assert_eq!(updated.source_operation_count(), 3);
+        assert!(updated.stages[0].gelu && !updated.stages[1].gelu);
+        assert_eq!(updated.stages[0].weight.data(), &[0.5; 6]);
+        for kind in 0..8 {
+            let mut invalid = layers();
+            match kind {
+                0 => {
+                    invalid.pop();
+                }
+                1 => invalid[0].inner = 3,
+                2 => invalid[1].cols = 2,
+                3 => invalid[0].activation = DenseActivation::None,
+                4 => {
+                    invalid[0].weights.pop();
+                }
+                5 => {
+                    invalid[1].bias.clear();
+                }
+                6 => invalid[0].weights[0] = f32::NAN,
+                _ => invalid[1].bias[0] = f32::INFINITY,
+            }
+            assert!(plan.with_dense_parameters(invalid).is_err(), "case {kind}");
+            assert_eq!(plan.to_json().unwrap(), original);
+        }
     }
 }

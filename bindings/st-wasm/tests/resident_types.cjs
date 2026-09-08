@@ -68,6 +68,26 @@ function checkNnContract(types, label) {
   assert.match(snapshot, /readonly shape: Uint32Array/);
   assert.match(snapshot, /readonly generation: bigint/);
   assert.match(snapshot, /readValues\(\): Promise<Float32Array>/);
+  assert.match(plan, /compileTrainingWebGpu\([^\n]*\): Promise<ResidentTraining>/);
+  const training=get("ResidentTraining"), loss=get("TrainingLossSnapshot"),
+    trainingSnapshot=get("TrainingSnapshot"), parameters=get("TrainingParametersSnapshot"), state=get("TrainingState");
+  assert.match(training, /uploadBatch\(input: Float32Array, target: Float32Array\): void/);
+  assert.match(training, /step\(learning_rate: number\): bigint/);
+  assert.match(training, /readonly submittedSteps: bigint/);
+  assert.match(training, /stateSnapshot\(\): TrainingSnapshot/);
+  assert.match(training, /lossSnapshot\(\): TrainingLossSnapshot/);
+  assert.match(training, /parameterSnapshot\(\): TrainingParametersSnapshot/);
+  assert.match(loss, /read\(\): Promise<number>/);
+  assert.match(trainingSnapshot, /readState\(\): Promise<TrainingState>/);
+  assert.match(parameters, /readPlan\(\): Promise<InferencePlan>/);
+  for(const declaration of [loss, trainingSnapshot, state]) {
+    assert.match(declaration, /readonly submittedStep: bigint/);
+    assert.match(declaration, /readonly batchGeneration: bigint/);
+  }
+  assert.match(state, /toPlan\(\): InferencePlan/);
+  assert.match(state, /readonly loss: number/);
+  for(const method of ["weightValues","biasValues","weightGradientValues","biasGradientValues"])
+    assert.match(state, new RegExp(method+"\\(stage: number\\): Float32Array"));
   console.log(label + " resident NN TypeScript contract passed");
 }
 

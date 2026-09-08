@@ -1,0 +1,230 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Public resident training clients and weight-only handoff</title>
+<pre id="result" data-status="running">Loading public WASM bindings</pre>
+<script type="module">
+import init, {InferencePlan} from "./module/spiraltorch_wasm.js";
+const element = document.querySelector("#result");
+const report = {schema:"spiraltorch.nn.training_browser_fixture.v1", status:"error", vjps:[], learning:[], rejected:0,
+  boundary:"public WASM client; Python weight-only handoff, not optimizer checkpoint/resume; no timing or quality claim"};
+function require(value, message) { if (!value) throw Error(message); }
+function equal(a, b, message) { require(JSON.stringify(Array.from(a)) === JSON.stringify(Array.from(b)), message); }
+function close(actual, expected) {
+  require(actual.length === expected.length, "length differs");
+  let maximum = 0;
+  actual.forEach((a, i) => {
+    require(Number.isFinite(a) && Number.isFinite(expected[i]) &&
+      Math.abs(a-expected[i]) <= 1e-5 + 1e-4*Math.abs(expected[i]), "numeric result differs at "+i);
+    maximum = Math.max(maximum, Math.abs(a-expected[i]));
+  });
+  return maximum;
+}
+async function reject(call, numeric=false) {
+  let error;
+  try { await call(); } catch (e) { error=e; }
+  require(error !== undefined, "invalid input/state was accepted");
+  if (numeric) require(error.code === "training_step_rejected" && Number.isInteger(error.stage) && error.flags > 0,
+    "missing structured numerical rejection");
+  report.rejected++;
+}
+async function digest(text) {
+  const data = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(data), x => x.toString(16).padStart(2,"0")).join("");
+}
+async function compile(text, options=[]) {
+  const plan = InferencePlan.fromJson(text);
+  const pending = plan.compileTrainingWebGpu(...options);
+  plan.free();
+  return await pending;
+}
+async function readState(snapshot) {
+  const pending = snapshot.readState();
+  await reject(() => snapshot.readState());
+  snapshot.free();
+  return await pending;
+}
+async function readPlan(snapshot) {
+  const pending = snapshot.readPlan();
+  await reject(() => snapshot.readPlan());
+  snapshot.free();
+  return await pending;
+}
+function planText(state) {
+  const plan = state.toPlan();
+  const text = plan.toJson();
+  plan.free();
+  return text;
+}
+function counter(value) {
+  require(typeof value === "bigint" && value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER), "counter lost integer identity");
+  return Number(value); // Only this bounded JSON fixture narrows public bigint counters.
+}
+function payload(state) {
+  const parameters = JSON.parse(planText(state)).stages.map(p =>
+    ({inner:p.inner, cols:p.cols, weights:p.weight, bias:p.bias, gelu:p.gelu}));
+  return {loss:state.loss, prediction:Array.from(state.predictionValues()), input_gradient:Array.from(state.inputGradientValues()),
+    parameters, parameter_gradients:parameters.map((_, i) =>
+      ({weights:Array.from(state.weightGradientValues(i)), bias:Array.from(state.biasGradientValues(i))})),
+    submitted_step:counter(state.submittedStep), batch_generation:counter(state.batchGeneration)};
+}
+function compare(a,b) {
+  let maximum = close([a.loss],[b.loss]);
+  for(const key of ["prediction","input_gradient"]) maximum=Math.max(maximum,close(a[key],b[key]));
+  for(const key of ["parameters","parameter_gradients"]) {
+    require(a[key].length === b[key].length, "stage count differs");
+    a[key].forEach((p,i) => {
+      for(const name of ["weights","bias"]) maximum=Math.max(maximum,close(p[name],b[key][i][name]));
+    });
+  }
+  return maximum;
+}
+function scalar(weights=[1], gelu=false) {
+  return JSON.stringify({schema:"spiraltorch.nn.inference_plan.v1", input_shape:[1],
+    stages:weights.map(w => ({inner:1, cols:1, weight:[w], bias:[0], gelu}))});
+}
+async function guards() {
+  const plan = InferencePlan.fromJson(scalar());
+  for(const options of [[[true,8,16]],[[8.5,8,16]],[[8,8]],[[0,8,16]],
+      [undefined,"unknown"],[undefined,undefined,"unknown"]])
+    await reject(() => plan.compileTrainingWebGpu(...options));
+  plan.free();
+  const gpu = await compile(scalar());
+  await reject(() => gpu.step(.1));
+  await reject(() => gpu.stateSnapshot());
+  await reject(() => gpu.lossSnapshot());
+  gpu.uploadBatch(new Float32Array([1]), new Float32Array([0]));
+  gpu.step(0);
+  const spoof = new Float64Array([9]);
+  Object.defineProperty(spoof, Symbol.toStringTag, {value:"Float32Array"});
+  for(const [x,y] of [[new Float32Array([9]),[]], [[9],new Float32Array([0])],
+      [spoof,new Float32Array([0])], [new Float32Array([9]),new Float64Array([0])],
+      [new Float32Array([9]),new Float32Array([NaN])], [new Float32Array([Infinity]),new Float32Array([0])],
+      [new Float32Array(0),new Float32Array([0])]])
+    await reject(() => gpu.uploadBatch(x,y));
+  for(const rate of [true, "0.1", -1, NaN, Infinity, 1e100]) await reject(() => gpu.step(rate));
+  require(gpu.batchGeneration === 1n && gpu.submittedSteps === 1n, "invalid request enqueued work");
+  gpu.step(0);
+  const state = await readState(gpu.stateSnapshot());
+  close(state.predictionValues(), [1]);
+  const original = planText(state);
+  state.weightValues(0).fill(Infinity);
+  state.predictionValues().fill(Infinity);
+  require(planText(state) === original, "client array aliases frozen state");
+  for(const method of ["weightValues","biasValues","weightGradientValues","biasGradientValues","layerShape"])
+    for(const index of [true,.5,-1,1,2**40]) await reject(() => state[method](index));
+  equal(state.layerShape(0),[1,1],"layer shape");
+  state.free();
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  gpu.uploadBatch(new frame.contentWindow.Float32Array([2]), new frame.contentWindow.Float32Array([0]));
+  frame.remove();
+  gpu.step(0);
+  const loss = gpu.lossSnapshot();
+  const pendingLoss = loss.read();
+  await reject(() => loss.read());
+  loss.free(); gpu.free();
+  close([await pendingLoss],[4]);
+
+  const rollbackPlan = scalar([1,.001]);
+  const rollback = await compile(rollbackPlan);
+  const before = await readPlan(rollback.parameterSnapshot());
+  const originalJson = before.toJson(); before.free();
+  rollback.uploadBatch(new Float32Array([.5]),new Float32Array([-.9995]));
+  rollback.step(3.4028234663852886e38);
+  const failure=rollback.stateSnapshot(), failureLoss=rollback.lossSnapshot(), parameters=rollback.parameterSnapshot();
+  rollback.step(.1);
+  const success=rollback.lossSnapshot();
+  rollback.free();
+  const unchanged=await readPlan(parameters);
+  require(unchanged.toJson() === originalJson,"numerically rejected update changed parameters"); unchanged.free();
+  await reject(() => failure.readState(),true);
+  await reject(() => failure.readState()); failure.free();
+  await reject(() => failureLoss.read(),true); failureLoss.free();
+  require(Number.isFinite(await success.read()),"valid retry failed"); success.free();
+
+  report.nonfinite_cases=[];
+  for(const [text,x,y] of [[scalar([3.4028234663852886e38]),0,-1],[scalar(),0,3.4028234663852886e38],
+      ...[1e20,-1e20,1e13,-1e13].map(x=>[scalar([1],true),x,0])]) {
+    const gpu=await compile(text);
+    const before=await readPlan(gpu.parameterSnapshot());
+    const original=before.toJson(); before.free();
+    gpu.uploadBatch(new Float32Array([x]),new Float32Array([y])); gpu.step(0);
+    const rejected=gpu.stateSnapshot();
+    await reject(()=>rejected.readState(),true); rejected.free();
+    const after=await readPlan(gpu.parameterSnapshot());
+    require(after.toJson() === original,"failed zero-rate probe changed parameters");
+    after.free(); gpu.free(); report.nonfinite_cases.push({input:x,target:y});
+  }
+  // Keep signed zero in the Rust JSON bytes, not JSON.stringify(-0).
+  const signedZero=scalar().replace('"weight":[1]', '"weight":[-0.0]').replace('"bias":[0]', '"bias":[-0.0]');
+  for(const rate of [0,-0]) {
+    const gpu=await compile(signedZero);
+    const before=await readPlan(gpu.parameterSnapshot());
+    const original=before.toJson(); before.free();
+    gpu.uploadBatch(new Float32Array([0]),new Float32Array([1])); gpu.step(rate);
+    const state=await readState(gpu.stateSnapshot());
+    require(Object.is(state.weightValues(0)[0],-0) && Object.is(state.biasValues(0)[0],-0),"zero sign changed");
+    require(planText(state) === original,"zero-rate probe changed parameter bytes");
+    state.free(); gpu.free();
+  }
+}
+try {
+  await init();
+  const response = await fetch("/fixture.json");
+  require(response.ok,"Python fixture unavailable");
+  const fixture=await response.json();
+  require(fixture.status === "passed" && fixture.schema === "spiraltorch.nn.training_client_fixture.v1" &&
+    fixture.vjps.length === 18 && fixture.learning.length === 3,"invalid Python fixture");
+  const cpuOnly=new URLSearchParams(location.search).get("cpu_only") === "1";
+  report.cpu_only=cpuOnly;
+  if(cpuOnly) {
+    for(const item of fixture.learning) {
+      const plan=InferencePlan.fromJson(item.half_plan_json);
+      require(plan.toJson() === item.half_plan_json,"weight transport changed");
+      await reject(()=>plan.compileTrainingWebGpu());
+      await reject(()=>plan.compileWebGpu()); plan.free();
+    }
+    report.transport_cases=3;
+  } else {
+    for(const item of fixture.vjps) {
+      const gpu=await compile(item.plan_json,[undefined,item.kernel,item.accumulation]);
+      report.adapter=gpu.adapterInfo();
+      require(typeof report.adapter.device_type === "string" && report.adapter.device_type !== "Cpu","missing GPU identity");
+      gpu.uploadBatch(new Float32Array(item.input),new Float32Array(item.target));
+      gpu.step(0); const probe=gpu.stateSnapshot();
+      gpu.step(item.learning_rate); const updated=gpu.stateSnapshot(); gpu.free();
+      equal(updated.inputShape,item.shape,"snapshot input shape changed");
+      equal(updated.outputShape,[...item.shape.slice(0,-1),3],"snapshot output shape changed");
+      require(probe.submittedStep === 1n && updated.submittedStep === 2n && updated.batchGeneration === 1n,"owned metadata changed");
+      const first=await readState(probe), second=await readState(updated);
+      const a=payload(first), b=payload(second);
+      const error=Math.max(compare(a,item.probe),compare(b,item.updated));
+      first.free(); second.free();
+      report.vjps.push({seed:item.seed,shape:item.shape,kernel:item.kernel,accumulation:item.accumulation,
+        probe:a,updated:b,max_abs_error_vs_python:error});
+    }
+    for(const item of fixture.learning) {
+      require(await digest(item.half_plan_json) === item.half_plan_sha256,"handoff bytes changed");
+      const gpu=await compile(item.half_plan_json);
+      require(gpu.submittedSteps === 0n && gpu.batchGeneration === 0n,"new workspace inherited counters");
+      gpu.uploadBatch(new Float32Array(item.input),new Float32Array(item.target));
+      const receipts=[];
+      for(let i=0;i<64;i++) { gpu.step(item.learning_rate); receipts.push(gpu.lossSnapshot()); }
+      gpu.step(0); const last=gpu.stateSnapshot(); gpu.free();
+      const losses=[];
+      for(const snapshot of receipts) { losses.push(await snapshot.read()); snapshot.free(); }
+      const state=await readState(last), final=payload(state), plan_json=planText(state);
+      const error=compare(final,item.final); state.free();
+      report.learning.push({seed:item.seed,steps:64,learning_rate:item.learning_rate,losses,final,plan_json,
+        plan_sha256:await digest(plan_json),source_plan_sha256:item.half_plan_sha256,max_abs_error_vs_uninterrupted_python:error});
+    }
+    await guards();
+  }
+  report.status="passed";
+} catch(error) {
+  report.error=String(error.stack || error);
+}
+element.textContent=JSON.stringify(report);
+element.dataset.status=report.status;
+</script>

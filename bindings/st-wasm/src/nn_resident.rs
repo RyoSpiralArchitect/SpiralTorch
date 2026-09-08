@@ -1,12 +1,12 @@
 //! Browser handles over the same portable Rust NN plan used by Python.
 
 use crate::utils::{js_error, js_u32};
-use js_sys::{JsString, Number, Promise};
+use js_sys::{Array, JsString, Number, Promise};
 use st_nn::resident::{InferencePlan, DEFAULT_MAX_PLAN_JSON_BYTES};
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "webgpu")]
-use js_sys::{Array, Float32Array};
+use js_sys::Float32Array;
 #[cfg(feature = "webgpu")]
 use st_backend_wgpu::{
     resident_dense::{DenseReadback, ResidentDense},
@@ -14,6 +14,52 @@ use st_backend_wgpu::{
 };
 #[cfg(feature = "webgpu")]
 use wasm_bindgen_futures::future_to_promise;
+
+mod training;
+pub use training::{
+    WasmResidentTraining, WasmTrainingLossSnapshot, WasmTrainingParametersSnapshot,
+    WasmTrainingSnapshot, WasmTrainingState,
+};
+
+#[cfg(feature = "webgpu")]
+fn gpu_options(
+    tile_mnk: Option<Array>,
+    kernel: Option<JsString>,
+    accumulation: Option<JsString>,
+) -> Result<(MatmulTile, MatmulKernel, MatmulAccumulation), JsValue> {
+    let tile = if let Some(values) = tile_mnk {
+        if values.length() != 3 {
+            return Err(js_error("tile_mnk must have three dimensions"));
+        }
+        MatmulTile::new(
+            js_u32(&values.get(0), "tile_m")?,
+            js_u32(&values.get(1), "tile_n")?,
+            js_u32(&values.get(2), "tile_k")?,
+        )
+        .map_err(js_error)?
+    } else {
+        MatmulTile::default()
+    };
+    let kernel = kernel
+        .map(|v| {
+            v.as_string()
+                .ok_or_else(|| js_error("kernel must be a string"))
+        })
+        .transpose()?
+        .map(|v| v.parse::<MatmulKernel>().map_err(js_error))
+        .transpose()?
+        .unwrap_or(MatmulKernel::Scalar);
+    let accumulation = accumulation
+        .map(|v| {
+            v.as_string()
+                .ok_or_else(|| js_error("accumulation must be a string"))
+        })
+        .transpose()?
+        .map(|v| v.parse::<MatmulAccumulation>().map_err(js_error))
+        .transpose()?
+        .unwrap_or_default();
+    Ok((tile, kernel, accumulation))
+}
 
 #[wasm_bindgen(js_name = InferencePlan)]
 pub struct WasmInferencePlan {
@@ -87,39 +133,7 @@ impl WasmInferencePlan {
         kernel: Option<JsString>,
         accumulation: Option<JsString>,
     ) -> Result<Promise, JsValue> {
-        let tile = if let Some(values) = tile_mnk {
-            if values.length() != 3 {
-                return Err(js_error("tile_mnk must have three dimensions"));
-            }
-            MatmulTile::new(
-                js_u32(&values.get(0), "tile_m")?,
-                js_u32(&values.get(1), "tile_n")?,
-                js_u32(&values.get(2), "tile_k")?,
-            )
-            .map_err(js_error)?
-        } else {
-            MatmulTile::default()
-        };
-        let kernel = kernel
-            .map(|value| {
-                value
-                    .as_string()
-                    .ok_or_else(|| js_error("kernel must be a string"))
-            })
-            .transpose()?
-            .map(|value| value.parse::<MatmulKernel>().map_err(js_error))
-            .transpose()?
-            .unwrap_or(MatmulKernel::Scalar);
-        let accumulation = accumulation
-            .map(|value| {
-                value
-                    .as_string()
-                    .ok_or_else(|| js_error("accumulation must be a string"))
-            })
-            .transpose()?
-            .map(|value| value.parse::<MatmulAccumulation>().map_err(js_error))
-            .transpose()?
-            .unwrap_or_default();
+        let (tile, kernel, accumulation) = gpu_options(tile_mnk, kernel, accumulation)?;
         // Clone before returning the promise: freeing the JS plan is safe while it compiles.
         let plan = self.inner.clone();
         Ok(future_to_promise(async move {
@@ -137,6 +151,26 @@ impl WasmInferencePlan {
         Err(js_error(
             "resident inference requires the webgpu build feature",
         ))
+    }
+
+    #[wasm_bindgen(js_name = compileTrainingWebGpu, unchecked_return_type = "Promise<ResidentTraining>")]
+    pub fn compile_training_webgpu(
+        &self,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        #[cfg(feature = "webgpu")]
+        {
+            training::compile(&self.inner, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident training requires the webgpu build feature",
+            ))
+        }
     }
 }
 

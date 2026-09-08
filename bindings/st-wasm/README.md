@@ -37,6 +37,10 @@ target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invokin
 
 ## Examples
 
+- [Resident NN training](../../docs/resident_nn_training.md): the public `InferencePlan.compileTrainingWebGpu()`
+  client runs Rust-owned mean-MSE, VJP and plain SGD without per-layer host readback,
+  with Python/browser weight-only handoff. Build with `--features webgpu`; `nn` alone
+  supports plan transport but rejects GPU compilation.
 - COBOL dispatch console: `bindings/st-wasm/examples/cobol-console/`
 - Canvas hypertrain demo (FractalCanvas + hypergradWave): `bindings/st-wasm/examples/canvas-hypertrain/`
 - Mellin log grid demo (evaluateMany): `bindings/st-wasm/examples/mellin-log-grid/`

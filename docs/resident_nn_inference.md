@@ -6,8 +6,8 @@ inference path with Python/WASM clients, not a second model definition API or a 
 `Module::forward` or backward.
 
 For explicit GPU-resident MSE/VJP/SGD from the same Rust module graph, see
-[resident training](resident_nn_training.md). The Python/WASM classes shown
-below still expose the inference subset.
+[resident training](resident_nn_training.md). The examples below use the
+inference subset; the same plan also exposes explicit Python/WASM training clients.
 
 ```text
 Sequential(Linear -> Gelu -> Linear)
