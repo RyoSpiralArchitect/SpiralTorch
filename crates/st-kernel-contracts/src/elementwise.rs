@@ -39,6 +39,37 @@ impl ElementwiseOp {
         };
         value.is_finite().then_some(value)
     }
+
+    /// Local partials of the checked operation. The full VJP also evaluates
+    /// forward intermediates, even when the incoming cotangent is zero.
+    pub fn partials(self, a: f32, b: f32) -> Option<(f32, f32)> {
+        if !a.is_finite() || (self.is_binary() && !b.is_finite()) {
+            return None;
+        }
+        Some(match self {
+            Self::Identity => (1., 0.),
+            Self::Add => (1., 1.),
+            Self::Multiply => (b, a),
+            Self::Relu => (if a > 0. { 1. } else { 0. }, 0.),
+            Self::Gelu => (gelu_derivative(a)?, 0.),
+        })
+    }
+}
+
+/// Saturated tanh-GELU derivative shared with the Tensor/Module host path.
+pub fn gelu_derivative(x: f32) -> Option<f32> {
+    if !x.is_finite() {
+        return None;
+    }
+    if x.abs() >= 10. {
+        return Some(if x > 0. { 1. } else { 0. });
+    }
+    let square = x * x;
+    let inner = 0.7978846 * (x + 0.044715 * x * square);
+    let t = inner.tanh();
+    let derivative =
+        0.5 * (1. + t) + 0.5 * x * (1. - t * t) * 0.7978846 * (1. + 3. * 0.044715 * square);
+    derivative.is_finite().then_some(derivative)
 }
 
 #[cfg(test)]

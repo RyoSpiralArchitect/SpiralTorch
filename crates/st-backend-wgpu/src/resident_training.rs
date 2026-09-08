@@ -213,6 +213,14 @@ pub struct ResidentDenseTraining {
     runtime: WgpuRuntime,
 }
 
+fn training_scalar_source() -> String {
+    [
+        include_str!("shaders/gelu_derivative.wgsl"),
+        include_str!("shaders/dense_training.wgsl"),
+    ]
+    .concat()
+}
+
 impl ResidentDenseTraining {
     pub fn new(
         runtime: WgpuRuntime,
@@ -349,7 +357,7 @@ impl ResidentDenseTraining {
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("training.element.shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/dense_training.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(training_scalar_source().into()),
         });
         let element_pipeline = |entry| {
             Shared::new(
@@ -798,6 +806,24 @@ impl ResidentDenseTraining {
         &self,
         device: &TensorDevice,
     ) -> Result<ResidentTensor, TrainingError> {
+        self.step_tensor(device, &self.output, self.activations.last().unwrap())
+    }
+
+    /// Pre-update input VJP plus the whole step's guard, frozen on GPU for
+    /// preceding pointwise stages. This does not commit any external parameter.
+    pub fn input_gradient_tensor(
+        &self,
+        device: &TensorDevice,
+    ) -> Result<ResidentTensor, TrainingError> {
+        self.step_tensor(device, &self.input, &self.gradients[0])
+    }
+
+    fn step_tensor(
+        &self,
+        device: &TensorDevice,
+        layout: &NdLayout,
+        values: &wgpu::Buffer,
+    ) -> Result<ResidentTensor, TrainingError> {
         self.last_step.ok_or(TrainingError::StaleStep)?;
         if !device
             .runtime()
@@ -806,11 +832,7 @@ impl ResidentDenseTraining {
         {
             return Err(TensorError::DeviceMismatch.into());
         }
-        Ok(device.capture(
-            &self.output,
-            self.activations.last().unwrap(),
-            &self.validation,
-        )?)
+        Ok(device.capture(layout, values, &self.validation)?)
     }
 
     /// Export parameters even before a step or after a numerically rejected step.
@@ -862,7 +884,7 @@ mod tests {
 
     #[test]
     fn training_shaders_validate_for_every_matrix_policy() {
-        validate(include_str!("shaders/dense_training.wgsl"));
+        validate(&training_scalar_source());
         for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
             for accumulation in [
                 MatmulAccumulation::Sequential,

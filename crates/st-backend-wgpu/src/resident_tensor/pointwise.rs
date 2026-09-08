@@ -5,6 +5,8 @@ use super::*;
 use st_kernel_contracts::pointwise::{PointwiseChain, PointwiseError, PointwiseExecution};
 use std::fmt::Write;
 
+pub mod vjp;
+
 #[derive(Debug)]
 pub struct PointwisePlan {
     chain: PointwiseChain,
@@ -17,6 +19,10 @@ pub struct PointwisePlan {
 }
 
 fn fused_source(chain: &PointwiseChain) -> String {
+    generated_source(chain, false)
+}
+
+fn generated_source(chain: &PointwiseChain, vjp: bool) -> String {
     let count = chain.input_count();
     let mut code = String::new();
     for i in 0..count {
@@ -43,6 +49,15 @@ fn fused_source(chain: &PointwiseChain) -> String {
         .unwrap();
     }
     code.push_str(include_str!("../shaders/checked_elementwise.wgsl"));
+    if vjp {
+        writeln!(
+            code,
+            "@group(0) @binding({}) var<storage, read> cotangent: array<f32>;",
+            count + 4
+        )
+        .unwrap();
+        code.push_str(include_str!("../shaders/gelu_derivative.wgsl"));
+    }
     // params: length, rank, grid-x, group-count, shape, (offset, strides)*inputs.
     code.push_str(
         r#"
@@ -75,7 +90,10 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
         writeln!(code, "    let value{i} = input{i}[address(i, {i}u)];").unwrap();
     }
     code.push_str("    var current = value0;\n");
-    for step in chain.steps() {
+    for (i, step) in chain.steps().iter().enumerate() {
+        if vjp {
+            writeln!(code, "    let before{i} = current;").unwrap();
+        }
         let rhs = step.rhs.map_or("0.0".to_string(), |i| format!("value{i}"));
         writeln!(
             code,
@@ -84,7 +102,60 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
         )
         .unwrap();
     }
-    code.push_str("    out[i] = current;\n}\n");
+    if vjp {
+        code.push_str("    var delta = cotangent[i]; check(delta);\n");
+        for slot in 0..count {
+            writeln!(code, "    var grad{slot} = 0.0;").unwrap();
+        }
+        for (j, step) in chain.steps().iter().enumerate().rev() {
+            match step.op {
+                ElementwiseOp::Identity => {}
+                ElementwiseOp::Add => {
+                    let slot = step.rhs.unwrap();
+                    writeln!(
+                        code,
+                        "    grad{slot} = checked_apply(OP_ADD, grad{slot}, delta);"
+                    )
+                    .unwrap();
+                }
+                ElementwiseOp::Multiply => {
+                    let slot = step.rhs.unwrap();
+                    writeln!(
+                        code,
+                        "    let contribution{j} = checked_apply(OP_MULTIPLY, delta, before{j});"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    grad{slot} = checked_apply(OP_ADD, grad{slot}, contribution{j});"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    delta = checked_apply(OP_MULTIPLY, delta, value{slot});"
+                    )
+                    .unwrap();
+                }
+                ElementwiseOp::Relu => {
+                    writeln!(code,"    delta = checked_apply(OP_MULTIPLY, delta, select(0.0,1.0,before{j}>0.0));").unwrap();
+                }
+                ElementwiseOp::Gelu => {
+                    writeln!(
+                        code,
+                        "    delta = checked_apply(OP_MULTIPLY, delta, gelu_prime(before{j}));"
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        code.push_str("    grad0 = checked_apply(OP_ADD, grad0, delta);\n");
+        for slot in 0..count {
+            writeln!(code, "    out[{slot}u * params[0] + i] = grad{slot};").unwrap();
+        }
+        code.push_str("}\n");
+    } else {
+        code.push_str("    out[i] = current;\n}\n");
+    }
     substitute_ops(code)
 }
 

@@ -1,0 +1,211 @@
+{
+  "status": "passed_with_reference_gaps",
+  "source": "8165b5b6b4a075ef101fb4f0d337d3f4032f2025",
+  "steps": [
+    {
+      "name": "native-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor",
+        "--example",
+        "resident_pointwise_vjp_bench"
+      ],
+      "returncode": 0,
+      "seconds": 53.37939804099733
+    },
+    {
+      "name": "wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor_browser",
+        "--target",
+        "wasm32-unknown-unknown"
+      ],
+      "returncode": 0,
+      "seconds": 66.0105849999818
+    },
+    {
+      "name": "bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "--target",
+        "web",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm",
+        "--out-name",
+        "spiraltorch_wasm",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_nd_tensor_browser.wasm"
+      ],
+      "returncode": 0,
+      "seconds": 0.16538066600332968
+    },
+    {
+      "name": "native-fixture",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/resident_nd_tensor"
+      ],
+      "returncode": 0,
+      "seconds": 3.1683273339876905
+    },
+    {
+      "name": "browser-fixture",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/test_resident_browser.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+        "",
+        "",
+        "",
+        "",
+        "nd-tensor"
+      ],
+      "returncode": 0,
+      "seconds": 4.457345999981044
+    },
+    {
+      "name": "torch-vjp-replay",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/validate_pointwise_vjp_vs_torch.py",
+        "--reports",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+        "--devices",
+        "cpu",
+        "mps",
+        "--source",
+        "8165b5b6b4a075ef101fb4f0d337d3f4032f2025",
+        "--allow-mps-empty-reference-gap",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/torch-vjp-replay.json"
+      ],
+      "returncode": 0,
+      "seconds": 5.308078874979401
+    },
+    {
+      "name": "torch-nd-regression",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/validate_nd_tensor_vs_torch.py",
+        "--reports",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+        "--devices",
+        "cpu",
+        "mps",
+        "--source",
+        "8165b5b6b4a075ef101fb4f0d337d3f4032f2025",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/torch-nd-regression.json"
+      ],
+      "returncode": 0,
+      "seconds": 3.0616556250024587
+    },
+    {
+      "name": "torch-mps-vjp-bench",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/bench_pointwise_vjp_vs_torch.py",
+        "--binary",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/resident_pointwise_vjp_bench",
+        "--torch-device",
+        "mps",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/vjp-bench.json"
+      ],
+      "returncode": 0,
+      "seconds": 6.724237415997777
+    },
+    {
+      "name": "bench-reaggregation",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/bench_pointwise_vjp_vs_torch.py",
+        "--verify",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/vjp-bench.json"
+      ],
+      "returncode": 0,
+      "seconds": 0.8354072079819161
+    }
+  ],
+  "products": {
+    "resident_nd_tensor": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/resident_nd_tensor",
+      "sha256": "4643a9775e2fd56cc497a191d1f723afa2e6e7fa0983912bd9d4f1602b313394"
+    },
+    "resident_pointwise_vjp_bench": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/resident_pointwise_vjp_bench",
+      "sha256": "b18c6e9afe3b86e683e0b7e6d0fe0a06432a8ee0567557e11dfb5aba3235f3bb"
+    },
+    "wasm/spiraltorch_wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm.d.ts",
+      "sha256": "f53349af3d70e021122e3f18fad0cdabbea62f8c1e21d17e8c7e00402fddbb8b"
+    },
+    "wasm/spiraltorch_wasm.js": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm.js",
+      "sha256": "f746243783b56fc2f0f9ec8a1a6bfd1e55f160b56f61c76cd24d7f7b07ed35e8"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "70d75b3757512eaa7447ab0f7f85aaec91d59f4789f502dffbe91f05fb67f92d"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm_bg.wasm",
+      "sha256": "894183d8dda650e0da8c1cfda7fd4ac0bd6a788e24aa53a8a940add8a86a6c4a"
+    }
+  },
+  "native_identity": {
+    "build_fingerprint": "sha256:db77fcffff525fcf32b08a6bc0c5b2e8470289f7a7c1a0a5a6bd113ec245cf8e",
+    "manifest": {
+      "git": {
+        "commit": "8165b5b6b4a075ef101fb4f0d337d3f4032f2025",
+        "describe": "v0.4.27-196-g8165b5b6",
+        "dirty": false,
+        "tree": "a979c3905557ca2119045f55d8d798d03008ab9f"
+      },
+      "host": "unknown-host",
+      "id": "Ryo-ST-ryospiralarchitect-2026-09-08T21:20:43.781Z-5b2b76a5e6d6401497e14573b71b5dc2",
+      "pkg": {
+        "name": "st-core",
+        "version": "1.10.0"
+      },
+      "profile": "release",
+      "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "seed": "5b2b76a5e6d6401497e14573b71b5dc2",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "triple": "aarch64-apple-darwin"
+      },
+      "timestamp": "2026-09-08T21:20:43.781Z",
+      "user": "ryospiralarchitect"
+    },
+    "schema": "spiraltorch.native_build_identity.v1"
+  }
+}

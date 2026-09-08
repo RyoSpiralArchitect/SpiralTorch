@@ -23,15 +23,6 @@ fn check(value: f32, flag: u32) {
 fn group_index(wid: vec3<u32>) -> u32 { return wid.y * p.groups_x + wid.x; }
 fn index(wid: vec3<u32>, lane: u32) -> u32 { return group_index(wid) * 256u + lane; }
 
-// Same saturated tanh derivative as st_tensor::gelu_derivative.
-fn gelu_prime(x: f32) -> f32 {
-    if (abs(x) >= 10.0) { return select(0.0, 1.0, x > 0.0); }
-    let square = x * x;
-    let inner = 0.7978846 * (x + 0.044715 * x * square);
-    let t = tanh(clamp(inner, -10.0, 10.0));
-    return 0.5 * (1.0 + t) + 0.5 * x * (1.0 - t*t) * 0.7978846 * (1.0 + 3.0 * 0.044715 * square);
-}
-
 @compute @workgroup_size(256)
 fn delta(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let i = index(wid, lane);

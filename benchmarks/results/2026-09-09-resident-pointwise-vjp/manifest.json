@@ -1,0 +1,368 @@
+{
+  "schema": "spiraltorch.pointwise_vjp.evidence.v1",
+  "source": "8165b5b6b4a075ef101fb4f0d337d3f4032f2025",
+  "tree": "a979c3905557ca2119045f55d8d798d03008ab9f",
+  "products": {
+    "resident_nd_tensor": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/resident_nd_tensor",
+      "sha256": "4643a9775e2fd56cc497a191d1f723afa2e6e7fa0983912bd9d4f1602b313394"
+    },
+    "resident_pointwise_vjp_bench": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/resident_pointwise_vjp_bench",
+      "sha256": "b18c6e9afe3b86e683e0b7e6d0fe0a06432a8ee0567557e11dfb5aba3235f3bb"
+    },
+    "wasm/spiraltorch_wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm.d.ts",
+      "sha256": "f53349af3d70e021122e3f18fad0cdabbea62f8c1e21d17e8c7e00402fddbb8b"
+    },
+    "wasm/spiraltorch_wasm.js": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm.js",
+      "sha256": "f746243783b56fc2f0f9ec8a1a6bfd1e55f160b56f61c76cd24d7f7b07ed35e8"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "70d75b3757512eaa7447ab0f7f85aaec91d59f4789f502dffbe91f05fb67f92d"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen/wasm/spiraltorch_wasm_bg.wasm",
+      "sha256": "894183d8dda650e0da8c1cfda7fd4ac0bd6a788e24aa53a8a940add8a86a6c4a"
+    }
+  },
+  "vjp": {
+    "status": "passed_with_reference_gaps",
+    "matched": 26,
+    "reference_gaps": 2,
+    "max_abs_error": 2.2649765014648438e-05
+  },
+  "legacy": {
+    "status": "passed",
+    "checks": 48
+  },
+  "benchmark": {
+    "device": {
+      "device": "mps",
+      "name": "Apple M4",
+      "contention": "unknown: macOS does not expose CUDA-style GPU process accounting; diagnostic only"
+    },
+    "adapter": {
+      "backend": "Metal",
+      "device_type": "IntegratedGpu",
+      "name": "Apple M4"
+    },
+    "warmups": 2,
+    "samples": 8,
+    "rows": [
+      {
+        "shape": [
+          15,
+          8,
+          64
+        ],
+        "seed": 17,
+        "median_ms": {
+          "rust": 8.222271000000001,
+          "torch": 11.601228994550183
+        },
+        "torch_over_rust": 1.4109519127440804,
+        "max_abs_error": 2.384185791015625e-06
+      },
+      {
+        "shape": [
+          15,
+          8,
+          64
+        ],
+        "seed": 29,
+        "median_ms": {
+          "rust": 9.357479,
+          "torch": 16.209374996833503
+        },
+        "torch_over_rust": 1.7322373896680403,
+        "max_abs_error": 2.1457672119140625e-06
+      },
+      {
+        "shape": [
+          15,
+          8,
+          64
+        ],
+        "seed": 43,
+        "median_ms": {
+          "rust": 5.2699584999999995,
+          "torch": 9.095229004742578
+        },
+        "torch_over_rust": 1.7258634967889366,
+        "max_abs_error": 4.76837158203125e-07
+      },
+      {
+        "shape": [
+          31,
+          16,
+          128
+        ],
+        "seed": 17,
+        "median_ms": {
+          "rust": 6.7700415,
+          "torch": 8.39370850007981
+        },
+        "torch_over_rust": 1.239831173867961,
+        "max_abs_error": 9.5367431640625e-07
+      },
+      {
+        "shape": [
+          31,
+          16,
+          128
+        ],
+        "seed": 29,
+        "median_ms": {
+          "rust": 7.402854,
+          "torch": 8.427978988038376
+        },
+        "torch_over_rust": 1.1384769965797483,
+        "max_abs_error": 4.76837158203125e-07
+      },
+      {
+        "shape": [
+          31,
+          16,
+          128
+        ],
+        "seed": 43,
+        "median_ms": {
+          "rust": 8.178375,
+          "torch": 8.240728988312185
+        },
+        "torch_over_rust": 1.0076242515551297,
+        "max_abs_error": 9.5367431640625e-07
+      }
+    ],
+    "boundary": "resident strided logical input, channel gain and scalar; 8x(mul gain,tanh GELU,original-input residual,mul scalar),ReLU; forward plus explicit cotangent VJP to all 3 slots; terminal contiguous host output and all gradients included; upload/views/plan construction/JSON excluded; Rust recomputes forward and checks every intermediate, Torch eager autograd retains a tape and has no equivalent guards; no NN optimizer/browser/CUDA/torch.compile claim; uncontrolled OS load"
+  },
+  "files": {
+    "native-nd.json.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "a67eb09cdf3a502e46d731490902ccb6d6d982287f3747bf2df00c2660b1caf7",
+      "bytes": 88467,
+      "decoded_sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da",
+      "decoded_bytes": 2738065
+    },
+    "browser-nd.json.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "59b4e46faa8d02b83aafb6e989c847bf4c82d73210469043d3c7cf33280612df",
+      "bytes": 121842,
+      "decoded_sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87",
+      "decoded_bytes": 6219548
+    },
+    "vjp-bench.json.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/vjp-bench.json",
+      "sha256": "786a42b9e940aca253ea046d56deb217cd0dbcc51de65873a01f10f51f0cc00c",
+      "bytes": 1746936,
+      "decoded_sha256": "3130e4b2acc535ab5cb63d8082b7fb4083f30b3de3a831a83a5a7a4232b869fd",
+      "decoded_bytes": 32569674
+    },
+    "frozen-run.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/frozen-run.json",
+      "sha256": "5f27adc7da7677b8970cb623cc77e81a5f2e42442a91f6aca90f90816668997c",
+      "bytes": 8393,
+      "decoded_sha256": "5f27adc7da7677b8970cb623cc77e81a5f2e42442a91f6aca90f90816668997c",
+      "decoded_bytes": 8393
+    },
+    "torch-vjp-replay.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/torch-vjp-replay.json",
+      "sha256": "5922843a4afbd961f8c042aa96cfee269157d0782e26a8ad73fbceee1b8a66c6",
+      "bytes": 12321,
+      "decoded_sha256": "5922843a4afbd961f8c042aa96cfee269157d0782e26a8ad73fbceee1b8a66c6",
+      "decoded_bytes": 12321
+    },
+    "torch-nd-regression.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/torch-nd-regression.json",
+      "sha256": "7db8e63f0342d3177008a1be01555eb9db1aa45bd4db54b5470139aba2efa28f",
+      "bytes": 20798,
+      "decoded_sha256": "7db8e63f0342d3177008a1be01555eb9db1aa45bd4db54b5470139aba2efa28f",
+      "decoded_bytes": 20798
+    },
+    "bench-reaggregation.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/bench-reaggregation.json",
+      "sha256": "4379d029802d99f814ba21f6d8e6628f2ce131b7807f05e6dd73a8bbeeda4dce",
+      "bytes": 1355,
+      "decoded_sha256": "4379d029802d99f814ba21f6d8e6628f2ce131b7807f05e6dd73a8bbeeda4dce",
+      "decoded_bytes": 1355
+    },
+    "initial/native-nd.json.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "c7a31879f065061c6238a2dc94094b2458cd966b7855172943515a43056e7300",
+      "bytes": 88478,
+      "decoded_sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da",
+      "decoded_bytes": 2738065
+    },
+    "initial/browser-nd.json.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/browser-nd.json",
+      "sha256": "888adeeea230ce61b86d8be04a8600b2644882fc3c5f4b58c96738d93a1a0b1d",
+      "bytes": 121852,
+      "decoded_sha256": "a480df65771b8178cc414f897916d386a7e861338d17562ad9ec6a65aaf1630b",
+      "decoded_bytes": 6219548
+    },
+    "initial/frozen-run.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen-run.json",
+      "sha256": "d3060ca0c67c491e0afadf4bf8dfa2ebe69ca651080782198dbbf950a4bc235a",
+      "bytes": 6076,
+      "decoded_sha256": "d3060ca0c67c491e0afadf4bf8dfa2ebe69ca651080782198dbbf950a4bc235a",
+      "decoded_bytes": 6076
+    },
+    "initial/torch-vjp-replay.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/torch-vjp-replay.json",
+      "sha256": "206631bd8dd0b257af0f3ac1f273c995c64fe328f655a686a2a22ad5455ea94a",
+      "bytes": 3274,
+      "decoded_sha256": "206631bd8dd0b257af0f3ac1f273c995c64fe328f655a686a2a22ad5455ea94a",
+      "decoded_bytes": 3274
+    },
+    "initial/torch-vjp-replay.log": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/torch-vjp-replay.log",
+      "sha256": "173f2dec717fe98e9975fad6fbe1e7de72a034abc28a5e34d4d647f2a8d39047",
+      "bytes": 1607,
+      "decoded_sha256": "173f2dec717fe98e9975fad6fbe1e7de72a034abc28a5e34d4d647f2a8d39047",
+      "decoded_bytes": 1607
+    },
+    "checks/checks-v2.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/checks-v2.json",
+      "sha256": "38a13f16b0b9960158afebc997aee04adec38dd440c17948c25cce721a379713",
+      "bytes": 1406,
+      "decoded_sha256": "38a13f16b0b9960158afebc997aee04adec38dd440c17948c25cce721a379713",
+      "decoded_bytes": 1406
+    },
+    "checks/checks-v3.json": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/checks-v3.json",
+      "sha256": "d1d4b61d78c4a17a98cfb98ad0f1434e77575691f7537e69b9f3a743f3c955d3",
+      "bytes": 1666,
+      "decoded_sha256": "d1d4b61d78c4a17a98cfb98ad0f1434e77575691f7537e69b9f3a743f3c955d3",
+      "decoded_bytes": 1666
+    },
+    "checks/first-tests.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/first-tests.log",
+      "sha256": "8fa13900533e2bd178dfadfcf44fd69f6bdae590d3c51c00a946f059d232482e",
+      "bytes": 7761,
+      "decoded_sha256": "5c3be973c7be91653a4da9c86eaf0064c542a4fb669cc26b37adc6d04b62eb2f",
+      "decoded_bytes": 126522
+    },
+    "checks/clippy-native-v2.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/clippy-native-v2.log",
+      "sha256": "160258301c6d91e2c6511e1afc1506dff3d75e15cd7ce97cbfc3143f6e5f46b5",
+      "bytes": 4584,
+      "decoded_sha256": "8d8973058368ad2c6f9d17b892570606c63e80e0b7d7d7d526a464fca7e000d0",
+      "decoded_bytes": 115391
+    },
+    "checks/contracts-backend-v2.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/contracts-backend-v2.log",
+      "sha256": "03c2b848d0052db80c6f171d320407d5549f0fad8725cda500c191b8227553ad",
+      "bytes": 7433,
+      "decoded_sha256": "1e9f770b331ace54becb0e79e7c94c5d42a0ad27676041b551cbe26503727d7a",
+      "decoded_bytes": 125768
+    },
+    "checks/tensor-cpu-v3.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/tensor-cpu-v3.log",
+      "sha256": "266ed598065b1e54fb3d80fad67de50543b2d20c86e3a864464dd71c306ace28",
+      "bytes": 7005,
+      "decoded_sha256": "6c372711e80db9c33ef63c751ba8dfa71ae7c0ee1fbf88c46331160a7f7edc52",
+      "decoded_bytes": 36104
+    },
+    "checks/nn-resident-v3.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/nn-resident-v3.log",
+      "sha256": "7996fc46f35c6904b7a22d84d4e08c23b07b3c1d9b1e3855e11d0a911d797926",
+      "bytes": 4623,
+      "decoded_sha256": "056210501458433184786c1bf163abda5652dfd15526ea0320e75395cfbddae0",
+      "decoded_bytes": 115505
+    },
+    "checks/clippy-native-v3.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/clippy-native-v3.log",
+      "sha256": "d0d7e9e1bea1029d3a23fb13b0cde524e4d7baec3b423916e337321c26f5fba8",
+      "bytes": 4286,
+      "decoded_sha256": "4124efcde05a35c5aa598c77003ce982ac668333adcdab67724f3662242b82d6",
+      "decoded_bytes": 114149
+    },
+    "checks/clippy-wasm-v3.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/clippy-wasm-v3.log",
+      "sha256": "67350e0171028c8ff0ad61fb131f2a04177a721317fafea2beced972dca9bf69",
+      "bytes": 4259,
+      "decoded_sha256": "88421800b185c6668c95b5265b6e9f8fb7d602f2913694ce27ac28d54fd384d8",
+      "decoded_bytes": 111827
+    },
+    "checks/backend-clippy-v3.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/backend-clippy-v3.log",
+      "sha256": "58950f4dce004ab56a67b1913d526c7b7d7ac29a6c5b5bfe59b0cbcb1dec5ea3",
+      "bytes": 4378,
+      "decoded_sha256": "2da1c70242b4da9b28a99d5eeccdc62f150cf27220fa05db2aacdbb3172fdedc",
+      "decoded_bytes": 114298
+    },
+    "checks/nn-examples-v3.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/nn-examples-v3.log",
+      "sha256": "f658c0565a01314574b3f8a84f76c7991cf78fce70b37aacdd91d4b0042c0d61",
+      "bytes": 6684,
+      "decoded_sha256": "8bd5bb75799dc49aaecdc87d0d04ff62beae847cd29a696b9e4f6825c58ee9c7",
+      "decoded_bytes": 128048
+    },
+    "checks/frozen-native-build.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-build.log",
+      "sha256": "f12d582009a5f3e576fe43b0ba9b20d0b1b2f1a1d320c7b170b3b1e32b5bbef5",
+      "bytes": 4322,
+      "decoded_sha256": "bdecfdc251203dc262f96a5e4bc064149c39e6026da19162317acadfba44e62e",
+      "decoded_bytes": 114540
+    },
+    "checks/frozen-wasm-build.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/wasm-build.log",
+      "sha256": "6ac2517478e71cbcf3e9c2b5c3c8194d42248a86ed59aa88e73699fc9f5763be",
+      "bytes": 4113,
+      "decoded_sha256": "2561d026ea535045632fbd099a3dcf7ed0fc8bc2d5099863fe84920e3a85fa4a",
+      "decoded_bytes": 111354
+    },
+    "checks/frozen-native-fixture.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-fixture.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "bytes": 20,
+      "decoded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "decoded_bytes": 0
+    },
+    "checks/frozen-browser-fixture.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-fixture.log",
+      "sha256": "ff77d43c38b92d7e2ac20133eb9f914264bcd0cd9791150bb0133ad19584ba5c",
+      "bytes": 144,
+      "decoded_sha256": "22cc4a33e8fbaf8382371acbee34dc982979050baf6bf95d3d7504186cb88a36",
+      "decoded_bytes": 149
+    },
+    "checks/frozen-torch-vjp-replay.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/torch-vjp-replay.log",
+      "sha256": "cb8f42d37e538096729dc49f4d1daac147ecca53a6bc3b9e3948bc6342d065f7",
+      "bytes": 116,
+      "decoded_sha256": "6388a8ea79c51c8a8b727116229f50513a9ed09abc30f1d9ea2c2ce20626c3a8",
+      "decoded_bytes": 117
+    },
+    "checks/frozen-torch-nd-regression.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/torch-nd-regression.log",
+      "sha256": "a9f1d0bc1f1625da08e5bcfbfd68314904dd1682e85032b79f2445354f938ced",
+      "bytes": 91,
+      "decoded_sha256": "face5fcedee8cfde04ccb3561770e73f2aba3d21ac2254c1df111045bdf07102",
+      "decoded_bytes": 76
+    },
+    "checks/frozen-torch-mps-vjp-bench.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/torch-mps-vjp-bench.log",
+      "sha256": "38b704fbc470e62ba0d60735d4837d82d5ea6f77381d2b19a2ae6a4eef5c779c",
+      "bytes": 309,
+      "decoded_sha256": "160f573525603a25966bc95c22d620c22874f1f4f4a8bebb07b08fb533e01a65",
+      "decoded_bytes": 940
+    },
+    "checks/frozen-bench-reaggregation.log.gz": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/bench-reaggregation.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "bytes": 20,
+      "decoded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "decoded_bytes": 0
+    },
+    "checks/python-vjp-tests.log": {
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/python-vjp-tests.log",
+      "sha256": "8ea1d76669d6ba5bfead991395a5d7b26d7aef027d6f5be4b0e6628bdb0f7012",
+      "bytes": 103,
+      "decoded_sha256": "8ea1d76669d6ba5bfead991395a5d7b26d7aef027d6f5be4b0e6628bdb0f7012",
+      "decoded_bytes": 103
+    }
+  }
+}

@@ -1,0 +1,385 @@
+{
+  "schema": "spiraltorch.pointwise_vjp.torch_validation.v1",
+  "status": "passed_with_reference_gaps",
+  "source": {
+    "commit": "8165b5b6b4a075ef101fb4f0d337d3f4032f2025",
+    "tree": "a979c3905557ca2119045f55d8d798d03008ab9f",
+    "tracked_dirty": false
+  },
+  "checks": [
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 0,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 5.960464477539063e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 1,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.4901161193847656e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 2,
+      "shape": [
+        513,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 2.86102294921875e-06,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 3,
+      "shape": [
+        65537,
+        1
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.7404556274414062e-05,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 4,
+      "shape": [],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 5,
+      "shape": [
+        2,
+        0,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 6,
+      "shape": [
+        2,
+        2,
+        4
+      ],
+      "nn_bridge": true,
+      "max_abs_error": 2.9802322387695312e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 0,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 5.960464477539063e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 1,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.4901161193847656e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 2,
+      "shape": [
+        513,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 5.960464477539062e-07,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 3,
+      "shape": [
+        65537,
+        1
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.6927719116210938e-05,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 4,
+      "shape": [],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "reference_unsupported",
+      "device": "mps",
+      "case": 5,
+      "shape": [
+        2,
+        0,
+        3
+      ],
+      "nn_bridge": false,
+      "error": "[srcBuf length] > 0 INTERNAL ASSERT FAILED at \"/Users/runner/work/pytorch/pytorch/aten/src/ATen/native/mps/OperationUtils.mm\":525, please report a bug to PyTorch. Placeholder tensor is empty!",
+      "fallback_used": false,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 6,
+      "shape": [
+        2,
+        2,
+        4
+      ],
+      "nn_bridge": true,
+      "max_abs_error": 1.862645149230957e-09,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/native-nd.json",
+      "sha256": "f64b41ca2578dfbfb8879d241d80a6851b40a26af8cffadd81aa8d52ffc008da"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 0,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 5.960464477539063e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 1,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.4901161193847656e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 2,
+      "shape": [
+        513,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 3.337860107421875e-06,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 3,
+      "shape": [
+        65537,
+        1
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.1682510375976562e-05,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 4,
+      "shape": [],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 5,
+      "shape": [
+        2,
+        0,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "cpu",
+      "case": 6,
+      "shape": [
+        2,
+        2,
+        4
+      ],
+      "nn_bridge": true,
+      "max_abs_error": 2.9802322387695312e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 0,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 5.960464477539063e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 1,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.4901161193847656e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 2,
+      "shape": [
+        513,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 3.5762786865234375e-07,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 3,
+      "shape": [
+        65537,
+        1
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 2.2649765014648438e-05,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 4,
+      "shape": [],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "reference_unsupported",
+      "device": "mps",
+      "case": 5,
+      "shape": [
+        2,
+        0,
+        3
+      ],
+      "nn_bridge": false,
+      "error": "[srcBuf length] > 0 INTERNAL ASSERT FAILED at \"/Users/runner/work/pytorch/pytorch/aten/src/ATen/native/mps/OperationUtils.mm\":525, please report a bug to PyTorch. Placeholder tensor is empty!",
+      "fallback_used": false,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    },
+    {
+      "status": "passed",
+      "device": "mps",
+      "case": 6,
+      "shape": [
+        2,
+        2,
+        4
+      ],
+      "nn_bridge": true,
+      "max_abs_error": 1.862645149230957e-09,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/verified/browser-nd.json",
+      "sha256": "6d122b3d0e1ffae41f4ed08a059f0cbe136b1ef250a14c8bc695ec29dcbcae87"
+    }
+  ],
+  "torch_version": "2.12.1",
+  "fallback_enabled": false,
+  "boundary": "logical input slot VJPs, summed broadcast axes; tanh GELU; mean-MSE NN probe; no optimizer or storage-view adjoint claim",
+  "reference_gaps": 2
+}
