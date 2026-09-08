@@ -101,7 +101,11 @@ print(snapshot.shape, snapshot.read_values())  # (2, 5, 3), one final readback
 The same Rust-owned plan can be exported with `plan.to_json()` and imported
 by `st.nn.InferencePlan.from_json(...)` or the browser's
 `InferencePlan.fromJson(...)`. Source model updates require a new plan.
-This is explicit inference, not resident backward or a general N-D Tensor.
+The code above is explicit inference, not a general N-D Tensor. The same plan's
+`compile_training_wgpu()` creates a mutable GPU workspace for mean-MSE, VJP and
+transactional plain SGD; see [resident training](../../docs/resident_nn_training.md)
+for Python/browser use and weight-only handoff. Current-source bindings are
+required; older published wheels may not have these APIs.
 CPU-only wheels support plan transport but reject GPU compilation rather
 than silently falling back. See the [resident NN guide](../../docs/resident_nn_inference.md)
 for browser use, validation, and the retained PyTorch comparison boundaries.

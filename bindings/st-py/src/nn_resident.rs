@@ -12,12 +12,55 @@ use pyo3::{
 use st_nn::resident::{InferenceError, InferencePlan, DEFAULT_MAX_PLAN_JSON_BYTES};
 use st_tensor::NdLayout;
 
+mod training;
+
 fn plan_error(error: InferenceError) -> PyErr {
     #[cfg(feature = "wgpu")]
-    if let InferenceError::Gpu(error) = error {
-        return gpu_error(error);
+    match error {
+        InferenceError::Gpu(error) => return gpu_error(error),
+        InferenceError::Training(error) => return training::training_error(error),
+        _ => {}
     }
     PyValueError::new_err(error.to_string())
+}
+
+#[cfg(feature = "wgpu")]
+fn gpu_options(
+    tile_mnk: Option<&Bound<'_, PyAny>>,
+    kernel: &str,
+    accumulation: &str,
+) -> PyResult<(
+    st_backend_wgpu::resident_matmul::MatmulTile,
+    st_backend_wgpu::resident_matmul::MatmulKernel,
+    st_backend_wgpu::resident_matmul::MatmulAccumulation,
+)> {
+    use st_backend_wgpu::resident_matmul::MatmulTile;
+    let tile = if let Some(tile) = tile_mnk {
+        let dimensions: Vec<u32> = tile
+            .try_iter()?
+            .map(|item| {
+                let item = item?;
+                if item.is_instance_of::<PyBool>() {
+                    return Err(PyTypeError::new_err(
+                        "tile dimensions must be integers, not bool",
+                    ));
+                }
+                item.extract::<u32>()
+            })
+            .collect::<PyResult<_>>()?;
+        if dimensions.len() != 3 {
+            return Err(PyValueError::new_err("tile_mnk must have three dimensions"));
+        }
+        MatmulTile::new(dimensions[0], dimensions[1], dimensions[2])
+            .map_err(|err| PyValueError::new_err(err.to_string()))?
+    } else {
+        MatmulTile::default()
+    };
+    Ok((
+        tile,
+        kernel.parse().map_err(PyValueError::new_err)?,
+        accumulation.parse().map_err(PyValueError::new_err)?,
+    ))
 }
 
 fn input_layout(value: &Bound<'_, PyAny>) -> PyResult<NdLayout> {
@@ -92,37 +135,8 @@ impl PyInferencePlan {
     ) -> PyResult<PyResidentInference> {
         #[cfg(feature = "wgpu")]
         {
-            use st_backend_wgpu::{
-                resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulTile},
-                runtime,
-            };
-            let tile = if let Some(tile) = tile_mnk {
-                let dimensions: Vec<u32> = tile
-                    .try_iter()?
-                    .map(|item| {
-                        let item = item?;
-                        if item.is_instance_of::<PyBool>() {
-                            return Err(PyTypeError::new_err(
-                                "tile dimensions must be integers, not bool",
-                            ));
-                        }
-                        item.extract::<u32>()
-                    })
-                    .collect::<PyResult<_>>()?;
-                if dimensions.len() != 3 {
-                    return Err(PyValueError::new_err("tile_mnk must have three dimensions"));
-                }
-                MatmulTile::new(dimensions[0], dimensions[1], dimensions[2])
-                    .map_err(|err| PyValueError::new_err(err.to_string()))?
-            } else {
-                MatmulTile::default()
-            };
-            let kernel = kernel
-                .parse::<MatmulKernel>()
-                .map_err(PyValueError::new_err)?;
-            let accumulation = accumulation
-                .parse::<MatmulAccumulation>()
-                .map_err(PyValueError::new_err)?;
+            use st_backend_wgpu::runtime;
+            let (tile, kernel, accumulation) = gpu_options(tile_mnk, kernel, accumulation)?;
             let plan = self.inner.clone();
             py.detach(move || {
                 let (runtime, _) = runtime::ensure_default_runtime_blocking("python.nn.resident")
@@ -141,6 +155,17 @@ impl PyInferencePlan {
                 "resident inference requires a wheel built with the 'wgpu' feature",
             ))
         }
+    }
+
+    #[pyo3(signature = (*, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_training_wgpu(
+        &self,
+        py: Python<'_>,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<training::PyResidentTraining> {
+        training::compile(&self.inner, py, tile_mnk, kernel, accumulation)
     }
 }
 
@@ -288,5 +313,6 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyInferencePlan>()?;
     module.add_class::<PyResidentInference>()?;
     module.add_class::<PyInferenceSnapshot>()?;
+    training::register(module)?;
     Ok(())
 }

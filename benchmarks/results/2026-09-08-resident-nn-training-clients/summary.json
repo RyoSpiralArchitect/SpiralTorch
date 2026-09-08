@@ -1,0 +1,232 @@
+{
+  "adapters": {
+    "browser": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "browser_version": "152.0.7977.77",
+    "identity_boundary": "Browser adapter is anonymous; no exact cross-client physical GPU attestation.",
+    "native": {
+      "backend": "Metal",
+      "device_type": "IntegratedGpu",
+      "name": "Apple M4"
+    }
+  },
+  "attribution": "Clean source checked before every command; installed extension bytes match frozen-source wheels. Not embedded Git attestation or reproducible-build proof.",
+  "boundaries": [
+    "Correctness only, no throughput or LLM/general-geometry learning claim.",
+    "Weight-only handoff with fresh counters, not optimizer checkpoint/resume.",
+    "Native and WASM dev packages, not a PyPI release.",
+    "Zero-rate signed-zero regression is retained as a development failure before the fix.",
+    "No CUDA/Furnace execution in this study; GPU contention unmeasured."
+  ],
+  "browser_rejections": 115,
+  "expanded_strict_clippy": {
+    "nn": {
+      "boundary": "diagnostics in unchanged files, not a separate baseline execution",
+      "errors": 22,
+      "files": [
+        "crates/st-nn/src/language/automation.rs",
+        "crates/st-nn/src/language/gw.rs",
+        "crates/st-nn/src/layers/activation.rs",
+        "crates/st-nn/src/layers/continuous_wavelet.rs",
+        "crates/st-nn/src/layers/dropout.rs",
+        "crates/st-nn/src/layers/embedding.rs",
+        "crates/st-nn/src/layers/lstm.rs",
+        "crates/st-nn/src/layers/non_liner.rs",
+        "crates/st-nn/src/layers/normalization.rs",
+        "crates/st-nn/src/layers/wave_gate.rs",
+        "crates/st-nn/src/layers/zspace_projector.rs",
+        "crates/st-nn/src/z_rba/cov_head.rs",
+        "crates/st-nn/src/zspace_coherence/sequencer.rs",
+        "crates/st-nn/src/zspace_coherence/vae.rs"
+      ],
+      "files_unchanged_vs_parent": true,
+      "status": "failed"
+    },
+    "python": {
+      "boundary": "diagnostics in unchanged files, not a separate baseline execution",
+      "errors": 7,
+      "files": [
+        "bindings/st-py/src/kv.rs",
+        "bindings/st-py/src/nn.rs",
+        "bindings/st-py/src/pure.rs",
+        "bindings/st-py/src/vision.rs",
+        "bindings/st-py/src/wgpu.rs"
+      ],
+      "files_unchanged_vs_parent": true,
+      "status": "failed"
+    },
+    "wasm": {
+      "boundary": "diagnostics in unchanged files, not a separate baseline execution",
+      "errors": 19,
+      "files": [
+        "bindings/st-wasm/src/cobol.rs",
+        "bindings/st-wasm/src/cobol_bridge.rs",
+        "bindings/st-wasm/src/cosmology.rs",
+        "bindings/st-wasm/src/fft.rs",
+        "bindings/st-wasm/src/fractal_field.rs",
+        "bindings/st-wasm/src/mellin.rs",
+        "bindings/st-wasm/src/scale_stack.rs"
+      ],
+      "files_unchanged_vs_parent": true,
+      "status": "failed"
+    }
+  },
+  "final_commands": 25,
+  "handoff_return_max_abs_error": 0.0,
+  "independent_torch_devices": [
+    "cpu",
+    "mps"
+  ],
+  "learning": [
+    {
+      "browser_additional_updates": 64,
+      "browser_max_abs_error": 0,
+      "final_mse": 0.013794777914881706,
+      "initial_mse": 0.14218813180923462,
+      "seed": 17,
+      "updates": 128
+    },
+    {
+      "browser_additional_updates": 64,
+      "browser_max_abs_error": 0,
+      "final_mse": 0.005683853756636381,
+      "initial_mse": 0.13536861538887024,
+      "seed": 29,
+      "updates": 128
+    },
+    {
+      "browser_additional_updates": 64,
+      "browser_max_abs_error": 0,
+      "final_mse": 0.00704549765214324,
+      "initial_mse": 0.09850212931632996,
+      "seed": 43,
+      "updates": 128
+    }
+  ],
+  "max_abs_error_vs_torch": 1.1920928955078125e-07,
+  "products": {
+    "cpu": {
+      "build_info": {
+        "features": {
+          "cpu": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "kdsl": true,
+          "logic": false,
+          "logic-learn": false,
+          "mps": false,
+          "nn": true,
+          "rec": true,
+          "robotics": true,
+          "selfsup": true,
+          "text": true,
+          "wgpu": false,
+          "wgpu-rt": false
+        },
+        "package": "spiraltorch-py",
+        "profile": "debug",
+        "target": {
+          "arch": "aarch64",
+          "family": "unix",
+          "os": "macos",
+          "pointer_width": 64
+        },
+        "version": "0.4.27"
+      },
+      "extension": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-clients-20260908/venv-cpu/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so",
+      "extension_sha256": "af530f5b0c842e780d43945165f6e983152266be818cf8036b6040b81916590b",
+      "prefix": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-clients-20260908/venv-cpu",
+      "training": "spiraltorch.nn",
+      "wgpu": false,
+      "wheel": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-clients-20260908/wheels-cpu-5c38855a/spiraltorch-0.4.27-cp38-abi3-macosx_11_0_arm64.whl",
+      "wheel_sha256": "a9791f135df19bba86dbf8e561a352c824461d0c18d1931ae9a010f4f8a4453e"
+    },
+    "gpu": {
+      "build_info": {
+        "features": {
+          "cpu": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "kdsl": true,
+          "logic": false,
+          "logic-learn": false,
+          "mps": false,
+          "nn": true,
+          "rec": true,
+          "robotics": true,
+          "selfsup": true,
+          "text": true,
+          "wgpu": true,
+          "wgpu-rt": false
+        },
+        "package": "spiraltorch-py",
+        "profile": "debug",
+        "target": {
+          "arch": "aarch64",
+          "family": "unix",
+          "os": "macos",
+          "pointer_width": 64
+        },
+        "version": "0.4.27"
+      },
+      "extension": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-clients-20260908/venv/lib/python3.12/site-packages/spiraltorch/spiraltorch.abi3.so",
+      "extension_sha256": "5c752a712d0c5f7304b567822355ee3dd896d557d26f1305a9afc6c849be2e33",
+      "prefix": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-clients-20260908/venv",
+      "training": "spiraltorch.nn",
+      "wgpu": true,
+      "wheel": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nn-resident-training-clients-20260908/wheels-5c38855a/spiraltorch-0.4.27-cp38-abi3-macosx_11_0_arm64.whl",
+      "wheel_sha256": "766dc814c59af72c14550d14cb429eaa1e41bcbf53a23b860ed7c8c05b2b865b"
+    }
+  },
+  "schema": "spiraltorch.nn.training_clients.study.v1",
+  "source_commit": "5c38855aa527c45f65ca5ea5674d2ea8ba98eeaf",
+  "source_tree": "11081b90c95779ac954d514a94ada4cd588e0023",
+  "status": "passed",
+  "strict_backend_clippy": "passed",
+  "tests": {
+    "python-cpu-nn-final.log": {
+      "passed": 5,
+      "ran": 13,
+      "skipped": 8
+    },
+    "python-cpu-smoke-final.log": {
+      "passed": 37,
+      "ran": 37,
+      "skipped": 0
+    },
+    "python-gpu-nn-final.log": {
+      "passed": 13,
+      "ran": 13,
+      "skipped": 0
+    },
+    "python-gpu-smoke-final.log": {
+      "passed": 37,
+      "ran": 37,
+      "skipped": 0
+    },
+    "python-matmul-final.log": {
+      "passed": 3,
+      "ran": 3,
+      "skipped": 0
+    },
+    "rust-backend-final.log": {
+      "passed": 102
+    },
+    "rust-nn-final.log": {
+      "passed": 749
+    },
+    "validator-final.log": {
+      "passed": 4,
+      "ran": 4,
+      "skipped": 0
+    }
+  },
+  "torch_version": "2.12.1",
+  "vjp_cases_per_client": 18,
+  "workspace_fmt": "passed"
+}
