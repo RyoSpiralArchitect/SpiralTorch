@@ -8,14 +8,111 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import statistics
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_rank_vs_torch as audit
 from bench_resident_nn_vs_torch import admit_device, match_adapter
+
+
+class Worker:
+    """One owned process, bounded responses/exit, and no automatic restart."""
+
+    def __init__(
+        self,
+        command,
+        stderr,
+        response_timeout=120.0,
+        exit_timeout=10.0,
+        limit=64 * 1024 * 1024,
+    ):
+        self.response_timeout = response_timeout
+        self.exit_timeout = exit_timeout
+        self.limit = limit
+        self.process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            bufsize=0,
+        )
+        self.messages = queue.Queue(maxsize=1)
+        self.stop = threading.Event()
+        # Raw pipes avoid a buffered-I/O lock if an inherited pipe outlives its owner.
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+
+    def _offer(self, value):
+        while not self.stop.is_set():
+            try:
+                self.messages.put(value, timeout=0.05)
+                return True
+            except queue.Full:
+                pass
+        return False
+
+    def _read(self):
+        pending = bytearray()
+        try:
+            while not self.stop.is_set():
+                chunk = self.process.stdout.read(65536)
+                if not chunk:
+                    raise RuntimeError(
+                        "Rust worker closed stdout before the next complete response"
+                    )
+                pending.extend(chunk)
+                while (end := pending.find(b"\n")) >= 0:
+                    if end + 1 > self.limit:
+                        raise ValueError(
+                            "worker response exceeds bounded fixture budget"
+                        )
+                    line = bytes(pending[: end + 1])
+                    del pending[: end + 1]
+                    if not self._offer(line):
+                        return
+                if len(pending) > self.limit:
+                    raise ValueError("worker response exceeds bounded fixture budget")
+        except Exception as error:
+            self._offer(error)
+
+    def request(self, payload):
+        self.process.stdin.write((json.dumps(payload) + "\n").encode())
+        try:
+            response = self.messages.get(timeout=self.response_timeout)
+        except queue.Empty as error:
+            raise TimeoutError(
+                "resident worker response deadline exceeded; no restart"
+            ) from error
+        if isinstance(response, Exception):
+            raise response
+        return json.loads(response)
+
+    def finish(self):
+        self.process.stdin.close()
+        self.process.wait(timeout=self.exit_timeout)
+        if self.process.returncode != 0:
+            raise RuntimeError(f"worker exit {self.process.returncode}")
+
+    def abort(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=self.exit_timeout)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=self.exit_timeout)
+
+    def close_streams(self):
+        self.stop.set()
+        self.process.stdin.close()
+        self.reader.join(timeout=0.25)
+        if not self.reader.is_alive():
+            self.process.stdout.close()
 
 
 def recipes():
@@ -100,32 +197,16 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
         "warmups": 2,
         "samples": 8,
         "cases": [],
+        "worker_deadlines_seconds": {"response": 120.0, "exit": 10.0},
         "boundary": "resident inputs; 20x(add broadcast,mul scalar,tanh GELU); views and terminal contiguous host read included; upload/pipeline construction/JSON excluded; Rust preserves intermediate finite guards, Torch does not; uncontrolled OS load; diagnostic not universal speedup",
     }
     with output.open("x", encoding="utf-8") as handle, output.with_suffix(
         ".stderr.log"
     ).open("x", encoding="utf-8") as stderr:
-        worker = subprocess.Popen(
-            [str(binary)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=stderr,
-            text=True,
-        )
-
-        def request(payload):
-            worker.stdin.write(json.dumps(payload) + "\n")
-            worker.stdin.flush()
-            line = worker.stdout.readline(64 * 1024 * 1024 + 1)
-            if not line:
-                raise RuntimeError(
-                    f"Rust worker closed stdout; process state={worker.poll()}"
-                )
-            if len(line) > 64 * 1024 * 1024 or not line.endswith("\n"):
-                raise ValueError("worker response exceeds bounded fixture budget")
-            return json.loads(line)
-
+        worker = None
         try:
+            worker = Worker([str(binary)], stderr)
+            request = worker.request
             for config in recipes():
                 shape, seed = config["shape"], config["seed"]
                 fixture = request({"op": "init", "config": config})
@@ -216,12 +297,7 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
                     ),
                     flush=True,
                 )
-            worker.stdin.close()
-            # An observation timeout must not spawn another worker.
-            while worker.poll() is None:
-                time.sleep(0.1)
-            if worker.returncode != 0:
-                raise RuntimeError(f"worker exit {worker.returncode}")
+            worker.finish()
             if (
                 audit.source_identity() != before
                 or audit.file_identity(binary) != product
@@ -232,13 +308,23 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
             report["status"] = "passed"
         except BaseException as error:
             report["error"] = repr(error)
-            if worker.poll() is None:
-                worker.terminate()
-                worker.wait()
+            try:
+                if worker is not None:
+                    worker.abort()
+            except Exception as cleanup_error:
+                report["cleanup_error"] = repr(cleanup_error)
             raise
         finally:
-            json.dump(report, handle, indent=2, allow_nan=False)
-            handle.write("\n")
+            try:
+                if worker is not None:
+                    worker.close_streams()
+            except Exception as cleanup_error:
+                report["status"] = "error"
+                report["cleanup_error"] = repr(cleanup_error)
+                raise
+            finally:
+                json.dump(report, handle, indent=2, allow_nan=False)
+                handle.write("\n")
 
 
 if __name__ == "__main__":

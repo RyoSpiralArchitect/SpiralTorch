@@ -3,8 +3,15 @@
 import copy
 import importlib.util
 import math
+import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+import types
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location(
     "nd_bench",
@@ -163,6 +170,101 @@ class Reaggregation(unittest.TestCase):
         row["intervals"][2]["rust"]["values"][0] = 1.0
         with self.assertRaises(ValueError):
             validation.validate_case(row, bench.recipes()[0], {}, 0)
+
+
+class WorkerDeadlines(unittest.TestCase):
+    def test_deadline_retains_error_report_and_never_restarts(self):
+        fake = mock.Mock()
+        fake.request.side_effect = TimeoutError("response deadline exceeded")
+        torch = types.SimpleNamespace(
+            __version__="fixture", set_num_threads=lambda _: None
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "worker"
+            binary.write_bytes(b"fixture")
+            output = Path(directory) / "report.json"
+            with mock.patch.dict(
+                sys.modules, {"numpy": types.ModuleType("numpy"), "torch": torch}
+            ), mock.patch.object(
+                bench.audit, "source_identity", return_value={"tracked_dirty": False}
+            ), mock.patch.object(
+                bench.audit, "file_identity", return_value={}
+            ), mock.patch.object(
+                bench.audit, "read_native_build_identity", return_value={}
+            ), mock.patch.object(
+                bench.audit, "validate_source_binding", return_value={"valid": True}
+            ), mock.patch.object(
+                bench.audit, "git_bytes", return_value=b""
+            ), mock.patch.object(
+                bench, "Worker", return_value=fake
+            ) as constructor:
+                with self.assertRaises(TimeoutError):
+                    bench.run(binary, output, "cpu")
+            report = bench.json.loads(output.read_text())
+            self.assertEqual(report["status"], "error")
+            self.assertIn("deadline exceeded", report["error"])
+            self.assertEqual(report["cases"], [])
+            constructor.assert_called_once()
+            fake.abort.assert_called_once()
+            fake.close_streams.assert_called_once()
+
+    def worker(self, program, **kwargs):
+        worker = bench.Worker(
+            [sys.executable, "-I", "-c", program],
+            subprocess.DEVNULL,
+            response_timeout=1.0,
+            exit_timeout=0.2,
+            **kwargs
+        )
+        self.addCleanup(worker.close_streams)
+        self.addCleanup(worker.abort)
+        return worker
+
+    def test_complete_response_and_clean_exit(self):
+        worker = self.worker(
+            "import json,sys; x=json.loads(sys.stdin.readline()); print(json.dumps(x),flush=True)"
+        )
+        self.assertEqual(worker.request({"value": 3}), {"value": 3})
+        worker.finish()
+
+    def test_silent_and_partial_responses_have_deadlines_without_restart(self):
+        for prefix in ("", "sys.stdout.write('{'); sys.stdout.flush();"):
+            worker = self.worker("import sys,time; " + prefix + "time.sleep(30)")
+            pid = worker.process.pid
+            start = time.monotonic()
+            with self.assertRaises(TimeoutError):
+                worker.request({})
+            worker.abort()
+            self.assertLess(time.monotonic() - start, 3.0)
+            self.assertEqual(worker.process.pid, pid)
+            self.assertIsNotNone(worker.process.poll())
+
+    def test_eof_oversize_and_exit_hang_are_bounded(self):
+        worker = self.worker("import sys; sys.stdin.readline()")
+        with self.assertRaises(RuntimeError):
+            worker.request({})
+        worker = self.worker(
+            "import sys; sys.stdin.readline(); print('x'*100,flush=True)", limit=16
+        )
+        with self.assertRaises(ValueError):
+            worker.request({})
+        worker = self.worker(
+            "import sys,time; sys.stdin.readline(); print('{}',flush=True); sys.stdin.read(); time.sleep(30)"
+        )
+        self.assertEqual(worker.request({}), {})
+        with self.assertRaises(subprocess.TimeoutExpired):
+            worker.finish()
+
+    @unittest.skipIf(os.name == "nt", "POSIX ignored-SIGTERM fixture")
+    def test_cleanup_kills_worker_that_ignores_termination(self):
+        worker = self.worker(
+            "import signal,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); sys.stdin.readline(); print('{}',flush=True); time.sleep(30)"
+        )
+        self.assertEqual(worker.request({}), {})
+        start = time.monotonic()
+        worker.abort()
+        self.assertLess(time.monotonic() - start, 3.0)
+        self.assertIsNotNone(worker.process.poll())
 
 
 if __name__ == "__main__":

@@ -127,6 +127,11 @@ Use a `wasm-bindgen` CLI version matching the lockfile, a WebGPU-enabled browser
 and the existing Playwright runner dependency. Choose fresh report paths;
 reports are not overwritten. Adapt artifact paths if using `CARGO_TARGET_DIR`.
 
+The native benchmark controller gives each response 120 seconds and exit/cleanup
+10 seconds per phase. A deadline fails the experiment and retains its partial
+report; it never restarts the worker. These experiment deadlines are independent
+of an interactive tool's shorter observation window.
+
 The shared fixture covers three shapes/seeds, including a strided NN input,
 60 chained elementwise operations, inference output reuse, eight SGD steps,
 transactional rejection, device mismatch, and snapshot lifetime. Independent

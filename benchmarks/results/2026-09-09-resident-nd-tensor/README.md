@@ -3,7 +3,9 @@
 Measured source: `6d9392be7fb355c277e8322d039aa2f1b481790c` (clean tree
 `82b1b14a8f5354911bcdf824dd794f9204cca2e6`). Native release and browser WASM
 products were built and copied before execution. Subsequent publication changes
-do not change the measured Rust core, fixtures or benchmark harness.
+do not change the measured Rust core or fixtures. A later review fix adds bounded
+response/exit deadlines to the benchmark controller; the retained timings remain
+bound to the original harness at this source, not relabeled as a new measurement.
 
 ## What Passed
 
@@ -23,8 +25,8 @@ do not change the measured Rust core, fixtures or benchmark harness.
 - Local checks: kernel contracts 14, host tensor 436, WGPU backend 108 and
   selected NN tests 741 passed, including explicitly enabled GPU tests.
   Native/WASM backend and tensor strict Clippy, strict tensor rustdoc and both
-  production binding compilation checks passed. Five benchmark admission and
-  reaggregation tests also pass.
+  production binding compilation checks passed. Ten benchmark admission,
+  reaggregation and worker-supervision tests also pass.
 
 The two attempted strict **whole st-nn** Clippy checks remain red on 22 existing
 library warnings in unchanged source. Ordinary native/browser example Clippy
@@ -35,6 +37,13 @@ Native timing admitted one Apple M4, matching WGPU Metal and Torch MPS, with
 MPS fallback disabled. Browser execution reports `BrowserWebGpu`; its separate
 adapter probe reports Apple/metal-3 and non-fallback, but is not an attestation
 of the exact Rust-selected adapter. Browser timing is **not** measured here.
+
+Review found the original benchmark controller could wait indefinitely for a
+live worker that never completed its response. The follow-up controller uses
+120-second response and 10-second exit/cleanup deadlines, retains partial error
+reports, and never restarts a worker automatically. Tests cover silence, partial
+lines, oversized responses, EOF, an exit hang and ignored termination. This does
+not change the Rust timed workload or retroactively alter the archived samples.
 
 ## Performance: Still Slower Than Eager MPS
 
