@@ -3,7 +3,10 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use serde::Deserialize;
     use serde_json::json;
-    use st_tensor::{NdTensor, WgpuTensorDevice};
+    use st_tensor::{
+        ElementwiseOp, NdPointwisePlan, NdTensor, PointwiseChain, PointwiseExecution,
+        PointwiseStep, WgpuTensorDevice,
+    };
     use std::{
         io::{self, BufRead, Write},
         time::Instant,
@@ -15,11 +18,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         seed: usize,
         iterations: usize,
     }
+    #[derive(Default, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Execution {
+        #[default]
+        Sequential,
+        Batched,
+        Fused,
+    }
     #[derive(Deserialize)]
     #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
     enum Request {
-        Init { config: Config },
-        Sample { capture: bool },
+        Init {
+            config: Config,
+        },
+        Sample {
+            capture: bool,
+            #[serde(default)]
+            execution: Execution,
+        },
     }
     let identity = json!({"schema":"spiraltorch.native_build_identity.v1",
         "build_fingerprint":st_core::build_fingerprint(),
@@ -66,6 +83,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let root = NdTensor::from_vec(&config.shape, input.clone())?.to_wgpu(&device)?;
                 let b = NdTensor::from_vec(&[config.shape[2]], bias.clone())?.to_wgpu(&device)?;
                 let gain = NdTensor::from_vec(&[], vec![0.75])?.to_wgpu(&device)?;
+                let view = root
+                    .permute(&[1, 0, 2])?
+                    .narrow(0, 1, config.shape[1] - 1)?;
+                let chain = PointwiseChain::new(
+                    3,
+                    [
+                        PointwiseStep {
+                            op: ElementwiseOp::Add,
+                            rhs: Some(1),
+                        },
+                        PointwiseStep {
+                            op: ElementwiseOp::Multiply,
+                            rhs: Some(2),
+                        },
+                        PointwiseStep {
+                            op: ElementwiseOp::Gelu,
+                            rhs: None,
+                        },
+                    ]
+                    .repeat(config.iterations),
+                )?;
+                let plan = NdPointwisePlan::new(chain, &[&view, &b, &gain])?;
                 // Finish uploads and shader warmup before the first interval.
                 root.read_values()?;
                 let out = json!({"schema":"spiraltorch.nd_bench.fixture.v1","shape":config.shape,"seed":config.seed,"iterations":config.iterations,
@@ -73,21 +112,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "name":device.runtime().adapter_info().name,
                         "device_type":format!("{:?}",device.runtime().adapter_info().device_type),
                         "backend":format!("{:?}",device.runtime().adapter_info().backend)},"identity":identity});
-                prepared = Some((config, root, b, gain));
+                prepared = Some((config, root, b, gain, plan));
                 out
             }
-            Request::Sample { capture } => {
-                let (config, root, b, gain) = prepared.as_ref().ok_or("init first")?;
+            Request::Sample { capture, execution } => {
+                let (config, root, b, gain, plan) = prepared.as_ref().ok_or("init first")?;
+                let mode = match execution {
+                    Execution::Sequential => PointwiseExecution::Sequential,
+                    Execution::Batched => PointwiseExecution::Batched,
+                    Execution::Fused => PointwiseExecution::Fused,
+                };
                 let start = Instant::now();
-                let mut out = root
+                let view = root
                     .permute(&[1, 0, 2])?
                     .narrow(0, 1, config.shape[1] - 1)?;
-                for _ in 0..config.iterations {
-                    out = out.add(b)?.mul(gain)?.gelu()?;
-                }
+                let out = plan.run(&[&view, b, gain], mode)?;
                 let values = out.read_values()?;
                 let elapsed_ms = start.elapsed().as_secs_f64() * 1000.;
                 json!({"elapsed_ms":elapsed_ms,"shape":out.shape(),"finite_checked":true,
+                    "execution":format!("{mode:?}").to_lowercase(),
                     "values":if capture {Some(values)} else {None}})
             }
         };

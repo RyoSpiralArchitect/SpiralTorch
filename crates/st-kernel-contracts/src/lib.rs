@@ -11,4 +11,5 @@
 pub mod compaction;
 pub mod elementwise;
 pub mod layout;
+pub mod pointwise;
 pub mod rank;

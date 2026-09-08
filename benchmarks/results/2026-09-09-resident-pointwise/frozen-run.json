@@ -1,0 +1,208 @@
+{
+  "status": "passed",
+  "source": "78af0d8c7b36761611f851338339febe7dd98e38",
+  "steps": [
+    {
+      "name": "frozen-example-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_bench"
+      ],
+      "returncode": 0,
+      "seconds": 6.543261250015348
+    },
+    {
+      "name": "frozen-native-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor",
+        "--example",
+        "resident_nd_bench"
+      ],
+      "returncode": 0,
+      "seconds": 52.05849999998463
+    },
+    {
+      "name": "frozen-wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor_browser",
+        "--target",
+        "wasm32-unknown-unknown"
+      ],
+      "returncode": 0,
+      "seconds": 54.16017987500527
+    },
+    {
+      "name": "frozen-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "--target",
+        "web",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/wasm",
+        "--out-name",
+        "spiraltorch_wasm",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_nd_tensor_browser.wasm"
+      ],
+      "returncode": 0,
+      "seconds": 0.08053829200798646
+    },
+    {
+      "name": "native-fixture",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/resident_nd_tensor"
+      ],
+      "returncode": 0,
+      "seconds": 1.461707833019318
+    },
+    {
+      "name": "browser-fixture",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-plan-v1/tools/test_resident_browser.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/wasm",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/browser-nd.json",
+        "",
+        "",
+        "",
+        "",
+        "nd-tensor"
+      ],
+      "returncode": 0,
+      "seconds": 7.52487729198765
+    },
+    {
+      "name": "torch-numeric-replay",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-plan-v1/tools/validate_nd_tensor_vs_torch.py",
+        "--reports",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/native-nd.json",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/browser-nd.json",
+        "--devices",
+        "cpu",
+        "mps",
+        "--source",
+        "78af0d8c7b36761611f851338339febe7dd98e38",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/torch-replay.json"
+      ],
+      "returncode": 0,
+      "seconds": 1.850897458003601
+    },
+    {
+      "name": "torch-mps-pointwise-bench",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-plan-v1/tools/bench_nd_tensor_vs_torch.py",
+        "--pointwise",
+        "--binary",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/resident_nd_bench",
+        "--torch-device",
+        "mps",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/pointwise-bench.json"
+      ],
+      "returncode": 0,
+      "seconds": 3.293431750003947
+    },
+    {
+      "name": "bench-reaggregation",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-plan-v1/tools/validate_nd_tensor_bench.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/pointwise-bench.json"
+      ],
+      "returncode": 0,
+      "seconds": 0.3910146249982063
+    }
+  ],
+  "products": {
+    "resident_nd_tensor": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/resident_nd_tensor",
+      "sha256": "3ed1982d04086f29721ce756d2e0535b966f6f2a3e94dbc28479714497b3d7ff"
+    },
+    "resident_nd_bench": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/resident_nd_bench",
+      "sha256": "b8557ece8d127920d31065d02c75b7931eab86eeed9d7c66f63b83195061b74c"
+    },
+    "wasm/spiraltorch_wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/wasm/spiraltorch_wasm.d.ts",
+      "sha256": "31c15dff94c590c78b1833ecc308609849bede7807263d29e4dcfda15288e7b0"
+    },
+    "wasm/spiraltorch_wasm.js": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/wasm/spiraltorch_wasm.js",
+      "sha256": "b9be8ac4037419381cd51281ef600ab5735b60237284329f9412a6045128b7c5"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/wasm/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "d4f85b1680fcb0401e274c56b23a7f8c242142571dc9dc50661a6383c2f5f783"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-plan-20260909/frozen/wasm/spiraltorch_wasm_bg.wasm",
+      "sha256": "57e832bf9536be82a88ebf267ed710f9077e1b7c2b2bcfd2c1e0350e30484816"
+    }
+  },
+  "native_identity": {
+    "build_fingerprint": "sha256:64fdf1db15fabb69e232a3a8eeefd4f708aa774a49a8a3bb3e46489cded8e9f9",
+    "manifest": {
+      "git": {
+        "commit": "78af0d8c7b36761611f851338339febe7dd98e38",
+        "describe": "v0.4.27-192-g78af0d8c",
+        "dirty": false,
+        "tree": "9b4a10703624f672edc924155f610d72bb9b6e98"
+      },
+      "host": "unknown-host",
+      "id": "Ryo-ST-ryospiralarchitect-2026-09-08T20:05:15.991Z-0b3e5089459242caa0efd397dd94a9e6",
+      "pkg": {
+        "name": "st-core",
+        "version": "1.10.0"
+      },
+      "profile": "release",
+      "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "seed": "0b3e5089459242caa0efd397dd94a9e6",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "triple": "aarch64-apple-darwin"
+      },
+      "timestamp": "2026-09-08T20:05:15.991Z",
+      "user": "ryospiralarchitect"
+    },
+    "schema": "spiraltorch.native_build_identity.v1"
+  }
+}

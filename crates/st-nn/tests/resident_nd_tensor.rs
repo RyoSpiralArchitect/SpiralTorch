@@ -11,4 +11,13 @@ fn nd_tensors_feed_existing_nn_and_preserve_training_guards_on_gpu() {
     let report = futures::executor::block_on(fixture::run(runtime)).unwrap();
     assert_eq!(report["status"], "passed");
     assert_eq!(report["cases"].as_array().unwrap().len(), 3);
+    assert_eq!(report["pointwise_cases"].as_array().unwrap().len(), 9);
+    assert_eq!(report["pointwise_guards"]["status"], "passed");
+    assert_eq!(
+        report["pointwise_guards"]["checks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
 }

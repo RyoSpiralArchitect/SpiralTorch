@@ -1,0 +1,58 @@
+{
+  "schema": "spiraltorch.resident_pointwise.evidence.v1",
+  "source": "78af0d8c7b36761611f851338339febe7dd98e38",
+  "source_tree": "9b4a10703624f672edc924155f610d72bb9b6e98",
+  "files": {
+    "README.md": {
+      "bytes": 5316,
+      "sha256": "0fbb69e17894fbfaf82a6944eb8f62d54270ef0fb93f5f8b25bcc6aaad849876"
+    },
+    "base-main-ci.json": {
+      "bytes": 26014,
+      "sha256": "e92702c76c848595b761652843ef46939301973f7b89fa730c195b0a8284d0fb"
+    },
+    "bench-reaggregation.json": {
+      "bytes": 3451,
+      "sha256": "52492d2978a644bb1ae2cbd319290ed51af8297a47cc016da450cd919ce1f4c6"
+    },
+    "browser-nd.json": {
+      "bytes": 319467,
+      "sha256": "27a6d1ccc4f5e399c3fad650b7b394b6d5141e36e2b39a756457370b928681e8"
+    },
+    "checks.json": {
+      "bytes": 3044,
+      "sha256": "9dabe64d266fce9ca65eafeeb5d6552f657da1aeea5bdd5598afc98745ee2ec5"
+    },
+    "frozen-run.json": {
+      "bytes": 7616,
+      "sha256": "18c0c687ca8da6c0c0e79cf79369c0e0efa65c515220744cdd5b80df8e5eb01b"
+    },
+    "native-nd.json": {
+      "bytes": 178363,
+      "sha256": "be68fe4df90f9cc7da0465d81b26c45269af329086ab1edafc6939ad0966ee14"
+    },
+    "pointwise-bench.json.gz": {
+      "bytes": 315212,
+      "sha256": "27dde2d89772535da305a7a751cf3e49be174aff97994f1f31ac92b3abb9a525"
+    },
+    "python-tests.log": {
+      "bytes": 1643,
+      "sha256": "b7321b7a2ff8b03ca05070f30d372139d339a447524d63fe6cf0053cc49b5a20"
+    },
+    "torch-replay-published.json": {
+      "bytes": 18734,
+      "sha256": "e702846b046704f393634e8acb365957a2b4b75a78fe8b85c9bcc5f81b27c34b"
+    },
+    "torch-replay.json": {
+      "bytes": 17614,
+      "sha256": "068ecd508c460a56524bc8537b816658ae4c76d100445aecbe7ae00821b9c95a"
+    }
+  },
+  "compressed_record": {
+    "name": "pointwise-bench.json.gz",
+    "uncompressed_bytes": 35038752,
+    "uncompressed_sha256": "634b5c1e869a4c33a1796f8af60715f32ebf3621cace80a2d484134c44ac760c"
+  },
+  "boundary": "source-bound native WGPU and browser WebGPU fixtures; source-bound native four-lane MPS timing; full intervals retained; no browser/CUDA timing, absent binary attestation, automatic Module forward lowering, general ND autograd, or training throughput claim",
+  "publication_validator_sha256": "0425289aced6fc5a4f464e86ed61be95b1e897aea96ed8a92e178f092c9bcbd0"
+}

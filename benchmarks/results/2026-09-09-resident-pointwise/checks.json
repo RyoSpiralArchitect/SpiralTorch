@@ -1,0 +1,158 @@
+{
+  "status": "passed",
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "returncode": 0,
+      "seconds": 2.7165780830255244
+    },
+    {
+      "name": "host-tests",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu",
+        "--lib"
+      ],
+      "returncode": 0,
+      "seconds": 13.888593582989415
+    },
+    {
+      "name": "backend-tests",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "-p",
+        "st-kernel-contracts",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "seconds": 9.080428958986886
+    },
+    {
+      "name": "backend-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "-p",
+        "st-kernel-contracts",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 4.7417437080002856
+    },
+    {
+      "name": "tensor-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense",
+        "--lib",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 4.149048000021139
+    },
+    {
+      "name": "nn-examples-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor",
+        "--example",
+        "resident_nd_bench"
+      ],
+      "returncode": 0,
+      "seconds": 25.76057874999242
+    },
+    {
+      "name": "wasm-check",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor_browser",
+        "--target",
+        "wasm32-unknown-unknown"
+      ],
+      "returncode": 0,
+      "seconds": 19.58770420801011
+    },
+    {
+      "name": "wasm-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "st-tensor/wgpu_dense",
+        "--lib",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 10.587530750024598
+    }
+  ]
+}

@@ -95,6 +95,38 @@ class Admission(unittest.TestCase):
 
 
 class Reaggregation(unittest.TestCase):
+    def test_pointwise_reaggregation_checks_each_lane_and_execution(self):
+        row = self.row()
+        lanes = ["sequential", "batched", "fused", "torch"]
+        for iteration, sample in enumerate(row["intervals"]):
+            base = sample.pop("rust")
+            for lane, elapsed in (
+                ("sequential", 2.0),
+                ("batched", 1.0),
+                ("fused", 0.5),
+            ):
+                sample[lane] = dict(base, execution=lane, elapsed_ms=elapsed)
+            offset = (iteration + 1) % 4
+            sample["order"] = lanes[offset:] + lanes[:offset]
+            if (iteration // 4) % 2:
+                sample["order"].reverse()
+        row["median_ms"] = dict(sequential=2.0, batched=1.0, fused=0.5, torch=1.0)
+        row["torch_over_rust"] = dict(sequential=0.5, batched=1.0, fused=2.0)
+        row["lane_errors"] = dict(sequential=0.0, batched=0.0, fused=0.0)
+        result = validation.validate_case(row, bench.recipes()[0], {}, 0, True)
+        self.assertEqual(result["rust_over_torch"]["fused"], 0.5)
+        for mutate in (
+            lambda r: r["intervals"][0]["order"].reverse(),
+            lambda r: r["intervals"][0]["fused"].update(execution="batched"),
+            lambda r: r["median_ms"].update(fused=0.1),
+            lambda r: r["lane_errors"].update(batched=1.0),
+            lambda r: r["intervals"][2]["fused"]["values"].__setitem__(0, 1.0),
+        ):
+            changed = copy.deepcopy(row)
+            mutate(changed)
+            with self.assertRaises(ValueError):
+                validation.validate_case(changed, bench.recipes()[0], {}, 0, True)
+
     def row(self):
         config = bench.recipes()[0]
         shape, seed = config["shape"], config["seed"]

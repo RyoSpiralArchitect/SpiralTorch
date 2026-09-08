@@ -161,7 +161,7 @@ def validate_sample(value, shape, capture, rust):
         raise ValueError("unexpected capture in timed response")
 
 
-def run(binary: Path, output: Path, torch_device: str) -> None:
+def run(binary: Path, output: Path, torch_device: str, pointwise: bool = False) -> None:
     os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"
     import numpy as np
     import torch
@@ -182,7 +182,11 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
     )
     torch.set_num_threads(1)
     report = {
-        "schema": "spiraltorch.nd_tensor.torch_bench.v1",
+        "schema": (
+            "spiraltorch.nd_tensor.pointwise_bench.v1"
+            if pointwise
+            else "spiraltorch.nd_tensor.torch_bench.v1"
+        ),
         "status": "error",
         "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
         "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -197,9 +201,18 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
         "warmups": 2,
         "samples": 8,
         "cases": [],
+        "lanes": (
+            ["sequential", "batched", "fused", "torch"]
+            if pointwise
+            else ["rust", "torch"]
+        ),
         "worker_deadlines_seconds": {"response": 120.0, "exit": 10.0},
         "boundary": "resident inputs; 20x(add broadcast,mul scalar,tanh GELU); views and terminal contiguous host read included; upload/pipeline construction/JSON excluded; Rust preserves intermediate finite guards, Torch does not; uncontrolled OS load; diagnostic not universal speedup",
     }
+    if pointwise:
+        report[
+            "boundary"
+        ] += "; prepared shape-preserving Rust pointwise plan in all three Rust lanes; plan compilation excluded, per-run output allocation and guard copies included"
     with output.open("x", encoding="utf-8") as handle, output.with_suffix(
         ".stderr.log"
     ).open("x", encoding="utf-8") as stderr:
@@ -245,6 +258,7 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
                         "values": host.reshape(-1).tolist() if capture else None,
                     }
 
+                lanes = report["lanes"]
                 for iteration in range(10):
                     capture = iteration == 2
                     order = (
@@ -252,6 +266,11 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
                         if (iteration + len(report["cases"])) % 2 == 0
                         else ["torch", "rust"]
                     )
+                    if pointwise:
+                        offset = (iteration + len(report["cases"])) % len(lanes)
+                        order = lanes[offset:] + lanes[:offset]
+                        if (iteration // len(lanes)) % 2:
+                            order = list(reversed(order))
                     interval = {
                         "iteration": iteration,
                         "warmup": iteration < 2,
@@ -259,33 +278,60 @@ def run(binary: Path, output: Path, torch_device: str) -> None:
                     }
                     for lane in order:
                         sample = (
-                            request({"op": "sample", "capture": capture})
-                            if lane == "rust"
+                            request(
+                                {
+                                    "op": "sample",
+                                    "capture": capture,
+                                    **({"execution": lane} if pointwise else {}),
+                                }
+                            )
+                            if lane != "torch"
                             else torch_sample(capture)
                         )
-                        validate_sample(sample, shape, capture, lane == "rust")
+                        validate_sample(sample, shape, capture, lane != "torch")
+                        if (
+                            pointwise
+                            and lane != "torch"
+                            and sample.get("execution") != lane
+                        ):
+                            raise ValueError(
+                                "worker returned a different execution mode"
+                            )
                         interval[lane] = sample
                     case["intervals"].append(interval)
                     if capture:
-                        a = np.asarray(interval["rust"]["values"], dtype=np.float32)
                         bvalues = np.asarray(
                             interval["torch"]["values"], dtype=np.float32
                         )
-                        if not np.isfinite(a).all() or not np.allclose(
-                            a, bvalues, atol=1e-6, rtol=1e-4
-                        ):
-                            raise RuntimeError("Rust/Torch mismatch")
-                        case["max_abs_error"] = float(np.max(np.abs(a - bvalues)))
+                        errors = {}
+                        for lane in lanes:
+                            if lane == "torch":
+                                continue
+                            a = np.asarray(interval[lane]["values"], dtype=np.float32)
+                            if not np.isfinite(a).all() or not np.allclose(
+                                a, bvalues, atol=1e-6, rtol=1e-4
+                            ):
+                                raise RuntimeError(f"{lane}/Torch mismatch")
+                            errors[lane] = float(np.max(np.abs(a - bvalues)))
+                        case["max_abs_error"] = max(errors.values())
+                        case["lane_errors"] = errors
                 medians = {
                     lane: statistics.median(
                         i[lane]["elapsed_ms"]
                         for i in case["intervals"]
                         if not i["warmup"]
                     )
-                    for lane in ("rust", "torch")
+                    for lane in lanes
                 }
                 case["median_ms"] = medians
-                case["torch_over_rust"] = medians["torch"] / medians["rust"]
+                if pointwise:
+                    case["torch_over_rust"] = {
+                        lane: medians["torch"] / medians[lane]
+                        for lane in lanes
+                        if lane != "torch"
+                    }
+                else:
+                    case["torch_over_rust"] = medians["torch"] / medians["rust"]
                 print(
                     json.dumps(
                         {
@@ -332,5 +378,6 @@ if __name__ == "__main__":
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--torch-device", choices=("cpu", "mps"), default="mps")
+    parser.add_argument("--pointwise", action="store_true")
     args = parser.parse_args()
-    run(args.binary.resolve(), args.output, args.torch_device)
+    run(args.binary.resolve(), args.output, args.torch_device, args.pointwise)
