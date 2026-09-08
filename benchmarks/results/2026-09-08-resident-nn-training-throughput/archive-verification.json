@@ -1,0 +1,8 @@
+{
+  "status": "passed",
+  "raw_members": 65,
+  "raw_bytes": 2050022262,
+  "archive_sha256": "c2791cc9c541cc3c75f15168982f11bd3f68427138292eded6c6b8a201b3b51f",
+  "parts": 3,
+  "boundary": "streaming byte-exact check; no extraction or GPU work"
+}
