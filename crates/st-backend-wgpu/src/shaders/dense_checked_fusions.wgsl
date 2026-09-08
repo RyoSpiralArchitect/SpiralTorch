@@ -3,7 +3,7 @@
 
 fn record_nonfinite(value: f32, flag: u32) {
     if ((bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u) {
-        atomicOr(&validation[params.validation_index], flag);
+        atomicOr(&validation[params.validation_index], flag | params.validation_mask);
     }
 }
 
@@ -22,7 +22,9 @@ fn apply_fusions(acc: f32, index: u32, col: u32) -> f32 {
         record_nonfinite(inner_arg, 8u);
         let inner = 0.7978845834732056 * inner_arg;
         record_nonfinite(inner, 16u);
-        let t = tanh(inner);
+        // tanh is already +/-1 in f32 here. Some GPU implementations overflow
+        // internally for large finite arguments; preserve the guards above.
+        let t = tanh(clamp(inner, -10.0, 10.0));
         record_nonfinite(t, 32u);
         value = 0.5 * x * (1.0 + t);
     } else if ((params.flags & FLAG_FUSED_RELU) != 0u) {
@@ -32,4 +34,3 @@ fn apply_fusions(acc: f32, index: u32, col: u32) -> f32 {
     record_nonfinite(value, 64u);
     return value;
 }
-

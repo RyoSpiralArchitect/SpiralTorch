@@ -47,6 +47,9 @@ pub enum InferenceError {
     #[cfg(feature = "wgpu")]
     #[error(transparent)]
     Gpu(#[from] st_backend_wgpu::resident_dense::DenseError),
+    #[cfg(feature = "wgpu")]
+    #[error(transparent)]
+    Training(#[from] st_backend_wgpu::resident_training::TrainingError),
 }
 
 #[derive(Clone, Debug)]
@@ -149,6 +152,29 @@ impl InferencePlan {
         self.stages.iter().map(|stage| (&stage.weight, &stage.bias))
     }
 
+    /// Replace values without changing the graph or the original frozen plan.
+    pub fn with_parameters(
+        &self,
+        parameters: Vec<(Tensor, Tensor)>,
+    ) -> Result<Self, InferenceError> {
+        if parameters.len() != self.stages.len() {
+            return Err(InferenceError::Shape(parameters.len()));
+        }
+        let mut operations = Vec::new();
+        for (index, ((weight, bias), original)) in
+            parameters.into_iter().zip(&self.stages).enumerate()
+        {
+            if weight.shape() != original.weight.shape() || bias.shape() != original.bias.shape() {
+                return Err(InferenceError::Shape(index));
+            }
+            operations.push(InferenceOp::Linear { weight, bias });
+            if original.gelu {
+                operations.push(InferenceOp::Gelu);
+            }
+        }
+        Self::from_operations(self.input.clone(), operations)
+    }
+
     #[cfg(feature = "wgpu")]
     pub fn compile_wgpu(
         &self,
@@ -171,9 +197,54 @@ impl InferencePlan {
         kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
         accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
     ) -> Result<st_backend_wgpu::resident_dense::ResidentDense, InferenceError> {
-        use st_backend_wgpu::resident_dense::{DenseActivation, DenseLayer, ResidentDense};
-        let layers: Vec<_> = self
-            .stages
+        Ok(st_backend_wgpu::resident_dense::ResidentDense::new(
+            runtime,
+            self.input.clone(),
+            &self.dense_layers(),
+            tile,
+            kernel,
+            accumulation,
+        )?)
+    }
+
+    /// Explicit plain SGD with mean-MSE and exact VJPs. Host modules/tapes are not mutated.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_training_wgpu(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+    ) -> Result<st_backend_wgpu::resident_training::ResidentDenseTraining, InferenceError> {
+        self.compile_training_wgpu_with_options(
+            runtime,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn compile_training_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_training::ResidentDenseTraining, InferenceError> {
+        Ok(
+            st_backend_wgpu::resident_training::ResidentDenseTraining::new(
+                runtime,
+                self.input.clone(),
+                &self.dense_layers(),
+                tile,
+                kernel,
+                accumulation,
+            )?,
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn dense_layers(&self) -> Vec<st_backend_wgpu::resident_dense::DenseLayer> {
+        use st_backend_wgpu::resident_dense::{DenseActivation, DenseLayer};
+        self.stages
             .iter()
             .map(|stage| DenseLayer {
                 inner: stage.weight.shape().0,
@@ -186,15 +257,7 @@ impl InferencePlan {
                     DenseActivation::None
                 },
             })
-            .collect();
-        Ok(ResidentDense::new(
-            runtime,
-            self.input.clone(),
-            &layers,
-            tile,
-            kernel,
-            accumulation,
-        )?)
+            .collect()
     }
 }
 
@@ -270,5 +333,38 @@ mod tests {
         assert_eq!(plan.stages[0].weight.data(), before);
         let refreshed = InferencePlan::from_module(&linear, shape).unwrap();
         assert_eq!(refreshed.stages[0].weight.data(), &[42.0; 4]);
+    }
+
+    #[test]
+    fn exported_training_parameters_preserve_graph_and_validate_before_replacement() {
+        let mut model = Sequential::new();
+        model.push(Linear::new("linear", 2, 3).unwrap());
+        model.push(Gelu::new());
+        let plan =
+            InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 5, 2]).unwrap()).unwrap();
+        let original = plan.stages[0].weight.data().to_vec();
+        let parameters = || {
+            vec![(
+                Tensor::from_vec(2, 3, vec![0.5; 6]).unwrap(),
+                Tensor::from_vec(1, 3, vec![0.25; 3]).unwrap(),
+            )]
+        };
+        let updated = plan.with_parameters(parameters()).unwrap();
+        assert_eq!(updated.stages[0].weight.data(), &[0.5; 6]);
+        assert_eq!(plan.stages[0].weight.data(), original);
+        assert_eq!(updated.output_layout().shape(), &[2, 5, 3]);
+        assert_eq!(updated.source_operation_count(), 2);
+        assert!(updated.stages[0].gelu);
+        assert!(plan.with_parameters(vec![]).is_err());
+        assert!(plan
+            .with_parameters(vec![(
+                Tensor::zeros(3, 2).unwrap(),
+                Tensor::zeros(1, 3).unwrap()
+            )])
+            .is_err());
+        let mut invalid = parameters();
+        invalid[0].0.data_mut()[0] = f32::NAN;
+        assert!(plan.with_parameters(invalid).is_err());
+        assert_eq!(plan.stages[0].weight.data(), original);
     }
 }

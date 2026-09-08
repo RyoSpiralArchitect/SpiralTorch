@@ -36,6 +36,39 @@ pub fn checked_dense_matmul_source(
     Ok(source)
 }
 
+/// Training reuses the same matrix kernel; only tape storage and RHS addressing differ.
+pub fn training_dense_matmul_source(
+    tile: [u32; 3],
+    kernel: MatmulKernel,
+    accumulation: MatmulAccumulation,
+    save_preactivation: bool,
+    transpose_rhs: bool,
+) -> Result<String, &'static str> {
+    let mut source = checked_dense_matmul_source(tile, kernel, accumulation)?;
+    if transpose_rhs {
+        let load = "return rhs_packed[k * params.cols + col];";
+        if !source.contains(load) {
+            return Err("missing canonical RHS load");
+        }
+        source = source.replacen(load, "return rhs_packed[col * params.inner + k];", 1);
+    }
+    if save_preactivation {
+        let guard = "record_nonfinite(value, 1u);";
+        if !source.contains(guard) {
+            return Err("missing checked preactivation");
+        }
+        source = source.replacen(
+            guard,
+            "record_nonfinite(value, 1u); preactivation[index] = value;",
+            1,
+        );
+        source.push_str(
+            "\n@group(0) @binding(8) var<storage, read_write> preactivation: array<f32>;\n",
+        );
+    }
+    Ok(source)
+}
+
 /// Accumulation policy is independent of the output tile and thread geometry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum MatmulAccumulation {

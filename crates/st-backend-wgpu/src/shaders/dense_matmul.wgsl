@@ -8,7 +8,7 @@ struct MatmulUniforms {
     flags: u32,
     output_scale: f32,
     validation_index: u32,
-    _pad1: f32,
+    validation_mask: u32,
     _pad2: f32,
 };
 

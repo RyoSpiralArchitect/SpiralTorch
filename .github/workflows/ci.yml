@@ -136,7 +136,7 @@ jobs:
         if: matrix.run_upper_stack
         run: |
           cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_feature_ownership --test ensemble
-          cargo test -p st-nn --release --features golden --lib
+          cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
 
@@ -218,6 +218,7 @@ jobs:
           cargo clippy --locked -p st-tensor --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu_dense -- -D warnings
           cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
+          cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser
       - name: build (wasm32)
         run: cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release
       - uses: actions/setup-node@v4

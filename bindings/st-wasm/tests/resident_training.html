@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Rust Sequential resident training fixture</title>
+<pre id="result" data-status="running">Running resident WebGPU learning and gradient checks</pre>
+<script type="module">
+import init, {run_resident_training_fixture} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU fallback");
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) throw Error("No browser WebGPU adapter");
+  const fallback = adapter.info?.isFallbackAdapter ?? adapter.isFallbackAdapter ?? null;
+  if (fallback === true) throw Error("Software fallback is not hardware GPU evidence");
+  await init();
+  const report = JSON.parse(await run_resident_training_fixture());
+  report.browser_adapter_probe = {
+    vendor: adapter.info?.vendor ?? null, architecture: adapter.info?.architecture ?? null,
+    device: adapter.info?.device ?? null, description: adapter.info?.description ?? null,
+    is_fallback_adapter: fallback,
+    boundary: "Separate browser adapter observation, not a device identity receipt for the Rust runtime"
+  };
+  if (report.status !== "passed" || report.vjps?.cases?.length !== 18
+      || report.learning?.runs?.length !== 3 || report.guards?.nonfinite_cases?.length !== 6)
+    throw Error("Incomplete Rust training fixture");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

@@ -247,7 +247,7 @@ impl Module for LoraLinear {
             return Tensor::zeros(rows, input_cols);
         }
 
-        let batch = rows as f32;
+        // Loss reduction belongs to the incoming cotangent, not the adapter.
         let scale = self.scale();
         let adapter_a_pack = self.lora_a.ensure_matmul_pack()?;
         let hidden = relabel_non_finite(
@@ -258,7 +258,7 @@ impl Module for LoraLinear {
         let grad_b = relabel_non_finite(
             hidden.matmul_lhs_transpose_scaled_with_backend(
                 grad_output,
-                scale / batch,
+                scale,
                 current_matmul_backend(),
             ),
             "lora_b_grad",
@@ -282,7 +282,7 @@ impl Module for LoraLinear {
         let grad_a = relabel_non_finite(
             input.matmul_lhs_transpose_scaled_with_backend(
                 &grad_adapter_hidden,
-                1.0 / batch,
+                1.0,
                 current_matmul_backend(),
             ),
             "lora_a_grad",
@@ -374,7 +374,7 @@ mod tests {
             .unwrap();
     }
 
-    fn mean_linear_objective(layer: &LoraLinear, input: &Tensor, grad_output: &Tensor) -> f32 {
+    fn linear_objective(layer: &LoraLinear, input: &Tensor, grad_output: &Tensor) -> f32 {
         let output = layer.forward(input).unwrap();
         output
             .data()
@@ -382,7 +382,6 @@ mod tests {
             .zip(grad_output.data())
             .map(|(value, grad)| value * grad)
             .sum::<f32>()
-            / input.shape().0 as f32
     }
 
     #[test]
@@ -469,9 +468,9 @@ mod tests {
         for idx in 0..layer.lora_a.value().data().len() {
             let original = layer.lora_a.value().data()[idx];
             layer.lora_a.value_mut().data_mut()[idx] = original + EPSILON;
-            let plus = mean_linear_objective(&layer, &input, &grad_output);
+            let plus = linear_objective(&layer, &input, &grad_output);
             layer.lora_a.value_mut().data_mut()[idx] = original - EPSILON;
-            let minus = mean_linear_objective(&layer, &input, &grad_output);
+            let minus = linear_objective(&layer, &input, &grad_output);
             layer.lora_a.value_mut().data_mut()[idx] = original;
             let numeric = (plus - minus) / (2.0 * EPSILON);
             let delta = (analytic_a.data()[idx] - numeric).abs();
@@ -485,9 +484,9 @@ mod tests {
         for idx in 0..layer.lora_b.value().data().len() {
             let original = layer.lora_b.value().data()[idx];
             layer.lora_b.value_mut().data_mut()[idx] = original + EPSILON;
-            let plus = mean_linear_objective(&layer, &input, &grad_output);
+            let plus = linear_objective(&layer, &input, &grad_output);
             layer.lora_b.value_mut().data_mut()[idx] = original - EPSILON;
-            let minus = mean_linear_objective(&layer, &input, &grad_output);
+            let minus = linear_objective(&layer, &input, &grad_output);
             layer.lora_b.value_mut().data_mut()[idx] = original;
             let numeric = (plus - minus) / (2.0 * EPSILON);
             let delta = (analytic_b.data()[idx] - numeric).abs();
