@@ -7,8 +7,11 @@ async function main() {
   const [baseline,candidate,chrome,output]=process.argv.slice(2);
   if(!baseline||!candidate||!chrome||!output) throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT");
   const fd=fs.openSync(output,"wx");
-  let server,browser,report={status:"error"},metadata={},errors=[],consoleMessages=[];
+  let server,browser,page,progressFd,casesFd,report={status:"error"},metadata={},errors=[],consoleMessages=[];
+  const cases=[];
   try {
+    progressFd=fs.openSync(output+".progress.jsonl","wx");
+    casesFd=fs.openSync(output+".cases.jsonl","wx");
     const files=new Map([["/",[path.join(__dirname,"../bindings/st-wasm/tests/resident_training_bench.html"),"text/html"]]]);
     function assets(dir,root,prefix) {
       for(const entry of fs.readdirSync(dir,{withFileTypes:true})) {
@@ -32,7 +35,18 @@ async function main() {
     metadata.launch_flags=["--enable-unsafe-webgpu"];
     browser=await chromium.launch({executablePath:chrome,headless:true,args:metadata.launch_flags});
     metadata.browser_version=browser.version();
-    const page=await browser.newPage();
+    page=await browser.newPage();
+    await page.exposeFunction("recordTrainingProgress",value=>{
+      metadata.last_progress=value;
+      fs.writeSync(progressFd,JSON.stringify(value)+"\n");
+      if(value.stage==="create_workspaces"||value.stage==="case_finished") console.log(JSON.stringify(value));
+    });
+    await page.exposeFunction("recordTrainingCase",value=>{
+      const row=JSON.parse(value);
+      if(cases.length>=9||!row.config||row.samples?.length!==20) throw Error("invalid completed case");
+      fs.writeSync(casesFd,value+"\n");
+      cases.push(row);
+    });
     let fail;
     const fatal=new Promise((_,reject)=>{fail=reject;});fatal.catch(()=>{});
     page.on("pageerror",error=>{errors.push(String(error));fail(error);});
@@ -40,14 +54,20 @@ async function main() {
     await page.goto("http://127.0.0.1:"+server.address().port);
     await Promise.race([fatal,page.locator("#result:not([data-status='running'])").waitFor({timeout:600000})]);
     report=JSON.parse(await page.locator("#result").textContent());
+    if(report.status==="passed"&&(report.cases?.length!==9||cases.length!==9)) throw Error("missing completed cases");
     for(const [url,[file]] of files) if(digest(file)!==metadata.asset_sha256[url]) throw Error("served asset changed");
     if(errors.length) report.status="error";
-  } catch(error) { report.status="error";report.error=String(error.stack||error); }
+  } catch(error) {
+    report.status="error";report.error=String(error.stack||error);
+    if(page) metadata.last_page_result=await page.locator("#result").textContent({timeout:2000}).catch(()=>null);
+  }
   finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));
-    fs.writeFileSync(fd,JSON.stringify({...report,...metadata,page_errors:errors,console_messages:consoleMessages},null,2)+"\n");
+    fs.writeFileSync(fd,JSON.stringify({...report,cases,...metadata,page_errors:errors,console_messages:consoleMessages})+"\n");
     fs.closeSync(fd);
+    if(progressFd!==undefined) fs.closeSync(progressFd);
+    if(casesFd!==undefined) fs.closeSync(casesFd);
   }
   console.log(JSON.stringify({status:report.status,cases:report.cases?.length,error:report.error}));
   process.exitCode=report.status==="passed"?0:1;

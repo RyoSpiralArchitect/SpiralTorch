@@ -9,6 +9,10 @@ import initB, {TrainingBenchmark as B} from "/candidate/spiraltorch_wasm.js";
 const element=document.querySelector("#result");
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
+async function progress(value) {
+  element.textContent=JSON.stringify(value);
+  await globalThis.recordTrainingProgress(value);
+}
 function require(value,message) { if(!value) throw Error(message); }
 function close(a,b) {
   require(a.length===b.length,"length differs");
@@ -29,6 +33,7 @@ function compare(a,b) {
   return maximum;
 }
 try {
+  await progress({stage:"initialize_modules"});
   await initA(); await initB();
   const adapter=await navigator.gpu.requestAdapter();
   const info=adapter?.info;
@@ -37,14 +42,16 @@ try {
     boundary:"separate navigator adapter observation; not the Rust workspaces' device receipt"};
   for(const seed of [17,29,43]) for(const [shape,depth] of [[[2,16,32],2],[[4,16,64],8],[[4,32,128],16]]) {
     const config={shape,depth,seed,steps:8};
-    const workers={baseline:await A.create(JSON.stringify(config)),candidate:await B.create(JSON.stringify(config))};
+    await progress({stage:"create_workspaces",config});
+    const workers={};
+    try {
+    workers.baseline=await A.create(JSON.stringify(config));
+    workers.candidate=await B.create(JSON.stringify(config));
     const fixtures=Object.fromEntries(Object.entries(workers).map(([k,v])=>[k,JSON.parse(v.fixture())]));
     for(const key of ["config","plan_json","input","target","learning_rate","kernel","accumulation","adapter"])
       require(JSON.stringify(fixtures.baseline[key])===JSON.stringify(fixtures.candidate[key]),"paired fixture differs: "+key);
     const row={config,fixture:fixtures.baseline,candidate_build_manifest:fixtures.candidate.build_manifest,
       captures:{},fingerprints:{},samples:[]};
-    report.cases.push(row);
-    try {
       for(const cadence of ["immediate","deferred"]) {
         const captures={};
         for(let block=0;block<10;block++) {
@@ -52,6 +59,7 @@ try {
           const sample={cadence,block,warmup:block<2,order,times_ms:{}};
           row.samples.push(sample);
           for(const lane of order) {
+            await progress({stage:"sample_started",config,cadence,block,lane});
             const value=JSON.parse(await workers[lane].sample(JSON.stringify(cadence),!captures[lane]));
             require(value.status==="passed"&&value.steps===8&&value.cadence===cadence&&value.losses.length===8&&
               Number.isFinite(value.elapsed_ms)&&value.elapsed_ms>0,"sample identity/timing differs");
@@ -60,6 +68,8 @@ try {
             captures[lane]??=value;
             close(value.losses,captures[lane].losses);
             sample.times_ms[lane]=value.elapsed_ms;
+            await progress({stage:"sample_finished",config,cadence,block,lane,
+              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256});
           }
         }
         row.captures[cadence+"_baseline"]=captures.baseline;
@@ -67,7 +77,11 @@ try {
         close(captures.baseline.losses,captures.candidate.losses);
         compare(captures.baseline.state,captures.candidate.state);
       }
-    } finally { workers.baseline.free(); workers.candidate.free(); }
+      // Transfer completed cases outside timing instead of one enormous final DOM value.
+      await globalThis.recordTrainingCase(JSON.stringify(row));
+      report.cases.push({config,status:"passed"});
+      await progress({stage:"case_finished",config});
+    } finally { workers.baseline?.free(); workers.candidate?.free(); }
   }
   report.status="passed";
 } catch(error) { report.error=String(error.stack||error); }
