@@ -36,7 +36,7 @@ pub fn checked_dense_matmul_source(
     Ok(source)
 }
 
-/// Training reuses the same matrix kernel; only tape storage and RHS addressing differ.
+/// Training reuses the same matrix kernel, including cooperative transposed tile loads.
 pub fn training_dense_matmul_source(
     tile: [u32; 3],
     kernel: MatmulKernel,
@@ -51,6 +51,11 @@ pub fn training_dense_matmul_source(
             return Err("missing canonical RHS load");
         }
         source = source.replacen(load, "return rhs_packed[col * params.inner + k];", 1);
+        let orientation = "const RHS_TRANSPOSED: bool = false;";
+        if !source.contains(orientation) {
+            return Err("missing canonical RHS tile orientation");
+        }
+        source = source.replacen(orientation, "const RHS_TRANSPOSED: bool = true;", 1);
     }
     if save_preactivation {
         let guard = "record_nonfinite(value, 1u);";

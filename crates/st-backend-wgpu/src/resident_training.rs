@@ -14,6 +14,8 @@ use thiserror::Error;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod profile_tests;
 mod readback;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod transpose_tests;
 pub use readback::{
     LayerGradient, ParameterReadback, StepReadback, TrainingState, TrainingStateReadback,
 };
@@ -806,6 +808,7 @@ mod tests {
                         source.contains("rhs_packed[col * params.inner + k]"),
                         transpose
                     );
+                    assert_eq!(source.contains("RHS_TRANSPOSED: bool = true"), transpose);
                 }
             }
         }

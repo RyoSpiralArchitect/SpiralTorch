@@ -17,6 +17,7 @@ const FLAG_FUSED_RELU: u32 = 1u << 1u;
 const FLAG_FUSED_GELU: u32 = 1u << 2u;
 const FLAG_FUSED_RESIDUAL: u32 = 1u << 3u;
 const FLAG_LHS_TRANSPOSE: u32 = 1u << 6u;
+const RHS_TRANSPOSED: bool = false;
 
 @group(0) @binding(0) var<storage, read> lhs : array<f32>;
 @group(0) @binding(1) var<storage, read> rhs_packed : {rhs_storage_type};
@@ -83,12 +84,17 @@ fn main(
         }
         let k_base = tile_index * TILE_K;
 
-        var load_row = lid.y;
+        // Transposed operands keep the contiguous source axis on adjacent x lanes.
+        // Only tile loading changes; the dot-product order below is unchanged.
+        let lhs_transposed = (params.flags & FLAG_LHS_TRANSPOSE) != 0u;
+        let a_row_step = select(WG_SIZE_Y, WG_SIZE_X, lhs_transposed);
+        let a_k_step = select(WG_SIZE_X, WG_SIZE_Y, lhs_transposed);
+        var load_row = select(lid.y, lid.x, lhs_transposed);
         loop {
             if (load_row >= TILE_M) {
                 break;
             }
-            var load_k = lid.x;
+            var load_k = select(lid.x, lid.y, lhs_transposed);
             loop {
                 if (load_k >= TILE_K) {
                     break;
@@ -104,17 +110,19 @@ fn main(
                     }}
                 }
                 tile_a[load_row * TILE_K + load_k] = value;
-                load_k = load_k + WG_SIZE_X;
+                load_k = load_k + a_k_step;
             }
-            load_row = load_row + WG_SIZE_Y;
+            load_row = load_row + a_row_step;
         }
 
-        var load_col = lid.x;
+        let b_col_step = select(WG_SIZE_X, WG_SIZE_Y, RHS_TRANSPOSED);
+        let b_k_step = select(WG_SIZE_Y, WG_SIZE_X, RHS_TRANSPOSED);
+        var load_col = select(lid.x, lid.y, RHS_TRANSPOSED);
         loop {
             if (load_col >= TILE_N) {
                 break;
             }
-            var load_k = lid.y;
+            var load_k = select(lid.y, lid.x, RHS_TRANSPOSED);
             loop {
                 if (load_k >= TILE_K) {
                     break;
@@ -126,9 +134,9 @@ fn main(
                     value = load_rhs_value(b_k, b_col);
                 }
                 tile_b[load_k * TILE_N + load_col] = value;
-                load_k = load_k + WG_SIZE_Y;
+                load_k = load_k + b_k_step;
             }
-            load_col = load_col + WG_SIZE_X;
+            load_col = load_col + b_col_step;
         }
 
         workgroupBarrier();
