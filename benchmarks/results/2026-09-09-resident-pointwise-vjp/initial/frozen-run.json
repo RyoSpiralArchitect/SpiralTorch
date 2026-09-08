@@ -1,0 +1,163 @@
+{
+  "status": "error",
+  "source": "cce81b8aaaeebb0624e177deaeed47a8a180e9de",
+  "steps": [
+    {
+      "name": "frozen-native-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor",
+        "--example",
+        "resident_pointwise_vjp_bench"
+      ],
+      "returncode": 0,
+      "seconds": 46.4204814589757
+    },
+    {
+      "name": "frozen-wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_nd_tensor_browser",
+        "--target",
+        "wasm32-unknown-unknown"
+      ],
+      "returncode": 0,
+      "seconds": 48.649321666016476
+    },
+    {
+      "name": "frozen-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "--target",
+        "web",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/wasm",
+        "--out-name",
+        "spiraltorch_wasm",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_nd_tensor_browser.wasm"
+      ],
+      "returncode": 0,
+      "seconds": 0.07186941700638272
+    },
+    {
+      "name": "native-fixture",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/resident_nd_tensor"
+      ],
+      "returncode": 0,
+      "seconds": 1.800982250017114
+    },
+    {
+      "name": "browser-fixture",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/test_resident_browser.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/wasm",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/browser-nd.json",
+        "",
+        "",
+        "",
+        "",
+        "nd-tensor"
+      ],
+      "returncode": 0,
+      "seconds": 5.972310582990758
+    },
+    {
+      "name": "torch-vjp-replay",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/validate_pointwise_vjp_vs_torch.py",
+        "--reports",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/browser-nd.json",
+        "--devices",
+        "cpu",
+        "mps",
+        "--source",
+        "cce81b8aaaeebb0624e177deaeed47a8a180e9de",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/torch-vjp-replay.json"
+      ],
+      "returncode": 1,
+      "seconds": 2.296316708991071
+    }
+  ],
+  "products": {
+    "resident_nd_tensor": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/resident_nd_tensor",
+      "sha256": "9ec2fabb8a28799e6595df865d989a78430a80ffe0734e1b94949373308d497b"
+    },
+    "resident_pointwise_vjp_bench": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/resident_pointwise_vjp_bench",
+      "sha256": "43fa6ab10e6aeed27382a2cd0842e54749ece6edb827a0b162020bf591c32b73"
+    },
+    "wasm/spiraltorch_wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/wasm/spiraltorch_wasm.d.ts",
+      "sha256": "da1c735178d0be90238b1242cecb5a7fecd2da55dd245bc44a9e852927dd01ab"
+    },
+    "wasm/spiraltorch_wasm.js": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/wasm/spiraltorch_wasm.js",
+      "sha256": "cac4a9e3e5b03a14e8a6b8195cecd8b2c446211ac52badc72fae3cea7bb53076"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm.d.ts": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/wasm/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "a0cc6888c91686b9aba6a02627a7d7799a63e56f0e3ba7b2db0c009849bde8b2"
+    },
+    "wasm/spiraltorch_wasm_bg.wasm": {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/frozen/wasm/spiraltorch_wasm_bg.wasm",
+      "sha256": "4d4f57296ac448558b856a93cb82263204301d3a58ac34cb593d6c9f56ddd81b"
+    }
+  },
+  "native_identity": {
+    "build_fingerprint": "sha256:f725512d5864bdd17d8b093a0336b7318241fe397ba7ef1f1485af061cd747a1",
+    "manifest": {
+      "git": {
+        "commit": "cce81b8aaaeebb0624e177deaeed47a8a180e9de",
+        "describe": "v0.4.27-195-gcce81b8a",
+        "dirty": false,
+        "tree": "289aa9a4f8e3d2e5a00d61f5c7199b185cca6740"
+      },
+      "host": "unknown-host",
+      "id": "Ryo-ST-ryospiralarchitect-2026-09-08T21:16:03.278Z-817e610bcf9444619bde7927d52b5f6c",
+      "pkg": {
+        "name": "st-core",
+        "version": "1.10.0"
+      },
+      "profile": "release",
+      "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "seed": "817e610bcf9444619bde7927d52b5f6c",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "triple": "aarch64-apple-darwin"
+      },
+      "timestamp": "2026-09-08T21:16:03.278Z",
+      "user": "ryospiralarchitect"
+    },
+    "schema": "spiraltorch.native_build_identity.v1"
+  },
+  "error": "RuntimeError('torch-vjp-replay failed; no automatic restart')"
+}

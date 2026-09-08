@@ -1,0 +1,86 @@
+[
+  {
+    "shape": [
+      8,
+      16,
+      64
+    ],
+    "seed": 17,
+    "iterations": 8,
+    "median_ms": {
+      "rust": 8.222271000000001,
+      "torch": 11.601228994550183
+    },
+    "torch_over_rust": 1.4109519127440804
+  },
+  {
+    "shape": [
+      8,
+      16,
+      64
+    ],
+    "seed": 29,
+    "iterations": 8,
+    "median_ms": {
+      "rust": 9.357479,
+      "torch": 16.209374996833503
+    },
+    "torch_over_rust": 1.7322373896680403
+  },
+  {
+    "shape": [
+      8,
+      16,
+      64
+    ],
+    "seed": 43,
+    "iterations": 8,
+    "median_ms": {
+      "rust": 5.2699584999999995,
+      "torch": 9.095229004742578
+    },
+    "torch_over_rust": 1.7258634967889366
+  },
+  {
+    "shape": [
+      16,
+      32,
+      128
+    ],
+    "seed": 17,
+    "iterations": 8,
+    "median_ms": {
+      "rust": 6.7700415,
+      "torch": 8.39370850007981
+    },
+    "torch_over_rust": 1.239831173867961
+  },
+  {
+    "shape": [
+      16,
+      32,
+      128
+    ],
+    "seed": 29,
+    "iterations": 8,
+    "median_ms": {
+      "rust": 7.402854,
+      "torch": 8.427978988038376
+    },
+    "torch_over_rust": 1.1384769965797483
+  },
+  {
+    "shape": [
+      16,
+      32,
+      128
+    ],
+    "seed": 43,
+    "iterations": 8,
+    "median_ms": {
+      "rust": 8.178375,
+      "torch": 8.240728988312185
+    },
+    "torch_over_rust": 1.0076242515551297
+  }
+]

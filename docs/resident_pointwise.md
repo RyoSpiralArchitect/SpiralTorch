@@ -102,6 +102,9 @@ given matching guards. This is not a general speedup, browser timing, CUDA,
 
 ## Resident Reverse Mode
 
+The [native/browser VJP record](../benchmarks/results/2026-09-09-resident-pointwise-vjp/README.md)
+retains complete Torch replay, the empty-MPS reference gap, and matched timings.
+
 `NdPointwisePlan::into_vjp()` opts into `NdPointwiseVjpPlan` preparation.
 `NdPointwiseVjpPlan::new(chain, inputs)` is the direct constructor.
 Forward-only plans do not compile backward shaders or allocate a tape.

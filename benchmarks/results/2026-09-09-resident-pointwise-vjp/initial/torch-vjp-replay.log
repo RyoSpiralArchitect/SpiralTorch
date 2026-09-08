@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/validate_pointwise_vjp_vs_torch.py", line 273, in <module>
+    validate(args.reports, args.devices, args.output, args.source)
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/validate_pointwise_vjp_vs_torch.py", line 238, in validate
+    for check in replay(torch, np, fixture, device):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-pointwise-vjp-v1/tools/validate_pointwise_vjp_vs_torch.py", line 162, in replay
+    gradients = torch.autograd.grad(y, inputs, grad_outputs=cotangent)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/torch/autograd/__init__.py", line 530, in grad
+    result = _engine_run_backward(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/torch/autograd/graph.py", line 882, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED at "/Users/runner/work/pytorch/pytorch/aten/src/ATen/native/mps/OperationUtils.mm":525, please report a bug to PyTorch. Placeholder tensor is empty!

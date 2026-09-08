@@ -1,0 +1,95 @@
+[
+  {
+    "name": "clippy-native",
+    "args": [
+      "clippy",
+      "--locked",
+      "-p",
+      "st-tensor",
+      "--no-default-features",
+      "--features",
+      "cpu,wgpu_dense",
+      "--lib",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "returncode": 0,
+    "seconds": 2.2596287909836974
+  },
+  {
+    "name": "clippy-wasm",
+    "args": [
+      "clippy",
+      "--locked",
+      "-p",
+      "st-tensor",
+      "--target",
+      "wasm32-unknown-unknown",
+      "--no-default-features",
+      "--features",
+      "cpu,wgpu_dense",
+      "--lib",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "returncode": 0,
+    "seconds": 6.911490291997325
+  },
+  {
+    "name": "nn-examples",
+    "args": [
+      "clippy",
+      "--locked",
+      "-p",
+      "st-nn",
+      "--no-default-features",
+      "--features",
+      "wgpu",
+      "--example",
+      "resident_pointwise_vjp_bench",
+      "--example",
+      "resident_nd_tensor"
+    ],
+    "returncode": 0,
+    "seconds": 24.482807166990824
+  },
+  {
+    "name": "tensor-cpu",
+    "args": [
+      "test",
+      "--locked",
+      "--release",
+      "-p",
+      "st-tensor",
+      "--no-default-features",
+      "--features",
+      "cpu,faer",
+      "--lib"
+    ],
+    "returncode": 0,
+    "seconds": 10.021035916026449
+  },
+  {
+    "name": "nn-resident",
+    "args": [
+      "test",
+      "--locked",
+      "--release",
+      "-p",
+      "st-nn",
+      "--no-default-features",
+      "--features",
+      "wgpu",
+      "--test",
+      "resident_training",
+      "--test",
+      "resident_nd_tensor",
+      "--",
+      "--test-threads=1"
+    ],
+    "returncode": 0,
+    "seconds": 56.857986417016946
+  }
+]

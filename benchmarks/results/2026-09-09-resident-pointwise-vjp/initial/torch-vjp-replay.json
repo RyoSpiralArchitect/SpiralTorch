@@ -1,0 +1,100 @@
+{
+  "schema": "spiraltorch.pointwise_vjp.torch_validation.v1",
+  "status": "error",
+  "source": {
+    "commit": "cce81b8aaaeebb0624e177deaeed47a8a180e9de",
+    "tree": "289aa9a4f8e3d2e5a00d61f5c7199b185cca6740",
+    "tracked_dirty": false
+  },
+  "checks": [
+    {
+      "device": "cpu",
+      "case": 0,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 5.960464477539063e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da"
+    },
+    {
+      "device": "cpu",
+      "case": 1,
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.4901161193847656e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da"
+    },
+    {
+      "device": "cpu",
+      "case": 2,
+      "shape": [
+        513,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 2.86102294921875e-06,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da"
+    },
+    {
+      "device": "cpu",
+      "case": 3,
+      "shape": [
+        65537,
+        1
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 1.7404556274414062e-05,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da"
+    },
+    {
+      "device": "cpu",
+      "case": 4,
+      "shape": [],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da"
+    },
+    {
+      "device": "cpu",
+      "case": 5,
+      "shape": [
+        2,
+        0,
+        3
+      ],
+      "nn_bridge": false,
+      "max_abs_error": 0.0,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da"
+    },
+    {
+      "device": "cpu",
+      "case": 6,
+      "shape": [
+        2,
+        2,
+        4
+      ],
+      "nn_bridge": true,
+      "max_abs_error": 2.9802322387695312e-08,
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-vjp-20260909/native-nd.json",
+      "sha256": "88aa9f52dfc1d52531caef54cc8deaa4ab0f5499e0a6f37cc43c7c2fac9fa1da"
+    }
+  ],
+  "torch_version": "2.12.1",
+  "fallback_enabled": false,
+  "boundary": "logical input slot VJPs, summed broadcast axes; tanh GELU; mean-MSE NN probe; no optimizer or storage-view adjoint claim",
+  "error": "RuntimeError('[srcBuf length] > 0 INTERNAL ASSERT FAILED at \"/Users/runner/work/pytorch/pytorch/aten/src/ATen/native/mps/OperationUtils.mm\":525, please report a bug to PyTorch. Placeholder tensor is empty!')"
+}
