@@ -1,0 +1,44 @@
+{
+  "schema": "spiraltorch.graph_workspace_summary.v1",
+  "status": "passed",
+  "ratios": {
+    "native": {
+      "immediate": {
+        "geometric_mean": 1.109844204554321,
+        "minimum": 0.976043360032546,
+        "maximum": 1.3083261502223402,
+        "faster_cases": 8,
+        "cases": 9
+      },
+      "deferred": {
+        "geometric_mean": 1.0436106905397609,
+        "minimum": 0.950390867044341,
+        "maximum": 1.2727496684062436,
+        "faster_cases": 6,
+        "cases": 9
+      }
+    },
+    "browser": {
+      "immediate": {
+        "geometric_mean": 1.2352157170694855,
+        "minimum": 1.1503267977070821,
+        "maximum": 1.4821428568815167,
+        "faster_cases": 9,
+        "cases": 9
+      },
+      "deferred": {
+        "geometric_mean": 1.186948095037397,
+        "minimum": 0.993710692198182,
+        "maximum": 1.8059701506811092,
+        "faster_cases": 8,
+        "cases": 9
+      }
+    }
+  },
+  "definition": "geometric mean of nine per-case median ratios; >1 means candidate is faster; 8 retained blocks after 2 warmups; no significance or universal speed claim",
+  "max_benchmark_abs_error": 1.4901161193847656e-08,
+  "native_torch_over_candidate": {
+    "immediate": 0.6742535573523227,
+    "deferred": 0.6782955881245412
+  }
+}

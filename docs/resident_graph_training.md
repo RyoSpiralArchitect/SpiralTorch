@@ -93,6 +93,9 @@ setup, resets and initial/final probes are excluded. Eager PyTorch does not perf
 the equivalent per-stage finite checks or atomic rollback, so this comparison is
 not a claim against the fastest available PyTorch configuration.
 
+See the [source-bound workspace comparison](../benchmarks/results/2026-09-10-resident-graph-workspace/README.md)
+for all measured cases, including regressions and the remaining PyTorch gap.
+
 ## Reproduce
 
 ```sh
