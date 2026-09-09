@@ -10,6 +10,7 @@ pub(super) fn compile(
     kernel: Option<JsString>,
     accumulation: Option<JsString>,
 ) -> Result<Promise, JsValue> {
+    require_dense(plan)?;
     let (tile, kernel, accumulation) = gpu_options(tile, kernel, accumulation)?;
     let plan = plan.clone();
     Ok(future_to_promise(async move {
@@ -22,7 +23,7 @@ pub(super) fn compile(
 }
 
 #[cfg(feature = "webgpu")]
-fn training_error(error: backend::TrainingError) -> JsValue {
+pub(super) fn training_error(error: backend::TrainingError) -> JsValue {
     if let backend::TrainingError::Rejected { stage, flags } = error {
         let value = js_sys::Error::new(&error.to_string());
         let decorate = || -> Result<JsValue, JsValue> {
@@ -172,11 +173,11 @@ impl WasmResidentTraining {
 #[wasm_bindgen(js_name = TrainingLossSnapshot)]
 pub struct WasmTrainingLossSnapshot {
     #[cfg(feature = "webgpu")]
-    inner: Option<backend::StepReadback>,
+    pub(super) inner: Option<backend::StepReadback>,
     #[cfg(feature = "webgpu")]
-    step: u64,
+    pub(super) step: u64,
     #[cfg(feature = "webgpu")]
-    generation: u64,
+    pub(super) generation: u64,
 }
 
 #[cfg(feature = "webgpu")]

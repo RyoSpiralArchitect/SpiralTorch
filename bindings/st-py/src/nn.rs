@@ -10918,6 +10918,18 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add(
         "__all__",
         vec![
+            "InferencePlan",
+            "ResidentInference",
+            "InferenceSnapshot",
+            "ResidentTraining",
+            "TrainingLossSnapshot",
+            "TrainingSnapshot",
+            "TrainingParametersSnapshot",
+            "TrainingState",
+            "ResidentGraphTraining",
+            "GraphTrainingSnapshot",
+            "GraphTrainingParametersSnapshot",
+            "GraphTrainingState",
             "Identity",
             "Linear",
             "LoraLinear",

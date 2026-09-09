@@ -1,0 +1,176 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Production resident graph clients</title>
+<pre id="result" data-status="running">Loading Python graph fixture</pre>
+<script type="module">
+import init, {InferencePlan} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+const report = {schema:"spiraltorch.nn.graph_browser_fixture.v1", status:"error", cases:[], rejected:0};
+function equal(a,b) {
+  if(typeof a === "bigint" || typeof b === "bigint") {
+    if(a !== b) throw Error("u64 metadata mismatch");
+  } else if(JSON.stringify(a) !== JSON.stringify(b)) throw Error("metadata mismatch");
+}
+function close(actual,expected) {
+  if(actual.length !== expected.length || !actual.every((a,i) => Number.isFinite(a) && Number.isFinite(expected[i]) &&
+      Math.abs(a-expected[i]) <= 1e-5 + 1e-4*Math.abs(expected[i]))) throw Error("numeric mismatch");
+}
+async function reject(call,code) {
+  try { await call(); } catch(error) {
+    if(code && (error.code !== code || !Number.isInteger(error.stage) || !(error.flags > 0))) throw error;
+    report.rejected++; return;
+  }
+  throw Error("invalid request or numerical failure was accepted");
+}
+async function digest(text) {
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))),
+    x=>x.toString(16).padStart(2,"0")).join("");
+}
+function payload(state) {
+  return {loss:state.loss, submitted_step:Number(state.submittedStep), batch_generation:Number(state.batchGeneration),
+    gradient_policy:state.gradientPolicy, input_shape:Array.from(state.inputShape), output_shape:Array.from(state.outputShape),
+    stage_count:state.stageCount, prediction:Array.from(state.predictionValues()), input_gradient:Array.from(state.inputGradientValues()),
+    parameters:Array.from({length:state.parameterCount}, (_,i)=>({role:state.parameterRole(i),shape:Array.from(state.parameterShape(i)),
+      values:Array.from(state.parameterValues(i)),raw:Array.from(state.parameterGradientValues(i)),effective:Array.from(state.effectiveGradientValues(i))}))};
+}
+function compare(a,b,step=b.submitted_step) {
+  equal(a.submitted_step,step); equal(a.batch_generation,1); equal(a.gradient_policy,b.gradient_policy);
+  equal(a.input_shape,b.input_shape); equal(a.output_shape,b.output_shape); equal(a.stage_count,b.stage_count);
+  close([a.loss],[b.loss]); close(a.prediction,b.prediction); close(a.input_gradient,b.input_gradient);
+  equal(a.parameters.length,b.parameters.length);
+  a.parameters.forEach((p,i)=>{
+    const q=b.parameters[i]; equal(p.role,q.role); equal(p.shape,q.shape);
+    for(const key of ["values","raw","effective"]) close(p[key],q[key]);
+  });
+}
+function requireGpu(gpu) {
+  const adapter=gpu.adapterInfo();
+  if(typeof adapter.device_type !== "string" || adapter.device_type === "Cpu") throw Error("missing identity or CPU fallback");
+  return adapter;
+}
+async function readState(snapshot) {
+  const pending=snapshot.readState();
+  await reject(()=>snapshot.readState());
+  snapshot.free();
+  return await pending;
+}
+async function readPlan(snapshot) {
+  const pending=snapshot.readPlan();
+  await reject(()=>snapshot.readPlan());
+  snapshot.free();
+  return await pending;
+}
+function scalar(rows,weight=1,gain=1) {
+  return InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[rows,1],
+    parameters:[{role:"weight",shape:[1,1],values:[weight]}, {role:"bias",shape:[1],values:[0]}, {role:"gain",shape:[1],values:[gain]}],
+    stages:[{kind:"linear",weight:0,bias:1,gelu:false},{kind:"pointwise",parameters:[2],steps:[{op:"multiply",rhs:1}]}]}));
+}
+try {
+  await init();
+  const cpuOnly = new URLSearchParams(location.search).get("cpu_only") === "1";
+  report.cpu_only=cpuOnly;
+  const response=await fetch("/fixture.json");
+  if(!response.ok) throw Error("fixture failed to load");
+  const fixture=await response.json();
+  if(fixture.schema !== "spiraltorch.nn.graph_client_fixture.v1" || fixture.status !== "passed" || fixture.cases.length !== 24)
+    throw Error("invalid/incomplete Python fixture");
+  for(const [index,item] of fixture.cases.entries()) {
+    if(await digest(item.plan_json) !== item.plan_sha256 || await digest(item.half_plan_json) !== item.half_plan_sha256)
+      throw Error("fixture plan bytes changed");
+    const plan=InferencePlan.fromJson(item.plan_json);
+    equal(plan.toJson(),item.plan_json); equal(plan.isDense,false); equal(Array.from(plan.inputShape),item.shape);
+    await reject(()=>plan.compileWebGpu()); await reject(()=>plan.compileTrainingWebGpu());
+    for(const policy of [undefined,null,true,1,"","auto","EXACT"," exact","module-compatible"])
+      await reject(()=>plan.compileGraphTrainingWebGpu(policy));
+    if(cpuOnly) {
+      await reject(()=>plan.compileGraphTrainingWebGpu(item.policy));
+      plan.free(); report.cases.push({index,plan_sha256:item.plan_sha256,gpu:"explicitly unavailable"}); continue;
+    }
+    for(const args of [[item.policy,[true,8,16]],[item.policy,[0,8,16]],[item.policy,undefined,"unknown"],
+                       [item.policy,undefined,undefined,"unknown"]]) await reject(()=>plan.compileGraphTrainingWebGpu(...args));
+    const pending=plan.compileGraphTrainingWebGpu(item.policy,undefined,item.kernel,item.accumulation);
+    plan.free();
+    const gpu=await pending, adapter=requireGpu(gpu);
+    equal(gpu.gradientPolicy,item.policy); equal(gpu.parameterCount,6); equal(gpu.stageCount,5);
+    for(const call of [()=>gpu.step(.1),()=>gpu.lossSnapshot(),()=>gpu.stateSnapshot()]) await reject(call);
+    for(const x of [item.input,new Float64Array(item.input)]) await reject(()=>gpu.uploadBatch(x,new Float32Array(item.target)));
+    const x=new Float32Array(item.input), y=new Float32Array(item.target);
+    gpu.uploadBatch(x,y); x.fill(99); y.fill(99);
+    const snapshots=[], losses=[];
+    for(let step=0;step<4;step++) { gpu.step(item.learning_rate); snapshots.push(gpu.stateSnapshot()); losses.push(gpu.lossSnapshot()); }
+    const final=gpu.parameterSnapshot();
+    for(const [x,y] of [[new Float32Array(item.input.length-1),new Float32Array(item.target)],
+                         [new Float32Array(item.input).fill(9),new Float32Array(item.target).fill(NaN)]])
+      await reject(()=>gpu.uploadBatch(x,y));
+    for(const rate of [true,"0.1",-1,NaN,Infinity,1e100]) await reject(()=>gpu.step(rate));
+    equal(gpu.batchGeneration,1n); equal(gpu.submittedSteps,4n);
+    gpu.uploadBatch(new Float32Array(item.input).fill(0),new Float32Array(item.target).fill(0));
+    await reject(()=>gpu.stateSnapshot()); gpu.step(0);
+    const later=gpu.stateSnapshot();
+    gpu.free();
+    const states=[];
+    for(let step=0;step<4;step++) {
+      const snapshot=snapshots[step]; equal(snapshot.gradientPolicy,item.policy);
+      equal(Array.from(snapshot.inputShape),item.shape); equal(snapshot.submittedStep,BigInt(step+1));
+      const state=await readState(snapshot), captured=payload(state);
+      compare(captured,item.states[step]);
+      state.predictionValues().fill(99); state.parameterValues(0).fill(99);
+      compare(payload(state),captured);
+      for(const method of ["parameterRole","parameterShape","parameterValues","parameterGradientValues","effectiveGradientValues"])
+        for(const id of [true,.5,-1,6,2**40,undefined]) await reject(()=>state[method](id));
+      states.push(captured); state.free();
+      const loss=losses[step], pending=loss.read(); await reject(()=>loss.read()); loss.free();
+      close([await pending],[captured.loss]);
+    }
+    const laterState=await readState(later); equal(laterState.batchGeneration,2n); equal(laterState.submittedStep,5n); laterState.free();
+    const finalPlan=await readPlan(final), finalJson=finalPlan.toJson(); finalPlan.free();
+    const half=InferencePlan.fromJson(item.half_plan_json);
+    const resumed=await half.compileGraphTrainingWebGpu(item.policy,undefined,item.kernel,item.accumulation); half.free();
+    equal(resumed.submittedSteps,0n); equal(resumed.batchGeneration,0n);
+    resumed.uploadBatch(new Float32Array(item.input),new Float32Array(item.target));
+    const resumedSnapshots=[];
+    for(let i=0;i<2;i++) { resumed.step(item.learning_rate); resumedSnapshots.push(resumed.stateSnapshot()); }
+    resumed.free();
+    const resumedStates=[];
+    for(let i=0;i<2;i++) {
+      const state=await readState(resumedSnapshots[i]), captured=payload(state);
+      compare(captured,item.states[i+2],i+1); resumedStates.push(captured); state.free();
+    }
+    report.cases.push({index,plan_sha256:item.plan_sha256,states,resumed_states:resumedStates,adapter,
+      final_plan_json:finalJson,final_plan_sha256:await digest(finalJson)});
+  }
+  if(!cpuOnly) {
+    for(const [policy,effective] of [["exact",5],["module_compatible",2.5]]) {
+      const plan=scalar(2), gpu=await plan.compileGraphTrainingWebGpu(policy); plan.free();
+      gpu.uploadBatch(new Float32Array([1,2]),new Float32Array([0,0])); gpu.step(.1);
+      const snapshot=gpu.stateSnapshot(); gpu.free(); const state=await readState(snapshot);
+      close([state.loss],[2.5]); close(state.parameterGradientValues(2),[5]); close(state.effectiveGradientValues(2),[effective]);
+      close(state.parameterValues(2),[1-.1*effective]); close(state.inputGradientValues(),[1,2]); state.free();
+    }
+    const maximum=3.4028234663852886e38;
+    for(const [rows,w,g,x,y,rate] of [[1,1,.0625,16,0,maximum/8],[2,maximum/2,0,1,-1.5,.1]]) {
+      const plan=scalar(rows,w,g), original=plan.toJson(), gpu=await plan.compileGraphTrainingWebGpu("exact"); plan.free();
+      gpu.uploadBatch(new Float32Array(rows).fill(x),new Float32Array(rows).fill(y)); gpu.step(rate);
+      const failure=gpu.lossSnapshot(), failedState=gpu.stateSnapshot(), parameters=gpu.parameterSnapshot();
+      gpu.uploadBatch(new Float32Array(rows),new Float32Array(rows)); gpu.step(.1);
+      const accepted=gpu.lossSnapshot(); gpu.free();
+      const unchanged=await readPlan(parameters); equal(unchanged.toJson(),original); unchanged.free();
+      await reject(()=>failure.read(),"training_step_rejected"); failure.free();
+      await reject(()=>failedState.readState(),"training_step_rejected"); failedState.free();
+      equal(await accepted.read(),0); accepted.free();
+    }
+    const plan=InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2],parameters:[],
+      stages:[{kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]}));
+    const original=plan.toJson(), gpu=await plan.compileGraphTrainingWebGpu("exact"); plan.free();
+    const initial=await readPlan(gpu.parameterSnapshot()); equal(initial.toJson(),original); initial.free();
+    gpu.uploadBatch(new Float32Array([-1,2]),new Float32Array([0,0])); gpu.step(.1);
+    const snapshot=gpu.stateSnapshot(); gpu.free(); const state=await readState(snapshot);
+    close(state.predictionValues(),[0,2]); close(state.inputGradientValues(),[0,2]); equal(state.parameterCount,0);
+    const saved=state.toPlan(); equal(saved.toJson(),original); saved.free(); state.free();
+    report.analytic_policy_cases=2; report.rollback_recovery_cases=2; report.parameterless_cases=1;
+  }
+  report.status="passed";
+} catch(error) { report.error=String(error.stack || error); }
+result.textContent=JSON.stringify(report); result.dataset.status=report.status;
+</script>

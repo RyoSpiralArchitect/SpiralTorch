@@ -1,0 +1,435 @@
+{
+  "schema": "spiraltorch.graph_clients.evidence_manifest.v1",
+  "source": "62c6b969aca8e7316e630a95bdacdf42765fef42",
+  "tree": "0fc9e4dff4240052459eac8492b4047d387e5a6c",
+  "files": [
+    {
+      "path": "raw/admission.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/admission.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "f702732cec4c5dd4facb8170f0965f87e34becfa5a8a4acc068586a52c3c4027",
+      "raw_sha256": "bedc69ddc63d77b75aa91e9bcf59e11e843e0e5c863c8a442612f7e6ff898ba2",
+      "bytes": 100,
+      "raw_bytes": 103
+    },
+    {
+      "path": "raw/backend-clippy.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/backend-clippy.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "2c774e597651525519cb97e73c546deda0bbeac65ac616b5270a49bde8e9461f",
+      "raw_sha256": "a8b644d4755b73e9886ef73b6c6ad4156f96e662d9d47ad9c3fd741deac96834",
+      "bytes": 3660,
+      "raw_bytes": 114457
+    },
+    {
+      "path": "raw/backend-wasm-clippy.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/backend-wasm-clippy.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "e15a357f67d92912129b54988ac38d13ed2fae7d8e2e6ee2d0ab134af8a02b3b",
+      "raw_sha256": "2838b40320d462d42dd82fd5d0f79f2fc730434c8e87bae3c01bce7fb4f36d78",
+      "bytes": 3448,
+      "raw_bytes": 111271
+    },
+    {
+      "path": "raw/backend.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/backend.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "1695f9beb0270e5b2843f90b45e7aa1615e262ffd2f3d5799a1f9a1db24ede3a",
+      "raw_sha256": "3fca71632ee30ceb906954dcdfa1eae437127b9ae9f0929c4ee9be4fbb5f52c4",
+      "bytes": 6156,
+      "raw_bytes": 124298
+    },
+    {
+      "path": "raw/contracts-clippy.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/contracts-clippy.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "c9ac9d9989ce2b6e0fe0e29a599684359fddea63c582012ed8e976d114851c55",
+      "raw_sha256": "44a46ce1c362f1a9896914f6a33b04f494447205efd234cf7c6d83a79efcd917",
+      "bytes": 248,
+      "raw_bytes": 231
+    },
+    {
+      "path": "raw/contracts.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/contracts.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "fe36fb91e120f51a672cbaf432652d94d17d00193a01162aeb07d1452c8df36e",
+      "raw_sha256": "f46f2d76f4ad2d0b19449d120a7bbd1a0ecbcb47b0c834d9b2f1c1a0dbb6d3d8",
+      "bytes": 972,
+      "raw_bytes": 2221
+    },
+    {
+      "path": "raw/cpu-bindgen.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/cpu-bindgen.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 32,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/cpu-build.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/cpu-build.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "8898d06f0e7390b2abf4695c13394cf1bcacfb6357a65795fd6b57b0dd589f20",
+      "raw_sha256": "760085ca89f38c165cca9bbbb7c90f08d02ff30ad47431efecfc29121fa9547d",
+      "bytes": 332,
+      "raw_bytes": 1157
+    },
+    {
+      "path": "raw/cpu-dense-browser.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/cpu-dense-browser.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "c102f84bdc058b7b8f536a1b88e0e74fb163f3c509d78e83b2abf66f0d6dc149",
+      "raw_sha256": "b565927383c1e720c21de870a1b5fdf38c8f3729d380c00f551635e4e971f6e5",
+      "bytes": 820,
+      "raw_bytes": 1634
+    },
+    {
+      "path": "raw/cpu-dense-browser.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/cpu-dense-browser.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "739e77034981beac8d0f3f5652460d343d81abb311f3ce04fc43780ef79f589f",
+      "raw_sha256": "60dc8b2411e38eac6363544b168f3cb2fa079eb7570d796c9038bba39805daa2",
+      "bytes": 204,
+      "raw_bytes": 153
+    },
+    {
+      "path": "raw/cpu-graph-browser.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/cpu-graph-browser.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "88ee65171db1620027cda202ac67be5024962c736bcd4c1ad612e44b2be018eb",
+      "raw_sha256": "335e7b711dc4c9a36414f165044d4498d8eefd6cb2cb09b1ce88458fb97e31f9",
+      "bytes": 1016,
+      "raw_bytes": 4941
+    },
+    {
+      "path": "raw/cpu-graph-browser.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/cpu-graph-browser.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "11c7b77fe878141515820efbe8e856fbd6b5ef3cb56444a4c61d1ea1944037dd",
+      "raw_sha256": "b77cec9b0217db73087660296717570a5ffe6b919e4f6b0a6156982f55a42d48",
+      "bytes": 200,
+      "raw_bytes": 154
+    },
+    {
+      "path": "raw/fmt.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/fmt.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 32,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/graph-fixture.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/graph-fixture.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "9bb5da9472ea887251fb03a2bb68a1ed1df5743b36f343ad5e2d199c78049c7e",
+      "raw_sha256": "649af8e83e3581230fc4858f9e702e8d7d55f9018714f320df332d4969f7f31c",
+      "bytes": 122292,
+      "raw_bytes": 1782394
+    },
+    {
+      "path": "raw/legacy-admission.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/legacy-admission.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "81a84d5967b908ec93f4444608ecb2c50781cbcddc58576d6cb8f3bdcfed657d",
+      "raw_sha256": "d094b1bd2c8318c96097f80c50da282add5b2972970a77046de8db6c8935f6ca",
+      "bytes": 100,
+      "raw_bytes": 102
+    },
+    {
+      "path": "raw/nn-fixture.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/nn-fixture.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "6733167b947d05376aaa7a7a107cccad966b10bd0be0eefdf4ac007ff8d56653",
+      "raw_sha256": "f0c16ffca84391c4542194b4c7b9c73ad620afed22e2dc5780c7d5e8e978b24c",
+      "bytes": 1244,
+      "raw_bytes": 5293
+    },
+    {
+      "path": "raw/nn.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/nn.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "dfe515b8c59e9a3a2a8902375d8d518e7264b964ba66c305451a637bd43c3e8e",
+      "raw_sha256": "4d832ff2f717b0282fdd1922a488f9b24de4a3de267980d3ff706de54abb8076",
+      "bytes": 14156,
+      "raw_bytes": 180504
+    },
+    {
+      "path": "raw/python-cpu-build.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-cpu-build.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "e68d1d11a50e9de33e5e20ba253260f34b5e3ee895d638e45bcf29cbfa0aa9e2",
+      "raw_sha256": "65a7646de21f05caf6d0a811fc7bb3293503b4c81e8e6583f15c4891f244c88e",
+      "bytes": 436,
+      "raw_bytes": 2070
+    },
+    {
+      "path": "raw/python-cpu-tests.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-cpu-tests.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "2ccdc9ae6457658187e947fa6cd1ede3068a5ab0d19fdcb2212732f8b62270f7",
+      "raw_sha256": "949c45e1a2ef6caeb50257713b80724708a5c605f298cd31edba754ccf0afac1",
+      "bytes": 428,
+      "raw_bytes": 753
+    },
+    {
+      "path": "raw/python-cpu-tests.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-cpu-tests.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "77c391043c7bd0df2d8b00e8869bb8d878d4fa7096c97c277b5983f47a8e9d23",
+      "raw_sha256": "621f0ddb7b88a6e779ab83638b328cab3f8dd717d1f7e037aaf461addc1a1e08",
+      "bytes": 1136,
+      "raw_bytes": 3919
+    },
+    {
+      "path": "raw/python-dense-capture.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-dense-capture.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "a8be67e287edce4381bdb86a7c20b6aece92569dc4096927b7f6a5fcbfeb0bb6",
+      "raw_sha256": "ff01bd92599fe7cce062b1420192dc29cbc44962856e75542c50274f4aa79182",
+      "bytes": 92,
+      "raw_bytes": 33
+    },
+    {
+      "path": "raw/python-graph-capture.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-graph-capture.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "eb41bdca017fb60650131cc6bb818e0f07769d48f5fa6f471e632e50960cb6fa",
+      "raw_sha256": "c65fe24c5c69d365f243c90d394a6158d686ee026487879a8af825a0ada7270c",
+      "bytes": 108,
+      "raw_bytes": 49
+    },
+    {
+      "path": "raw/python-return.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-return.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "eb41bdca017fb60650131cc6bb818e0f07769d48f5fa6f471e632e50960cb6fa",
+      "raw_sha256": "c65fe24c5c69d365f243c90d394a6158d686ee026487879a8af825a0ada7270c",
+      "bytes": 108,
+      "raw_bytes": 49
+    },
+    {
+      "path": "raw/python-wgpu-build.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-wgpu-build.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "2d19e8a5b09d1a3af90668d1827cc0fb8edaab94e1374923ec15c85f5486ceba",
+      "raw_sha256": "197c12ef2d1aa3e1f34cdbf9e2b4a41d18abf371d19049783add5cf6c9ccfc50",
+      "bytes": 3740,
+      "raw_bytes": 115404
+    },
+    {
+      "path": "raw/python-wgpu-tests.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-wgpu-tests.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "03be7b3f9ba4c98d6eefcafabe7a44c503646a157af83e452f77de6fc0f8b1b3",
+      "raw_sha256": "32bf77622a80af30d2fe79c378845f3f80011c5d60183b902a033918f01ef3c5",
+      "bytes": 428,
+      "raw_bytes": 753
+    },
+    {
+      "path": "raw/python-wgpu-tests.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-wgpu-tests.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "9bcfb1e75002d0a01b0cdf3568bfc98b43f77ae3059e2fc4f10cd078cde8a0c4",
+      "raw_sha256": "9d5b8fb0ea3e02c2622acf4135d3154b31a0d221f5f9dd45a1623634b8e0791a",
+      "bytes": 1104,
+      "raw_bytes": 3618
+    },
+    {
+      "path": "raw/receipt.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/receipt.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "a255dda09325458682595e1229135b3ea2efbf61c98703b6cab7fca9fc10bf69",
+      "raw_sha256": "bd5257829d62601e0b9d7810d4e12feb4d2947eb41ad6ea0860b17295e4dbcb2",
+      "bytes": 2116,
+      "raw_bytes": 14632
+    },
+    {
+      "path": "raw/return.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/return.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "5cd0a0994c317733b727076c70dc50e6463ed9f0a8c854ec03db60d929da90a3",
+      "raw_sha256": "6a519f29d5a7bed0c70f8bb8878e69760c33114c5a63771a6bd9d0e971905428",
+      "bytes": 35320,
+      "raw_bytes": 369193
+    },
+    {
+      "path": "raw/torch-replay.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/torch-replay.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "46edb35c9bc868f1e60bdd7d5762aff3da96534c73dc5af86c07d41e4e04a66b",
+      "raw_sha256": "d9ef4b016edbf75ffa362b96cdbd73f16591fe88056f6ef5d42457512e833778",
+      "bytes": 140,
+      "raw_bytes": 91
+    },
+    {
+      "path": "raw/torch.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/torch.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "ef6eceb5a8e900102ff79fbf164857cc862d07f817fa5ce9865e7e1237fafa3c",
+      "raw_sha256": "579f2d0a52ad4c90bd4d2afa399487f076a8766f4d0f6fcaaea9f88e3dd4cc9a",
+      "bytes": 1908,
+      "raw_bytes": 50569
+    },
+    {
+      "path": "raw/webgpu-bindgen.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu-bindgen.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 32,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/webgpu-build.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu-build.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "a903a1084633d4879dd67d61da2f5e5d30426ed229f2292b4d6ceef5bbaa829e",
+      "raw_sha256": "050d79da9c57f2e1f8101252361e393d3abd70ff8d2b709184ab46dc9c7e13f1",
+      "bytes": 3448,
+      "raw_bytes": 111500
+    },
+    {
+      "path": "raw/webgpu-dense-browser.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu-dense-browser.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "90b1cca013b15a3714a922f1f3d3aee26cfd153e2cad93ed3a0252a405638caf",
+      "raw_sha256": "99820bbbb1f6187639aabbeac748d1128452ce7e60152739bee231afb30cab51",
+      "bytes": 916,
+      "raw_bytes": 2137
+    },
+    {
+      "path": "raw/webgpu-dense-browser.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu-dense-browser.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "15fc3beb7345be712287d99c5abd0549ce2d864e594e2d53a83f0aadda263dc7",
+      "raw_sha256": "ce103de8391a6c596bcbffcf4f6b9ec5824ff486b98743e16cbfcc0acb35fb93",
+      "bytes": 204,
+      "raw_bytes": 156
+    },
+    {
+      "path": "raw/webgpu-graph-browser.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu-graph-browser.json",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "bdefdb59fd1622ba3bc02eb484db11d26caf43d29bcfa21676d1ce427db42f46",
+      "raw_sha256": "08d98f277f0995cdae4079a581b3bffbc172cbc6efb35fd8c3acf48018f69ce4",
+      "bytes": 120308,
+      "raw_bytes": 2384299
+    },
+    {
+      "path": "raw/webgpu-graph-browser.log.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu-graph-browser.log",
+      "boundary": "clean-source validation",
+      "encoding": "xz",
+      "sha256": "55b34c9998a3ef37f98c7c8e32c15fc5f21d12f6d5403e2d4cff1d62eb393b7f",
+      "raw_sha256": "81ccf87e24a7fd4ab57c7cf4ab4b1f7d1eae68ee35629b163d0a768de28fe79e",
+      "bytes": 200,
+      "raw_bytes": 157
+    },
+    {
+      "path": "development-failures/python-initial-tests.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/python-initial-tests.json",
+      "boundary": "pre-commit harness failure; not clean-source validation",
+      "encoding": "xz",
+      "sha256": "8d087dd8f888b54a07342c92ce0eb8f5d170b9a564a0e48fdaa3c7a86aded85c",
+      "raw_sha256": "00465c32628c1dec6f15712fa11b5e4753903eb86d14328cf769d0ff8b10199a",
+      "bytes": 436,
+      "raw_bytes": 796
+    },
+    {
+      "path": "development-failures/graph-fixture-dev.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/graph-fixture-dev.json",
+      "boundary": "pre-commit harness failure; not clean-source validation",
+      "encoding": "xz",
+      "sha256": "f317c7282b7d7252e7d7eeeaf89e68b2561f066361e6aa2d918efd495193a485",
+      "raw_sha256": "d26d7c42c19309aec1b605378096cd8d347d0d2d2ec23948c033548b5099e1e2",
+      "bytes": 292,
+      "raw_bytes": 301
+    },
+    {
+      "path": "development-failures/webgpu-dev-browser.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/webgpu-dev-browser.json",
+      "boundary": "pre-commit harness failure; not clean-source validation",
+      "encoding": "xz",
+      "sha256": "a2b4a33e3ce6185dc7e8e1f586ca1f3122d41a7bc11637fa548415da67f02e41",
+      "raw_sha256": "5cd6aec3ed5a6bb601a1c8e0d3bf1d8d53ccee7f78c9c640d862b908b0f1e9fa",
+      "bytes": 756,
+      "raw_bytes": 1314
+    },
+    {
+      "path": "development-failures/torch-dev.json.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/torch-dev.json",
+      "boundary": "pre-commit harness failure; not clean-source validation",
+      "encoding": "xz",
+      "sha256": "d05fd13fa3a6fca79ab14c41de8ad89810c6d68c25321d8884bb87fb7947599e",
+      "raw_sha256": "d75381df28d4559bfa951172d726bde7a189beba1fb1f6932219243baff266a7",
+      "bytes": 308,
+      "raw_bytes": 311
+    },
+    {
+      "path": "driver/final-checks.py.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final-checks.py",
+      "boundary": "local build/test driver; paths are this host, no ambient package installation",
+      "encoding": "xz",
+      "sha256": "88f7f9c4025586b2782ca687ef61f9fae127a380933e7246914006ad63e5842b",
+      "raw_sha256": "35d4de66266413b77fc6ff145ad5335aa737e360fa9d9096a8b5b42b64501011",
+      "bytes": 2372,
+      "raw_bytes": 7312
+    },
+    {
+      "path": "driver/python-client.py.xz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/python-client.py",
+      "boundary": "local build/test driver; paths are this host, no ambient package installation",
+      "encoding": "xz",
+      "sha256": "9139e7a262541c7fad15023bf9f6fc404868367ee863f8ce2ceff4e48a7e5f44",
+      "raw_sha256": "6298f2947a7f15e1c54ae5b4b5664c54e8e797c34b7cc5b1933a7e93cf4181d6",
+      "bytes": 828,
+      "raw_bytes": 1688
+    },
+    {
+      "path": "summary.json",
+      "encoding": "identity",
+      "sha256": "f9ac3a4f8cd5d2030546f02fd854b29ee6958566ee82eba5e9865866b88074e8",
+      "raw_sha256": "f9ac3a4f8cd5d2030546f02fd854b29ee6958566ee82eba5e9865866b88074e8",
+      "bytes": 3686,
+      "raw_bytes": 3686
+    }
+  ]
+}

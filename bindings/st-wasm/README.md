@@ -37,6 +37,11 @@ target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invokin
 
 ## Examples
 
+- [Resident graph training](../../docs/resident_graph_training.md#python-and-browser-clients):
+  `InferencePlan.compileGraphTrainingWebGpu("exact")` executes mixed Scaler,
+  Relu, Linear and Gelu graphs through the same Rust core as Python. Owning
+  snapshots expose every parameter role, mathematical/effective gradients, and
+  portable v2 weights for explicit cross-client resume.
 - [Resident NN training](../../docs/resident_nn_training.md): the public `InferencePlan.compileTrainingWebGpu()`
   client runs Rust-owned mean-MSE, VJP and plain SGD without per-layer host readback,
   with Python/browser weight-only handoff. Build with `--features webgpu`; `nn` alone

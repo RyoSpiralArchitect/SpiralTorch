@@ -14,6 +14,7 @@ pub(super) fn compile(
 ) -> PyResult<PyResidentTraining> {
     #[cfg(feature = "wgpu")]
     {
+        require_dense(plan)?;
         let (tile, kernel, accumulation) = gpu_options(tile, kernel, accumulation)?;
         let plan = plan.clone();
         py.detach(move || {
@@ -186,13 +187,13 @@ impl PyResidentTraining {
 }
 
 #[pyclass(name = "TrainingLossSnapshot", module = "spiraltorch.nn")]
-struct PyTrainingLossSnapshot {
+pub(super) struct PyTrainingLossSnapshot {
     #[cfg(feature = "wgpu")]
-    inner: Option<backend::StepReadback>,
+    pub(super) inner: Option<backend::StepReadback>,
     #[cfg(feature = "wgpu")]
-    step: u64,
+    pub(super) step: u64,
     #[cfg(feature = "wgpu")]
-    generation: u64,
+    pub(super) generation: u64,
 }
 
 #[cfg(feature = "wgpu")]

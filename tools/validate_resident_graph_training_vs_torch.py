@@ -14,7 +14,7 @@ from pathlib import Path
 import torch
 
 
-def replay(case, device):
+def replay(case, device, *, expected_steps=9):
     plan = case["plan"]
     assert plan["schema"] == "spiraltorch.nn.inference_plan.v2"
     assert case["policy"] in ("Exact", "ModuleCompatible")
@@ -44,7 +44,7 @@ def replay(case, device):
         )
         comparisons += 1
 
-    assert len(case["steps"]) == len(case["rates"]) == 9
+    assert len(case["steps"]) == len(case["rates"]) == expected_steps
     for rate, expected in zip(case["rates"], case["steps"]):
         current = x
         for stage in plan["stages"]:

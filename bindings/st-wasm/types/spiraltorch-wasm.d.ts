@@ -18,10 +18,72 @@ declare module "spiraltorch-wasm" {
         readonly outputShape: Uint32Array;
         readonly stageCount: number;
         readonly sourceOperationCount: number;
+        readonly isDense: boolean;
         /** Requires webgpu; the plan may be freed while the returned promise runs. */
         compileWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentInference>;
         /** Mean-MSE, VJP and plain SGD use the same Rust core as native training. */
         compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentTraining>;
+        /** Explicit Rust policy: "exact" or "module_compatible". Requires webgpu. */
+        compileGraphTrainingWebGpu(gradient_policy: string, tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphTraining>;
+        free(): void;
+    }
+
+    export class ResidentGraphTraining {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly gradientPolicy: string;
+        readonly submittedSteps: bigint;
+        readonly batchGeneration: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        uploadBatch(input: Float32Array, target: Float32Array): void;
+        /** Submitted attempt, not acceptance. Read its owning snapshot. */
+        step(learning_rate: number): bigint;
+        lossSnapshot(): TrainingLossSnapshot;
+        stateSnapshot(): GraphTrainingSnapshot;
+        parameterSnapshot(): GraphTrainingParametersSnapshot;
+        free(): void;
+    }
+
+    export class GraphTrainingSnapshot {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly submittedStep: bigint;
+        readonly batchGeneration: bigint;
+        readonly gradientPolicy: string;
+        readState(): Promise<GraphTrainingState>;
+        free(): void;
+    }
+
+    export class GraphTrainingParametersSnapshot {
+        private constructor();
+        readPlan(): Promise<InferencePlan>;
+        free(): void;
+    }
+
+    /** Pre-update loss/VJPs, post-update parameters, addressed by stable parameter ID. */
+    export class GraphTrainingState {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly gradientPolicy: string;
+        readonly submittedStep: bigint;
+        readonly batchGeneration: bigint;
+        readonly loss: number;
+        predictionValues(): Float32Array;
+        inputGradientValues(): Float32Array;
+        parameterRole(parameter: number): string;
+        parameterShape(parameter: number): Uint32Array;
+        parameterValues(parameter: number): Float32Array;
+        parameterGradientValues(parameter: number): Float32Array;
+        effectiveGradientValues(parameter: number): Float32Array;
+        /** Weight-only v2 plan, not runtime counters, batch or gradient policy. */
+        toPlan(): InferencePlan;
         free(): void;
     }
 

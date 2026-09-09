@@ -24,6 +24,22 @@ pub struct GraphStateReadback {
     pub(super) batch_generation: u64,
 }
 impl GraphStateReadback {
+    pub fn input_layout(&self) -> &NdLayout {
+        self.definition.input_layout()
+    }
+    pub fn output_layout(&self) -> &NdLayout {
+        self.definition.output_layout()
+    }
+    pub fn submitted_step(&self) -> u64 {
+        self.step
+    }
+    pub fn batch_generation(&self) -> u64 {
+        self.batch_generation
+    }
+    pub fn gradient_policy(&self) -> GraphGradientPolicy {
+        self.policy
+    }
+
     fn decode(
         bytes: &[u8],
         definition: GraphDefinition,

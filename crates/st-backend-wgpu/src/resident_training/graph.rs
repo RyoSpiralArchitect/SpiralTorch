@@ -535,6 +535,14 @@ impl ResidentGraphTraining {
     pub fn gradient_policy(&self) -> GraphGradientPolicy {
         self.policy
     }
+
+    pub fn stage_count(&self) -> usize {
+        self.definition.stages().len()
+    }
+
+    pub fn parameter_count(&self) -> usize {
+        self.definition.parameters().len()
+    }
     pub fn submitted_steps(&self) -> u64 {
         self.submitted_steps
     }

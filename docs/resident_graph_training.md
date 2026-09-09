@@ -64,12 +64,77 @@ Graphs require nonempty contiguous rank >= 1 input, u32-addressable buffers,
 tying is rejected rather than guessed. Device limits may be tighter. Scaler's
 Module lowering keeps its exact feature-width check, not extra broadcasting.
 
-This addition is a Rust API and real browser-WASM fixture. General graph training
-is **not yet exposed by production Python/JavaScript wrapper classes**; their
-dense-only plan entrypoints explicitly reject rich/v2 graphs before requesting a
-device. It does not change `pure::Tensor` storage,
-generic autograd, `ModuleTrainer` or GNN execution. General forward-only compilation
-and production client exposure remain follow-up work.
+Current-source Python/WASM bindings expose the same graph training compiler.
+Plan transport accepts v1 and v2; `is_dense` / `isDense` distinguishes the legacy
+dense representation. The specialized dense compilers still reject v2 before
+requesting a device. CPU-only builds transport plans but explicitly reject GPU
+execution. Older published wheels may not have the graph client APIs.
+
+This does not change `pure::Tensor` storage, generic autograd, `ModuleTrainer` or
+GNN execution. General forward-only graph compilation and production resident
+N-D Tensor handles remain follow-up work. The clients upload a host batch once;
+intermediate values and subsequent training steps stay on the GPU. Rust's
+`upload_batch_tensors` interface above is not yet a Python/JavaScript API.
+
+## Python And Browser Clients
+
+```python
+import spiraltorch as st
+
+model = st.nn.Sequential()
+model.add(st.nn.Scaler("input_gain", 4))
+model.add(st.nn.Linear(4, 3, name="projection"))
+model.add(st.nn.Gelu())
+model.add(st.nn.Relu())
+plan = model.inference_plan([2, 5, 4])
+graph = plan.compile_graph_training_wgpu(
+    gradient_policy="exact", kernel="register_2x2", accumulation="compensated",
+)
+graph.upload_batch_values([0.1] * 40, [0.2] * 30)
+for _ in range(8):
+    graph.step(0.01)  # enqueue, not a host synchronization or acceptance receipt
+state = graph.state_snapshot().read_state()
+for parameter in range(state.parameter_count):
+    print(state.parameter_role(parameter), state.parameter_shape(parameter),
+          state.parameter_gradient_values(parameter), state.effective_gradient_values(parameter))
+plan_json = state.to_plan().to_json()  # post-update parameters; pre-update prediction/VJP
+```
+
+`upload_batch(Tensor, Tensor)` also accepts the exact flattened leading-axes
+matrices, e.g. `(10, 4)` input and `(10, 3)` target above. Both shapes and values
+are checked before either batch buffer changes. `gradient_policy` is required:
+`"exact"` and `"module_compatible"` are canonical Rust-parsed names, not client
+heuristics. Parameter accessors use stable **parameter IDs**, not layer indices;
+they return host copies only after explicit readback.
+
+```javascript
+import init, {InferencePlan} from "./spiraltorch_wasm.js";
+await init();
+const plan = InferencePlan.fromJson(planJson); // Python's plan_json
+const graph = await plan.compileGraphTrainingWebGpu("exact", undefined, "register_2x2", "compensated");
+plan.free();
+graph.uploadBatch(new Float32Array(40).fill(0.1), new Float32Array(30).fill(0.2));
+graph.step(0.01);
+const snapshot = graph.stateSnapshot();
+graph.free();
+const pending = snapshot.readState();
+snapshot.free(); // pending read owns its buffers, no borrowed JS handle
+const state = await pending;
+const updated = state.toPlan();
+const nextPlanJson = updated.toJson();
+updated.free();
+state.free();
+```
+
+`loss_snapshot` / `lossSnapshot` reuses `TrainingLossSnapshot`; full-state and
+parameter-only reads use `GraphTrainingSnapshot` and
+`GraphTrainingParametersSnapshot`. Snapshots are single-consume, including
+failed reads, and survive graph drop or later batch changes. JavaScript batch
+values must be `Float32Array`; counters are `bigint`. On numerical rejection,
+loss/state reads expose `code="training_step_rejected"`, `stage`, and `flags`.
+Parameter-only snapshots remain readable after rollback and before the first
+step. Recompiling saved weights starts counters at zero and requires a new batch
+and explicit policy. It does not update the source Python model in place.
 
 ## Reusable Workspace
 
@@ -97,6 +162,43 @@ See the [source-bound workspace comparison](../benchmarks/results/2026-09-10-res
 for all measured cases, including regressions and the remaining PyTorch gap.
 
 ## Reproduce
+
+Production client validation (use fresh output paths and a current-source WGPU
+wheel; the Torch validator runs in a separate environment without SpiralTorch):
+
+```bash
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I bindings/st-py/tests/test_nn_resident_graph_training.py -v
+python -I bindings/st-py/examples/resident_graph_training.py --output /tmp/new-graph-fixture.json
+cargo build --locked --release -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu
+wasm-bindgen --target web --out-dir /tmp/new-graph-client --out-name spiraltorch_wasm \
+  target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm
+cp /tmp/new-graph-fixture.json /tmp/new-graph-client/graph-fixture.json
+node tools/test_resident_browser.cjs /tmp/new-graph-client /path/to/chromium \
+  /tmp/new-graph-browser.json '' '' '' '' nn-graph-clients
+python -I bindings/st-py/examples/resident_graph_training.py \
+  --fixture /tmp/new-graph-fixture.json --browser-report /tmp/new-graph-browser.json \
+  --output /tmp/new-graph-return.json
+PYTORCH_ENABLE_MPS_FALLBACK=0 /path/to/torch-python -I tools/verify_resident_graph_clients_torch.py \
+  --python-report /tmp/new-graph-fixture.json --browser-report /tmp/new-graph-browser.json \
+  --return-report /tmp/new-graph-return.json --output /tmp/new-graph-torch.json
+```
+
+This freezes 24 recipes: rank 1/2/3 (including 258 rows), two seeds, both gradient
+policies, scalar/sequential and register-2x2/compensated kernels. Each recipe
+captures four SGD states, resumes Python's step-2 weights for two browser steps,
+then returns the browser's step-4 weights for one more Python step. The independent
+Torch oracle compares prediction, loss, input VJP, every raw/effective parameter
+gradient and every updated parameter on CPU/MPS. The test also exercises delayed
+readback after graph drop, invalid JS types, atomic uploads and gain rollback.
+To verify CPU-only WASM behavior, build a separate product with `--features nn`
+(without `webgpu`) and run `nn-graph-clients-cpu` against the same fixture. A CPU-only
+Python wheel uses `--no-default-features --features python-default,cpu`.
+
+The original Rust-core/browser-example fixture remains independently runnable:
+
+The [source-bound client results](../benchmarks/results/2026-09-10-resident-graph-clients/README.md)
+retain the complete Python/browser/return trajectories, independent Torch checks,
+CPU-only behavior, product digests and pre-commit harness failures.
 
 ```sh
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked -p st-nn --features wgpu --test resident_graph_training

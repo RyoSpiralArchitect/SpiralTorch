@@ -15,6 +15,11 @@ use st_backend_wgpu::{
 #[cfg(feature = "webgpu")]
 use wasm_bindgen_futures::future_to_promise;
 
+mod graph;
+pub use graph::{
+    WasmGraphTrainingParametersSnapshot, WasmGraphTrainingSnapshot, WasmGraphTrainingState,
+    WasmResidentGraphTraining,
+};
 mod training;
 pub use training::{
     WasmResidentTraining, WasmTrainingLossSnapshot, WasmTrainingParametersSnapshot,
@@ -89,10 +94,6 @@ impl WasmInferencePlan {
         }
         let payload = payload.as_string().unwrap();
         let inner = InferencePlan::from_json_with_limit(&payload, max_bytes).map_err(js_error)?;
-        // Keep this dense-only facade closed until it exposes a graph executor.
-        if !inner.is_dense() {
-            return Err(js_error(st_nn::resident::InferenceError::RequiresGraph));
-        }
         Ok(Self { inner })
     }
 
@@ -128,6 +129,11 @@ impl WasmInferencePlan {
         self.inner.source_operation_count()
     }
 
+    #[wasm_bindgen(getter, js_name = isDense)]
+    pub fn is_dense(&self) -> bool {
+        self.inner.is_dense()
+    }
+
     #[cfg(feature = "webgpu")]
     #[wasm_bindgen(js_name = compileWebGpu, unchecked_return_type = "Promise<ResidentInference>")]
     pub fn compile_webgpu(
@@ -136,6 +142,7 @@ impl WasmInferencePlan {
         kernel: Option<JsString>,
         accumulation: Option<JsString>,
     ) -> Result<Promise, JsValue> {
+        require_dense(&self.inner)?;
         let (tile, kernel, accumulation) = gpu_options(tile_mnk, kernel, accumulation)?;
         // Clone before returning the promise: freeing the JS plan is safe while it compiles.
         let plan = self.inner.clone();
@@ -175,6 +182,40 @@ impl WasmInferencePlan {
             ))
         }
     }
+
+    #[wasm_bindgen(js_name = compileGraphTrainingWebGpu, unchecked_return_type = "Promise<ResidentGraphTraining>")]
+    pub fn compile_graph_training_webgpu(
+        &self,
+        gradient_policy: JsString,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        let policy = gradient_policy
+            .as_string()
+            .ok_or_else(|| js_error("gradient_policy must be a string"))?
+            .parse::<st_nn::resident::GraphGradientPolicy>()
+            .map_err(js_error)?;
+        #[cfg(feature = "webgpu")]
+        {
+            graph::compile(&self.inner, policy, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (policy, tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident graph training requires the webgpu build feature",
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "webgpu")]
+fn require_dense(plan: &InferencePlan) -> Result<(), JsValue> {
+    if !plan.is_dense() {
+        return Err(js_error(st_nn::resident::InferenceError::RequiresGraph));
+    }
+    Ok(())
 }
 
 #[wasm_bindgen(js_name = ResidentInference)]

@@ -12,6 +12,7 @@ use pyo3::{
 use st_nn::resident::{InferenceError, InferencePlan, DEFAULT_MAX_PLAN_JSON_BYTES};
 use st_tensor::NdLayout;
 
+mod graph;
 mod training;
 
 fn plan_error(error: InferenceError) -> PyErr {
@@ -84,18 +85,16 @@ pub(crate) fn plan_for(
     shape: &Bound<'_, PyAny>,
 ) -> PyResult<PyInferencePlan> {
     Ok(PyInferencePlan {
-        inner: dense_plan(
-            InferencePlan::from_module(module, input_layout(shape)?).map_err(plan_error)?,
-        )?,
+        inner: InferencePlan::from_module(module, input_layout(shape)?).map_err(plan_error)?,
     })
 }
 
-// This facade has only dense executors until the general graph wrapper lands.
-fn dense_plan(plan: InferencePlan) -> PyResult<InferencePlan> {
+#[cfg(feature = "wgpu")]
+fn require_dense(plan: &InferencePlan) -> PyResult<()> {
     if !plan.is_dense() {
         return Err(plan_error(InferenceError::RequiresGraph));
     }
-    Ok(plan)
+    Ok(())
 }
 
 #[pyclass(name = "InferencePlan", module = "spiraltorch.nn")]
@@ -109,9 +108,7 @@ impl PyInferencePlan {
     #[pyo3(signature = (payload, *, max_bytes=DEFAULT_MAX_PLAN_JSON_BYTES))]
     fn from_json(payload: &str, max_bytes: usize) -> PyResult<Self> {
         Ok(Self {
-            inner: dense_plan(
-                InferencePlan::from_json_with_limit(payload, max_bytes).map_err(plan_error)?,
-            )?,
+            inner: InferencePlan::from_json_with_limit(payload, max_bytes).map_err(plan_error)?,
         })
     }
 
@@ -136,6 +133,11 @@ impl PyInferencePlan {
         self.inner.source_operation_count()
     }
 
+    #[getter]
+    fn is_dense(&self) -> bool {
+        self.inner.is_dense()
+    }
+
     /// Compile this fixed parameter snapshot; source model updates are not followed.
     #[pyo3(signature = (*, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
     fn compile_wgpu(
@@ -148,6 +150,7 @@ impl PyInferencePlan {
         #[cfg(feature = "wgpu")]
         {
             use st_backend_wgpu::runtime;
+            require_dense(&self.inner)?;
             let (tile, kernel, accumulation) = gpu_options(tile_mnk, kernel, accumulation)?;
             let plan = self.inner.clone();
             py.detach(move || {
@@ -178,6 +181,25 @@ impl PyInferencePlan {
         accumulation: &str,
     ) -> PyResult<training::PyResidentTraining> {
         training::compile(&self.inner, py, tile_mnk, kernel, accumulation)
+    }
+
+    #[pyo3(signature = (*, gradient_policy, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_graph_training_wgpu(
+        &self,
+        py: Python<'_>,
+        gradient_policy: &str,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<graph::PyResidentGraphTraining> {
+        graph::compile(
+            &self.inner,
+            py,
+            gradient_policy,
+            tile_mnk,
+            kernel,
+            accumulation,
+        )
     }
 }
 
@@ -326,5 +348,6 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyResidentInference>()?;
     module.add_class::<PyInferenceSnapshot>()?;
     training::register(module)?;
+    graph::register(module)?;
     Ok(())
 }

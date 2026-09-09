@@ -66,7 +66,7 @@ class ResidentPlanSurface(unittest.TestCase):
             with self.subTest(shape=shape), self.assertRaises((ValueError, TypeError, OverflowError)):
                 net.inference_plan(shape)
         unsupported = st.nn.Sequential()
-        unsupported.add(st.nn.Relu())
+        unsupported.add(st.nn.LayerNorm("unsupported", 2, -1., 1e-5))
         with self.assertRaises(ValueError):
             unsupported.inference_plan([2, 2])
         payload = net.inference_plan([2, 2]).to_json()
@@ -85,12 +85,17 @@ class ResidentPlanSurface(unittest.TestCase):
         with self.assertRaises(ValueError):
             st.nn.InferencePlan.from_json(json.dumps(corrupted))
 
-    def test_dense_facade_rejects_valid_rich_graph_before_device_allocation(self):
+    def test_rich_transport_and_explicit_dense_executor_boundary(self):
         rich = {"schema": "spiraltorch.nn.inference_plan.v2", "input_shape": [2, 2],
                 "parameters": [], "stages": [{"kind": "pointwise", "parameters": [],
                 "steps": [{"op": "relu", "rhs": None}]}]}
-        with self.assertRaisesRegex(ValueError, "dense-only API"):
-            st.nn.InferencePlan.from_json(json.dumps(rich))
+        plan = st.nn.InferencePlan.from_json(json.dumps(rich))
+        self.assertFalse(plan.is_dense)
+        self.assertEqual(json.loads(plan.to_json()), rich)
+        if st.wgpu_kernel_reports_available():
+            for compile in (plan.compile_wgpu, plan.compile_training_wgpu):
+                with self.assertRaisesRegex(ValueError, "dense-only API"):
+                    compile()
 
     def test_cpu_only_plan_does_not_claim_gpu_execution(self):
         if not st.wgpu_kernel_reports_available():

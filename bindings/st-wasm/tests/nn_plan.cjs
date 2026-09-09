@@ -10,6 +10,7 @@ assert.deepEqual([...plan.inputShape], [2,3,2]);
 assert.deepEqual([...plan.outputShape], [2,3,2]);
 assert.equal(plan.stageCount, 1);
 assert.equal(plan.sourceOperationCount, 2);
+assert.equal(plan.isDense, true);
 const canonical = plan.toJson();
 const restored = InferencePlan.fromJson(canonical, Buffer.byteLength(canonical));
 assert.equal(restored.toJson(), canonical);
@@ -22,4 +23,16 @@ assert.throws(() => plan.compileWebGpu(), /webgpu/);
 plan.free();
 assert.equal(restored.toJson(), canonical);
 restored.free();
+const rich = InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2,3,2],
+  parameters:[],stages:[{kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]}));
+assert.equal(rich.isDense, false);
+assert.deepEqual([...rich.outputShape], [2,3,2]);
+const richJson = rich.toJson(), richRestored = InferencePlan.fromJson(richJson);
+assert.equal(richRestored.toJson(), richJson);
+assert.throws(() => rich.compileWebGpu(), /webgpu/);
+assert.throws(() => rich.compileTrainingWebGpu(), /webgpu/);
+for(const policy of ["exact","module_compatible"]) assert.throws(() => rich.compileGraphTrainingWebGpu(policy), /webgpu/);
+for(const policy of [undefined,null,true,1,"","auto","EXACT"," exact","module-compatible"])
+  assert.throws(() => rich.compileGraphTrainingWebGpu(policy), /gradient_policy/);
+rich.free(); richRestored.free();
 console.log("CPU-only WASM NN transport and explicit GPU rejection passed");
