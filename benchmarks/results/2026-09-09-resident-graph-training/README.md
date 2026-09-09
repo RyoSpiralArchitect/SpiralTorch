@@ -3,7 +3,8 @@
 Measured source: `e4ea73aee6a1f4d92b2bb6dcc893fd0dbb28cde2`.
 Source tree: `6b7d1ebc0b906e63568d5fe97e022e3613a40b84`.
 The native executable and browser WASM both reported that exact clean source.
-Publication adds this evidence only; it is not a new measured binary.
+GPU kernel code is unchanged after that source. A later client-admission fix is
+tested separately below; publication commits add evidence, not measured binaries.
 
 ## What Ran
 
@@ -59,6 +60,16 @@ binding `cargo check` passed. CI includes the real graph runtime test and the
 WASM graph example build.
 
 ## Scope and Reproduction
+
+The follow-up at `34f410aefb1ff062ae76674e171a920ea829811a` preserves the existing
+production dense-only contract: Python Module/JSON and JavaScript JSON entrypoints
+reject rich/v2 plans before device requests. This avoids accepting plans that those
+wrappers cannot execute yet, without reducing the Rust graph compiler's support.
+The freshly built Python extension passed **14** tests with no skips. Production
+browser WebGPU and CPU-only modules passed **3** dense fixture cases each, including
+the new rich-plan rejection (**59** / **16** total negative checks). No browser
+page or console errors occurred. Build commands, frozen library/module hashes and
+results are retained in `raw/clients-*` and [client manifest](client-manifest.json).
 
 This is **correctness and transactional-update evidence, not a throughput
 benchmark**, FT quality win, generic autograd, production Python/JS graph-training

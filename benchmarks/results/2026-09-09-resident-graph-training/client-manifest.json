@@ -1,0 +1,72 @@
+{
+  "schema": "spiraltorch.resident_graph_client_boundary_evidence.v1",
+  "source": "34f410aefb1ff062ae76674e171a920ea829811a",
+  "files": [
+    {
+      "path": "raw/clients-cpu-bindgen.log.gz",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "raw/clients-cpu-browser.json.gz",
+      "sha256": "2b1dd12a681b178f87bac2dd12b3200266683794e05062d9607cb29bf92e4d85",
+      "raw_sha256": "12ed3862ee0f16e26aebfbecae49788c1b8a10112e60a18d745679ad761882dc"
+    },
+    {
+      "path": "raw/clients-cpu-browser.log.gz",
+      "sha256": "8d5cc19b9760f024ff92d4af5932625c33b4d770935da155fbd11ef48e00df49",
+      "raw_sha256": "8c0e81e099863808ca492098b43d236323f4263c5983388fc94ad577b39d107d"
+    },
+    {
+      "path": "raw/clients-cpu-build.log.gz",
+      "sha256": "a158e97e26fc13d927a9efd19e3b4a5b78d8b39f6f78ce1eb1cfec0c6421b2ef",
+      "raw_sha256": "7285c9efc9d45c2deb5060429902cf69921af8159bd39c461aa1667d03084a59"
+    },
+    {
+      "path": "raw/clients-nn-fixture.json.gz",
+      "sha256": "badaebebe5800ebf0b9ac036ea2df6ac5bbec09c36c647bef5dd1da1796ec03b",
+      "raw_sha256": "f0c16ffca84391c4542194b4c7b9c73ad620afed22e2dc5780c7d5e8e978b24c"
+    },
+    {
+      "path": "raw/clients-python-build.log.gz",
+      "sha256": "5dc498933d4c4364c904382bfb793e089b3f8801cf4972f8a3ecda711ecc9402",
+      "raw_sha256": "4736043d59e4e29f2e136055887629fcbccad1fd30c455999e959b6f7300422a"
+    },
+    {
+      "path": "raw/clients-python-runtime.log.gz",
+      "sha256": "725c81de7afdaac84069d064bb6cb5f3f4d96df30f49aa5b63904d811842bbd4",
+      "raw_sha256": "9bf7c8748d0d01b23c23ab54156315a57cf4ae800ce24c4d0dd9b888ffed4715"
+    },
+    {
+      "path": "raw/clients-python-tests.json.gz",
+      "sha256": "fba438f61f2bcfa5618c5a03c2f75ffa8743d6b9b00004bf8c94f1995eb89dee",
+      "raw_sha256": "6c6a8f2c49913924a0c787c46bf9cc023f059c8ce3eb0d6bd61293fe2c7fda53"
+    },
+    {
+      "path": "raw/clients-receipt.json.gz",
+      "sha256": "f44bafb20fd4aa0b2259c081ad1f38b57d161e5276d8f4e4773e3842a79acd9b",
+      "raw_sha256": "3b1f6188834815d6d13ee2d9df67b00e116630ae781ee13e861398e7b37e6bbb"
+    },
+    {
+      "path": "raw/clients-webgpu-bindgen.log.gz",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "raw/clients-webgpu-browser.json.gz",
+      "sha256": "0898c8d7549174da62b30236d60cab20d47c5089844994e1a2abd2a246f8c825",
+      "raw_sha256": "b9b2cab9f4226c097efaf52987dd9eb77017c7e09ac4fcb9e0c776a0e7aec3d4"
+    },
+    {
+      "path": "raw/clients-webgpu-browser.log.gz",
+      "sha256": "70fdc9980f9bbe95945fe44766ef68a6d68b5c8b469d843af184a57ce95bd4b4",
+      "raw_sha256": "245bc09c6554a4d1ad6d587283f7d54f1e5b666bc2e2d45d6b16088cdcd08f6d"
+    },
+    {
+      "path": "raw/clients-webgpu-build.log.gz",
+      "sha256": "c220f5650f20477e674f8486843fe231989aa73aa3e51d2dccac0bfb852dc855",
+      "raw_sha256": "7f7d98058ac74f2e126e700a28745ca177fccc55878080e706489e4229fd3d78"
+    }
+  ],
+  "scope": "Follow-up dense-facade admission fix only; graph kernels unchanged from measured e4ea73ae. Python 14 tests and production browser WebGPU/CPU clients."
+}
