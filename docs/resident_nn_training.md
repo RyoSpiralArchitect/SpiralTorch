@@ -1,5 +1,9 @@
 # Existing NN Modules, GPU-Resident Training
 
+For Scaler/ReLU and jointly owned gain updates, see the opt-in
+[general resident graph training](resident_graph_training.md) Rust/WASM path.
+The Python/JavaScript and specialized dense APIs below remain unchanged.
+
 The same Rust `Sequential(Linear -> Gelu -> Linear)` and `InferencePlan` used by
 [resident inference](resident_nn_inference.md) now support an explicit mutable
 GPU training workspace. It implements **mean-MSE, exact vector-Jacobian products,

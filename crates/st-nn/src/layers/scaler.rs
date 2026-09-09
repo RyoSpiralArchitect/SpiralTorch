@@ -235,6 +235,13 @@ impl Scaler {
 }
 
 impl Module for Scaler {
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        Ok(vec![crate::resident::InferenceOp::Scale {
+            gain: self.gain.value().clone(),
+        }])
+    }
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         let gain = self.gain.value();

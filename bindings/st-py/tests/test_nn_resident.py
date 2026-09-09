@@ -77,12 +77,20 @@ class ResidentPlanSurface(unittest.TestCase):
         corrupted["stages"][0]["cols"] += 1
         with self.assertRaises(ValueError):
             st.nn.InferencePlan.from_json(json.dumps(corrupted))
+
         with self.assertRaises(ValueError):
             st.nn.InferencePlan.from_json(payload.replace("spiraltorch.nn.inference_plan.v1", "unknown"))
         corrupted = json.loads(payload)
         corrupted["input_shape"] = [4294967295, 2]
         with self.assertRaises(ValueError):
             st.nn.InferencePlan.from_json(json.dumps(corrupted))
+
+    def test_dense_facade_rejects_valid_rich_graph_before_device_allocation(self):
+        rich = {"schema": "spiraltorch.nn.inference_plan.v2", "input_shape": [2, 2],
+                "parameters": [], "stages": [{"kind": "pointwise", "parameters": [],
+                "steps": [{"op": "relu", "rhs": None}]}]}
+        with self.assertRaisesRegex(ValueError, "dense-only API"):
+            st.nn.InferencePlan.from_json(json.dumps(rich))
 
     def test_cpu_only_plan_does_not_claim_gpu_execution(self):
         if not st.wgpu_kernel_reports_available():

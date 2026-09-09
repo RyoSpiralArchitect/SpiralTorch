@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Rust resident graph training</title>
+<pre id="result" data-status="running">Checking graph-owned gains and transactional SGD</pre>
+<script type="module">
+import init, {run_resident_graph_training_fixture} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU fallback");
+  await init();
+  const report = JSON.parse(await run_resident_graph_training_fixture());
+  if (report.status !== "passed" || report.cases?.length !== 6 || report.guards?.length !== 4 || report.primitive_checks?.length !== 3)
+    throw Error("Incomplete graph training fixture");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error",error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

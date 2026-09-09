@@ -300,33 +300,13 @@ impl PointwisePlan {
             for (i, input) in inputs.iter().enumerate() {
                 encoder.copy_buffer_to_buffer(input.flags(), 0, &inherited, i as u64 * 4, 4);
             }
-            let buffers: Vec<_> = inputs
-                .iter()
-                .map(|t| t.values())
-                .chain([&values, &self.metadata, &inherited, &flags])
-                .collect();
-            let entries: Vec<_> = buffers
-                .iter()
-                .enumerate()
-                .map(|(i, buffer)| wgpu::BindGroupEntry {
-                    binding: i as u32,
-                    resource: buffer.as_entire_binding(),
-                })
-                .collect();
-            let binding = gpu.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("pointwise.inputs"),
-                layout: &self.binding_layout,
-                entries: &entries,
-            });
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("pointwise.fused"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &binding, &[]);
-                pass.dispatch_workgroups(self.grid[0], self.grid[1], 1);
-            }
+            self.encode_into(
+                &mut encoder,
+                &inputs.iter().map(|t| t.values()).collect::<Vec<_>>(),
+                &values,
+                &inherited,
+                &flags,
+            );
             ResidentTensor {
                 storage: Shared::new(Storage { values, flags }),
                 layout,
@@ -335,6 +315,32 @@ impl PointwisePlan {
         };
         context.queue().submit(Some(encoder.finish()));
         Ok(output)
+    }
+
+    /// Internal graph workspace only: the caller owns same-device, exact-layout
+    /// buffers and flag initialization. No mutable buffer escapes the public API.
+    pub(crate) fn encode_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        inputs: &[&wgpu::Buffer],
+        output: &wgpu::Buffer,
+        inherited: &wgpu::Buffer,
+        flags: &wgpu::Buffer,
+    ) {
+        assert_eq!(inputs.len(), self.layouts.len());
+        let buffers: Vec<_> = inputs
+            .iter()
+            .copied()
+            .chain([output, &self.metadata, inherited, flags])
+            .collect();
+        vjp::encode(
+            self.device.runtime().context().device(),
+            encoder,
+            &self.binding_layout,
+            &self.pipeline,
+            &buffers,
+            [self.grid[0], self.grid[1]],
+        );
     }
 }
 

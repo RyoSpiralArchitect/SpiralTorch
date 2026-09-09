@@ -12,6 +12,7 @@ use bytemuck::{Pod, Zeroable};
 use st_kernel_contracts::layout::NdLayout;
 use thiserror::Error;
 
+pub mod graph;
 mod readback;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod stage_tests;
@@ -21,6 +22,8 @@ pub use readback::{
 
 #[derive(Debug, Error)]
 pub enum TrainingError {
+    #[error(transparent)]
+    Graph(#[from] st_kernel_contracts::graph::GraphError),
     #[error(transparent)]
     Tensor(#[from] TensorError),
     #[error(transparent)]

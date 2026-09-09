@@ -3,6 +3,8 @@
 use super::{InferenceError, InferenceOp, InferencePlan};
 use serde::{Deserialize, Serialize};
 use st_tensor::{NdLayout, Tensor};
+mod graph;
+pub use graph::GRAPH_PLAN_SCHEMA;
 
 pub const INFERENCE_PLAN_SCHEMA: &str = "spiraltorch.nn.inference_plan.v1";
 pub const DEFAULT_MAX_PLAN_JSON_BYTES: usize = 64 * 1024 * 1024;
@@ -58,6 +60,9 @@ impl PlanRecord {
 impl InferencePlan {
     /// Export fixed f32 parameters, not a device image or a training checkpoint.
     pub fn to_json(&self) -> Result<String, InferenceError> {
+        if let Some(graph) = &self.graph {
+            return graph::to_json(graph);
+        }
         let record = PlanRecord {
             schema: INFERENCE_PLAN_SCHEMA.to_owned(),
             input_shape: self
@@ -97,6 +102,14 @@ impl InferencePlan {
                 actual: payload.len(),
                 limit: max_bytes,
             });
+        }
+        #[derive(Deserialize)]
+        struct Schema {
+            schema: String,
+        }
+        let schema: Schema = serde_json::from_str(payload)?;
+        if schema.schema == GRAPH_PLAN_SCHEMA {
+            return graph::from_json(payload);
         }
         let record: PlanRecord = serde_json::from_str(payload)?;
         if record.schema != INFERENCE_PLAN_SCHEMA {

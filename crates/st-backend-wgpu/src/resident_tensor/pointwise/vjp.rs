@@ -207,12 +207,6 @@ impl PointwiseVjpPlan {
         let gpu = context.device();
         let storage = wgpu::BufferUsages::STORAGE;
         let copy_storage = storage | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
-        let contributions = runtime::empty_buffer::<f32>(
-            gpu,
-            "vjp.contributions",
-            self.contribution_len.max(1),
-            storage | wgpu::BufferUsages::COPY_SRC,
-        )?;
         let flags = runtime::empty_buffer::<u32>(gpu, "vjp.flags", 1, copy_storage)?;
         let inherited = runtime::empty_buffer::<u32>(
             gpu,
@@ -224,25 +218,6 @@ impl PointwiseVjpPlan {
         for (i, input) in inputs.iter().copied().chain([&cotangent]).enumerate() {
             encoder.copy_buffer_to_buffer(input.flags(), 0, &inherited, i as u64 * 4, 4);
         }
-        let buffers: Vec<_> = inputs
-            .iter()
-            .map(|t| t.values())
-            .chain([
-                &contributions,
-                &self.forward.metadata,
-                &inherited,
-                &flags,
-                cotangent.values(),
-            ])
-            .collect();
-        encode(
-            gpu,
-            &mut encoder,
-            &self.layout,
-            &self.pipeline,
-            &buffers,
-            [self.forward.grid[0], self.forward.grid[1]],
-        );
         let mut result = Vec::new();
         for reduction in &self.reductions {
             let values = runtime::empty_buffer::<f32>(
@@ -251,50 +226,6 @@ impl PointwiseVjpPlan {
                 reduction.layout.len().max(1),
                 copy_storage,
             )?;
-            if reduction.direct {
-                // Contributions are already checked, contiguous logical gradients.
-                if !reduction.layout.is_empty() {
-                    encoder.copy_buffer_to_buffer(
-                        &contributions,
-                        reduction.source_offset,
-                        &values,
-                        0,
-                        reduction.layout.len() as u64 * 4,
-                    );
-                }
-            } else if let Some((metadata, grid)) = &reduction.second {
-                let partials = runtime::empty_buffer::<f32>(
-                    gpu,
-                    "vjp.partials",
-                    reduction.partial_len.max(1),
-                    storage,
-                )?;
-                encode(
-                    gpu,
-                    &mut encoder,
-                    &self.reduction_layout,
-                    &self.reduction_pipeline,
-                    &[&contributions, &partials, &reduction.first, &flags],
-                    reduction.first_grid,
-                );
-                encode(
-                    gpu,
-                    &mut encoder,
-                    &self.reduction_layout,
-                    &self.reduction_pipeline,
-                    &[&partials, &values, metadata, &flags],
-                    *grid,
-                );
-            } else {
-                encode(
-                    gpu,
-                    &mut encoder,
-                    &self.reduction_layout,
-                    &self.reduction_pipeline,
-                    &[&contributions, &values, &reduction.first, &flags],
-                    reduction.first_grid,
-                );
-            }
             let result_flags =
                 runtime::empty_buffer::<u32>(gpu, "vjp.gradient.flags", 1, copy_storage)?;
             result.push(ResidentTensor {
@@ -306,6 +237,14 @@ impl PointwiseVjpPlan {
                 device: device.clone(),
             });
         }
+        self.encode_into(
+            &mut encoder,
+            &inputs.iter().map(|t| t.values()).collect::<Vec<_>>(),
+            cotangent.values(),
+            &result.iter().map(|t| t.values()).collect::<Vec<_>>(),
+            &inherited,
+            &flags,
+        )?;
         // Every returned gradient inherits failures from every input and reduction,
         // including a later broadcast sum overflowing after another slot succeeded.
         for gradient in &result {
@@ -314,9 +253,96 @@ impl PointwiseVjpPlan {
         context.queue().submit(Some(encoder.finish()));
         Ok(result)
     }
+
+    /// Same VJP/reductions as run(), recorded into a private graph workspace.
+    /// Callers validate device/layout and clear flags before encoding a step.
+    pub(crate) fn encode_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        inputs: &[&wgpu::Buffer],
+        cotangent: &wgpu::Buffer,
+        gradients: &[&wgpu::Buffer],
+        inherited: &wgpu::Buffer,
+        flags: &wgpu::Buffer,
+    ) -> Result<(), TensorError> {
+        assert_eq!(inputs.len(), self.forward.layouts.len());
+        assert_eq!(gradients.len(), self.reductions.len());
+        let gpu = self.forward.device.runtime().context().device();
+        let contributions = runtime::empty_buffer::<f32>(
+            gpu,
+            "vjp.contributions",
+            self.contribution_len.max(1),
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        )?;
+        let buffers: Vec<_> = inputs
+            .iter()
+            .copied()
+            .chain([
+                &contributions,
+                &self.forward.metadata,
+                inherited,
+                flags,
+                cotangent,
+            ])
+            .collect();
+        encode(
+            gpu,
+            encoder,
+            &self.layout,
+            &self.pipeline,
+            &buffers,
+            [self.forward.grid[0], self.forward.grid[1]],
+        );
+        for (reduction, &values) in self.reductions.iter().zip(gradients) {
+            if reduction.direct {
+                if !reduction.layout.is_empty() {
+                    encoder.copy_buffer_to_buffer(
+                        &contributions,
+                        reduction.source_offset,
+                        values,
+                        0,
+                        reduction.layout.len() as u64 * 4,
+                    );
+                }
+            } else if let Some((metadata, grid)) = &reduction.second {
+                let partials = runtime::empty_buffer::<f32>(
+                    gpu,
+                    "vjp.partials",
+                    reduction.partial_len.max(1),
+                    wgpu::BufferUsages::STORAGE,
+                )?;
+                encode(
+                    gpu,
+                    encoder,
+                    &self.reduction_layout,
+                    &self.reduction_pipeline,
+                    &[&contributions, &partials, &reduction.first, flags],
+                    reduction.first_grid,
+                );
+                encode(
+                    gpu,
+                    encoder,
+                    &self.reduction_layout,
+                    &self.reduction_pipeline,
+                    &[&partials, values, metadata, flags],
+                    *grid,
+                );
+            } else {
+                encode(
+                    gpu,
+                    encoder,
+                    &self.reduction_layout,
+                    &self.reduction_pipeline,
+                    &[&contributions, values, &reduction.first, flags],
+                    reduction.first_grid,
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
-fn encode(
+pub(super) fn encode(
     gpu: &wgpu::Device,
     encoder: &mut wgpu::CommandEncoder,
     layout: &wgpu::BindGroupLayout,

@@ -23,6 +23,7 @@ hip = ["st-core/hip", "st-tensor/hip"]
 selfsup = []
 
 [dependencies]
+st-kernel-contracts = { path = "../st-kernel-contracts" }
 st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
 st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"] }
 st-core = { path = "../st-core", default-features = false }
@@ -85,6 +86,15 @@ required-features = ["wgpu"]
 
 [[example]]
 name = "resident_training"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_graph_training"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_graph_training_browser"
+crate-type = ["cdylib"]
 required-features = ["wgpu"]
 
 [[example]]

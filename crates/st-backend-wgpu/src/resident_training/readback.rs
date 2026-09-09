@@ -7,7 +7,7 @@ pub(super) struct RawSnapshot {
 
 impl RawSnapshot {
     #[cfg(not(target_arch = "wasm32"))]
-    fn read(mut self) -> Result<Vec<u8>, TrainingError> {
+    pub(super) fn read(mut self) -> Result<Vec<u8>, TrainingError> {
         Ok(self.lease.read(
             &self.context,
             std::time::Duration::from_secs(30),
@@ -15,7 +15,7 @@ impl RawSnapshot {
         )?)
     }
     #[cfg(target_arch = "wasm32")]
-    async fn read_async(self) -> Result<Vec<u8>, TrainingError> {
+    pub(super) async fn read_async(self) -> Result<Vec<u8>, TrainingError> {
         Ok(self
             .lease
             .read_async(self.context, "training.snapshot")
@@ -64,7 +64,7 @@ pub(super) fn capture_new(
     capture(context, &pool, buffers)
 }
 
-fn loss_and_flags(bytes: &[u8], stages: usize) -> Result<(f32, usize), TrainingError> {
+pub(super) fn loss_and_flags(bytes: &[u8], stages: usize) -> Result<(f32, usize), TrainingError> {
     let prefix = stages
         .checked_add(3)
         .and_then(|n| n.checked_mul(4))
@@ -96,7 +96,11 @@ fn loss_and_flags(bytes: &[u8], stages: usize) -> Result<(f32, usize), TrainingE
     Ok((loss, prefix))
 }
 
-fn values(bytes: &[u8], offset: &mut usize, len: usize) -> Result<Vec<f32>, TrainingError> {
+pub(super) fn values(
+    bytes: &[u8],
+    offset: &mut usize,
+    len: usize,
+) -> Result<Vec<f32>, TrainingError> {
     let end = len
         .checked_mul(4)
         .and_then(|n| offset.checked_add(n))

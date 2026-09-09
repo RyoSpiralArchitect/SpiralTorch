@@ -84,8 +84,18 @@ pub(crate) fn plan_for(
     shape: &Bound<'_, PyAny>,
 ) -> PyResult<PyInferencePlan> {
     Ok(PyInferencePlan {
-        inner: InferencePlan::from_module(module, input_layout(shape)?).map_err(plan_error)?,
+        inner: dense_plan(
+            InferencePlan::from_module(module, input_layout(shape)?).map_err(plan_error)?,
+        )?,
     })
+}
+
+// This facade has only dense executors until the general graph wrapper lands.
+fn dense_plan(plan: InferencePlan) -> PyResult<InferencePlan> {
+    if !plan.is_dense() {
+        return Err(plan_error(InferenceError::RequiresGraph));
+    }
+    Ok(plan)
 }
 
 #[pyclass(name = "InferencePlan", module = "spiraltorch.nn")]
@@ -99,7 +109,9 @@ impl PyInferencePlan {
     #[pyo3(signature = (payload, *, max_bytes=DEFAULT_MAX_PLAN_JSON_BYTES))]
     fn from_json(payload: &str, max_bytes: usize) -> PyResult<Self> {
         Ok(Self {
-            inner: InferencePlan::from_json_with_limit(payload, max_bytes).map_err(plan_error)?,
+            inner: dense_plan(
+                InferencePlan::from_json_with_limit(payload, max_bytes).map_err(plan_error)?,
+            )?,
         })
     }
 
