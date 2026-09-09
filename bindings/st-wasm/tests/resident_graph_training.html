@@ -10,8 +10,18 @@ try {
   if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU fallback");
   await init();
   const report = JSON.parse(await run_resident_graph_training_fixture());
-  if (report.status !== "passed" || report.cases?.length !== 6 || report.guards?.length !== 4 || report.primitive_checks?.length !== 3)
+  if (report.status !== "passed" || report.cases?.length !== 6 || report.guards?.length !== 36 || report.primitive_checks?.length !== 3)
     throw Error("Incomplete graph training fixture");
+  const masked=report.guards.filter(g=>g.case==="masked_forward_overflow");
+  const expected=new Set();
+  for(let stage=0;stage<8;stage++) for(const policy of ["Exact","ModuleCompatible"])
+    for(const rate of [0,Math.fround(.01)]) expected.add(JSON.stringify([stage,policy,rate]));
+  for(const guard of masked) {
+    if(!guard.all_parameter_bits_unchanged||!guard.retained_guard_after_reuse_and_drop||
+       !expected.delete(JSON.stringify([guard.fault_stage,guard.policy,Math.fround(guard.rate)])))
+      throw Error("Invalid or repeated masked-overflow guard");
+  }
+  if(masked.length!==32||expected.size) throw Error("Missing masked-overflow guard");
   result.textContent = JSON.stringify(report);
   result.dataset.status = "passed";
 } catch (error) {
