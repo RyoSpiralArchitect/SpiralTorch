@@ -364,6 +364,16 @@ impl PointwisePlan {
             [self.grid[0], self.grid[1]],
         );
     }
+
+    pub(crate) fn encode_in_pass<'a>(
+        &'a self,
+        pass: &mut wgpu::ComputePass<'a>,
+        binding: &'a wgpu::BindGroup,
+    ) {
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, binding, &[]);
+        pass.dispatch_workgroups(self.grid[0], self.grid[1], 1);
+    }
 }
 
 #[cfg(test)]

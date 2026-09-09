@@ -260,6 +260,14 @@ impl DenseKernel {
             label: Some("dense.stage.pass"),
             timestamp_writes: None,
         });
+        self.encode_in_pass(&mut pass, dispatch);
+    }
+
+    pub(crate) fn encode_in_pass<'a>(
+        &'a self,
+        pass: &mut wgpu::ComputePass<'a>,
+        dispatch: &'a DenseDispatch,
+    ) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &dispatch.binding, &[]);
         pass.dispatch_workgroups(dispatch.groups[0], dispatch.groups[1], 1);

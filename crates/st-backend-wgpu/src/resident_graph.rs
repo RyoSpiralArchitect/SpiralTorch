@@ -324,21 +324,35 @@ impl ResidentGraph {
                 4,
             );
         }
+        // Each pointwise node owns its flags. Clear/capture them outside one
+        // compute pass so blit encoders do not split every pair of NN stages.
+        for node in &self.nodes {
+            if let Node::Pointwise { flags, .. } = node {
+                encoder.clear_buffer(flags, 0, None);
+            }
+        }
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("graph.forward.pass"),
+                timestamp_writes: None,
+            });
+            for node in &self.nodes {
+                match node {
+                    Node::Linear(binding) => self
+                        .kernel
+                        .as_ref()
+                        .unwrap()
+                        .encode_in_pass(&mut pass, binding),
+                    Node::Pointwise { plan, binding, .. } => {
+                        plan.encode_in_pass(&mut pass, binding)
+                    }
+                }
+            }
+        }
         for (i, node) in self.nodes.iter().enumerate() {
-            match node {
-                Node::Linear(binding) => {
-                    self.kernel.as_ref().unwrap().encode(&mut encoder, binding)
-                }
-                Node::Pointwise {
-                    plan,
-                    binding,
-                    flags,
-                } => {
-                    encoder.clear_buffer(flags, 0, None);
-                    plan.encode_bound(&mut encoder, binding);
-                    // Preserve each stage's guard even when a later operation masks overflow.
-                    encoder.copy_buffer_to_buffer(flags, 0, &self.validation, i as u64 * 4, 4);
-                }
+            if let Node::Pointwise { flags, .. } = node {
+                // Keep every logical stage's error, including masked earlier overflow.
+                encoder.copy_buffer_to_buffer(flags, 0, &self.validation, i as u64 * 4, 4);
             }
         }
         context.queue().submit(Some(encoder.finish()));

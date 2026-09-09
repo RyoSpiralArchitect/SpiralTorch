@@ -97,6 +97,10 @@ name = "resident_graph_forward"
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_graph_forward_bench"
+required-features = ["wgpu"]
+
+[[example]]
 name = "resident_graph_forward_browser"
 crate-type = ["cdylib"]
 required-features = ["wgpu"]

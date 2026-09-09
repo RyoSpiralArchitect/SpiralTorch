@@ -25,6 +25,7 @@ jobs:
           python3 -I tests/test_resident_training_client_validation.py
           python3 -I tests/test_resident_graph_client_validation.py
           python3 -I tests/test_resident_graph_forward_validation.py
+          python3 -I tests/test_graph_forward_paths.py
           python3 -I tests/test_resident_training_bench.py
           python3 -I tests/test_nd_tensor_bench.py
           python3 -I tests/test_pointwise_vjp_bench.py

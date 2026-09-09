@@ -154,7 +154,10 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
 - Parameters, bindings and activation buffers are prepared once. `dispatch`
   uses one command submission, with no per-dispatch buffer/binding allocation
   or host readback. Intermediate activation buffers are shared between stages.
-  Pointwise validation flags use small GPU-only copies into the graph guard.
+  All nodes execute in one compute pass. Private pointwise validation flags are
+  cleared before that pass and copied into the graph guard afterward, without
+  changing logical stage/error indices or masking earlier failures. Dense-only
+  inference and graph training retain their existing pass scheduling.
 - `output_tensor` freezes output and all guards into an immutable GPU tensor.
   It performs an on-device identity/capture pass, not a CPU readback or mutable
   workspace alias. Subsequent dispatches cannot invalidate the returned tensor.
@@ -172,6 +175,44 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
 
 These are structural transfer boundaries, not hardware-counter measurements
 or a claim that this path is faster than PyTorch.
+
+## Timing The Connected Path
+
+`resident_graph_forward_bench` measures existing `Module::forward` with a
+no-fallback WGPU policy alongside scalar/sequential and
+register-2x2/compensated resident mixed graphs. Each model repeats
+Scaler/Linear/GELU/ReLU blocks, with three seeds and bounded depth/width/shape
+combinations. The two kernel choices also differ in accumulation policy; a
+timing difference between them is not attributable to register tiling alone.
+
+There are two separate observation boundaries: H2H includes input upload and an
+owning host output on every sample; burst measures eight independent forwards
+of the same already-resident input with one final readback. This is not eight
+dependent autoregressive steps, nor GPU timestamp-only timing. Compilation and
+setup are excluded; three warmups precede nine rotated retained sample blocks.
+All outputs are checked outside timing, and raw timings are retained.
+
+```bash
+cargo run --locked --release -p st-nn --no-default-features --features wgpu \
+  --example resident_graph_forward_bench > /tmp/new-native-forward-bench.json
+# Use a release binding built from the measured source, not an installed wheel.
+PYTORCH_ENABLE_MPS_FALLBACK=0 /path/to/torch-python -I tools/bench_graph_forward_paths.py \
+  --fixture /tmp/new-native-forward-bench.json --native-library /path/to/frozen/libspiraltorch.dylib \
+  --output /tmp/new-python-torch-forward-bench.json
+# Build the production webgpu package as above, then supply that same fixture.
+cp /tmp/new-native-forward-bench.json /tmp/new-public-module/forward-bench-fixture.json
+node tools/test_resident_browser.cjs /tmp/new-public-module /path/to/chromium \
+  /tmp/new-browser-forward-bench.json '' '' '' '' nn-forward-bench
+```
+
+The Python harness imports both current-source SpiralTorch and Torch, alternates
+their controls, and includes host-list output conversion for each. Torch uses
+eager `addmm`/bias and tanh-GELU, not `torch.compile`. Native and WASM outputs are
+host f32 vectors and typed arrays respectively, so client overheads differ.
+macOS GPU contention and browser physical GPU identity remain unverified.
+`validate_graph_forward_paths.py` compares complete baseline/candidate triples,
+checks f32 fixture bits and hashes, rejects missing/changed samples and keeps
+H2H and burst ratios separate. It does not select a fastest global backend.
 
 ## Public Client Validation
 
