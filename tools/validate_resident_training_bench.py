@@ -119,6 +119,11 @@ def run(args, result):
         require(value["status"] == "passed" and value["schema"] == schema and len(value["cases"]) == 9,
                 "expected complete successful reports")
     require(not browser["page_errors"], "browser page errors")
+    workload = native.get("workload", "dense")
+    require(workload in ("dense", "graph") and browser.get("workload", "dense") == workload,
+            "workload differs")
+    graph = workload == "graph"
+    result["workload"] = workload
     sources = {lane: bench.source_for(getattr(args, lane + "_source")) for lane in ("baseline", "candidate")}
     result["native_products"] = native["native_products"]
     result["source_bindings"] = {lane: manifest_binding(native["native_products"][lane]["identity"]["manifest"], source)
@@ -131,7 +136,7 @@ def run(args, result):
     result["browser_adapter_probe"] = browser.get("adapter_probe")
     result["device_admission"] = native["device_admission"]
     result["torch"] = dict(version=native["torch"], device=native["torch_device"])
-    for config, n, b in zip(bench.recipes(), native["cases"], browser["cases"]):
+    for config, n, b in zip(bench.recipes(graph), native["cases"], browser["cases"]):
         row = dict(config=config, native=summarize_case(n, config, ("baseline", "candidate", "torch")),
                    browser=summarize_case(b, config, ("baseline", "candidate")), max_abs_errors={})
         result["cases"].append(row)
@@ -146,8 +151,9 @@ def run(args, result):
         for origin, value in (("native", n), ("browser", b)):
             for key, capture in value["captures"].items():
                 bench.close_values(capture["losses"], fixed["losses"])
-                errors = reference.compare(capture["state"], fixed["state"])
-                row["max_abs_errors"][origin + "_" + key] = max(errors.values())
+                error = (bench.graph_reference.compare(capture["state"], fixed["state"]) if graph else
+                         max(reference.compare(capture["state"], fixed["state"]).values()))
+                row["max_abs_errors"][origin + "_" + key] = error
         row["losses"] = fixed["losses"]
     result["browser_intervals_revalidated"] = validate_progress(args.browser_progress, browser["cases"])
     require(identities == [bench.audit.file_identity(path) for path in paths], "evidence changed during validation")

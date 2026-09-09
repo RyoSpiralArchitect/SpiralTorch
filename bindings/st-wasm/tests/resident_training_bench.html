@@ -7,7 +7,9 @@
 import initA, {TrainingBenchmark as A} from "/baseline/spiraltorch_wasm.js";
 import initB, {TrainingBenchmark as B} from "/candidate/spiraltorch_wasm.js";
 const element=document.querySelector("#result");
+const graph=new URL(location.href).searchParams.get("workload")==="graph";
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
+  workload:graph?"graph":"dense",
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
 async function progress(value) {
   element.textContent=JSON.stringify(value);
@@ -26,6 +28,13 @@ function close(a,b) {
 function compare(a,b) {
   let maximum=close([a.loss],[b.loss]);
   for(const key of ["prediction","input_gradient"]) maximum=Math.max(maximum,close(a[key],b[key]));
+  if(graph) {
+    for(const key of ["parameters","raw_gradients","effective_gradients"]) {
+      require(a[key].length===b[key].length,"parameter count differs");
+      a[key].forEach((p,i)=>{maximum=Math.max(maximum,close(p,b[key][i]));});
+    }
+    return maximum;
+  }
   for(const key of ["parameters","parameter_gradients"]) {
     require(a[key].length===b[key].length,"stage count differs");
     a[key].forEach((p,i)=>{ for(const name of ["weights","bias"]) maximum=Math.max(maximum,close(p[name],b[key][i][name])); });
@@ -40,8 +49,9 @@ try {
   report.adapter_probe={vendor:info?.vendor??null,architecture:info?.architecture??null,
     description:info?.description??null,isFallbackAdapter:info?.isFallbackAdapter??adapter?.isFallbackAdapter??null,
     boundary:"separate navigator adapter observation; not the Rust workspaces' device receipt"};
-  for(const seed of [17,29,43]) for(const [shape,depth] of [[[2,16,32],2],[[4,16,64],8],[[4,32,128],16]]) {
-    const config={shape,depth,seed,steps:8};
+  const shapes=graph?[[[2,16,32],2],[[2,129,32],4],[[4,32,64],8]]:[[[2,16,32],2],[[4,16,64],8],[[4,32,128],16]];
+  for(const seed of [17,29,43]) for(const [shape,depth] of shapes) {
+    const config={shape,depth,seed,steps:8,...(graph?{graph:true}:{})};
     await progress({stage:"create_workspaces",config});
     const workers={};
     try {
