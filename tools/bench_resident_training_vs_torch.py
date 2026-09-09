@@ -21,12 +21,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_rank_vs_torch as audit
 from bench_resident_nn_vs_torch import admit_device, match_adapter
 import validate_resident_training_vs_torch as reference
+import resident_graph_bench_reference as graph_reference
 
 
-def recipes():
-    return [dict(shape=shape, depth=depth, seed=seed, steps=8)
-            for seed in (17, 29, 43) for shape, depth in
-            (([2, 16, 32], 2), ([4, 16, 64], 8), ([4, 32, 128], 16))]
+def recipes(graph=False):
+    shapes = ((([2, 16, 32], 2), ([2, 129, 32], 4), ([4, 32, 64], 8)) if graph else
+              (([2, 16, 32], 2), ([4, 16, 64], 8), ([4, 32, 128], 16)))
+    return [dict(shape=shape, depth=depth, seed=seed, steps=8, **({"graph": True} if graph else {}))
+            for seed in (17, 29, 43) for shape, depth in shapes]
 
 
 def source_for(ref):
@@ -126,6 +128,9 @@ def validate_sample(value, cadence, steps):
 
 
 def run(args, result, baseline_stderr, candidate_stderr):
+    graph = getattr(args, "graph", False)
+    compare = graph_reference.compare if graph else reference.compare
+    sample_torch = graph_reference.torch_sample if graph else torch_sample
     result["device_admission"] = admit_device(args.device)
     before = audit.source_identity()
     if before["tracked_dirty"] or audit.git_bytes("ls-files", "--others", "--exclude-standard"):
@@ -148,7 +153,7 @@ def run(args, result, baseline_stderr, candidate_stderr):
                                         ("candidate", args.candidate, args.candidate_source, candidate_stderr)):
             workers[label] = Native(path, ref, stderr)
         result["native_products"] = {k:dict(file=w.file,identity=w.identity,binding=w.binding) for k,w in workers.items()}
-        for config in recipes():
+        for config in recipes(graph):
             row = dict(config=config,samples=[],captures={},fingerprints={})
             result["cases"].append(row)
             fixture = workers["baseline"].request(dict(op="init",config=config))
@@ -167,19 +172,19 @@ def run(args, result, baseline_stderr, candidate_stderr):
                     row["samples"].append(sample)
                     for lane in order:
                         if lane == "torch":
-                            value=torch_sample(torch,fixture,args.device,cadence,synchronize)
+                            value=sample_torch(torch,fixture,args.device,cadence,synchronize)
                         else:
                             value=workers[lane].request(dict(op="sample",cadence=cadence,capture=lane not in captured))
                             fingerprint=row["fingerprints"].setdefault(lane,value["state_sha256"])
                             if value["state_sha256"] != fingerprint: raise ValueError("native state changed across identical reset trajectories")
                         validate_sample(value,cadence,config["steps"])
                         if lane not in captured: captured[lane]=value
-                        if lane == "torch": reference.compare(value["state"],captured[lane]["state"])
+                        if lane == "torch": compare(value["state"],captured[lane]["state"])
                         close_values(value["losses"],captured[lane]["losses"])
                         sample["times_ms"][lane]=value["elapsed_ms"]
                     for lane in ("baseline","candidate"):
                         row["captures"][cadence+"_"+lane] = captured[lane]
-                        reference.compare(captured[lane]["state"],captured["torch"]["state"])
+                        compare(captured[lane]["state"],captured["torch"]["state"])
                         close_values(captured[lane]["losses"],captured["torch"]["losses"])
                     row["captures"][cadence+"_torch"] = captured["torch"]
             row["summary"]={cadence:{lane:statistics.median(s["times_ms"][lane] for s in row["samples"]
@@ -202,9 +207,11 @@ def main():
         parser.add_argument("--"+label,type=Path,required=True)
         parser.add_argument("--"+label+"-source",required=True)
     parser.add_argument("--device",choices=("mps","cuda"),required=True)
+    parser.add_argument("--graph",action="store_true",help="v2 Linear/GELU/gain/ReLU graph, exact gradients")
     parser.add_argument("--output",type=Path,required=True)
     args=parser.parse_args()
     result=dict(schema="spiraltorch.resident_training_comparison.v1",status="error",cases=[],
+        workload="graph" if args.graph else "dense",
         boundary="rotating native A/B and eager torch; f32 tanh-GELU mean-MSE plain SGD; device-persistent batch/weights; 8 updates, all losses read; 2 warmups+8 retained samples per cadence; reset/probes excluded; no fastest-PyTorch/quality claim",
         safety_difference="Rust validates every intermediate and commits parameters transactionally; eager torch has no matching per-stage finite/rollback checks for these fixed finite fixtures",
         readback_difference="Immediate reads each step; deferred Rust reads owning snapshots after enqueue, while torch stacks retained losses for one final host copy")

@@ -69,8 +69,32 @@ is **not yet exposed by production Python/JavaScript wrapper classes**; their
 dense-only plan entrypoints explicitly reject rich/v2 graphs before requesting a
 device. It does not change `pure::Tensor` storage,
 generic autograd, `ModuleTrainer` or GNN execution. General forward-only compilation
-and pooled pointwise VJP scratch remain follow-up work. There is no new graph
-throughput, browser speedup or CUDA performance claim.
+and production client exposure remain follow-up work.
+
+## Reusable Workspace
+
+Graph construction prepares pointwise forward/VJP bind groups, contribution buffers,
+and two-pass unbroadcast partials once. `step()` reuses them on the owning queue;
+it creates no pointwise buffers or bind groups. Kernels, reduction order, validation
+and transactional commit are unchanged. This is per-graph ownership, not a global
+pool or shared mutable scratch on `PointwiseVjpPlan`: standalone `run()` calls still
+produce independent results. The graph retains the extra scratch until dropped.
+Command encoders, queue staging and requested snapshots can still allocate.
+
+The shared `resident_training_bench` native/browser worker accepts `graph: true`
+in its configuration. `tools/bench_resident_training_vs_torch.py --graph` and the
+optional final `graph` argument of `tools/bench_resident_training_browser.cjs` run
+the same fixed nine mixed-graph workloads, including more than 256 reduction rows.
+Freeze a clean harness-only baseline and a clean optimized revision before building
+both products. The harness validates source identity and numerical trajectories,
+rotates lane order, and retains eight measured blocks after two warmups per cadence.
+Each interval includes eight real SGD updates and every requested loss readback;
+setup, resets and initial/final probes are excluded. Eager PyTorch does not perform
+the equivalent per-stage finite checks or atomic rollback, so this comparison is
+not a claim against the fastest available PyTorch configuration.
+
+See the [source-bound workspace comparison](../benchmarks/results/2026-09-10-resident-graph-workspace/README.md)
+for all measured cases, including regressions and the remaining PyTorch gap.
 
 ## Reproduce
 
@@ -90,5 +114,7 @@ PYTORCH_ENABLE_MPS_FALLBACK=0 python -I tools/validate_resident_graph_training_v
 The same native/browser fixture checks input/middle/output gains, rank 1/2/3,
 more than 256 reduction rows, both policies, eight updates after a zero-rate probe,
 immutable snapshots, weight-only resume and late-failure all-parameter rejection.
+It also interleaves two independent graphs while changing batches, holds 24
+snapshots until after both graphs are dropped, and recovers failed workspaces.
 Torch independently replays every prediction, loss, input VJP, raw/effective
 parameter gradient and update. This is correctness evidence, not a benchmark.

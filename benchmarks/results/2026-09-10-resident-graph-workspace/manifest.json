@@ -1,0 +1,642 @@
+{
+  "schema": "spiraltorch.graph_workspace_evidence.v1",
+  "baseline": {
+    "status": "passed",
+    "source": "b13d5bdf556c1e1c436692b53e165bd947103e8e",
+    "tree": "391986f6206c8aba34310fad5b4b2d9e47fa2382",
+    "steps": [
+      {
+        "label": "native-build",
+        "command": [
+          "cargo",
+          "+1.98.0",
+          "build",
+          "--locked",
+          "--release",
+          "-p",
+          "st-nn",
+          "--no-default-features",
+          "--features",
+          "wgpu",
+          "--example",
+          "resident_training_bench"
+        ],
+        "returncode": 0,
+        "seconds": 82.99841141600336
+      },
+      {
+        "label": "wasm-build",
+        "command": [
+          "cargo",
+          "+1.98.0",
+          "build",
+          "--locked",
+          "--release",
+          "-p",
+          "st-nn",
+          "--no-default-features",
+          "--features",
+          "wgpu",
+          "--target",
+          "wasm32-unknown-unknown",
+          "--example",
+          "resident_training_bench_browser"
+        ],
+        "returncode": 0,
+        "seconds": 58.259807209004066
+      },
+      {
+        "label": "resident_training_bench-bindgen",
+        "command": [
+          "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+          "--target",
+          "web",
+          "--out-dir",
+          "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-workspace-20260910/baseline/resident_training_bench-wasm",
+          "--out-name",
+          "spiraltorch_wasm",
+          "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_training_bench_browser.wasm"
+        ],
+        "returncode": 0,
+        "seconds": 0.08948587499617133
+      }
+    ],
+    "products": {
+      "resident_training_bench": "d20411f8ae99e6b14172e51d2efe948fdce53c9d7637395e69fb140bec9ea0d8",
+      "resident_training_bench-wasm/spiraltorch_wasm.d.ts": "34c72db405d39a235086b96eafc5ee12ccf36afaf5d1ff004ea4f27e92ff1e19",
+      "resident_training_bench-wasm/spiraltorch_wasm.js": "dde2fb33cd55bda123ae4a3b92d21bb2f4b3fb68dd75c3676a7fede2b1c72b93",
+      "resident_training_bench-wasm/spiraltorch_wasm_bg.wasm.d.ts": "f6b0b720407fe29ddedcde4d444129712752ab4b5a61076cc6cd43624d85de72",
+      "resident_training_bench-wasm/spiraltorch_wasm_bg.wasm": "adb9a27c13b5ba8cc36b5c4978c4776abda29ea5a983c32002db6a9e0a7bf880",
+      "resident_training_bench-wasm/snippets/st-nn-f975d31addace2e2/inline0.js": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b"
+    },
+    "identity": {
+      "build_fingerprint": "sha256:77ed2714c1de6fdbd51ec586ca154682963018cb7dd74a781dfc1578a9ac59f1",
+      "manifest": {
+        "git": {
+          "commit": "b13d5bdf556c1e1c436692b53e165bd947103e8e",
+          "describe": "v0.4.27-205-gb13d5bdf",
+          "dirty": false,
+          "tree": "391986f6206c8aba34310fad5b4b2d9e47fa2382"
+        },
+        "host": "unknown-host",
+        "id": "Ryo-ST-ryospiralarchitect-2026-09-09T19:18:35.268Z-a7374e700b824952be0784f5931644e5",
+        "pkg": {
+          "name": "st-core",
+          "version": "1.10.0"
+        },
+        "profile": "release",
+        "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+        "seed": "a7374e700b824952be0784f5931644e5",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "triple": "aarch64-apple-darwin"
+        },
+        "timestamp": "2026-09-09T19:18:35.268Z",
+        "user": "ryospiralarchitect"
+      },
+      "schema": "spiraltorch.native_build_identity.v1"
+    }
+  },
+  "candidate": {
+    "status": "passed",
+    "source": "3b95f84012f3d7e25d89eba98936338458d0a071",
+    "tree": "504e10b249e029c3c9063c0f554c5b6aae4b8745",
+    "steps": [
+      {
+        "label": "native-build",
+        "command": [
+          "cargo",
+          "+1.98.0",
+          "build",
+          "--locked",
+          "--release",
+          "-p",
+          "st-nn",
+          "--no-default-features",
+          "--features",
+          "wgpu",
+          "--example",
+          "resident_training_bench",
+          "--example",
+          "resident_graph_training",
+          "--example",
+          "resident_nd_tensor"
+        ],
+        "returncode": 0,
+        "seconds": 58.77877683399856
+      },
+      {
+        "label": "wasm-build",
+        "command": [
+          "cargo",
+          "+1.98.0",
+          "build",
+          "--locked",
+          "--release",
+          "-p",
+          "st-nn",
+          "--no-default-features",
+          "--features",
+          "wgpu",
+          "--target",
+          "wasm32-unknown-unknown",
+          "--example",
+          "resident_training_bench_browser",
+          "--example",
+          "resident_graph_training_browser",
+          "--example",
+          "resident_nd_tensor_browser"
+        ],
+        "returncode": 0,
+        "seconds": 44.475464916999044
+      },
+      {
+        "label": "resident_training_bench-bindgen",
+        "command": [
+          "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+          "--target",
+          "web",
+          "--out-dir",
+          "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-workspace-20260910/candidate/resident_training_bench-wasm",
+          "--out-name",
+          "spiraltorch_wasm",
+          "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_training_bench_browser.wasm"
+        ],
+        "returncode": 0,
+        "seconds": 0.06751791699934984
+      },
+      {
+        "label": "resident_graph_training-bindgen",
+        "command": [
+          "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+          "--target",
+          "web",
+          "--out-dir",
+          "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-workspace-20260910/candidate/resident_graph_training-wasm",
+          "--out-name",
+          "spiraltorch_wasm",
+          "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_graph_training_browser.wasm"
+        ],
+        "returncode": 0,
+        "seconds": 0.06627758300601272
+      },
+      {
+        "label": "resident_nd_tensor-bindgen",
+        "command": [
+          "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+          "--target",
+          "web",
+          "--out-dir",
+          "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-workspace-20260910/candidate/resident_nd_tensor-wasm",
+          "--out-name",
+          "spiraltorch_wasm",
+          "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_nd_tensor_browser.wasm"
+        ],
+        "returncode": 0,
+        "seconds": 0.0631733339978382
+      }
+    ],
+    "products": {
+      "resident_training_bench": "240510f257a4dd5a266d320733a0783c11d8e072b7c233247537b7b780decfaa",
+      "resident_graph_training": "24c93403ba2640a3766d4946024ecce2662c1238cb00929eb639d1b0c4ae1ca3",
+      "resident_nd_tensor": "0281d88ddefcb4ddbb180cc479310b5da66d6457d8eebd8aa4b363b054cb8d0c",
+      "resident_training_bench-wasm/spiraltorch_wasm.d.ts": "34c72db405d39a235086b96eafc5ee12ccf36afaf5d1ff004ea4f27e92ff1e19",
+      "resident_training_bench-wasm/spiraltorch_wasm.js": "77ffc455f6d257d4413d1acc0ccae2e97a380b22803835e373b65eb23a341ef4",
+      "resident_training_bench-wasm/spiraltorch_wasm_bg.wasm.d.ts": "f6b0b720407fe29ddedcde4d444129712752ab4b5a61076cc6cd43624d85de72",
+      "resident_training_bench-wasm/spiraltorch_wasm_bg.wasm": "643c390b184988fa87e4ca036721bfa7ed964393ca889af447c25cde36c70a0b",
+      "resident_training_bench-wasm/snippets/st-nn-f975d31addace2e2/inline0.js": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b",
+      "resident_graph_training-wasm/spiraltorch_wasm.d.ts": "5ab8a1a606c792adb369386d2bc9ced18deec962f601d9155e068d5f4ed5ca33",
+      "resident_graph_training-wasm/spiraltorch_wasm.js": "e8ab76ea7746c9637f1c18041dfe4d0d3efd92893f0d6c90b559b242f0f2f6ed",
+      "resident_graph_training-wasm/spiraltorch_wasm_bg.wasm.d.ts": "a5f612472939e5e1ec0886b2b214dfc0975553445d61fb1a1f07ab6289ed5a58",
+      "resident_graph_training-wasm/spiraltorch_wasm_bg.wasm": "edbaf08f27bca1d91af15398f3bb3829a47fce3174f767ecb6a0bbc9b646551a",
+      "resident_nd_tensor-wasm/spiraltorch_wasm.d.ts": "ce0505f26c33d32234e271d846abf3e3d2a1e08018c2374caf89355c22e1001c",
+      "resident_nd_tensor-wasm/spiraltorch_wasm.js": "6f348789975c8823c0dad8c2be9b5030b744aec1311d37af256e17cd60d94897",
+      "resident_nd_tensor-wasm/spiraltorch_wasm_bg.wasm.d.ts": "1db77e73ef0e944be69adbe28853d18e5f6caa46b35e42e732338c9008fdfe4a",
+      "resident_nd_tensor-wasm/spiraltorch_wasm_bg.wasm": "38b1ea1e22805e91ac6e268fe0dac492ffd9c1dcc778deb3b38b4cec47516cba"
+    },
+    "identity": {
+      "build_fingerprint": "sha256:c9a29aed907007af2b80a03d52e4b1bf02dfa555db84f414dc874266a87f7c88",
+      "manifest": {
+        "git": {
+          "commit": "3b95f84012f3d7e25d89eba98936338458d0a071",
+          "describe": "v0.4.27-206-g3b95f840",
+          "dirty": false,
+          "tree": "504e10b249e029c3c9063c0f554c5b6aae4b8745"
+        },
+        "host": "unknown-host",
+        "id": "Ryo-ST-ryospiralarchitect-2026-09-09T19:25:07.552Z-e115df2b3a0b4587aaf5d71eb49f7fcf",
+        "pkg": {
+          "name": "st-core",
+          "version": "1.10.0"
+        },
+        "profile": "release",
+        "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+        "seed": "e115df2b3a0b4587aaf5d71eb49f7fcf",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "triple": "aarch64-apple-darwin"
+        },
+        "timestamp": "2026-09-09T19:25:07.552Z",
+        "user": "ryospiralarchitect"
+      },
+      "schema": "spiraltorch.native_build_identity.v1"
+    }
+  },
+  "files": [
+    {
+      "path": "raw/backend-clippy.log.xz",
+      "source": "backend-clippy.log",
+      "raw_sha256": "011b4b0b9d4ddae8660ae6749bff5a9abb368020351ec5d2dbf0695ac960c9d8",
+      "xz_sha256": "3fde7de8a442ff615094a36f2ea936bd6abf0a735938b208e68ea9562704158e",
+      "raw_bytes": 115261,
+      "xz_bytes": 3932
+    },
+    {
+      "path": "raw/baseline__native-build.log.xz",
+      "source": "baseline/native-build.log",
+      "raw_sha256": "9ff311e69e7e083c4410543666849b88a1aa1ca1e2d9037acf75c2455ab3a44c",
+      "xz_sha256": "3a48ffcf587fcb73f383f5070edf88ba4e009a3ed9d288396500c2473cad7d63",
+      "raw_bytes": 115953,
+      "xz_bytes": 3796
+    },
+    {
+      "path": "raw/baseline__receipt.json.xz",
+      "source": "baseline/receipt.json",
+      "raw_sha256": "9d5ef13c0866cb6ec437e16ae8edb880bbf6f36361372d75ce65c071daf85aab",
+      "xz_sha256": "65fd876826768a97363714982a306f3736c93f21e0fb1ba980339a5d87139df5",
+      "raw_bytes": 3419,
+      "xz_bytes": 1324
+    },
+    {
+      "path": "raw/baseline__resident_training_bench-bindgen.log.xz",
+      "source": "baseline/resident_training_bench-bindgen.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/baseline__wasm-build.log.xz",
+      "source": "baseline/wasm-build.log",
+      "raw_sha256": "8313c86a6853fc3d4bc5f935fc17faf2d37e3254b76233bf31419900310e74ea",
+      "xz_sha256": "813f652945e5db61890f3d83886244805599a7e39166b90aa6192529399255f3",
+      "raw_bytes": 112598,
+      "xz_bytes": 3552
+    },
+    {
+      "path": "raw/bench-validation.json.xz",
+      "source": "bench-validation.json",
+      "raw_sha256": "7e46a10f195d7370421bae7d0859ce977c4180171dd23891c5205aee02198a17",
+      "xz_sha256": "acf0a8a2afe461e176e563b033eb9bd4418251205251f738b62fbea4032f1042",
+      "raw_bytes": 41532,
+      "xz_bytes": 5860
+    },
+    {
+      "path": "raw/browser-bench.json.xz",
+      "source": "browser-bench.json",
+      "raw_sha256": "1ab300870e286434f6cae2b58749323410f00a45f5e3bf0f9bf769fab302b583",
+      "xz_sha256": "f23fc385c15be2549b3cb6871101b95982991ab050c1ecc597552534183d5b22",
+      "raw_bytes": 30112613,
+      "xz_bytes": 1709556
+    },
+    {
+      "path": "raw/browser-bench.json.cases.jsonl.xz",
+      "source": "browser-bench.json.cases.jsonl",
+      "raw_sha256": "83cd2c0146e89c346b2690935acd849bde67e813b938d1f9f91eee4b5e928f63",
+      "xz_sha256": "40d7955e639fe78af99289e6f211654086b69cfe773599412f96312f2232bcb7",
+      "raw_bytes": 30111144,
+      "xz_bytes": 1709352
+    },
+    {
+      "path": "raw/browser-bench.json.progress.jsonl.xz",
+      "source": "browser-bench.json.progress.jsonl",
+      "raw_sha256": "d432033afcfa9abbb5e3dd15a0a3a49acae19f7ac192ed0cac85a96ab7913c44",
+      "xz_sha256": "51e199445bd629d58b98bebe839dd8aa9715c8c6e783941de632408397943824",
+      "raw_bytes": 158998,
+      "xz_bytes": 5308
+    },
+    {
+      "path": "raw/browser-bench.log.xz",
+      "source": "browser-bench.log",
+      "raw_sha256": "88508a454fd7403573ba977aed4661f44dcac1694c7f2b4cc361bc9f0f83f83f",
+      "xz_sha256": "019b0cc403b28e75b37450afae3517eec482fc4be6708af0e7dfb7cf775cb4d1",
+      "raw_bytes": 1836,
+      "xz_bytes": 256
+    },
+    {
+      "path": "raw/browser-graph.json.xz",
+      "source": "browser-graph.json",
+      "raw_sha256": "9b84986be9ab376290e9e6c9244688031de8a8ba2b1c125b4446ae52b64bb17c",
+      "xz_sha256": "99e28b59822edc73c1b81ec28ee2fc4761b9946b8065e094b38230ee7db2e625",
+      "raw_bytes": 1743042,
+      "xz_bytes": 75864
+    },
+    {
+      "path": "raw/browser-graph.log.xz",
+      "source": "browser-graph.log",
+      "raw_sha256": "50bc04426f2d593ec6895f3cb4d70ac6f1ec5520b72a5c4bd0aa51a51f3e71b9",
+      "xz_sha256": "d9ac9746659a92e4d1cbf378f1d2c1808199a56d039e13d0501dcab6f791f925",
+      "raw_bytes": 145,
+      "xz_bytes": 192
+    },
+    {
+      "path": "raw/browser-nd.json.xz",
+      "source": "browser-nd.json",
+      "raw_sha256": "23ed985bab81eb56f5106732b937db2c55b61c98f82936b2d13aae8363bc44e8",
+      "xz_sha256": "1e0f88b4919e93b50748c292c6a508c847d514b02f1a1ead05778ac4bfc9629e",
+      "raw_bytes": 6219548,
+      "xz_bytes": 26256
+    },
+    {
+      "path": "raw/browser-nd.log.xz",
+      "source": "browser-nd.log",
+      "raw_sha256": "6ee623eab7f6aead7f1018f1ce08952b00fab51ad3015d7c9a3209eec24e3030",
+      "xz_sha256": "6f53358233f6d0c5518fc649cf56d7a12579f7806e577066f1f9a1c872212a9f",
+      "raw_bytes": 142,
+      "xz_bytes": 196
+    },
+    {
+      "path": "raw/candidate__native-build.log.xz",
+      "source": "candidate/native-build.log",
+      "raw_sha256": "7cbf8f06d00212447aa5e8e6c8b7cf6f4f0910c7691de63f3de69b5f2ac703e1",
+      "xz_sha256": "ecf3c745a565027d635598b341e99ead4dfb10ef293f79dd55495a531877c588",
+      "raw_bytes": 115118,
+      "xz_bytes": 3716
+    },
+    {
+      "path": "raw/candidate__receipt.json.xz",
+      "source": "candidate/receipt.json",
+      "raw_sha256": "e669593424e3f2b3cc52836b076d11a26a873a455421f34b7c9892ad3447de25",
+      "xz_sha256": "4324acb1914916256811099fc9becbbb70c4d1078f2619e8896199d71e430e71",
+      "raw_bytes": 6259,
+      "xz_bytes": 1812
+    },
+    {
+      "path": "raw/candidate__resident_graph_training-bindgen.log.xz",
+      "source": "candidate/resident_graph_training-bindgen.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/candidate__resident_nd_tensor-bindgen.log.xz",
+      "source": "candidate/resident_nd_tensor-bindgen.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/candidate__resident_training_bench-bindgen.log.xz",
+      "source": "candidate/resident_training_bench-bindgen.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/candidate__wasm-build.log.xz",
+      "source": "candidate/wasm-build.log",
+      "raw_sha256": "d8680c0b0c03f39399966fbe86e65f5bdc3ed8f2653e481251f33a657a633694",
+      "xz_sha256": "a4e33b90b5c5d226af3fbbe9f35240e4f1d2187af4a32a975499aed320d73b83",
+      "raw_bytes": 111932,
+      "xz_bytes": 3496
+    },
+    {
+      "path": "raw/checks-r2__backend-clippy.log.xz",
+      "source": "checks-r2/backend-clippy.log",
+      "raw_sha256": "86be7f76acd584169ce59c1d4ce9f7ae65f3497d682810ac3681a5765ae0bb2c",
+      "xz_sha256": "af870e4f5ede437d88f8b202fc446df2881d8f64dcde702d528c37ece9c06ab1",
+      "raw_bytes": 114163,
+      "xz_bytes": 3628
+    },
+    {
+      "path": "raw/checks-r2__backend-tests.log.xz",
+      "source": "checks-r2/backend-tests.log",
+      "raw_sha256": "b2c8f3b814010983c6b1e736f91bc078f179bc56800fb0b8aa495ed2f58e6184",
+      "xz_sha256": "f6a948c8d9c64b13613d8bb692e95d031d4ba2667ddc392c6d02ab3de48cc2d1",
+      "raw_bytes": 124313,
+      "xz_bytes": 6172
+    },
+    {
+      "path": "raw/checks-r2__checks.jsonl.xz",
+      "source": "checks-r2/checks.jsonl",
+      "raw_sha256": "7f3d0223b3ecf04c97d7f3db0ff43b5f65f7d82308b9c1ee3bca816a38c8d870",
+      "xz_sha256": "bfd226fe4b3806f4b70c98a84badc39069bb58f45726f992f75be980f3d4bd14",
+      "raw_bytes": 1475,
+      "xz_bytes": 500
+    },
+    {
+      "path": "raw/checks-r2__nn-clippy.log.xz",
+      "source": "checks-r2/nn-clippy.log",
+      "raw_sha256": "a6fac4644146bd478acd0b3f732db024572887855152010fff8ee96f90e1c20f",
+      "xz_sha256": "29120d4d4e7e55cce90d00403941948cdc2d85aaae882532c062fd5708d78e6e",
+      "raw_bytes": 127772,
+      "xz_bytes": 5696
+    },
+    {
+      "path": "raw/checks-r2__nn-tests.log.xz",
+      "source": "checks-r2/nn-tests.log",
+      "raw_sha256": "c97f6663392a0b21584403e860867e738f2bbbd084fe3929c194bca274be4959",
+      "xz_sha256": "78137855ff34aa69f1f566d482957092952ffecd266e57c6c11f47035422df5e",
+      "raw_bytes": 180026,
+      "xz_bytes": 14224
+    },
+    {
+      "path": "raw/checks-r2__python-tests.log.xz",
+      "source": "checks-r2/python-tests.log",
+      "raw_sha256": "5eef82feee5132a0329fcd4e9a2ac83ef39e22083355e420b549431f0db61d47",
+      "xz_sha256": "848c3524fd288268a659f7c657dd540ace1ec78c47bc6e94c796772fc15da0d8",
+      "raw_bytes": 1420,
+      "xz_bytes": 464
+    },
+    {
+      "path": "raw/checks-r2__wasm-clippy.log.xz",
+      "source": "checks-r2/wasm-clippy.log",
+      "raw_sha256": "c03b2b7bf7ce8f106c7a4450bf5a7d36353db1a6849f6a86e5c0de4d9975d36f",
+      "xz_sha256": "25b233a1152d7f2254a2d05af91bc85933f9be2a6524b600a5a83bb2285e0355",
+      "raw_bytes": 111277,
+      "xz_bytes": 3452
+    },
+    {
+      "path": "raw/checks.jsonl.xz",
+      "source": "checks.jsonl",
+      "raw_sha256": "fa1d625589c61f61fe32e71ef99f3a22670ef9b57757f074f5cb77d1a6ce1636",
+      "xz_sha256": "72b3dd511dde23bfc2da62c18a69b3615267cf92c15cbbb259400bba4a94d712",
+      "raw_bytes": 215,
+      "xz_bytes": 224
+    },
+    {
+      "path": "raw/checks.py.xz",
+      "source": "checks.py",
+      "raw_sha256": "5fd667f4a6e8a0289b7f39e6c51a5481cfd6db719156ff26f7819d4fc6d75e1e",
+      "xz_sha256": "05fc85d843e6f4bb4e3abbf4e1c923ffc5ed0ff887e2764ae6a43eff977a3947",
+      "raw_bytes": 1961,
+      "xz_bytes": 920
+    },
+    {
+      "path": "raw/freeze.py.xz",
+      "source": "freeze.py",
+      "raw_sha256": "e624dc0a6d2a6cac1db97b7ded17144ed5b3937d5ae50745ec62b80f9eed0765",
+      "xz_sha256": "9a1f230b1a7325798ebc1806e8eb1d0602fa598a3c4bdaf741953545bcaa0a04",
+      "raw_bytes": 3225,
+      "xz_bytes": 1468
+    },
+    {
+      "path": "raw/harness-check.log.xz",
+      "source": "harness-check.log",
+      "raw_sha256": "2220364f65f64b187197808d5f4887655bd1bb7ee60e74af7f9e81ca05c22e4e",
+      "xz_sha256": "1a3a5f673515331137b4eedc1d13df58fae952b37a82e53bd2a5e41becb97138",
+      "raw_bytes": 115885,
+      "xz_bytes": 3808
+    },
+    {
+      "path": "raw/native-bench.baseline.stderr.xz",
+      "source": "native-bench.baseline.stderr",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/native-bench.candidate.stderr.xz",
+      "source": "native-bench.candidate.stderr",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/native-bench.json.xz",
+      "source": "native-bench.json",
+      "raw_sha256": "e35118896bd638b8c5993942cb9775febb3f5f50bb7c9ed277da8f8e92625cf1",
+      "xz_sha256": "a6faa8bb16fcde254d84c229648dfed1bb708677045bfc2b69eb05a7fb20ad01",
+      "raw_bytes": 93179515,
+      "xz_bytes": 2578616
+    },
+    {
+      "path": "raw/native-bench.log.xz",
+      "source": "native-bench.log",
+      "raw_sha256": "388653760e0339d5527f1ecbda8c6efbad8fdeef1b4f34ef2f6bd0f5fc4042ae",
+      "xz_sha256": "38d0fb3b9284c5b2439cc79e26c0de7e2e902dd367a2f8ae555b9addbbeb0440",
+      "raw_bytes": 2846,
+      "xz_bytes": 788
+    },
+    {
+      "path": "raw/native-graph.json.xz",
+      "source": "native-graph.json",
+      "raw_sha256": "b36a7624d4b2ed3a18b4dfa47c5211951062635e72e283ba7f040ef7da98ca8c",
+      "xz_sha256": "8d981361fb78db2a9fa61ecb27f21485eba51a2b85813d2e09fbbf77b91d1857",
+      "raw_bytes": 1739421,
+      "xz_bytes": 75620
+    },
+    {
+      "path": "raw/native-graph.log.xz",
+      "source": "native-graph.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/native-nd.json.xz",
+      "source": "native-nd.json",
+      "raw_sha256": "8bda23c68b41ef66810807d6e8ec240edc903ef53a43a5ef615bbb94dd897ab8",
+      "xz_sha256": "24decc6c0f8c02d4c76a616abff01ad5de7ed9f2af8c0c0bb8b1686ca638ad55",
+      "raw_bytes": 2738065,
+      "xz_bytes": 24196
+    },
+    {
+      "path": "raw/native-nd.log.xz",
+      "source": "native-nd.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "xz_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275",
+      "raw_bytes": 0,
+      "xz_bytes": 32
+    },
+    {
+      "path": "raw/optimization.diff.xz",
+      "source": "optimization.diff",
+      "raw_sha256": "380c65105ee7f6bf4266b1d5cedc174eb666520f7e0a4e6014887e425a6e363b",
+      "xz_sha256": "490957e30a78584878b07336def348f73f21ec06e2a2120417b73816510f2a09",
+      "raw_bytes": 22795,
+      "xz_bytes": 6100
+    },
+    {
+      "path": "raw/prior-main-ci.json.xz",
+      "source": "prior-main-ci.json",
+      "raw_sha256": "7d19d5cdce42aefa0b1315564b7a59e49115cc7880c9f436d59c37c9165dae5a",
+      "xz_sha256": "433493c2b66883959323127fdf72b9d8faa67166781709ae2f15468a43bc6638",
+      "raw_bytes": 99,
+      "xz_bytes": 160
+    },
+    {
+      "path": "raw/publish.py.xz",
+      "source": "publish.py",
+      "raw_sha256": "5a428c366cc2e6c5fb00ca16cade8d08b15259d9fdb25406604c0a8e25ed6367",
+      "xz_sha256": "3d77b6b00c5c89effb66ca423d0e78752fc4f64c24aaa677046718251ab5dcd3",
+      "raw_bytes": 3205,
+      "xz_bytes": 1512
+    },
+    {
+      "path": "raw/run-receipt.json.xz",
+      "source": "run-receipt.json",
+      "raw_sha256": "9ed2605b8c2eff37672b0a6d39fe16d6d0965039cd6bcaba613763d3aac21f2c",
+      "xz_sha256": "3babae25cadd4cf3a39ff0455bf5b5b6ad489e24bda4df7fdea3ac9f94132fc1",
+      "raw_bytes": 6892,
+      "xz_bytes": 1004
+    },
+    {
+      "path": "raw/run.py.xz",
+      "source": "run.py",
+      "raw_sha256": "fafd4392bb0d148bdb85c26602852b6fd6544a91c8dd72e5d01c089e3bd30bdb",
+      "xz_sha256": "45e7f951e1d6792dff63309ddda3adee64c28005017d02bf6d5f322460b8f3fa",
+      "raw_bytes": 4057,
+      "xz_bytes": 1492
+    },
+    {
+      "path": "raw/torch-graph-replay.json.xz",
+      "source": "torch-graph-replay.json",
+      "raw_sha256": "a895b6cf25f1a9d193846a3ce640723f42a9ae1d752eab97cda3dcd7edd57b93",
+      "xz_sha256": "a52e165d2ae576a9f5dd691e2fbd7c551ab02a01a31296c3a90da5955a8d927b",
+      "raw_bytes": 8585,
+      "xz_bytes": 756
+    },
+    {
+      "path": "raw/torch-graph-replay.log.xz",
+      "source": "torch-graph-replay.log",
+      "raw_sha256": "0be493d469d1103fb9fde198675f828adb6b78a5a1aef1ec1f6b541a53984fc0",
+      "xz_sha256": "0655b7b2420b4533a69abeba342afd9952d6141a487021a7bd1e04c9b15568c6",
+      "raw_bytes": 75,
+      "xz_bytes": 136
+    },
+    {
+      "path": "raw/torch-vjp-replay.json.xz",
+      "source": "torch-vjp-replay.json",
+      "raw_sha256": "9db6aeb13ce5cd317c20b8b11f716a6a2fa239986c7aef0fc565e5e122284f1f",
+      "xz_sha256": "e542accfba0c3b9e14f6b1b089df8543d867997777020392d9efe0970495db36",
+      "raw_bytes": 12125,
+      "xz_bytes": 1180
+    },
+    {
+      "path": "raw/torch-vjp-replay.log.xz",
+      "source": "torch-vjp-replay.log",
+      "raw_sha256": "6388a8ea79c51c8a8b727116229f50513a9ed09abc30f1d9ea2c2ce20626c3a8",
+      "xz_sha256": "ccd39262e7052abe90550cd4713075eac33424942b25cfcb43e4061a6d729e0d",
+      "raw_bytes": 117,
+      "xz_bytes": 160
+    },
+    {
+      "path": "raw/validate-bench.log.xz",
+      "source": "validate-bench.log",
+      "raw_sha256": "a66ec04d75165bee4a7cace0facee9c46d9bbad65813fc7fd3d8ce2e9691cf14",
+      "xz_sha256": "5e1e9a3b2b827b37bbd020be9321bb0b488fd2ffc0f7da2ed17a445845891b49",
+      "raw_bytes": 48,
+      "xz_bytes": 104
+    }
+  ],
+  "scope": "Raw local evidence, including the initial Clippy failure; no binaries, credentials, browser physical-device attestation, or CUDA result"
+}

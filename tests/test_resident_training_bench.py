@@ -15,6 +15,24 @@ spec.loader.exec_module(validation)
 
 
 class Admission(unittest.TestCase):
+    def test_graph_recipes_include_two_pass_unbroadcast(self):
+        values=bench.recipes(True)
+        self.assertEqual(len(values),9)
+        self.assertEqual({(tuple(v["shape"]),v["depth"]) for v in values},
+                         {((2,16,32),2),((2,129,32),4),((4,32,64),8)})
+        self.assertTrue(all(v["graph"] is True and v["steps"]==8 for v in values))
+        self.assertTrue(all("graph" not in v for v in bench.recipes()))
+
+    def test_graph_oracle_checks_every_parameter_and_gradient(self):
+        value=dict(loss=1., prediction=[.1], input_gradient=[.2], parameters=[[.3],[.4]],
+                   raw_gradients=[[.5],[.6]],effective_gradients=[[.5],[.6]])
+        self.assertEqual(bench.graph_reference.compare(value,value),0.)
+        for key in ("parameters","raw_gradients","effective_gradients"):
+            for replacement in ([[.3]], [[float("nan")],[.4]], [[.3],[100.]]):
+                bad=dict(value,**{key:replacement})
+                with self.subTest(key=key),self.assertRaises(ValueError):
+                    bench.graph_reference.compare(bad,value)
+
     def test_recipe_matrix_is_frozen_and_bounded(self):
         values=bench.recipes()
         self.assertEqual(len(values),9)

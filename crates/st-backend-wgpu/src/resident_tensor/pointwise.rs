@@ -327,18 +327,40 @@ impl PointwisePlan {
         inherited: &wgpu::Buffer,
         flags: &wgpu::Buffer,
     ) {
+        let binding = self.bind_into(inputs, output, inherited, flags);
+        self.encode_bound(encoder, &binding);
+    }
+
+    /// Bind a graph's private stable buffers once, not on every training step.
+    pub(crate) fn bind_into(
+        &self,
+        inputs: &[&wgpu::Buffer],
+        output: &wgpu::Buffer,
+        inherited: &wgpu::Buffer,
+        flags: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
         assert_eq!(inputs.len(), self.layouts.len());
         let buffers: Vec<_> = inputs
             .iter()
             .copied()
             .chain([output, &self.metadata, inherited, flags])
             .collect();
-        vjp::encode(
+        vjp::bind(
             self.device.runtime().context().device(),
-            encoder,
             &self.binding_layout,
-            &self.pipeline,
             &buffers,
+        )
+    }
+
+    pub(crate) fn encode_bound(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        binding: &wgpu::BindGroup,
+    ) {
+        vjp::encode_bound(
+            encoder,
+            &self.pipeline,
+            binding,
             [self.grid[0], self.grid[1]],
         );
     }

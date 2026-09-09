@@ -4,13 +4,25 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use st_backend_wgpu::{
     resident_matmul::{MatmulAccumulation, MatmulKernel},
-    resident_training::{StepReadback, TrainingState, TrainingStateReadback},
+    resident_training::{
+        graph::{GraphStateReadback, ResidentGraphTraining},
+        ResidentDenseTraining, StepReadback, TrainingState, TrainingStateReadback,
+    },
     runtime::WgpuRuntime,
 };
-use st_nn::{layers::Gelu, module::Module, resident::InferencePlan, Linear, Sequential};
+use st_nn::{
+    layers::{Gelu, Relu, Scaler},
+    module::Module,
+    resident::{GraphGradientPolicy, InferencePlan},
+    Linear, Sequential,
+};
 use st_tensor::{NdLayout, Tensor};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -19,6 +31,8 @@ pub struct Config {
     pub depth: usize,
     pub seed: u32,
     pub steps: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub graph: bool,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -52,6 +66,52 @@ async fn state(snapshot: TrainingStateReadback) -> Result<TrainingState> {
     Ok(result?)
 }
 
+async fn graph_state(snapshot: GraphStateReadback) -> Result<Value> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let value = snapshot.read()?;
+    #[cfg(target_arch = "wasm32")]
+    let value = snapshot.read_async().await?;
+    Ok(
+        json!({"loss":value.loss,"prediction":value.prediction,"input_gradient":value.input_gradient,
+        "parameters":value.graph.parameters().iter().map(|p|&p.values).collect::<Vec<_>>(),
+        "raw_gradients":value.raw_gradients,"effective_gradients":value.effective_gradients}),
+    )
+}
+
+enum Training {
+    Dense(ResidentDenseTraining),
+    Graph(ResidentGraphTraining),
+}
+
+impl Training {
+    fn upload_batch(&mut self, input: &[f32], target: &[f32]) -> Result<()> {
+        match self {
+            Self::Dense(gpu) => gpu.upload_batch(input, target)?,
+            Self::Graph(gpu) => gpu.upload_batch(input, target)?,
+        }
+        Ok(())
+    }
+    fn step(&mut self, rate: f32) -> Result<()> {
+        match self {
+            Self::Dense(gpu) => gpu.step(rate)?,
+            Self::Graph(gpu) => gpu.step(rate)?,
+        };
+        Ok(())
+    }
+    fn loss_snapshot(&self) -> Result<StepReadback> {
+        Ok(match self {
+            Self::Dense(gpu) => gpu.loss_snapshot()?,
+            Self::Graph(gpu) => gpu.loss_snapshot()?,
+        })
+    }
+    async fn state(&self) -> Result<Value> {
+        match self {
+            Self::Dense(gpu) => Ok(state_json(&state(gpu.state_snapshot()?).await?)),
+            Self::Graph(gpu) => graph_state(gpu.state_snapshot()?).await,
+        }
+    }
+}
+
 fn state_json(value: &TrainingState) -> Value {
     json!({"loss":value.loss,"prediction":value.prediction,"input_gradient":value.input_gradient,
         "parameters":value.parameters.iter().map(|p| json!({"weights":p.weights,"bias":p.bias})).collect::<Vec<_>>(),
@@ -75,10 +135,19 @@ impl Benchmark {
             return Err("benchmark exceeds bounded shape/depth/steps/seed".into());
         }
         let mut model = Sequential::new();
+        if config.graph {
+            model.push(Scaler::new("input_gain", width)?);
+        }
         for i in 0..config.depth {
             model.push(Linear::new(format!("linear_{i}"), width, width)?);
             if i + 1 < config.depth {
                 model.push(Gelu::new());
+            }
+            if config.graph {
+                model.push(Scaler::new(format!("gain_{i}"), width)?);
+                if i + 1 < config.depth {
+                    model.push(Relu::new());
+                }
             }
         }
         let mut seed = config.seed;
@@ -90,13 +159,18 @@ impl Benchmark {
         };
         let gain = 1.0 / (width as f32).sqrt();
         model.visit_parameters_mut(&mut |p| {
+            let is_gain = p.name().ends_with("gain");
             let scale = if p.name().ends_with("weight") {
                 gain
             } else {
                 0.25
             };
             for value in p.value_mut().data_mut() {
-                *value = next() * scale;
+                *value = if is_gain {
+                    1. + next() * 0.25
+                } else {
+                    next() * scale
+                };
             }
             Ok(())
         })?;
@@ -126,12 +200,22 @@ impl Benchmark {
 
     pub async fn sample(&self, cadence: Cadence, capture: bool, now: fn() -> f64) -> Result<Value> {
         let setup = now();
-        let mut gpu = self.plan.compile_training_wgpu_with_options(
-            self.runtime.clone(),
-            Default::default(),
-            MatmulKernel::Register2x2,
-            MatmulAccumulation::Sequential,
-        )?;
+        let mut gpu = if self.config.graph {
+            Training::Graph(self.plan.compile_graph_training_wgpu_with_options(
+                self.runtime.clone(),
+                GraphGradientPolicy::Exact,
+                Default::default(),
+                MatmulKernel::Register2x2,
+                MatmulAccumulation::Sequential,
+            )?)
+        } else {
+            Training::Dense(self.plan.compile_training_wgpu_with_options(
+                self.runtime.clone(),
+                Default::default(),
+                MatmulKernel::Register2x2,
+                MatmulAccumulation::Sequential,
+            )?)
+        };
         gpu.upload_batch(self.input.data(), self.target.data())?;
         // Settle uploads and lazy pipeline compilation without changing the weights.
         gpu.step(0.)?;
@@ -157,8 +241,7 @@ impl Benchmark {
         }
         // The final zero-rate VJP and serialization are deliberately outside timing.
         gpu.step(0.)?;
-        let final_state = state(gpu.state_snapshot()?).await?;
-        let final_state = state_json(&final_state);
+        let final_state = gpu.state().await?;
         let state_sha256 = format!("{:x}", Sha256::digest(serde_json::to_vec(&final_state)?));
         Ok(
             json!({"status":"passed","cadence":cadence,"elapsed_ms":elapsed_ms,"setup_ms":setup_ms,

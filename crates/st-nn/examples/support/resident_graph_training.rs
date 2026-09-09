@@ -273,6 +273,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         }
     }
     let guards = guards(runtime.clone()).await?;
+    let workspace_reuse = workspace_reuse(runtime.clone()).await?;
     let mut primitive_checks = Vec::new();
     for name in ["relu", "gelu", "scaler"] {
         let mut model = Sequential::new();
@@ -308,8 +309,60 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         json!({"schema":"spiraltorch.resident_graph_training_fixture.v1","status":"passed",
         "build_manifest":serde_json::from_str::<Value>(st_core::build_manifest_json())?,"primitive_checks":primitive_checks,
         "adapter":format!("{:?}",runtime.adapter_info()),"cases":cases,"guards":guards,
+        "workspace_reuse":workspace_reuse,
         "scope":"Sequential with owned gains; mean-MSE plain SGD; no intermediate host readbacks; not a throughput claim"}),
     )
+}
+
+async fn workspace_reuse(runtime: WgpuRuntime) -> Result<Value> {
+    let mut records = Vec::new();
+    for shape in [vec![4], vec![3, 4], vec![2, 129, 4]] {
+        let layout = NdLayout::contiguous(&shape)?;
+        let rows = layout.len() / 4;
+        let policy = GraphGradientPolicy::Exact;
+        let mut models = [model(17)?, model(43)?];
+        let plans = models
+            .iter()
+            .map(|m| InferencePlan::from_module(m, layout.clone()))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let roles = plans[0]
+            .graph_definition()?
+            .parameters()
+            .iter()
+            .map(|p| p.role)
+            .collect::<Vec<_>>();
+        let mut graphs = plans
+            .iter()
+            .map(|p| p.compile_graph_training_wgpu(runtime.clone(), policy))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut captures = Vec::new();
+        // Same topology, distinct parameters/batches, alternating writes, deferred reads.
+        for round in 0..12 {
+            for lane in [round % 2, (round + 1) % 2] {
+                let x = Tensor::from_fn(rows, 4, |r, c| {
+                    ((r * 7 + c * 3 + round * 11 + lane * 5) % 23) as f32 / 16. - 0.5
+                })?;
+                let y = Tensor::from_fn(rows, 3, |r, c| x.data()[r * 4 + c] * 0.3 - 0.1)?;
+                let rate = if round % 3 == 0 { 0. } else { 0.025 };
+                graphs[lane].upload_batch(x.data(), y.data())?;
+                graphs[lane].step(rate)?;
+                captures.push((
+                    graphs[lane].state_snapshot()?,
+                    cpu_step(&mut models[lane], &x, &y, rate, policy, &roles)?,
+                ));
+            }
+        }
+        drop(graphs);
+        let mut maximum = 0f32;
+        for (snapshot, reference) in captures {
+            maximum = maximum.max(compare(&state(snapshot).await?, &reference)?);
+        }
+        records.push(
+            json!({"input_shape":shape,"independent_graphs":2,"snapshots":24,
+            "steps_per_graph":12,"read_after_graph_drop":true,"max_abs_error":maximum}),
+        );
+    }
+    Ok(json!(records))
 }
 
 fn guard_plan(rows: usize, weight: f32, gain: f32) -> Result<InferencePlan> {
@@ -397,6 +450,13 @@ async fn guards(runtime: WgpuRuntime) -> Result<Value> {
         records.push(
             json!({"case":name,"error":error.to_string(),"all_parameter_bits_unchanged":true}),
         );
+        // Reuse the exact failed workspace with a finite batch: no stale scratch/flags.
+        gpu.upload_batch(&vec![0.; rows], &vec![0.; rows])?;
+        gpu.step(0.1)?;
+        let recovered = state(gpu.state_snapshot()?).await?;
+        if recovered.loss != 0. || bits(&recovered.graph) != bits(&initial) {
+            return Err("failed workspace did not recover without a partial update".into());
+        }
     }
     let plan = guard_plan(1, 0., 0.)?;
     let initial = plan.graph_definition()?;

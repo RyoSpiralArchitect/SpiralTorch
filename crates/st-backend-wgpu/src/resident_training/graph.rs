@@ -2,7 +2,10 @@
 //! Uses the same GEMM and pointwise VJP kernels as the specialized public plans.
 use super::*;
 use crate::resident_tensor::{
-    pointwise::{vjp::PointwiseVjpPlan, PointwisePlan},
+    pointwise::{
+        vjp::{PointwiseVjpPlan, VjpWorkspace},
+        PointwisePlan,
+    },
     storage_limit,
 };
 pub use st_kernel_contracts::graph::{
@@ -19,6 +22,8 @@ enum Node {
     },
     Pointwise {
         plan: Box<PointwiseVjpPlan>,
+        workspace: Box<VjpWorkspace>,
+        forward: wgpu::BindGroup,
         parameters: Vec<usize>,
     },
 }
@@ -39,7 +44,6 @@ pub struct ResidentGraphTraining {
     target: wgpu::Buffer,
     validation: wgpu::Buffer,
     pointwise_flags: wgpu::Buffer,
-    empty_flags: wgpu::Buffer,
     loss: wgpu::Buffer,
     step_config: wgpu::Buffer,
     loss_pool: runtime::ReadbackPool,
@@ -385,12 +389,34 @@ impl ResidentGraphTraining {
                                 .map_err(TensorError::from)?,
                         );
                     }
+                    let plan = Box::new(PointwiseVjpPlan::new(PointwisePlan::new(
+                        device.clone(),
+                        chain.clone(),
+                        layouts,
+                    )?)?);
+                    let inputs: Vec<_> = std::iter::once(&activations[i])
+                        .chain(ids.iter().map(|&id| &parameters[id]))
+                        .collect();
+                    let destinations: Vec<_> = std::iter::once(&gradients[i])
+                        .chain(ids.iter().map(|&id| &raw_gradients[id]))
+                        .collect();
+                    let forward = plan.forward().bind_into(
+                        &inputs,
+                        &activations[i + 1],
+                        &empty_flags,
+                        &pointwise_flags,
+                    );
+                    let workspace = Box::new(plan.prepare_into(
+                        &inputs,
+                        &gradients[i + 1],
+                        &destinations,
+                        &empty_flags,
+                        &pointwise_flags,
+                    )?);
                     Node::Pointwise {
-                        plan: Box::new(PointwiseVjpPlan::new(PointwisePlan::new(
-                            device.clone(),
-                            chain.clone(),
-                            layouts,
-                        )?)?),
+                        plan,
+                        workspace,
+                        forward,
                         parameters: ids.clone(),
                     }
                 }
@@ -489,7 +515,6 @@ impl ResidentGraphTraining {
             target,
             validation,
             pointwise_flags,
-            empty_flags,
             loss,
             step_config,
             loss_pool,
@@ -636,22 +661,13 @@ impl ResidentGraphTraining {
             );
             encoder.copy_buffer_to_buffer(target.flags(), 0, &self.validation, n as u64 * 4, 4);
         }
-        for (i, node) in self.nodes.iter().enumerate() {
+        for node in &self.nodes {
             match node {
                 Node::Linear { forward, .. } => {
                     self.encode_passes(&mut encoder, std::slice::from_ref(forward))
                 }
-                Node::Pointwise { plan, parameters } => {
-                    let inputs: Vec<_> = std::iter::once(&self.activations[i])
-                        .chain(parameters.iter().map(|&id| &self.parameters[id]))
-                        .collect();
-                    plan.forward().encode_into(
-                        &mut encoder,
-                        &inputs,
-                        &self.activations[i + 1],
-                        &self.empty_flags,
-                        &self.pointwise_flags,
-                    );
+                Node::Pointwise { plan, forward, .. } => {
+                    plan.forward().encode_bound(&mut encoder, forward);
                 }
             }
         }
@@ -659,21 +675,15 @@ impl ResidentGraphTraining {
         for (i, node) in self.nodes.iter().enumerate().rev() {
             match node {
                 Node::Linear { backward, .. } => self.encode_passes(&mut encoder, backward),
-                Node::Pointwise { plan, parameters } => {
-                    let inputs: Vec<_> = std::iter::once(&self.activations[i])
-                        .chain(parameters.iter().map(|&id| &self.parameters[id]))
-                        .collect();
-                    let gradients: Vec<_> = std::iter::once(&self.gradients[i])
-                        .chain(parameters.iter().map(|&id| &self.raw_gradients[id]))
-                        .collect();
-                    plan.encode_into(
-                        &mut encoder,
-                        &inputs,
-                        &self.gradients[i + 1],
-                        &gradients,
-                        &self.empty_flags,
-                        &self.pointwise_flags,
-                    )?;
+                Node::Pointwise {
+                    plan,
+                    parameters,
+                    workspace,
+                    ..
+                } => {
+                    let gradients = std::iter::once(&self.gradients[i])
+                        .chain(parameters.iter().map(|&id| &self.raw_gradients[id]));
+                    plan.encode_prepared(&mut encoder, workspace, gradients);
                 }
             }
         }
