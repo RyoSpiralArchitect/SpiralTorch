@@ -60,3 +60,10 @@ in a test model state dict, a JS BigInt assertion serializer, and decimal f64 JS
 comparison against Rust's shortest-roundtripping f32. The latter was replaced
 by **f32 bit equality**, not a looser tolerance. These are not backend performance
 regressions or additional successful GPU evidence.
+
+Final surface review also found the shipped TypeScript declarations lagged the
+generated graph API. The follow-up changes declarations/tests only, not Rust or
+the measured runtime. `types-followup.json` binds those source files, generated
+declarations and successful generated/shipped TypeScript contract checks, plus
+the real CPU-only Node-WASM v2 transport/explicit-rejection check. These additional
+checks are separate from the original 43-entry manifest.

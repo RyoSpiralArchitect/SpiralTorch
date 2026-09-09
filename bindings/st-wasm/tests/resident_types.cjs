@@ -88,6 +88,38 @@ function checkNnContract(types, label) {
   assert.match(state, /readonly loss: number/);
   for(const method of ["weightValues","biasValues","weightGradientValues","biasGradientValues"])
     assert.match(state, new RegExp(method+"\\(stage: number\\): Float32Array"));
+  assert.match(plan, /readonly isDense: boolean/);
+  assert.match(plan, /compileGraphTrainingWebGpu\(gradient_policy: string, [^\n]*\): Promise<ResidentGraphTraining>/);
+  const graph=get("ResidentGraphTraining"), graphSnapshot=get("GraphTrainingSnapshot"),
+    graphParameters=get("GraphTrainingParametersSnapshot"), graphState=get("GraphTrainingState");
+  for(const declaration of [graph, graphSnapshot, graphState]) {
+    assert.match(declaration, /readonly gradientPolicy: string/);
+    assert.match(declaration, /readonly inputShape: Uint32Array/);
+    assert.match(declaration, /readonly outputShape: Uint32Array/);
+    assert.match(declaration, /readonly batchGeneration: bigint/);
+  }
+  for(const declaration of [graph, graphState]) {
+    assert.match(declaration, /readonly parameterCount: number/);
+    assert.match(declaration, /readonly stageCount: number/);
+  }
+  for(const declaration of [graphSnapshot, graphState]) assert.match(declaration, /readonly submittedStep: bigint/);
+  assert.match(graph, /readonly submittedSteps: bigint/);
+  assert.match(graph, /adapterInfo\(\): \{ name: string; backend: string; device_type: string \}/);
+  assert.match(graph, /uploadBatch\(input: Float32Array, target: Float32Array\): void/);
+  assert.match(graph, /step\(learning_rate: number\): bigint/);
+  assert.match(graph, /stateSnapshot\(\): GraphTrainingSnapshot/);
+  assert.match(graph, /lossSnapshot\(\): TrainingLossSnapshot/);
+  assert.match(graph, /parameterSnapshot\(\): GraphTrainingParametersSnapshot/);
+  assert.match(graphSnapshot, /readState\(\): Promise<GraphTrainingState>/);
+  assert.match(graphParameters, /readPlan\(\): Promise<InferencePlan>/);
+  assert.match(graphState, /readonly loss: number/);
+  assert.match(graphState, /parameterRole\(parameter: number\): string/);
+  assert.match(graphState, /parameterShape\(parameter: number\): Uint32Array/);
+  for(const method of ["parameterValues","parameterGradientValues","effectiveGradientValues"])
+    assert.match(graphState, new RegExp(method+"\\(parameter: number\\): Float32Array"));
+  for(const method of ["predictionValues","inputGradientValues"])
+    assert.match(graphState, new RegExp(method+"\\(\\): Float32Array"));
+  assert.match(graphState, /toPlan\(\): InferencePlan/);
   console.log(label + " resident NN TypeScript contract passed");
 }
 

@@ -1,0 +1,29 @@
+{
+  "status": "passed",
+  "scope": "declaration/test-only follow-up; no changed Rust runtime",
+  "runtime_source": "62c6b969aca8e7316e630a95bdacdf42765fef42",
+  "sources": {
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "369abf93d9c682cb4085f0c184d730292b83392e37717e2e7898ca58be8685f3",
+    "bindings/st-wasm/tests/resident_types.cjs": "71664471549fe1d973d5cfc30731d72e1173bfca2170606dc018664019b27413",
+    "bindings/st-wasm/tests/nn_plan.cjs": "4500e2489b91bb832477b03109bb6bf66214dd35c509a647a4cd6ce0d2850761"
+  },
+  "artifacts": {
+    "types-followup.log": "50c95105c4e2d5453d343330a499af8fdf3081fbdc095056c7344b9a6a972324",
+    "cpu-node-followup.log": "de12741aeb924f03681e69431971ab4ecffacb6bf753a60c4efa865278cae0ed",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu/spiraltorch_wasm.d.ts": "e2b2e577620242b3217ea991b5cb44db96e4651a05ffa07dcbeea6a44470c669",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/cpu-node-followup/spiraltorch_wasm.js": "cbfd2038de614e337aa435773e3d5ecffa36ef6ccc7d2d9ca6cfddd33b1462a6",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/cpu-node-followup/spiraltorch_wasm_bg.wasm": "16d8c78db054047c0b35b89d25565b54d523468182cc925cc1ba5e80eaa7cf4b"
+  },
+  "commands": [
+    [
+      "node",
+      "bindings/st-wasm/tests/resident_types.cjs",
+      "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/webgpu/spiraltorch_wasm.js"
+    ],
+    [
+      "node",
+      "bindings/st-wasm/tests/nn_plan.cjs",
+      "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/cpu-node-followup/spiraltorch_wasm.js"
+    ]
+  ]
+}
