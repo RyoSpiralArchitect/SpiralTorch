@@ -25,6 +25,22 @@ pub struct PointwiseVjpPlan {
     contribution_len: usize,
 }
 
+/// Private to one execution: public run() calls never share mutable scratch.
+/// All scratch elements that are read are overwritten by the preceding dispatch.
+pub(crate) struct VjpWorkspace {
+    contributions: wgpu::Buffer,
+    contribution_binding: wgpu::BindGroup,
+    reductions: Vec<ReductionWorkspace>,
+}
+
+enum ReductionWorkspace {
+    Direct,
+    Sum {
+        first: wgpu::BindGroup,
+        second: Option<Box<(wgpu::Buffer, wgpu::BindGroup)>>,
+    },
+}
+
 fn groups_grid(groups: usize, limits: &wgpu::Limits) -> Result<[u32; 2], TensorError> {
     let groups = u32::try_from(groups.max(1)).map_err(|_| TensorError::Limit("VJP groups"))?;
     let x = groups.min(limits.max_compute_workgroups_per_dimension);
@@ -265,6 +281,21 @@ impl PointwiseVjpPlan {
         inherited: &wgpu::Buffer,
         flags: &wgpu::Buffer,
     ) -> Result<(), TensorError> {
+        let workspace = self.prepare_into(inputs, cotangent, gradients, inherited, flags)?;
+        self.encode_prepared(encoder, &workspace, gradients.iter().copied());
+        Ok(())
+    }
+
+    /// Buffers must belong to the validated graph and stay fixed for this workspace.
+    /// The graph serializes execution on its queue; snapshots copy into fresh storage.
+    pub(crate) fn prepare_into(
+        &self,
+        inputs: &[&wgpu::Buffer],
+        cotangent: &wgpu::Buffer,
+        gradients: &[&wgpu::Buffer],
+        inherited: &wgpu::Buffer,
+        flags: &wgpu::Buffer,
+    ) -> Result<VjpWorkspace, TensorError> {
         assert_eq!(inputs.len(), self.forward.layouts.len());
         assert_eq!(gradients.len(), self.reductions.len());
         let gpu = self.forward.device.runtime().context().device();
@@ -285,71 +316,108 @@ impl PointwiseVjpPlan {
                 cotangent,
             ])
             .collect();
-        encode(
-            gpu,
-            encoder,
-            &self.layout,
-            &self.pipeline,
-            &buffers,
-            [self.forward.grid[0], self.forward.grid[1]],
-        );
+        let contribution_binding = bind(gpu, &self.layout, &buffers);
+        let mut reductions = Vec::with_capacity(self.reductions.len());
         for (reduction, &values) in self.reductions.iter().zip(gradients) {
-            if reduction.direct {
-                if !reduction.layout.is_empty() {
-                    encoder.copy_buffer_to_buffer(
-                        &contributions,
-                        reduction.source_offset,
-                        values,
-                        0,
-                        reduction.layout.len() as u64 * 4,
-                    );
-                }
-            } else if let Some((metadata, grid)) = &reduction.second {
+            reductions.push(if reduction.direct {
+                ReductionWorkspace::Direct
+            } else if let Some((metadata, _)) = &reduction.second {
                 let partials = runtime::empty_buffer::<f32>(
                     gpu,
                     "vjp.partials",
                     reduction.partial_len.max(1),
                     wgpu::BufferUsages::STORAGE,
                 )?;
-                encode(
+                let first = bind(
                     gpu,
-                    encoder,
                     &self.reduction_layout,
-                    &self.reduction_pipeline,
                     &[&contributions, &partials, &reduction.first, flags],
-                    reduction.first_grid,
                 );
-                encode(
+                let second = bind(
                     gpu,
-                    encoder,
                     &self.reduction_layout,
-                    &self.reduction_pipeline,
                     &[&partials, values, metadata, flags],
-                    *grid,
                 );
+                ReductionWorkspace::Sum {
+                    first,
+                    second: Some(Box::new((partials, second))),
+                }
             } else {
-                encode(
+                let first = bind(
                     gpu,
-                    encoder,
                     &self.reduction_layout,
-                    &self.reduction_pipeline,
                     &[&contributions, values, &reduction.first, flags],
-                    reduction.first_grid,
                 );
+                ReductionWorkspace::Sum {
+                    first,
+                    second: None,
+                }
+            });
+        }
+        Ok(VjpWorkspace {
+            contributions,
+            contribution_binding,
+            reductions,
+        })
+    }
+
+    /// Re-encode the same bindings without allocating buffers or bind groups.
+    /// Gradient destinations must be the ones supplied to prepare_into().
+    pub(crate) fn encode_prepared<'a>(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        workspace: &VjpWorkspace,
+        gradients: impl IntoIterator<Item = &'a wgpu::Buffer>,
+    ) {
+        encode_bound(
+            encoder,
+            &self.pipeline,
+            &workspace.contribution_binding,
+            [self.forward.grid[0], self.forward.grid[1]],
+        );
+        let mut gradients = gradients.into_iter();
+        for (reduction, bound) in self.reductions.iter().zip(&workspace.reductions) {
+            let values = gradients.next().expect("validated gradient slot");
+            match bound {
+                ReductionWorkspace::Direct => {
+                    if !reduction.layout.is_empty() {
+                        encoder.copy_buffer_to_buffer(
+                            &workspace.contributions,
+                            reduction.source_offset,
+                            values,
+                            0,
+                            reduction.layout.len() as u64 * 4,
+                        );
+                    }
+                }
+                ReductionWorkspace::Sum { first, second } => {
+                    encode_bound(
+                        encoder,
+                        &self.reduction_pipeline,
+                        first,
+                        reduction.first_grid,
+                    );
+                    if let Some(second) = second {
+                        let (_, binding) = second.as_ref();
+                        encode_bound(
+                            encoder,
+                            &self.reduction_pipeline,
+                            binding,
+                            reduction.second.as_ref().unwrap().1,
+                        );
+                    }
+                }
             }
         }
-        Ok(())
+        assert!(gradients.next().is_none(), "validated gradient count");
     }
 }
 
-pub(super) fn encode(
+pub(super) fn bind(
     gpu: &wgpu::Device,
-    encoder: &mut wgpu::CommandEncoder,
     layout: &wgpu::BindGroupLayout,
-    pipeline: &wgpu::ComputePipeline,
     buffers: &[&wgpu::Buffer],
-    grid: [u32; 2],
-) {
+) -> wgpu::BindGroup {
     let entries: Vec<_> = buffers
         .iter()
         .enumerate()
@@ -358,17 +426,25 @@ pub(super) fn encode(
             resource: b.as_entire_binding(),
         })
         .collect();
-    let binding = gpu.create_bind_group(&wgpu::BindGroupDescriptor {
+    gpu.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("vjp.operands"),
         layout,
         entries: &entries,
-    });
+    })
+}
+
+pub(super) fn encode_bound(
+    encoder: &mut wgpu::CommandEncoder,
+    pipeline: &wgpu::ComputePipeline,
+    binding: &wgpu::BindGroup,
+    grid: [u32; 2],
+) {
     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
         label: Some("pointwise.vjp"),
         timestamp_writes: None,
     });
     pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, &binding, &[]);
+    pass.set_bind_group(0, binding, &[]);
     pass.dispatch_workgroups(grid[0], grid[1], 1);
 }
 
