@@ -15,6 +15,19 @@ spec.loader.exec_module(validation)
 
 
 class Admission(unittest.TestCase):
+    def test_wide_matrix_is_explicit_bounded_and_separate(self):
+        values=bench.recipes(True,"wide")
+        self.assertEqual(len(values),9)
+        self.assertEqual({v["seed"] for v in values},{17,29,43})
+        self.assertEqual({(tuple(v["shape"]),v["depth"]) for v in values},
+                         {((4,64,64),8),((2,128,128),8),((2,64,256),4)})
+        self.assertTrue(all(v["graph"] is True and v["steps"]==8 for v in values))
+        for v in values:
+            self.assertLessEqual(v["shape"][0]*v["shape"][1]*v["shape"][2],32768)
+        for graph,matrix in ((False,"wide"),(True,"typo")):
+            with self.subTest(graph=graph,matrix=matrix),self.assertRaises(ValueError):
+                bench.recipes(graph,matrix)
+
     def test_graph_recipes_include_two_pass_unbroadcast(self):
         values=bench.recipes(True)
         self.assertEqual(len(values),9)

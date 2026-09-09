@@ -8,8 +8,9 @@ import initA, {TrainingBenchmark as A} from "/baseline/spiraltorch_wasm.js";
 import initB, {TrainingBenchmark as B} from "/candidate/spiraltorch_wasm.js";
 const element=document.querySelector("#result");
 const graph=new URL(location.href).searchParams.get("workload")==="graph";
+const matrix=new URL(location.href).searchParams.get("matrix")??"standard";
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
-  workload:graph?"graph":"dense",
+  workload:graph?"graph":"dense",matrix,
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
 async function progress(value) {
   element.textContent=JSON.stringify(value);
@@ -42,6 +43,7 @@ function compare(a,b) {
   return maximum;
 }
 try {
+  require(["standard","wide"].includes(matrix)&&(matrix!=="wide"||graph),"invalid workload matrix");
   await progress({stage:"initialize_modules"});
   await initA(); await initB();
   const adapter=await navigator.gpu.requestAdapter();
@@ -49,7 +51,8 @@ try {
   report.adapter_probe={vendor:info?.vendor??null,architecture:info?.architecture??null,
     description:info?.description??null,isFallbackAdapter:info?.isFallbackAdapter??adapter?.isFallbackAdapter??null,
     boundary:"separate navigator adapter observation; not the Rust workspaces' device receipt"};
-  const shapes=graph?[[[2,16,32],2],[[2,129,32],4],[[4,32,64],8]]:[[[2,16,32],2],[[4,16,64],8],[[4,32,128],16]];
+  const shapes=matrix==="wide"?[[[4,64,64],8],[[2,128,128],8],[[2,64,256],4]]:
+    graph?[[[2,16,32],2],[[2,129,32],4],[[4,32,64],8]]:[[[2,16,32],2],[[4,16,64],8],[[4,32,128],16]];
   for(const seed of [17,29,43]) for(const [shape,depth] of shapes) {
     const config={shape,depth,seed,steps:8,...(graph?{graph:true}:{})};
     await progress({stage:"create_workspaces",config});
