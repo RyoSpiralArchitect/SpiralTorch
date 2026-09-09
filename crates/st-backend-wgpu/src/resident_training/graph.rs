@@ -62,6 +62,13 @@ fn scalar_source() -> String {
     .concat()
 }
 
+fn forward_dispatches_per_pass(backend: wgpu::Backend, count: usize) -> usize {
+    match backend {
+        wgpu::Backend::Metal | wgpu::Backend::BrowserWebGpu => count.max(1),
+        _ => 1,
+    }
+}
+
 impl ResidentGraphTraining {
     pub fn new(
         runtime: WgpuRuntime,
@@ -669,13 +676,22 @@ impl ResidentGraphTraining {
             );
             encoder.copy_buffer_to_buffer(target.flags(), 0, &self.validation, n as u64 * 4, 4);
         }
-        for node in &self.nodes {
-            match node {
-                Node::Linear { forward, .. } => {
-                    self.encode_passes(&mut encoder, std::slice::from_ref(forward))
-                }
-                Node::Pointwise { plan, forward, .. } => {
-                    plan.forward().encode_bound(&mut encoder, forward);
+        // Forward has no intervening copies. Keep the loss/VJP/decision phases
+        // separate: their copies and prepare/vote/commit ordering are unchanged.
+        for nodes in self
+            .nodes
+            .chunks(forward_dispatches_per_pass(self.adapter_info().backend, n))
+        {
+            let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("graph.training.forward"),
+                timestamp_writes: None,
+            });
+            for node in nodes {
+                match node {
+                    Node::Linear { forward, .. } => forward.encode(&mut compute),
+                    Node::Pointwise { plan, forward, .. } => {
+                        plan.forward().encode_in_pass(&mut compute, forward);
+                    }
                 }
             }
         }
@@ -777,6 +793,24 @@ impl ResidentGraphTraining {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn forward_pass_batching_does_not_change_unmeasured_backends() {
+        use super::forward_dispatches_per_pass;
+        for count in [0, 1, 24, 4096] {
+            for backend in [wgpu::Backend::Metal, wgpu::Backend::BrowserWebGpu] {
+                assert_eq!(forward_dispatches_per_pass(backend, count), count.max(1));
+            }
+            for backend in [
+                wgpu::Backend::Empty,
+                wgpu::Backend::Vulkan,
+                wgpu::Backend::Dx12,
+                wgpu::Backend::Gl,
+            ] {
+                assert_eq!(forward_dispatches_per_pass(backend, count), 1);
+            }
+        }
+    }
+
     #[test]
     fn graph_parameter_shader_validates() {
         let module = naga::front::wgsl::parse_str(&super::scalar_source()).unwrap();

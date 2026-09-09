@@ -71,10 +71,12 @@ requesting a device. CPU-only builds transport plans but explicitly reject GPU
 execution. Older published wheels may not have the graph client APIs.
 
 This does not change `pure::Tensor` storage, generic autograd, `ModuleTrainer` or
-GNN execution. General forward-only graph compilation and production resident
-N-D Tensor handles remain follow-up work. The clients upload a host batch once;
-intermediate values and subsequent training steps stay on the GPU. Rust's
-`upload_batch_tensors` interface above is not yet a Python/JavaScript API.
+GNN execution. [Forward-only graphs and resident N-D tensor handles](resident_graph_forward.md)
+are also available in Rust, Python and WASM. Python's `upload_batch_tensors` and
+JavaScript's `uploadBatchTensors` admit those same-device handles without host
+readback. The clients can also upload a host batch once; intermediate values and
+subsequent training steps stay on the GPU. Frozen plans do not follow live host
+model updates, and the resident optimizer does not modify the source Module.
 
 ## Python And Browser Clients
 
@@ -146,10 +148,24 @@ pool or shared mutable scratch on `PointwiseVjpPlan`: standalone `run()` calls s
 produce independent results. The graph retains the extra scratch until dropped.
 Command encoders, queue staging and requested snapshots can still allocate.
 
+On Metal and BrowserWebGpu, all mixed-graph forward dispatches share one compute
+pass. Loss, VJP/unbroadcast, validation-copy and prepare/vote/commit boundaries
+remain unchanged, as does specialized dense training. Other backends keep one
+forward dispatch per pass until measured. This changes encoding only, not
+shader math, parameter ownership, intermediate checks or optimizer semantics.
+Validation includes masked overflow at each of eight alternating dense/gain
+positions, both gradient policies and zero/nonzero learning rates. Rejected
+captures retain their guards after recovery and graph drop; no parameter may
+partially commit.
+
 The shared `resident_training_bench` native/browser worker accepts `graph: true`
 in its configuration. `tools/bench_resident_training_vs_torch.py --graph` and the
 optional final `graph` argument of `tools/bench_resident_training_browser.cjs` run
 the same fixed nine mixed-graph workloads, including more than 256 reduction rows.
+Use `--matrix wide` and the browser runner's final `wide` argument for an additional
+fixed nine-case matrix: `[4,64,64]/8`, `[2,128,128]/8`, `[2,64,256]/4` (shape/depth),
+again seeds 17/29/43 and eight updates. The standard matrix is unchanged; neither
+matrix is an application-quality test or automatically labels a case compute-bound.
 Freeze a clean harness-only baseline and a clean optimized revision before building
 both products. The harness validates source identity and numerical trajectories,
 rotates lane order, and retains eight measured blocks after two warmups per cadence.

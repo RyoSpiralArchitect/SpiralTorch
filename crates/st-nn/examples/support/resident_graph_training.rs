@@ -407,7 +407,7 @@ fn guard_plan(rows: usize, weight: f32, gain: f32) -> Result<InferencePlan> {
     )?)?)
 }
 async fn guards(runtime: WgpuRuntime) -> Result<Value> {
-    let mut records = Vec::new();
+    let mut records = masked_forward_guards(runtime.clone()).await?;
     for (name, rows, w, g, x, y, rate) in [
         ("late_gain_candidate", 1, 1., 0.0625, 16., 0., f32::MAX / 8.),
         (
@@ -485,4 +485,80 @@ async fn guards(runtime: WgpuRuntime) -> Result<Value> {
     loss(gpu.loss_snapshot()?).await?;
     records.push(json!({"case":"fresh_batch_clears_prior_failure","passed":true}));
     Ok(json!(records))
+}
+
+async fn masked_forward_guards(runtime: WgpuRuntime) -> Result<Vec<Value>> {
+    let mut records = Vec::new();
+    for fault in 0..8 {
+        let mut model = Sequential::new();
+        for stage in 0..8 {
+            let coefficient = if stage == fault { f32::MAX } else { 1. };
+            if stage % 2 == 0 {
+                let mut linear = Linear::new(format!("dense_{stage}"), 1, 1)?;
+                linear.visit_parameters_mut(&mut |p| {
+                    let value = if p.name().ends_with("weight") {
+                        coefficient
+                    } else {
+                        0.
+                    };
+                    p.value_mut().data_mut().fill(value);
+                    Ok(())
+                })?;
+                model.push(linear);
+            } else {
+                model.push(Scaler::from_gain(
+                    format!("gain_{stage}"),
+                    Tensor::from_vec(1, 1, vec![coefficient])?,
+                )?);
+            }
+        }
+        model.push(Relu::new());
+        let plan = InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 1, 1])?)?;
+        let initial = plan.graph_definition()?;
+        for policy in [
+            GraphGradientPolicy::Exact,
+            GraphGradientPolicy::ModuleCompatible,
+        ] {
+            for rate in [0., 0.01] {
+                let mut gpu = plan.compile_graph_training_wgpu(runtime.clone(), policy)?;
+                gpu.upload_batch(&[-2.; 2], &[0.; 2])?;
+                gpu.step(rate)?;
+                let rejected = gpu.loss_snapshot()?;
+                let rejected_state = gpu.state_snapshot()?;
+                let prediction = gpu.prediction_tensor()?;
+                let gradient = gpu.input_gradient_tensor()?;
+                let rollback = gpu.parameter_snapshot()?;
+                // Recovery must not clear guards on owning captures of the bad step.
+                gpu.upload_batch(&[0.; 2], &[0.; 2])?;
+                gpu.step(0.01)?;
+                let recovered = gpu.state_snapshot()?;
+                drop(gpu);
+                let error = loss(rejected)
+                    .await
+                    .expect_err("masked overflow was accepted");
+                if !matches!(
+                    error.downcast_ref::<TrainingError>(),
+                    Some(TrainingError::Rejected { .. })
+                ) || state(rejected_state).await.is_ok()
+                    || tensor(prediction.relu()?.snapshot()?).await.is_ok()
+                    || tensor(gradient.snapshot()?).await.is_ok()
+                {
+                    return Err("masked forward overflow lost the transaction guard".into());
+                }
+                let recovered = state(recovered).await?;
+                if bits(&parameters(rollback).await?) != bits(&initial)
+                    || bits(&recovered.graph) != bits(&initial)
+                    || recovered.loss != 0.
+                {
+                    return Err(
+                        "masked forward overflow partially committed or recovery failed".into(),
+                    );
+                }
+                records.push(json!({"case":"masked_forward_overflow","fault_stage":fault,
+                    "policy":format!("{policy:?}"),"rate":rate,"error":error.to_string(),
+                    "all_parameter_bits_unchanged":true,"retained_guard_after_reuse_and_drop":true}));
+            }
+        }
+    }
+    Ok(records)
 }
