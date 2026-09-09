@@ -50,6 +50,31 @@ which remaining kernel/dispatch phase causes it. Torch has no matching per-stage
 finite checks or atomic graph rollback, and `torch.compile` was not benchmarked.
 No Torch CPU timing or universal fastest-backend claim is made.
 
+## Selected Revision Recheck
+
+The selected Metal-only policy at `df64ed06` was built into fresh native/WASM
+products and checked in 19 additional serial stages, including the same Rust,
+Python, browser, CPU/MPS numerical and strict backend lint checks. One further
+full round per matrix measured the actual selected products against the frozen
+baseline, not merely the exploratory binary. These ratios summarize nine
+paired case medians each and are separate from the two-round trial above.
+
+| Matrix | Client | Immediate | Deferred |
+| --- | --- | ---: | ---: |
+| Standard | Native Metal | 1.263 | 1.277 |
+| Wide | Native Metal | 1.067 | 1.111 |
+| Standard | Browser WebGPU | 1.003 | 1.000 |
+| Wide | Browser WebGPU | 1.010 | 0.988 |
+
+Metal improved in all nine standard cases and eight of nine wide cases per
+cadence. The unchanged browser schedule still shows timing variability, including
+wide deferred outliers; no universal no-regression or statistical-significance
+claim follows. Torch MPS remains roughly twofold faster on the wide matrix.
+Maximum captured-state benchmark error is `1.4901161193847656e-8`.
+This round adds 1,800 intervals (1,440 retained), containing 14,400 real SGD
+updates on repeated reset trajectories. `selected-summary.json` and
+`selected-manifest.json` bind this follow-up separately from the retained trial.
+
 ## Correctness And Evidence
 
 Trial verification passed 112 serial backend tests, 733 NN unit tests, six native
