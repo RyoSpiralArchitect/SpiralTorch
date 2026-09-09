@@ -1,0 +1,286 @@
+{
+  "schema": "spiraltorch.resident_graph_training_evidence.v1",
+  "source": "e4ea73aee6a1f4d92b2bb6dcc893fd0dbb28cde2",
+  "tree": "6b7d1ebc0b906e63568d5fe97e022e3613a40b84",
+  "graph_replay": {
+    "status": "passed",
+    "cases": 24,
+    "comparisons": 5184,
+    "max_abs_error": 1.1920928955078125e-07
+  },
+  "boundary": "Source-bound correctness, not a throughput benchmark. Browser adapter hardware identity is unavailable. Existing MPS empty VJP reference gaps retained separately.",
+  "files": [
+    {
+      "path": "raw/verified-browser-dense.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/browser-dense.json",
+      "sha256": "f1fadc9845e3d6d509f23716aae64c83e4c2ffd9ae59be9ac37b1b9185009791",
+      "raw_sha256": "b66fd3be59150591ffb702e8875b8008c82be740c874d6dad6edfdeb5805b6c5",
+      "bytes": 34421,
+      "raw_bytes": 214835
+    },
+    {
+      "path": "raw/verified-browser-dense.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/browser-dense.log",
+      "sha256": "2ccca7dbbc84aa30a8515c69c6cd75db67c5784059d0a3ce85774b30d8722b7e",
+      "raw_sha256": "e37c722eeb2ef7298fdb4a708c8e95997e57db765decbc028ae12de6f730db7b",
+      "bytes": 140,
+      "raw_bytes": 143
+    },
+    {
+      "path": "raw/verified-browser-graph.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/browser-graph.json",
+      "sha256": "f56027109ae3721321bd815c0af4c453e7fe8019bd7336586d95b846ceeee930",
+      "raw_sha256": "b1fc1075652a386f937586d9470e9e884ab432115fba93d349698029740b49ca",
+      "bytes": 146684,
+      "raw_bytes": 1742321
+    },
+    {
+      "path": "raw/verified-browser-graph.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/browser-graph.log",
+      "sha256": "0958d3f3226c2fb885026f1b82d9a2471d8f4e7ed5604c605a139fb4bbf76413",
+      "raw_sha256": "69e1676fe74567cc6e71132ba272247869d3841fca2720a48d70c188673b8d48",
+      "bytes": 146,
+      "raw_bytes": 153
+    },
+    {
+      "path": "raw/verified-browser-nd.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/browser-nd.json",
+      "sha256": "322aa5cf76c20af2169b6bd45ed4d180b3703a1bc6555b479bbb145c6e31a883",
+      "raw_sha256": "7726e9b1d7936176c8c739d9b8bbaa12db63ff406c3e38179459c791f7ef69a1",
+      "bytes": 121854,
+      "raw_bytes": 6219548
+    },
+    {
+      "path": "raw/verified-browser-nd.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/browser-nd.log",
+      "sha256": "59cdc305494befc861ff537a1fcef9028b4b32b5d112ce530b88d6a60a8b366e",
+      "raw_sha256": "00cef2e5f4aff67a788020218b21d7198a0b1441467efcc878999be9187aa413",
+      "bytes": 145,
+      "raw_bytes": 150
+    },
+    {
+      "path": "raw/verified-frozen-run.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/frozen-run.json",
+      "sha256": "4c68b9a0333527f662e1dab91f6dcfb9470989e02e7e1c38f99fbf17eb2cb72f",
+      "raw_sha256": "cd8fc8bdd9fbd410108bed9b992aef6cac4171d00b0495c0887e2a446ebf35e1",
+      "bytes": 2284,
+      "raw_bytes": 14430
+    },
+    {
+      "path": "raw/verified-native-build.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/native-build.log",
+      "sha256": "e7311a8d3cb2964d2b5c0c34dba8dcd9d824cb7349569b88ee9bf2cec95e1cdd",
+      "raw_sha256": "7a020a6a29bf52fe3cd4e397a141d67fa437725bf8fa97960c720f5ecf7e4f33",
+      "bytes": 4322,
+      "raw_bytes": 114544
+    },
+    {
+      "path": "raw/verified-native-dense.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/native-dense.json",
+      "sha256": "0c1bf7d6a626193cee1351f56053b9fad1f873e4878738a67e2df95e6fa76bb6",
+      "raw_sha256": "13fb8cdef7b47e8a2f2189b20b5eeb66108850efbad7d796e34998a6ace02f8a",
+      "bytes": 33922,
+      "raw_bytes": 213798
+    },
+    {
+      "path": "raw/verified-native-dense.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/native-dense.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 20,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/verified-native-graph.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/native-graph.json",
+      "sha256": "40924594af099da5071e47b9684508b754e1d1d0d69389981696384ed78e4720",
+      "raw_sha256": "91613f4ce2e78b6e6722ac7bbce0e0cae156d8b92467e84025ae9464d71505ee",
+      "bytes": 146703,
+      "raw_bytes": 1738700
+    },
+    {
+      "path": "raw/verified-native-graph.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/native-graph.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 20,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/verified-native-nd.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/native-nd.json",
+      "sha256": "7e615f2da29066623b6efeaaeefc5a7838e221c7a1809cc2de1fad89f1162d58",
+      "raw_sha256": "2927fa489ddf5a6bddbd06a9220f566900d082ce4d71f59f7ef4be28f2b83f87",
+      "bytes": 88477,
+      "raw_bytes": 2738065
+    },
+    {
+      "path": "raw/verified-native-nd.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/native-nd.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 20,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/verified-resident_graph_training-bindgen.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/resident_graph_training-bindgen.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 20,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/verified-resident_nd_tensor-bindgen.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/resident_nd_tensor-bindgen.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 20,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/verified-resident_training-bindgen.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/resident_training-bindgen.log",
+      "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 20,
+      "raw_bytes": 0
+    },
+    {
+      "path": "raw/verified-torch-graph-replay.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/torch-graph-replay.json",
+      "sha256": "11d4116c20d94748c23325f1b4cc4f8f27bade6040c053439606ef9e095e57c0",
+      "raw_sha256": "e9d1a1bff2c9f3fb69827f8bbb37e2da94369d8fd5ba2e768566f674b9fe85ce",
+      "bytes": 692,
+      "raw_bytes": 8793
+    },
+    {
+      "path": "raw/verified-torch-graph-replay.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/torch-graph-replay.log",
+      "sha256": "cf2f8ec0430ee06e73899743f33b4c26c87b73b6e1f3a125a3803afbbc362c54",
+      "raw_sha256": "0be493d469d1103fb9fde198675f828adb6b78a5a1aef1ec1f6b541a53984fc0",
+      "bytes": 90,
+      "raw_bytes": 75
+    },
+    {
+      "path": "raw/verified-torch-nd-regression.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/torch-nd-regression.json",
+      "sha256": "459b5feb5c7ae5259602ca0009342e0e395f896177fd08ef946dcd2e2767e7e2",
+      "raw_sha256": "1b51072dfad15f6f603e5c9aa9ff42344949116dbabb0bd8025c43bca2111485",
+      "bytes": 889,
+      "raw_bytes": 20846
+    },
+    {
+      "path": "raw/verified-torch-nd-regression.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/torch-nd-regression.log",
+      "sha256": "a9f1d0bc1f1625da08e5bcfbfd68314904dd1682e85032b79f2445354f938ced",
+      "raw_sha256": "face5fcedee8cfde04ccb3561770e73f2aba3d21ac2254c1df111045bdf07102",
+      "bytes": 91,
+      "raw_bytes": 76
+    },
+    {
+      "path": "raw/verified-torch-vjp-regression.json.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/torch-vjp-regression.json",
+      "sha256": "f26804ee80aef94db4383d22be30e03b69ebcf219816aaec31dbbc7c5628e924",
+      "raw_sha256": "568ebb220aebae53cf081da1a58693e80cfefaddaeb2e7f37bf1c7f7e4dcfada",
+      "bytes": 1165,
+      "raw_bytes": 12349
+    },
+    {
+      "path": "raw/verified-torch-vjp-regression.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/torch-vjp-regression.log",
+      "sha256": "cb8f42d37e538096729dc49f4d1daac147ecca53a6bc3b9e3948bc6342d065f7",
+      "raw_sha256": "6388a8ea79c51c8a8b727116229f50513a9ed09abc30f1d9ea2c2ce20626c3a8",
+      "bytes": 116,
+      "raw_bytes": 117
+    },
+    {
+      "path": "raw/verified-wasm-build.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/verified/wasm-build.log",
+      "sha256": "87e5dff61b8eadbb0e194719e951657122c9c17ab8e0124190d68c41b4e62621",
+      "raw_sha256": "afb68bb2a8d6734ce9d464f42ed9992a3fa3c4e960068b76438158ae2da0e737",
+      "bytes": 4110,
+      "raw_bytes": 111358
+    },
+    {
+      "path": "raw/checks.jsonl.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/checks.jsonl",
+      "sha256": "2d1af246520564179f643093fca0939df9aed2ddabad3409f0de90fdd1a01827",
+      "raw_sha256": "72ab7dfa6e9056fffeabd8e0e2ca71305c403ea0ff00ddd6b4544a7ea45732bb",
+      "bytes": 574,
+      "raw_bytes": 2488
+    },
+    {
+      "path": "raw/backend-clippy-final.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/backend-clippy-final.log",
+      "sha256": "5f04f7127c543d5eadc30f8b77099d4427945ae3d29d018ac1050bfbd59eb858",
+      "raw_sha256": "c0354bfd51ea84607cb125e0beabda58ee7530078cbd7fc218ce846ffc89b63d",
+      "bytes": 4288,
+      "raw_bytes": 114162
+    },
+    {
+      "path": "raw/backend-runtime-final.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/backend-runtime-final.log",
+      "sha256": "3ba179aab33047a25e2a18df887a103e0b7971efcc1e94d3b5f58cddb2437c5e",
+      "raw_sha256": "1428025953f2a2b9ff941b685d4abd2269f706202591f057bc18eddc23c37125",
+      "bytes": 7454,
+      "raw_bytes": 125780
+    },
+    {
+      "path": "raw/nn-lib-final.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/nn-lib-final.log",
+      "sha256": "467b1b0c06898c9df89d5dfa659a4096b6ca5ee0ee9349cfbba6f54713f89a19",
+      "raw_sha256": "fa2286c609499e974c61074042f32278e4b99f2c7ede97f0952dfa37fcff1c9f",
+      "bytes": 15825,
+      "raw_bytes": 178728
+    },
+    {
+      "path": "raw/nn-runtime-final.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/nn-runtime-final.log",
+      "sha256": "ce504709e1702c81af5198c4fbbc41c290613da0ed291b31b1e3ffaaa454aaac",
+      "raw_sha256": "9a9e2cc19f9303891326392d9374d05ba090d56ee56fee9b0c5551d0093a00a3",
+      "bytes": 4638,
+      "raw_bytes": 115366
+    },
+    {
+      "path": "raw/nn-clippy.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/nn-clippy.log",
+      "sha256": "9a9311178360f3b5f5932353441ce51d91a525ad25ac6a9d7bbcdb59ed9e0663",
+      "raw_sha256": "19f8979ff59ca2c3ab60624d8500329cc43ede3b4945b628ba44df79b6832b8b",
+      "bytes": 7676,
+      "raw_bytes": 135027
+    },
+    {
+      "path": "raw/wasm-backend-clippy-final.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/wasm-backend-clippy-final.log",
+      "sha256": "19080e34d69c6f4cad5ca381f124283c289c99b5e8e97bf6aab9a5f66836fd0d",
+      "raw_sha256": "3932c0314d666f7069184773007e6d2f6f7baa89640c3e821ddaac116345335f",
+      "bytes": 4205,
+      "raw_bytes": 111274
+    },
+    {
+      "path": "raw/python-default-check.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/python-default-check.log",
+      "sha256": "357983b7b5cac8a24fdd2b8256da5e429badd4537c1177a0250d7b26432b3608",
+      "raw_sha256": "eb909b5371cb43f2875acc0185acd9853626c4d866d01b773bdc3a22da8d305e",
+      "bytes": 4732,
+      "raw_bytes": 117526
+    },
+    {
+      "path": "raw/python-wgpu-check.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/python-wgpu-check.log",
+      "sha256": "b088df2f50ce650fcd805bdd4080c31cebbd1f66f878d2656434c19f49987d98",
+      "raw_sha256": "c55975c7bf24837bc7e05db1efec6ff8f223a958cc54b31cef60ab3726283c7e",
+      "bytes": 4184,
+      "raw_bytes": 114010
+    },
+    {
+      "path": "raw/graph-primitive-check.log.gz",
+      "source": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-training-20260909/graph-primitive-check.log",
+      "sha256": "37fece6aedeb3b42980044ce2ae2c3a5fab5411c84bbd029a17f375dd2b45419",
+      "raw_sha256": "9b08a8494f753d795b035ac00217f8d4069e11a4e940ef31a522e37f1f1aa639",
+      "bytes": 4513,
+      "raw_bytes": 114955
+    }
+  ]
+}
