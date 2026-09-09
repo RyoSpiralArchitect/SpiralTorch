@@ -148,10 +148,12 @@ pool or shared mutable scratch on `PointwiseVjpPlan`: standalone `run()` calls s
 produce independent results. The graph retains the extra scratch until dropped.
 Command encoders, queue staging and requested snapshots can still allocate.
 
-On Metal and BrowserWebGpu, all mixed-graph forward dispatches share one compute
-pass. Loss, VJP/unbroadcast, validation-copy and prepare/vote/commit boundaries
-remain unchanged, as does specialized dense training. Other backends keep one
-forward dispatch per pass until measured. This changes encoding only, not
+On Metal, all mixed-graph forward dispatches share one compute pass. Loss,
+VJP/unbroadcast, validation-copy and prepare/vote/commit boundaries remain
+unchanged, as does specialized dense training. BrowserWebGpu retains its
+one-forward-dispatch-per-pass schedule: paired trials were essentially flat for
+immediate loss reads and could regress for deferred reads. Other backends also
+keep their old schedule until measured. This changes encoding only, not
 shader math, parameter ownership, intermediate checks or optimizer semantics.
 Validation includes masked overflow at each of eight alternating dense/gain
 positions, both gradient policies and zero/nonzero learning rates. Rejected
@@ -176,6 +178,8 @@ not a claim against the fastest available PyTorch configuration.
 
 See the [source-bound workspace comparison](../benchmarks/results/2026-09-10-resident-graph-workspace/README.md)
 for all measured cases, including regressions and the remaining PyTorch gap.
+The [forward-pass study](../benchmarks/results/2026-09-10-graph-training-forward-pass/README.md)
+retains both standard/wide matrices and the non-adopted browser trial.
 
 ## Reproduce
 

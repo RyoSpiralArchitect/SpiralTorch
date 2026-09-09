@@ -157,7 +157,9 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
   All nodes execute in one compute pass. Private pointwise validation flags are
   cleared before that pass and copied into the graph guard afterward, without
   changing logical stage/error indices or masking earlier failures. Dense-only
-  inference and graph training retain their existing pass scheduling.
+  inference retains its existing schedule. Mixed graph training batches its
+  forward dispatches on Metal only; its loss/backward/update boundaries remain
+  separate. Browser training keeps the measured original schedule.
 - `output_tensor` freezes output and all guards into an immutable GPU tensor.
   It performs an on-device identity/capture pass, not a CPU readback or mutable
   workspace alias. Subsequent dispatches cannot invalidate the returned tensor.

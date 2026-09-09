@@ -63,9 +63,12 @@ fn scalar_source() -> String {
 }
 
 fn forward_dispatches_per_pass(backend: wgpu::Backend, count: usize) -> usize {
-    match backend {
-        wgpu::Backend::Metal | wgpu::Backend::BrowserWebGpu => count.max(1),
-        _ => 1,
+    // Browser immediate timings were flat and deferred reads sometimes regressed.
+    // Keep its old schedule; native Metal benefits in both observation cadences.
+    if backend == wgpu::Backend::Metal {
+        count.max(1)
+    } else {
+        1
     }
 }
 
@@ -794,13 +797,15 @@ impl ResidentGraphTraining {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn forward_pass_batching_does_not_change_unmeasured_backends() {
+    fn forward_pass_batching_preserves_browser_and_unmeasured_backends() {
         use super::forward_dispatches_per_pass;
         for count in [0, 1, 24, 4096] {
-            for backend in [wgpu::Backend::Metal, wgpu::Backend::BrowserWebGpu] {
-                assert_eq!(forward_dispatches_per_pass(backend, count), count.max(1));
-            }
+            assert_eq!(
+                forward_dispatches_per_pass(wgpu::Backend::Metal, count),
+                count.max(1)
+            );
             for backend in [
+                wgpu::Backend::BrowserWebGpu,
                 wgpu::Backend::Empty,
                 wgpu::Backend::Vulkan,
                 wgpu::Backend::Dx12,
