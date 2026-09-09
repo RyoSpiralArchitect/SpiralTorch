@@ -273,8 +273,40 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         }
     }
     let guards = guards(runtime.clone()).await?;
+    let mut primitive_checks = Vec::new();
+    for name in ["relu", "gelu", "scaler"] {
+        let mut model = Sequential::new();
+        match name {
+            "relu" => model.push(Relu::new()),
+            "gelu" => model.push(Gelu::new()),
+            _ => model.push(Scaler::new("gain", 3)?),
+        }
+        let plan = InferencePlan::from_module(&model, NdLayout::contiguous(&[3])?)?;
+        let initial = plan.graph_definition()?;
+        let roles = initial
+            .parameters()
+            .iter()
+            .map(|p| p.role)
+            .collect::<Vec<_>>();
+        let mut gpu =
+            plan.compile_graph_training_wgpu(runtime.clone(), GraphGradientPolicy::Exact)?;
+        if bits(&parameters(gpu.parameter_snapshot()?).await?) != bits(&initial) {
+            return Err("pre-step snapshot differs".into());
+        }
+        let x = Tensor::from_vec(1, 3, vec![-1., 0., 2.])?;
+        let y = Tensor::zeros(1, 3)?;
+        gpu.upload_batch(x.data(), y.data())?;
+        gpu.step(0.05)?;
+        let actual = state(gpu.state_snapshot()?).await?;
+        let error = compare(
+            &actual,
+            &cpu_step(&mut model, &x, &y, 0.05, GraphGradientPolicy::Exact, &roles)?,
+        )?;
+        primitive_checks.push(json!({"case":name,"max_abs_error":error,"parameters":roles.len()}));
+    }
     Ok(
         json!({"schema":"spiraltorch.resident_graph_training_fixture.v1","status":"passed",
+        "build_manifest":serde_json::from_str::<Value>(st_core::build_manifest_json())?,"primitive_checks":primitive_checks,
         "adapter":format!("{:?}",runtime.adapter_info()),"cases":cases,"guards":guards,
         "scope":"Sequential with owned gains; mean-MSE plain SGD; no intermediate host readbacks; not a throughput claim"}),
     )

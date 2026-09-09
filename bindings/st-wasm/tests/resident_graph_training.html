@@ -10,7 +10,7 @@ try {
   if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU fallback");
   await init();
   const report = JSON.parse(await run_resident_graph_training_fixture());
-  if (report.status !== "passed" || report.cases?.length !== 6 || report.guards?.length !== 4)
+  if (report.status !== "passed" || report.cases?.length !== 6 || report.guards?.length !== 4 || report.primitive_checks?.length !== 3)
     throw Error("Incomplete graph training fixture");
   result.textContent = JSON.stringify(report);
   result.dataset.status = "passed";
