@@ -196,6 +196,10 @@ Python wheel uses `--no-default-features --features python-default,cpu`.
 
 The original Rust-core/browser-example fixture remains independently runnable:
 
+The [source-bound client results](../benchmarks/results/2026-09-10-resident-graph-clients/README.md)
+retain the complete Python/browser/return trajectories, independent Torch checks,
+CPU-only behavior, product digests and pre-commit harness failures.
+
 ```sh
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked -p st-nn --features wgpu --test resident_graph_training
 cargo run --locked -p st-nn --features wgpu --example resident_graph_training > native.json

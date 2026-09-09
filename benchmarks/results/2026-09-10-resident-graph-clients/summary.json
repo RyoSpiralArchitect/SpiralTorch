@@ -1,0 +1,155 @@
+{
+  "schema": "spiraltorch.graph_clients.evidence_summary.v1",
+  "status": "passed",
+  "source": "62c6b969aca8e7316e630a95bdacdf42765fef42",
+  "tree": "0fc9e4dff4240052459eac8492b4047d387e5a6c",
+  "base": "a87bc3cd893509b8da1a5c21cd42da237938830a",
+  "boundary": "production Python/WASM graph execution and weight-only resume correctness; no throughput, model quality, CUDA or generic Tensor/autograd claim",
+  "python_cases": 24,
+  "browser_cases": 24,
+  "torch_version": "2.12.1",
+  "torch_replays": 192,
+  "torch_comparisons": 11088,
+  "max_abs_error": 3.8743019104003906e-07,
+  "native_adapter": {
+    "name": "Apple M4",
+    "backend": "Metal",
+    "device_type": "IntegratedGpu"
+  },
+  "browser_adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "browser_version": "152.0.7977.83",
+  "browser_identity_boundary": "Rust BrowserWebGpu metadata is not physical-adapter attestation",
+  "browser_rejected_checks": 3874,
+  "browser_guard_recovery_cases": 2,
+  "contracts": [
+    {
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "backend": [
+    {
+      "passed": 110,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "nn": [
+    {
+      "passed": 733,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "python_wgpu": {
+    "status": "passed",
+    "tests": 20,
+    "skipped": 0,
+    "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-wgpu.dylib",
+    "build_info": {
+      "package": "spiraltorch-py",
+      "version": "0.4.27",
+      "profile": "debug",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "family": "unix",
+        "pointer_width": 64
+      },
+      "features": {
+        "cpu": false,
+        "wgpu": true,
+        "wgpu-rt": false,
+        "mps": false,
+        "cuda": false,
+        "hip": false,
+        "hip-real": false,
+        "logic": false,
+        "logic-learn": false,
+        "kdsl": true,
+        "nn": true,
+        "rec": true,
+        "text": true,
+        "selfsup": true,
+        "robotics": true
+      }
+    }
+  },
+  "python_cpu": {
+    "status": "passed",
+    "tests": 20,
+    "skipped": 12,
+    "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-clients-20260910/final/python-cpu.dylib",
+    "build_info": {
+      "package": "spiraltorch-py",
+      "version": "0.4.27",
+      "profile": "debug",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "family": "unix",
+        "pointer_width": 64
+      },
+      "features": {
+        "cpu": true,
+        "wgpu": false,
+        "wgpu-rt": false,
+        "mps": false,
+        "cuda": false,
+        "hip": false,
+        "hip-real": false,
+        "logic": false,
+        "logic-learn": false,
+        "kdsl": true,
+        "nn": true,
+        "rec": true,
+        "text": true,
+        "selfsup": true,
+        "robotics": true
+      }
+    }
+  },
+  "cpu_browser_cases": 24,
+  "strict_checks": [
+    "contracts-clippy",
+    "backend-clippy",
+    "backend-wasm-clippy",
+    "fmt"
+  ],
+  "preserved_development_failures": [
+    "development-failures/python-initial-tests.json.xz",
+    "development-failures/graph-fixture-dev.json.xz",
+    "development-failures/webgpu-dev-browser.json.xz",
+    "development-failures/torch-dev.json.xz"
+  ]
+}
