@@ -106,6 +106,11 @@ The code above is explicit inference, not a general N-D Tensor. The same plan's
 transactional plain SGD; see [resident training](../../docs/resident_nn_training.md)
 for Python/browser use and weight-only handoff. Current-source bindings are
 required; older published wheels may not have these APIs.
+For mixed `Scaler`/`Relu`/`Linear`/`Gelu` graphs, use
+`plan.compile_graph_training_wgpu(gradient_policy="exact")`. It keeps all
+parameters and intermediate VJPs resident, exposes raw/effective gain gradients,
+and exports the same v2 weight-only plan for browser training and return resume.
+See [graph training clients](../../docs/resident_graph_training.md#python-and-browser-clients).
 CPU-only wheels support plan transport but reject GPU compilation rather
 than silently falling back. See the [resident NN guide](../../docs/resident_nn_inference.md)
 for browser use, validation, and the retained PyTorch comparison boundaries.

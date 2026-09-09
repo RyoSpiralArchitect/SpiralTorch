@@ -27,10 +27,14 @@ async function digest(text) {
 }
 try {
   await init();
-  await reject(() => InferencePlan.fromJson(JSON.stringify({
+  const rich = InferencePlan.fromJson(JSON.stringify({
     schema:"spiraltorch.nn.inference_plan.v2", input_shape:[2,2], parameters:[],
     stages:[{kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]
-  })));
+  }));
+  if (rich.isDense) throw Error("v2 graph mislabeled dense");
+  await reject(() => rich.compileWebGpu());
+  await reject(() => rich.compileTrainingWebGpu());
+  rich.free();
   const response = await fetch("/fixture.json");
   if (!response.ok) throw Error("Python fixture failed to load");
   const fixture = await response.json();

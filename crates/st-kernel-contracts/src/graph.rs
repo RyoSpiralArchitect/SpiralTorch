@@ -12,12 +12,43 @@ pub enum ParameterRole {
     Gain,
 }
 
+impl ParameterRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Weight => "weight",
+            Self::Bias => "bias",
+            Self::Gain => "gain",
+        }
+    }
+}
+
 /// Exact is a mathematical VJP. ModuleCompatible retains Scaler's legacy
 /// extra row average without applying it to Linear weight/bias gradients.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphGradientPolicy {
     Exact,
     ModuleCompatible,
+}
+
+impl GraphGradientPolicy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::ModuleCompatible => "module_compatible",
+        }
+    }
+}
+
+impl std::str::FromStr for GraphGradientPolicy {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "exact" => Ok(Self::Exact),
+            "module_compatible" => Ok(Self::ModuleCompatible),
+            _ => Err("gradient_policy must be 'exact' or 'module_compatible'"),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -207,6 +238,21 @@ impl GraphDefinition {
 mod tests {
     use super::*;
     use crate::{elementwise::ElementwiseOp, pointwise::PointwiseStep};
+    #[test]
+    fn client_names_are_canonical_and_policy_is_explicit() {
+        for policy in [
+            GraphGradientPolicy::Exact,
+            GraphGradientPolicy::ModuleCompatible,
+        ] {
+            assert_eq!(policy.as_str().parse(), Ok(policy));
+        }
+        for invalid in ["", "auto", "EXACT", " exact", "exact ", "module-compatible"] {
+            assert!(invalid.parse::<GraphGradientPolicy>().is_err());
+        }
+        assert_eq!(ParameterRole::Weight.as_str(), "weight");
+        assert_eq!(ParameterRole::Bias.as_str(), "bias");
+        assert_eq!(ParameterRole::Gain.as_str(), "gain");
+    }
     fn scaler() -> GraphStage {
         GraphStage::Pointwise {
             chain: PointwiseChain::new(

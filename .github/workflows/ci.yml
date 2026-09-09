@@ -23,6 +23,7 @@ jobs:
           python3 -I tests/test_resident_rank_adaptation_bench.py
           python3 -I tests/test_matmul_rank_bench.py
           python3 -I tests/test_resident_training_client_validation.py
+          python3 -I tests/test_resident_graph_client_validation.py
           python3 -I tests/test_resident_training_bench.py
           python3 -I tests/test_nd_tensor_bench.py
           python3 -I tests/test_pointwise_vjp_bench.py
@@ -466,6 +467,8 @@ jobs:
           python -P tests/test_resident_benchmark.py
           python -P bindings/st-py/tests/test_wgpu_resident.py
           python -P bindings/st-py/tests/test_nn_resident.py
+          python -P bindings/st-py/tests/test_nn_resident_training.py
+          python -P bindings/st-py/tests/test_nn_resident_graph_training.py
           python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
         env:

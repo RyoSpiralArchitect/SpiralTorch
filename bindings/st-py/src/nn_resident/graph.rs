@@ -1,74 +1,60 @@
-//! Owning Python handles, not Python loss/optimizer semantics.
+//! Thin owning handles over Rust's general resident graph training.
+#[cfg(feature = "wgpu")]
+use super::training::{training_error, PyTrainingLossSnapshot};
 use super::*;
 #[cfg(feature = "wgpu")]
 use pyo3::exceptions::PyIndexError;
 #[cfg(feature = "wgpu")]
-use st_backend_wgpu::{resident_training as backend, runtime};
+use st_backend_wgpu::{resident_training::graph as backend, runtime};
 
 pub(super) fn compile(
     plan: &InferencePlan,
     py: Python<'_>,
+    policy: &str,
     tile: Option<&Bound<'_, PyAny>>,
     kernel: &str,
     accumulation: &str,
-) -> PyResult<PyResidentTraining> {
+) -> PyResult<PyResidentGraphTraining> {
+    let policy = policy
+        .parse::<st_nn::resident::GraphGradientPolicy>()
+        .map_err(PyValueError::new_err)?;
     #[cfg(feature = "wgpu")]
     {
-        require_dense(plan)?;
         let (tile, kernel, accumulation) = gpu_options(tile, kernel, accumulation)?;
         let plan = plan.clone();
         py.detach(move || {
-            let (runtime, _) = runtime::ensure_default_runtime_blocking("python.nn.training")
+            let (runtime, _) = runtime::ensure_default_runtime_blocking("python.nn.graph_training")
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
             let inner = plan
-                .compile_training_wgpu_with_options(runtime, tile, kernel, accumulation)
+                .compile_graph_training_wgpu_with_options(
+                    runtime,
+                    policy,
+                    tile,
+                    kernel,
+                    accumulation,
+                )
                 .map_err(plan_error)?;
-            Ok(PyResidentTraining { inner, plan })
+            Ok(PyResidentGraphTraining { inner })
         })
     }
     #[cfg(not(feature = "wgpu"))]
     {
-        let _ = (plan, py, tile, kernel, accumulation);
+        let _ = (plan, py, policy, tile, kernel, accumulation);
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "resident training requires a wheel built with the 'wgpu' feature",
+            "resident graph training requires a wheel built with the 'wgpu' feature",
         ))
     }
 }
 
-#[cfg(feature = "wgpu")]
-pub(super) fn training_error(error: backend::TrainingError) -> PyErr {
-    use st_backend_wgpu::resident_matmul::MatmulError;
-    match error {
-        backend::TrainingError::Dense(error) => gpu_error(error),
-        backend::TrainingError::Runtime(_)
-        | backend::TrainingError::Matmul(MatmulError::Runtime(_)) => {
-            PyRuntimeError::new_err(error.to_string())
-        }
-        backend::TrainingError::Rejected { stage, flags } => {
-            let exception = PyValueError::new_err(error.to_string());
-            let decorated: PyResult<()> = Python::attach(|py| {
-                let value = exception.value(py);
-                value.setattr("stage", stage)?;
-                value.setattr("flags", flags)?;
-                value.setattr("code", "training_step_rejected")
-            });
-            decorated.err().unwrap_or(exception)
-        }
-        _ => PyValueError::new_err(error.to_string()),
-    }
-}
-
-#[pyclass(name = "ResidentTraining", module = "spiraltorch.nn")]
-pub(super) struct PyResidentTraining {
+#[pyclass(name = "ResidentGraphTraining", module = "spiraltorch.nn")]
+pub(super) struct PyResidentGraphTraining {
     #[cfg(feature = "wgpu")]
-    inner: backend::ResidentDenseTraining,
-    #[cfg(feature = "wgpu")]
-    plan: InferencePlan,
+    inner: backend::ResidentGraphTraining,
 }
 
 #[cfg(feature = "wgpu")]
 #[pymethods]
-impl PyResidentTraining {
+impl PyResidentGraphTraining {
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.inner.input_layout().shape().iter().copied())
@@ -80,6 +66,14 @@ impl PyResidentTraining {
     #[getter]
     fn stage_count(&self) -> usize {
         self.inner.stage_count()
+    }
+    #[getter]
+    fn parameter_count(&self) -> usize {
+        self.inner.parameter_count()
+    }
+    #[getter]
+    fn gradient_policy(&self) -> &'static str {
+        self.inner.gradient_policy().as_str()
     }
     #[getter]
     fn submitted_steps(&self) -> u64 {
@@ -98,7 +92,6 @@ impl PyResidentTraining {
         result.set_item("device_type", format!("{:?}", info.device_type))?;
         Ok(result)
     }
-
     fn upload_batch_values(
         &mut self,
         py: Python<'_>,
@@ -108,7 +101,6 @@ impl PyResidentTraining {
         py.detach(|| self.inner.upload_batch(&input, &target))
             .map_err(training_error)
     }
-
     fn upload_batch(
         &mut self,
         py: Python<'_>,
@@ -137,8 +129,7 @@ impl PyResidentTraining {
         py.detach(|| self.inner.upload_batch(input.data(), target.data()))
             .map_err(training_error)
     }
-
-    /// Enqueue only. Reading its snapshot proves numerical acceptance.
+    /// Enqueued attempt, not proof of acceptance. Read an owning loss/state snapshot.
     fn step(&mut self, py: Python<'_>, learning_rate: &Bound<'_, PyAny>) -> PyResult<u64> {
         if learning_rate.is_instance_of::<PyBool>() {
             return Err(PyTypeError::new_err(
@@ -149,7 +140,6 @@ impl PyResidentTraining {
         py.detach(|| self.inner.step(learning_rate))
             .map_err(training_error)
     }
-
     fn loss_snapshot(&self, py: Python<'_>) -> PyResult<PyTrainingLossSnapshot> {
         let inner = py
             .detach(|| self.inner.loss_snapshot())
@@ -160,69 +150,33 @@ impl PyResidentTraining {
             inner: Some(inner),
         })
     }
-
-    fn state_snapshot(&self, py: Python<'_>) -> PyResult<PyTrainingSnapshot> {
+    fn state_snapshot(&self, py: Python<'_>) -> PyResult<PyGraphTrainingSnapshot> {
         let inner = py
             .detach(|| self.inner.state_snapshot())
             .map_err(training_error)?;
-        Ok(PyTrainingSnapshot {
+        Ok(PyGraphTrainingSnapshot {
             step: inner.submitted_step(),
             generation: inner.batch_generation(),
             input_shape: inner.input_layout().shape().to_vec(),
             output_shape: inner.output_layout().shape().to_vec(),
+            policy: inner.gradient_policy().as_str(),
             inner: Some(inner),
-            plan: self.plan.clone(),
         })
     }
-
-    fn parameter_snapshot(&self, py: Python<'_>) -> PyResult<PyTrainingParametersSnapshot> {
-        Ok(PyTrainingParametersSnapshot {
+    fn parameter_snapshot(&self, py: Python<'_>) -> PyResult<PyGraphTrainingParametersSnapshot> {
+        Ok(PyGraphTrainingParametersSnapshot {
             inner: Some(
                 py.detach(|| self.inner.parameter_snapshot())
                     .map_err(training_error)?,
             ),
-            plan: self.plan.clone(),
         })
     }
 }
 
-#[pyclass(name = "TrainingLossSnapshot", module = "spiraltorch.nn")]
-pub(super) struct PyTrainingLossSnapshot {
+#[pyclass(name = "GraphTrainingSnapshot", module = "spiraltorch.nn")]
+struct PyGraphTrainingSnapshot {
     #[cfg(feature = "wgpu")]
-    pub(super) inner: Option<backend::StepReadback>,
-    #[cfg(feature = "wgpu")]
-    pub(super) step: u64,
-    #[cfg(feature = "wgpu")]
-    pub(super) generation: u64,
-}
-
-#[cfg(feature = "wgpu")]
-#[pymethods]
-impl PyTrainingLossSnapshot {
-    #[getter]
-    fn submitted_step(&self) -> u64 {
-        self.step
-    }
-    #[getter]
-    fn batch_generation(&self) -> u64 {
-        self.generation
-    }
-
-    fn read(&mut self, py: Python<'_>) -> PyResult<f32> {
-        let snapshot = self
-            .inner
-            .take()
-            .ok_or_else(|| PyRuntimeError::new_err("snapshot has already been consumed"))?;
-        py.detach(|| snapshot.read()).map_err(training_error)
-    }
-}
-
-#[pyclass(name = "TrainingSnapshot", module = "spiraltorch.nn")]
-struct PyTrainingSnapshot {
-    #[cfg(feature = "wgpu")]
-    inner: Option<backend::TrainingStateReadback>,
-    #[cfg(feature = "wgpu")]
-    plan: InferencePlan,
+    inner: Option<backend::GraphStateReadback>,
     #[cfg(feature = "wgpu")]
     step: u64,
     #[cfg(feature = "wgpu")]
@@ -231,11 +185,13 @@ struct PyTrainingSnapshot {
     input_shape: Vec<usize>,
     #[cfg(feature = "wgpu")]
     output_shape: Vec<usize>,
+    #[cfg(feature = "wgpu")]
+    policy: &'static str,
 }
 
 #[cfg(feature = "wgpu")]
 #[pymethods]
-impl PyTrainingSnapshot {
+impl PyGraphTrainingSnapshot {
     #[getter]
     fn submitted_step(&self) -> u64 {
         self.step
@@ -243,6 +199,10 @@ impl PyTrainingSnapshot {
     #[getter]
     fn batch_generation(&self) -> u64 {
         self.generation
+    }
+    #[getter]
+    fn gradient_policy(&self) -> &'static str {
+        self.policy
     }
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
@@ -252,93 +212,65 @@ impl PyTrainingSnapshot {
     fn output_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.output_shape.iter().copied())
     }
-    fn read_state(&mut self, py: Python<'_>) -> PyResult<PyTrainingState> {
-        let snapshot = self
+    fn read_state(&mut self, py: Python<'_>) -> PyResult<PyGraphTrainingState> {
+        let inner = self
             .inner
             .take()
             .ok_or_else(|| PyRuntimeError::new_err("snapshot has already been consumed"))?;
-        let inner = py.detach(|| snapshot.read()).map_err(training_error)?;
-        Ok(PyTrainingState {
-            inner,
-            plan: self.plan.clone(),
+        Ok(PyGraphTrainingState {
+            inner: py.detach(|| inner.read()).map_err(training_error)?,
         })
     }
 }
 
-#[pyclass(name = "TrainingParametersSnapshot", module = "spiraltorch.nn")]
-struct PyTrainingParametersSnapshot {
+#[pyclass(name = "GraphTrainingParametersSnapshot", module = "spiraltorch.nn")]
+struct PyGraphTrainingParametersSnapshot {
     #[cfg(feature = "wgpu")]
-    inner: Option<backend::ParameterReadback>,
-    #[cfg(feature = "wgpu")]
-    plan: InferencePlan,
+    inner: Option<backend::GraphParameterReadback>,
 }
 
 #[cfg(feature = "wgpu")]
 #[pymethods]
-impl PyTrainingParametersSnapshot {
+impl PyGraphTrainingParametersSnapshot {
     fn read_plan(&mut self, py: Python<'_>) -> PyResult<PyInferencePlan> {
-        let snapshot = self
+        let inner = self
             .inner
             .take()
             .ok_or_else(|| PyRuntimeError::new_err("snapshot has already been consumed"))?;
-        let plan = &self.plan;
-        let inner = py.detach(|| {
-            let layers = snapshot.read().map_err(training_error)?;
-            plan.with_dense_parameters(layers).map_err(plan_error)
-        })?;
-        Ok(PyInferencePlan { inner })
+        py.detach(|| {
+            let graph = inner.read().map_err(training_error)?;
+            Ok(PyInferencePlan {
+                inner: InferencePlan::from_graph_definition(graph).map_err(plan_error)?,
+            })
+        })
     }
 }
 
-#[pyclass(name = "TrainingState", module = "spiraltorch.nn", frozen)]
-struct PyTrainingState {
+#[pyclass(name = "GraphTrainingState", module = "spiraltorch.nn", frozen)]
+struct PyGraphTrainingState {
     #[cfg(feature = "wgpu")]
-    inner: backend::TrainingState,
-    #[cfg(feature = "wgpu")]
-    plan: InferencePlan,
+    inner: backend::GraphState,
 }
 
 #[cfg(feature = "wgpu")]
-impl PyTrainingState {
-    fn stage_index(stage: &Bound<'_, PyAny>) -> PyResult<usize> {
-        if stage.is_instance_of::<PyBool>() {
-            return Err(PyTypeError::new_err("stage must be an integer, not bool"));
+impl PyGraphTrainingState {
+    fn parameter_id(&self, id: &Bound<'_, PyAny>) -> PyResult<usize> {
+        if id.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err(
+                "parameter must be an integer, not bool",
+            ));
         }
-        stage.extract::<usize>()
-    }
-
-    fn parameter_tensor(&self, index: usize, gradient: bool, bias: bool) -> PyResult<PyTensor> {
-        let layer = self
-            .inner
-            .parameters
-            .get(index)
-            .ok_or_else(|| PyIndexError::new_err("stage out of range"))?;
-        let values = if gradient {
-            let g = &self.inner.parameter_gradients[index];
-            if bias {
-                &g.bias
-            } else {
-                &g.weights
-            }
-        } else if bias {
-            &layer.bias
-        } else {
-            &layer.weights
-        };
-        Ok(PyTensor::from_tensor(
-            st_tensor::Tensor::from_vec(
-                if bias { 1 } else { layer.inner },
-                layer.cols,
-                values.clone(),
-            )
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?,
-        ))
+        let index = id.extract::<usize>()?;
+        if index >= self.inner.graph.parameters().len() {
+            return Err(PyIndexError::new_err("parameter out of range"));
+        }
+        Ok(index)
     }
 }
 
 #[cfg(feature = "wgpu")]
 #[pymethods]
-impl PyTrainingState {
+impl PyGraphTrainingState {
     #[getter]
     fn loss(&self) -> f32 {
         self.inner.loss
@@ -352,16 +284,24 @@ impl PyTrainingState {
         self.inner.batch_generation
     }
     #[getter]
+    fn gradient_policy(&self) -> &'static str {
+        self.inner.gradient_policy.as_str()
+    }
+    #[getter]
     fn stage_count(&self) -> usize {
-        self.inner.parameters.len()
+        self.inner.graph.stages().len()
+    }
+    #[getter]
+    fn parameter_count(&self) -> usize {
+        self.inner.graph.parameters().len()
     }
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        PyTuple::new(py, self.inner.input_layout.shape().iter().copied())
+        PyTuple::new(py, self.inner.graph.input_layout().shape().iter().copied())
     }
     #[getter]
     fn output_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        PyTuple::new(py, self.inner.output_layout.shape().iter().copied())
+        PyTuple::new(py, self.inner.graph.output_layout().shape().iter().copied())
     }
     fn prediction_values(&self) -> Vec<f32> {
         self.inner.prediction.clone()
@@ -369,34 +309,50 @@ impl PyTrainingState {
     fn input_gradient_values(&self) -> Vec<f32> {
         self.inner.input_gradient.clone()
     }
-    fn weight(&self, stage: &Bound<'_, PyAny>) -> PyResult<PyTensor> {
-        self.parameter_tensor(Self::stage_index(stage)?, false, false)
+    fn parameter_role(&self, parameter: &Bound<'_, PyAny>) -> PyResult<&'static str> {
+        Ok(self.inner.graph.parameters()[self.parameter_id(parameter)?]
+            .role
+            .as_str())
     }
-    fn bias(&self, stage: &Bound<'_, PyAny>) -> PyResult<PyTensor> {
-        self.parameter_tensor(Self::stage_index(stage)?, false, true)
+    fn parameter_shape<'py>(
+        &self,
+        py: Python<'py>,
+        parameter: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        PyTuple::new(
+            py,
+            self.inner.graph.parameters()[self.parameter_id(parameter)?]
+                .shape
+                .iter()
+                .copied(),
+        )
     }
-    fn weight_gradient(&self, stage: &Bound<'_, PyAny>) -> PyResult<PyTensor> {
-        self.parameter_tensor(Self::stage_index(stage)?, true, false)
+    fn parameter_values(&self, parameter: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
+        Ok(self.inner.graph.parameters()[self.parameter_id(parameter)?]
+            .values
+            .clone())
     }
-    fn bias_gradient(&self, stage: &Bound<'_, PyAny>) -> PyResult<PyTensor> {
-        self.parameter_tensor(Self::stage_index(stage)?, true, true)
+    fn parameter_gradient_values(&self, parameter: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
+        Ok(self.inner.raw_gradients[self.parameter_id(parameter)?].clone())
     }
+    fn effective_gradient_values(&self, parameter: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
+        Ok(self.inner.effective_gradients[self.parameter_id(parameter)?].clone())
+    }
+    /// Weight-only portable v2 plan. Runtime counters, batch and policy are not serialized.
     fn to_plan(&self, py: Python<'_>) -> PyResult<PyInferencePlan> {
-        let inner = py
-            .detach(|| {
-                self.plan
-                    .with_dense_parameters(self.inner.parameters.clone())
+        py.detach(|| {
+            Ok(PyInferencePlan {
+                inner: InferencePlan::from_graph_definition(self.inner.graph.clone())
+                    .map_err(plan_error)?,
             })
-            .map_err(plan_error)?;
-        Ok(PyInferencePlan { inner })
+        })
     }
 }
 
 pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<PyResidentTraining>()?;
-    module.add_class::<PyTrainingLossSnapshot>()?;
-    module.add_class::<PyTrainingSnapshot>()?;
-    module.add_class::<PyTrainingParametersSnapshot>()?;
-    module.add_class::<PyTrainingState>()?;
+    module.add_class::<PyResidentGraphTraining>()?;
+    module.add_class::<PyGraphTrainingSnapshot>()?;
+    module.add_class::<PyGraphTrainingParametersSnapshot>()?;
+    module.add_class::<PyGraphTrainingState>()?;
     Ok(())
 }

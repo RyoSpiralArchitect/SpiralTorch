@@ -11,9 +11,10 @@ async function main() {
   if (!moduleDir || !executablePath || !outputPath) {
     throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-pair-lanes-matched|rank-prefix-matched|rank-count-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean|nn|nn-training|nd-tensor|nn-clients|nn-clients-cpu|nn-training-clients|nn-training-clients-cpu] [BASELINE_MODULE_DIR]");
   }
-  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu"].includes(fixture)) throw Error("unknown fixture");
+  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu"].includes(fixture)) throw Error("unknown fixture");
   const nnClientFixture = fixture === "nn-clients" || fixture === "nn-clients-cpu";
   const trainingClientFixture = fixture === "nn-training-clients" || fixture === "nn-training-clients-cpu";
+  const graphClientFixture = fixture === "nn-graph-clients" || fixture === "nn-graph-clients-cpu";
   const matched=fixture === "rank-matched" || fixture === "rank-pruning-matched" || fixture === "rank-pair-lanes-matched" || fixture === "rank-prefix-matched" || fixture === "rank-count-matched";
   if(matched !== Boolean(baselineDir)) throw Error("matched rank fixtures require BASELINE_MODULE_DIR; other fixtures must omit it");
   const rankFixture = fixture === "rank" || fixture === "rank-active-lanes" || fixture === "rank-tournament";
@@ -34,6 +35,10 @@ async function main() {
     if(trainingClientFixture) {
       files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_training_clients.html"), "text/html"]);
       files.set("/fixture.json", [path.join(moduleRoot, "training-fixture.json"), "application/json"]);
+    }
+    if(graphClientFixture) {
+      files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_clients.html"), "text/html"]);
+      files.set("/fixture.json", [path.join(moduleRoot, "graph-fixture.json"), "application/json"]);
     }
     function addGeneratedAssets(dir, root=moduleRoot, prefix="/module/") {
       for(const entry of fs.readdirSync(dir,{withFileTypes:true})) {
@@ -88,7 +93,7 @@ async function main() {
       }
     });
     const params = new URLSearchParams();
-    if(fixture === "nn-clients-cpu" || fixture === "nn-training-clients-cpu") params.set("cpu_only","1");
+    if(fixture === "nn-clients-cpu" || fixture === "nn-training-clients-cpu" || fixture === "nn-graph-clients-cpu") params.set("cpu_only","1");
     if(tiles) params.set("tiles",tiles);
     if(kernels) params.set("kernels",kernels);
     if(accumulations) params.set("accumulations",accumulations);
