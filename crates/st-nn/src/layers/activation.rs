@@ -131,6 +131,11 @@ impl Relu {
 }
 
 impl Module for Relu {
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        Ok(vec![crate::resident::InferenceOp::Relu])
+    }
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         validate_finite_tensor("relu_input", input)?;

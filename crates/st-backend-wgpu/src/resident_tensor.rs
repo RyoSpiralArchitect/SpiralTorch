@@ -69,7 +69,7 @@ fn substitute_ops(source: String) -> String {
     source
 }
 
-fn storage_limit(elements: usize, limits: &wgpu::Limits) -> Result<(), TensorError> {
+pub(crate) fn storage_limit(elements: usize, limits: &wgpu::Limits) -> Result<(), TensorError> {
     let bytes = runtime::checked_byte_len::<u32>("resident tensor", elements.max(1))?;
     if elements > u32::MAX as usize
         || bytes > limits.max_buffer_size

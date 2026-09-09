@@ -1,21 +1,28 @@
 //! Explicit inference lowering from existing Modules, not a second model API.
 //!
 //! Plans own immutable parameter snapshots. Rebuild after parameter updates.
-//! This first lowering supports Linear chains with optional following GELU;
+//! Dense-only plans retain their specialized fast path; rich graphs also own
+//! Scaler/ReLU pointwise parameters and an explicit gradient policy.
 //! unsupported modules fail before GPU allocation, never fall back to CPU.
 
 use crate::{module::Module, Tensor, TensorError};
+pub use st_kernel_contracts::graph::{
+    GraphDefinition, GraphGradientPolicy, GraphParameter, GraphStage, ParameterRole,
+};
 use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
+mod graph;
 mod portable;
-pub use portable::{DEFAULT_MAX_PLAN_JSON_BYTES, INFERENCE_PLAN_SCHEMA};
+pub use portable::{DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, INFERENCE_PLAN_SCHEMA};
 
 /// Modules must emit operations equivalent to their ordinary forward semantics.
 #[derive(Clone, Debug)]
 pub enum InferenceOp {
     Linear { weight: Tensor, bias: Tensor },
     Gelu,
+    Relu,
+    Scale { gain: Tensor },
 }
 
 #[derive(Debug, Error)]
@@ -24,8 +31,12 @@ pub enum InferenceError {
     UnsupportedModule(&'static str),
     #[error("inference requires a nonempty contiguous last-axis input at offset zero")]
     InvalidLayout,
-    #[error("inference plan contains no linear operation")]
+    #[error("inference plan contains no operations")]
     EmptyPlan,
+    #[error("this is a rich graph; use graph_definition/with_graph_values/compile_graph_training_wgpu, not the dense-only API")]
+    RequiresGraph,
+    #[error(transparent)]
+    Graph(#[from] st_kernel_contracts::graph::GraphError),
     #[error("GELU must directly follow an unfused Linear in this lowering")]
     UnsupportedGelu,
     #[error("linear parameter or input dimensions differ at stage {0}")]
@@ -65,6 +76,7 @@ pub struct InferencePlan {
     output: NdLayout,
     stages: Vec<FrozenLinear>,
     source_operations: usize,
+    graph: Option<GraphDefinition>,
 }
 
 impl InferencePlan {
@@ -88,6 +100,14 @@ impl InferencePlan {
             return Err(InferenceError::InvalidLayout);
         }
         let source_operations = operations.len();
+        let rich = operations.iter().enumerate().any(|(i, op)| match op {
+            InferenceOp::Scale { .. } | InferenceOp::Relu => true,
+            InferenceOp::Gelu => i == 0 || !matches!(operations[i - 1], InferenceOp::Linear { .. }),
+            _ => false,
+        });
+        if rich {
+            return Self::lower_graph(input, operations);
+        }
         let mut stages: Vec<FrozenLinear> = Vec::new();
         let mut width = *input.shape().last().unwrap();
         for operation in operations {
@@ -120,6 +140,9 @@ impl InferencePlan {
                         .ok_or(InferenceError::UnsupportedGelu)?;
                     stage.gelu = true;
                 }
+                InferenceOp::Scale { .. } | InferenceOp::Relu => {
+                    unreachable!("rich operations were lowered above")
+                }
             }
         }
         if stages.is_empty() {
@@ -132,6 +155,7 @@ impl InferencePlan {
             output: NdLayout::contiguous(&shape)?,
             stages,
             source_operations,
+            graph: None,
         })
     }
 
@@ -142,12 +166,16 @@ impl InferencePlan {
         &self.output
     }
     pub fn stage_count(&self) -> usize {
-        self.stages.len()
+        self.graph
+            .as_ref()
+            .map_or(self.stages.len(), |g| g.stages().len())
     }
     pub fn source_operation_count(&self) -> usize {
         self.source_operations
     }
 
+    /// Linear weight/bias snapshots only. For all roles (including gains), use
+    /// graph_definition().parameters(); this legacy iterator never includes gains.
     pub fn parameter_snapshots(&self) -> impl Iterator<Item = (&Tensor, &Tensor)> {
         self.stages.iter().map(|stage| (&stage.weight, &stage.bias))
     }
@@ -157,6 +185,7 @@ impl InferencePlan {
         &self,
         parameters: Vec<(Tensor, Tensor)>,
     ) -> Result<Self, InferenceError> {
+        self.require_dense()?;
         if parameters.len() != self.stages.len() {
             return Err(InferenceError::Shape(parameters.len()));
         }
@@ -181,6 +210,7 @@ impl InferencePlan {
         &self,
         layers: Vec<st_backend_wgpu::resident_dense::DenseLayer>,
     ) -> Result<Self, InferenceError> {
+        self.require_dense()?;
         use st_backend_wgpu::resident_dense::DenseActivation;
         if layers.len() != self.stages.len() {
             return Err(InferenceError::Shape(layers.len()));
@@ -222,6 +252,7 @@ impl InferencePlan {
         kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
         accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
     ) -> Result<st_backend_wgpu::resident_dense::ResidentDense, InferenceError> {
+        self.require_dense()?;
         Ok(st_backend_wgpu::resident_dense::ResidentDense::new(
             runtime,
             self.input.clone(),
@@ -254,6 +285,7 @@ impl InferencePlan {
         kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
         accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
     ) -> Result<st_backend_wgpu::resident_training::ResidentDenseTraining, InferenceError> {
+        self.require_dense()?;
         Ok(
             st_backend_wgpu::resident_training::ResidentDenseTraining::new(
                 runtime,
@@ -315,14 +347,12 @@ mod tests {
     #[test]
     fn unsupported_layers_and_shapes_fail_closed() {
         let shape = NdLayout::contiguous(&[2, 4]).unwrap();
-        assert!(matches!(
-            InferencePlan::from_module(&Relu::new(), shape.clone()),
-            Err(InferenceError::UnsupportedModule(_))
-        ));
-        assert!(matches!(
-            InferencePlan::from_module(&Gelu::new(), shape.clone()),
-            Err(InferenceError::UnsupportedGelu)
-        ));
+        assert!(!InferencePlan::from_module(&Relu::new(), shape.clone())
+            .unwrap()
+            .is_dense());
+        assert!(!InferencePlan::from_module(&Gelu::new(), shape.clone())
+            .unwrap()
+            .is_dense());
         assert!(matches!(
             InferencePlan::from_module(&Sequential::new(), shape.clone()),
             Err(InferenceError::EmptyPlan)
