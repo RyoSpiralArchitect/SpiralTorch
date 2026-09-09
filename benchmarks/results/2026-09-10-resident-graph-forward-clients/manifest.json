@@ -1,0 +1,320 @@
+{
+  "schema": "spiraltorch.hash_archive.v1",
+  "entries": [
+    {
+      "path": "raw/final/admission.log.xz",
+      "original_name": "final/admission.log",
+      "bytes": 104,
+      "sha256": "8750d4b5acdce1e4d680a3a27eb5d68370ed8b7d37b619aa32e9e0049f881dae",
+      "compressed_sha256": "d77f3845f7b133e58e5f32a4f49dbab608daced4d9d3860179f5137a7751be42"
+    },
+    {
+      "path": "raw/final/backend-serial.log.xz",
+      "original_name": "final/backend-serial.log",
+      "bytes": 123932,
+      "sha256": "b710d6f33212963806ca4a7a10e2c3493cb802ec86444550b16f3f41ef0c2c8b",
+      "compressed_sha256": "56d01b986044bb294bee144560fe781f6bcec9da67824967f214822d01779ca6"
+    },
+    {
+      "path": "raw/final/browser.json.xz",
+      "original_name": "final/browser.json",
+      "bytes": 698481,
+      "sha256": "69217cd2a6511fa08c88ca93e748d4bd4cbbd68dd6c03fb60a96bf1687fc0fef",
+      "compressed_sha256": "174d59ee8a94e55a636437a14ba282eb0ed9e253f56097bb7f5f616b3d88adca"
+    },
+    {
+      "path": "raw/final/browser.log.xz",
+      "original_name": "final/browser.log",
+      "bytes": 152,
+      "sha256": "6000d5e8fc45fee2fb9390c57da87a58d28ae51c9ba778ff1ae0564160319f4f",
+      "compressed_sha256": "efb3a11865d6d332e49096442a131c94e2de25d1e2b6a0efe16f8ec20a329d32"
+    },
+    {
+      "path": "raw/final/core-fixture.json.xz",
+      "original_name": "final/core-fixture.json",
+      "bytes": 699371,
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0",
+      "compressed_sha256": "dc51b1391f66b23febf4be5110779debcfe07b2cf0d42a4a20cd61bd8a41a047"
+    },
+    {
+      "path": "raw/final/cpu-bindgen.log.xz",
+      "original_name": "final/cpu-bindgen.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/final/cpu-wasm-build.log.xz",
+      "original_name": "final/cpu-wasm-build.log",
+      "bytes": 1157,
+      "sha256": "5600d70b153d81ef3c9a29bf50c533d7301e1d779478199a3ca54a7e70e1b64e",
+      "compressed_sha256": "7425e824065e362ea8a17ad71b494b7ce7ded59f5865ee507bf3feed53a35bd7"
+    },
+    {
+      "path": "raw/final/cpu-wasm-tensor-absence.log.xz",
+      "original_name": "final/cpu-wasm-tensor-absence.log",
+      "bytes": 45,
+      "sha256": "3debfb0d0f2a3ae5c634c6e63e3971c76a1a13453ba3e0c837b227f4ebfb93d9",
+      "compressed_sha256": "ab9152695ad5eb8a0372c81bf7dc0c1e288b5a01452199c04ad8f73eb4e9f052"
+    },
+    {
+      "path": "raw/final/cpu-wasm-transport.log.xz",
+      "original_name": "final/cpu-wasm-transport.log",
+      "bytes": 61,
+      "sha256": "de12741aeb924f03681e69431971ab4ecffacb6bf753a60c4efa865278cae0ed",
+      "compressed_sha256": "0c46eed321f7e07fb98b4c41c57ada92fc17d6846b761d5c8763172199b1c723"
+    },
+    {
+      "path": "raw/final/diff-check.log.xz",
+      "original_name": "final/diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/final/fmt.log.xz",
+      "original_name": "final/fmt.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/final/legacy-admission.log.xz",
+      "original_name": "final/legacy-admission.log",
+      "bytes": 103,
+      "sha256": "173723c51405459d7776f373751eefb956edf91c4da71db14fd901bfc7e979b3",
+      "compressed_sha256": "6183c55028adb23fa3d70016f58312795d159fe9170f8cccb3533a94ed81ca9f"
+    },
+    {
+      "path": "raw/final/python-capture.log.xz",
+      "original_name": "final/python-capture.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/final/python-cpu-build.log.xz",
+      "original_name": "final/python-cpu-build.log",
+      "bytes": 2044,
+      "sha256": "3f08a5cecdd0e80eaba807fcf9cd0de3a6f4f2070c7028d03ef6fb7f901dbc42",
+      "compressed_sha256": "067a1017debe3fcbc9bee82296b19701def8b1665c0b1d755fe7692ed8fb3d6b"
+    },
+    {
+      "path": "raw/final/python-cpu-tests.json.xz",
+      "original_name": "final/python-cpu-tests.json",
+      "bytes": 788,
+      "sha256": "8640f9c1740e688ef8a0971cef71faef5082eeb39e4afbc7b33e640f16bf7f63",
+      "compressed_sha256": "0767f5364f302bd1633f38c203f525a6305032432ad29e07c8eff0c42ddac737"
+    },
+    {
+      "path": "raw/final/python-cpu-tests.log.xz",
+      "original_name": "final/python-cpu-tests.log",
+      "bytes": 5554,
+      "sha256": "647b9c4f4ad6943b34a108b91fd0b25e8e0da422ee9d1b3380f5415cc1661797",
+      "compressed_sha256": "4d99ab7a3b6e9f20197d615a46cf4a8879f14233a7d372fe599be6314f84630b"
+    },
+    {
+      "path": "raw/final/python-gpu-build.log.xz",
+      "original_name": "final/python-gpu-build.log",
+      "bytes": 115404,
+      "sha256": "00451255af9b41f3410be52c9b6d4f442538810155693a12f3e18cc8cadc2686",
+      "compressed_sha256": "3c9747e93e9265376ecd491ea160c735db0d936fc1ddbfccbd122a5d353a7f18"
+    },
+    {
+      "path": "raw/final/python-gpu-tests.json.xz",
+      "original_name": "final/python-gpu-tests.json",
+      "bytes": 787,
+      "sha256": "0f8b4d5d719c3ee7413fee5258206503c075516c2b4fa3f1841f30693cc2799e",
+      "compressed_sha256": "ef7b41bbdb633b4cbfcf7bcd1c76a3662a152ababecc8449a9a235c2dd4a5ac1"
+    },
+    {
+      "path": "raw/final/python-gpu-tests.log.xz",
+      "original_name": "final/python-gpu-tests.log",
+      "bytes": 5084,
+      "sha256": "dc9897472cfa39dd1b69b1592ab6837b8e6172a7b83f3acc3c713b2bc68ae8a4",
+      "compressed_sha256": "26e1a14075b076fbe35427bb62b6f146c48e3b12ca06a355e8c4182616140d49"
+    },
+    {
+      "path": "raw/final/python.json.xz",
+      "original_name": "final/python.json",
+      "bytes": 698755,
+      "sha256": "8bb7b8e2cd8c40f1b5a1610d78ce125ee7948f2b8b26f210b8b8e069245cc33d",
+      "compressed_sha256": "8e3d9869919848cfa62c3b1e4d47ad8f032b9eda68f53565cd466348545e8494"
+    },
+    {
+      "path": "raw/final/receipt.json.xz",
+      "original_name": "final/receipt.json",
+      "bytes": 13971,
+      "sha256": "faecebf12f68cb404767e687ebb4cc54672520b038271900e6761d1a6187ada0",
+      "compressed_sha256": "d0b7f98c03f64d60c65ab30f6ea4db10d1a37f6ce586070fd02630488326846d"
+    },
+    {
+      "path": "raw/final/torch.json.xz",
+      "original_name": "final/torch.json",
+      "bytes": 16501,
+      "sha256": "4d7cbc421c91c3eea299b96066cc66f2bedf835aa9dde916ceb055870882d3ee",
+      "compressed_sha256": "762565f4d57938ef3979380192118b915c1306f36e24d4fda04fbf039da825df"
+    },
+    {
+      "path": "raw/final/torch.log.xz",
+      "original_name": "final/torch.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/final/types.log.xz",
+      "original_name": "final/types.log",
+      "bytes": 316,
+      "sha256": "50c95105c4e2d5453d343330a499af8fdf3081fbdc095056c7344b9a6a972324",
+      "compressed_sha256": "231d46c3980f39c5bfe75b7cf1de3184c9fbfecfcad9509236ccf16a2263a362"
+    },
+    {
+      "path": "raw/final/webgpu-bindgen.log.xz",
+      "original_name": "final/webgpu-bindgen.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/final/webgpu-wasm-build.log.xz",
+      "original_name": "final/webgpu-wasm-build.log",
+      "bytes": 111500,
+      "sha256": "6d68a57967b7fa18d1eedfd9cdb9302ce01cc0171d020f468d40b39401f97b38",
+      "compressed_sha256": "4523598bbc097d0b102ab1c307b36d38f1dbd6815f4da2737b6b0fb267175e22"
+    },
+    {
+      "path": "raw/final/wgpu-only-check.log.xz",
+      "original_name": "final/wgpu-only-check.log",
+      "bytes": 115340,
+      "sha256": "3618765309a62c44336b7921351bff816e70ad6210edcf2db2806aeb7c39efa5",
+      "compressed_sha256": "aebbcb06254a38b2c7de355ff32b2eb73cdcd35199ad43d24c0db1f0054f3fd2"
+    },
+    {
+      "path": "raw/browser-initial.json.xz",
+      "original_name": "browser-initial.json",
+      "bytes": 698481,
+      "sha256": "217f6bcbc5efc8ac6d5ba9569af3a36c79b5ca2f648c385d9ffe59fd9f8491f6",
+      "compressed_sha256": "68585ebec723a9f569cb49dec7ef7d7243b9d63045c3070f36b464969ae53a6c"
+    },
+    {
+      "path": "raw/python-initial-build.log.xz",
+      "original_name": "python-initial-build.log",
+      "bytes": 117581,
+      "sha256": "be1b53e52e22f2758aabfa65be8150ed3ff6abc36c38eb388de9e53d17248689",
+      "compressed_sha256": "73f5703352874cc29a804e7966a1fefff72a4fda8ba66d920629f9214a764078"
+    },
+    {
+      "path": "raw/python-initial-capture.json.xz",
+      "original_name": "python-initial-capture.json",
+      "bytes": 698752,
+      "sha256": "d9c2815c213f5021bdad9ae67e4f254e8b3406f19d5e3934a29e35203c0660c5",
+      "compressed_sha256": "c51975ea5515c06d57af15779eddc47124adc74be0afc71f20a322862443914d"
+    },
+    {
+      "path": "raw/python-initial-capture.log.xz",
+      "original_name": "python-initial-capture.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/python-initial-check.log.xz",
+      "original_name": "python-initial-check.log",
+      "bytes": 115404,
+      "sha256": "bf1f927205e8fdee316d0414812b1f36689e36139381c639758a85afa67f67d6",
+      "compressed_sha256": "0fce7a68d7ae9595d62a97c9b144ac114a373e8f35c1f3e5427f4dfd59af4fab"
+    },
+    {
+      "path": "raw/python-initial-forward.log.xz",
+      "original_name": "python-initial-forward.log",
+      "bytes": 648,
+      "sha256": "169f246ed08c9863b7d3d403cabe53f25919676e2aa8d861b50a7654b384816c",
+      "compressed_sha256": "2aeb8cea6e69c4bfa32a0eaa8c517eefe4fb5d1faade2ecd163a3e70252dc366"
+    },
+    {
+      "path": "raw/python-initial-tensor.log.xz",
+      "original_name": "python-initial-tensor.log",
+      "bytes": 846,
+      "sha256": "063b0570fae30741aba40dde5b7dd3287345027f5850f3008e2bb3eaaac116d8",
+      "compressed_sha256": "a771505a34ca94cbc22f31e7cdcb52d17b10d5881328aeff3dc8ca9e32266d5e"
+    },
+    {
+      "path": "raw/torch-initial.json.xz",
+      "original_name": "torch-initial.json",
+      "bytes": 16499,
+      "sha256": "e8c31a0f4eaca9c6df8d5935f7c75bf6e7a12d958fb5b1056a3dd08c88293c1d",
+      "compressed_sha256": "77773a8478e2f0571135fd7f1e05978c46efefe14f66bcc73ff83d00a7c8d5d0"
+    },
+    {
+      "path": "raw/torch-initial.log.xz",
+      "original_name": "torch-initial.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "path": "raw/wasm-initial-build.log.xz",
+      "original_name": "wasm-initial-build.log",
+      "bytes": 112344,
+      "sha256": "ab21fef3a8e8b024af78eca5261c879fb92ae68a51739cc643ffc5c2b419bef6",
+      "compressed_sha256": "5e710777ce8be01121d1902f8656ce99ea6c73ca68fe9fb5c73bcd84038f0490"
+    },
+    {
+      "path": "raw/wasm-initial-check.log.xz",
+      "original_name": "wasm-initial-check.log",
+      "bytes": 111509,
+      "sha256": "f0d83867f437e9aed93db4d8cce14363a14e59cbb3c23030931b90e265d97e9a",
+      "compressed_sha256": "d23c96244fe47395e2f22af08b61118d08a23cdcea3eaf97748aa5285c8152e2"
+    },
+    {
+      "path": "raw/python-client.py.xz",
+      "original_name": "python-client.py",
+      "bytes": 1902,
+      "sha256": "b1997314bfd3cc08014549d99eae1836e01a9e50e7aa337509c3dba4e386b4c6",
+      "compressed_sha256": "469057ee6c57b0e0f21abdc210b9b9061340d4cc79a75f092fa40877a2c84024"
+    },
+    {
+      "path": "raw/verify-clients.py.xz",
+      "original_name": "verify-clients.py",
+      "bytes": 6812,
+      "sha256": "df61f7f3917285e7f6fb3c002469edfbb96b4cd58b450c543653c26639fa0b7e",
+      "compressed_sha256": "0f4f17578e38f9c6e212017c95ae39e9e4c220e01ca223264aa2fdbd6f546f06"
+    },
+    {
+      "path": "raw/pack-evidence.py.xz",
+      "original_name": "pack-evidence.py",
+      "bytes": 6204,
+      "sha256": "2cd690b87fe95b15f50a82c3648420c609d0427562cc6569312793548d9eb90d",
+      "compressed_sha256": "2a8722955971435725dab9982828c3855f5b5abe90404c523da041e14622f149"
+    },
+    {
+      "path": "raw/final/cpu/spiraltorch_wasm.d.ts.xz",
+      "original_name": "final/cpu/spiraltorch_wasm.d.ts",
+      "bytes": 44204,
+      "sha256": "83ba1d05481d97b9639166f1639f5f222682531f2dc1aa53e80c5c61c1b34848",
+      "compressed_sha256": "9d329b0008b54343146152b52bca7ddeeaf1d610b0a6372f1b5285e9f09915ec"
+    },
+    {
+      "path": "raw/final/cpu/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "original_name": "final/cpu/spiraltorch_wasm_bg.wasm.d.ts",
+      "bytes": 52438,
+      "sha256": "476d681da74cabb1a3a7e721ee896698d97d2a73398383491d078dc13ff27a79",
+      "compressed_sha256": "7b6bf0a84eeb4a388d1eb0a8a4bc8c2b32f0b249d19f1488e5e7e9ccc1fe9e83"
+    },
+    {
+      "path": "raw/final/webgpu/spiraltorch_wasm.d.ts.xz",
+      "original_name": "final/webgpu/spiraltorch_wasm.d.ts",
+      "bytes": 117626,
+      "sha256": "da63f6e7f3ed4204ae63ba5685e5745eac55ca3468062dfdb7f87fb430146e58",
+      "compressed_sha256": "9cf12c06fa6273ad23bc6abeac3645dda775fc3fb14e34a60c5686d95b3f7865"
+    },
+    {
+      "path": "raw/final/webgpu/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "original_name": "final/webgpu/spiraltorch_wasm_bg.wasm.d.ts",
+      "bytes": 65752,
+      "sha256": "e66213559ab3ef81693d2a3fee3b589fdff2a1394e1df7b9e9482632088331c6",
+      "compressed_sha256": "3660cb61d25b243ec5712eaa5652efb2f6e0380769d2b6cea2f7a727761988cc"
+    }
+  ]
+}

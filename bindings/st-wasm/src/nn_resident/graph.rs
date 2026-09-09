@@ -38,6 +38,28 @@ fn shape(layout: &st_tensor::NdLayout) -> Vec<u32> {
 #[cfg(feature = "webgpu")]
 #[wasm_bindgen(js_class = ResidentGraphTraining)]
 impl WasmResidentGraphTraining {
+    #[wasm_bindgen(js_name = uploadBatchTensors)]
+    pub fn upload_batch_tensors(
+        &mut self,
+        input: &crate::wgpu_tensor::WasmWgpuTensor,
+        target: &crate::wgpu_tensor::WasmWgpuTensor,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .upload_batch_tensors(&input.inner, &target.inner)
+            .map_err(training_error)
+    }
+    #[wasm_bindgen(js_name = predictionTensor)]
+    pub fn prediction_tensor(&self) -> Result<crate::wgpu_tensor::WasmWgpuTensor, JsValue> {
+        Ok(crate::wgpu_tensor::WasmWgpuTensor {
+            inner: self.inner.prediction_tensor().map_err(training_error)?,
+        })
+    }
+    #[wasm_bindgen(js_name = inputGradientTensor)]
+    pub fn input_gradient_tensor(&self) -> Result<crate::wgpu_tensor::WasmWgpuTensor, JsValue> {
+        Ok(crate::wgpu_tensor::WasmWgpuTensor {
+            inner: self.inner.input_gradient_tensor().map_err(training_error)?,
+        })
+    }
     #[wasm_bindgen(getter, js_name = inputShape)]
     pub fn input_shape(&self) -> Vec<u32> {
         shape(self.inner.input_layout())

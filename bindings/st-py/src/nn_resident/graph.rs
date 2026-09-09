@@ -55,6 +55,29 @@ pub(super) struct PyResidentGraphTraining {
 #[cfg(feature = "wgpu")]
 #[pymethods]
 impl PyResidentGraphTraining {
+    fn upload_batch_tensors(
+        &mut self,
+        py: Python<'_>,
+        input: &crate::wgpu_tensor::PyWgpuTensor,
+        target: &crate::wgpu_tensor::PyWgpuTensor,
+    ) -> PyResult<()> {
+        py.detach(|| self.inner.upload_batch_tensors(&input.inner, &target.inner))
+            .map_err(training_error)
+    }
+    fn prediction_tensor(&self, py: Python<'_>) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        Ok(crate::wgpu_tensor::PyWgpuTensor {
+            inner: py
+                .detach(|| self.inner.prediction_tensor())
+                .map_err(training_error)?,
+        })
+    }
+    fn input_gradient_tensor(&self, py: Python<'_>) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        Ok(crate::wgpu_tensor::PyWgpuTensor {
+            inner: py
+                .detach(|| self.inner.input_gradient_tensor())
+                .map_err(training_error)?,
+        })
+    }
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.inner.input_layout().shape().iter().copied())

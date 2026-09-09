@@ -7021,6 +7021,9 @@ _mirror_into_module(
     "wgpu",
     {
         "WgpuMatmul": ("wgpu.WgpuMatmul",),
+        "WgpuTensorDevice": ("wgpu.WgpuTensorDevice",),
+        "WgpuTensor": ("wgpu.WgpuTensor",),
+        "WgpuTensorSnapshot": ("wgpu.WgpuTensorSnapshot",),
         "WgpuRank": ("wgpu.WgpuRank",),
         "wgpu_kernel_reports_available": ("wgpu.wgpu_kernel_reports_available",),
         "wgpu_kernel_catalog": ("wgpu.wgpu_kernel_catalog",),
@@ -8884,7 +8887,7 @@ _CORE_EXPORTS = [
     "kv_json_set_options","kv_redis_set_json","kv_redis_get_json",
     "kv_redis_set_choice","kv_redis_get_choice","kv_redis_push_choice",
     "kv_redis_lrange_choice",
-    "WgpuMatmul","WgpuRank","wgpu_kernel_reports_available","wgpu_kernel_catalog","wgpu_kernel_descriptor",
+    "WgpuMatmul","WgpuRank","WgpuTensorDevice","WgpuTensor","WgpuTensorSnapshot","wgpu_kernel_reports_available","wgpu_kernel_catalog","wgpu_kernel_descriptor",
     "wgpu_rank_kernel_report","wgpu_kernel_report_from_rank_plan",
     "wgpu_softmax_kernel_report",
     "token_scale_stack","token_coherence_levels",

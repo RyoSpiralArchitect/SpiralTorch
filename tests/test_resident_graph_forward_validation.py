@@ -34,6 +34,30 @@ def fixture():
 
 
 class Admission(unittest.TestCase):
+    def test_client_lineage_is_required_and_frozen(self):
+        core = fixture()
+        client = copy.deepcopy(core)
+        client.update(schema="spiraltorch.resident_graph_forward_client.v1", client="python", source_fixture_sha256="a"*64,
+                      guards={k:True for k in ("owned_output","late_readback","atomic_input","single_consumption","shared_runtime")})
+        self.assertEqual(len(validator.admit(client)),12)
+        sources=[dict(sha256="a"*64),dict(sha256="b"*64)]
+        validator.check_lineage([core,client],sources)
+        with self.assertRaises(ValueError): validator.check_lineage([client],sources[1:])
+        changed=copy.deepcopy(client)
+        changed["cases"][0]["input"][0]=1.
+        with self.assertRaises(ValueError): validator.check_lineage([core,changed],sources)
+        changed=copy.deepcopy(client)
+        changed["source_fixture_sha256"]="c"*64
+        with self.assertRaises(ValueError): validator.check_lineage([core,changed],sources)
+        client["client"]="wasm"
+        with self.assertRaises(ValueError): validator.admit(client)
+        client["asset_sha256"]={"/fixture.json":"a"*64}
+        self.assertEqual(len(validator.admit(client)),12)
+        for bad in ("missing", False, 1):
+            changed=copy.deepcopy(client)
+            changed["guards"]["shared_runtime"]=bad
+            with self.assertRaises(ValueError): validator.admit(changed)
+
     def test_complete_recipe_admission(self):
         self.assertEqual(len(validator.admit(fixture())), 12)
 

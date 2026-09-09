@@ -12,6 +12,7 @@ use pyo3::{
 use st_nn::resident::{InferenceError, InferencePlan, DEFAULT_MAX_PLAN_JSON_BYTES};
 use st_tensor::NdLayout;
 
+mod forward;
 mod graph;
 mod training;
 
@@ -20,6 +21,7 @@ fn plan_error(error: InferenceError) -> PyErr {
     match error {
         InferenceError::Gpu(error) => return gpu_error(error),
         InferenceError::Training(error) => return training::training_error(error),
+        InferenceError::GraphGpu(error) => return forward::error(error),
         _ => {}
     }
     PyValueError::new_err(error.to_string())
@@ -183,6 +185,17 @@ impl PyInferencePlan {
         training::compile(&self.inner, py, tile_mnk, kernel, accumulation)
     }
 
+    #[pyo3(signature = (*, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_graph_wgpu(
+        &self,
+        py: Python<'_>,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<forward::PyResidentGraphInference> {
+        forward::compile(&self.inner, py, tile_mnk, kernel, accumulation)
+    }
+
     #[pyo3(signature = (*, gradient_policy, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
     fn compile_graph_training_wgpu(
         &self,
@@ -223,6 +236,25 @@ fn gpu_error(error: st_backend_wgpu::resident_dense::DenseError) -> PyErr {
 #[cfg(feature = "wgpu")]
 #[pymethods]
 impl PyResidentInference {
+    fn set_input_tensor(
+        &mut self,
+        py: Python<'_>,
+        input: &crate::wgpu_tensor::PyWgpuTensor,
+    ) -> PyResult<()> {
+        py.detach(|| self.inner.set_input_tensor(&input.inner))
+            .map_err(gpu_error)
+    }
+    fn tensor_snapshot(
+        &self,
+        py: Python<'_>,
+        device: &crate::wgpu_tensor::PyWgpuTensorDevice,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        Ok(crate::wgpu_tensor::PyWgpuTensor {
+            inner: py
+                .detach(|| self.inner.tensor_snapshot(&device.inner))
+                .map_err(gpu_error)?,
+        })
+    }
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.inner.input_layout().shape().iter().copied())
@@ -349,5 +381,6 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyInferenceSnapshot>()?;
     training::register(module)?;
     graph::register(module)?;
+    forward::register(module)?;
     Ok(())
 }

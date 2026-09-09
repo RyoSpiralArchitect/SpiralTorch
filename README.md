@@ -59,7 +59,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 - **[Backend vs PyTorch benchmarks](docs/backend_pytorch_benchmarks.md)** - Matched inputs, strict execution, actual WASM/CUDA runs, and preserved failures.
 - **[Resident WebGPU matmul](docs/resident_webgpu_matmul.md)** - Shared Rust execution from Python/browser WASM, GPU chaining, and asynchronous snapshots.
 - **[Resident NN inference](docs/resident_nn_inference.md)** - Lower existing Rust Linear/GELU/Sequential modules into a checked GPU-resident chain with N-D shape metadata; explicit inference, not resident training.
-- **[Mixed forward graphs](docs/resident_graph_forward.md)** - Run existing Rust Scaler/ReLU/Linear/GELU modules without a training tape; connect resident N-D inputs, postprocessing and subsequent graphs without CPU readback.
+- **[Mixed forward graphs](docs/resident_graph_forward.md)** - Compile existing Scaler/ReLU/Linear/GELU modules through Rust, Python or WASM without a training tape; shared `WgpuTensor` handles connect N-D processing, inference and graph training without intermediate CPU readback.
 - **[Resident NN training](docs/resident_nn_training.md)** - The same graph supports Rust-owned mean-MSE, VJP and transactional SGD through Python/browser clients, with explicit weight-only handoff.
 - 🌌 **[Z-Space Introduction](docs/zspace_intro.md)** - Understanding hyperbolic geometry in ML
 

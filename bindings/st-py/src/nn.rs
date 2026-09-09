@@ -10927,6 +10927,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "TrainingParametersSnapshot",
             "TrainingState",
             "ResidentGraphTraining",
+            "ResidentGraphInference",
+            "GraphInferenceSnapshot",
             "GraphTrainingSnapshot",
             "GraphTrainingParametersSnapshot",
             "GraphTrainingState",

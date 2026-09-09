@@ -120,6 +120,26 @@ function checkNnContract(types, label) {
   for(const method of ["predictionValues","inputGradientValues"])
     assert.match(graphState, new RegExp(method+"\\(\\): Float32Array"));
   assert.match(graphState, /toPlan\(\): InferencePlan/);
+  assert.match(plan, /compileGraphWebGpu\([^\n]*\): Promise<ResidentGraphInference>/);
+  const forward=get("ResidentGraphInference"), forwardSnapshot=get("GraphInferenceSnapshot"),
+    tensor=get("WgpuTensor"), tensorDevice=get("WgpuTensorDevice"), tensorSnapshot=get("WgpuTensorSnapshot");
+  assert.match(forward, /setInputTensor\(input: WgpuTensor\): void/);
+  assert.match(forward, /outputTensor\(\): WgpuTensor/);
+  assert.match(forward, /tensorDevice\(\): WgpuTensorDevice/);
+  assert.match(forward, /snapshot\(\): GraphInferenceSnapshot/);
+  assert.match(forward, /readonly submittedDispatches: bigint/);
+  assert.match(forwardSnapshot, /readonly submittedDispatch: bigint/);
+  for (const value of [forwardSnapshot,tensorSnapshot]) assert.match(value, /readValues\(\): Promise<Float32Array>/);
+  assert.match(tensorDevice, /create\(\): Promise<WgpuTensorDevice>/);
+  assert.match(tensorDevice, /upload\(shape: number\[\], data: Float32Array\): WgpuTensor/);
+  assert.match(tensor, /readonly strides: Uint32Array/);
+  assert.match(tensor, /narrow\(axis: number, start: number, length: number\): WgpuTensor/);
+  assert.match(tensor, /snapshot\(\): WgpuTensorSnapshot/);
+  assert.match(gpu, /setInputTensor\(input: WgpuTensor\): void/);
+  assert.match(gpu, /tensorSnapshot\(device: WgpuTensorDevice\): WgpuTensor/);
+  assert.match(graph, /uploadBatchTensors\(input: WgpuTensor, target: WgpuTensor\): void/);
+  assert.match(graph, /predictionTensor\(\): WgpuTensor/);
+  assert.match(graph, /inputGradientTensor\(\): WgpuTensor/);
   console.log(label + " resident NN TypeScript contract passed");
 }
 

@@ -21,10 +21,72 @@ declare module "spiraltorch-wasm" {
         readonly isDense: boolean;
         /** Requires webgpu; the plan may be freed while the returned promise runs. */
         compileWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentInference>;
+        compileGraphWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphInference>;
         /** Mean-MSE, VJP and plain SGD use the same Rust core as native training. */
         compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentTraining>;
         /** Explicit Rust policy: "exact" or "module_compatible". Requires webgpu. */
         compileGraphTrainingWebGpu(gradient_policy: string, tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphTraining>;
+        free(): void;
+    }
+
+    /** Immutable N-D GPU storage; available with webgpu, never host Tensor storage. */
+    export class WgpuTensorDevice {
+        private constructor();
+        static create(): Promise<WgpuTensorDevice>;
+        upload(shape: number[], data: Float32Array): WgpuTensor;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        free(): void;
+    }
+    export class WgpuTensor {
+        private constructor();
+        readonly shape: Uint32Array;
+        readonly strides: Uint32Array;
+        readonly offset: number;
+        readonly numel: number;
+        readonly isContiguous: boolean;
+        device(): WgpuTensorDevice;
+        sharesStorageWith(other: WgpuTensor): boolean;
+        reshape(shape: number[]): WgpuTensor;
+        permute(axes: number[]): WgpuTensor;
+        narrow(axis: number, start: number, length: number): WgpuTensor;
+        broadcastTo(shape: number[]): WgpuTensor;
+        contiguous(): WgpuTensor;
+        add(rhs: WgpuTensor): WgpuTensor;
+        mul(rhs: WgpuTensor): WgpuTensor;
+        relu(): WgpuTensor;
+        gelu(): WgpuTensor;
+        snapshot(): WgpuTensorSnapshot;
+        free(): void;
+    }
+    export class WgpuTensorSnapshot {
+        private constructor();
+        readonly shape: Uint32Array;
+        readValues(): Promise<Float32Array>;
+        free(): void;
+    }
+    export class ResidentGraphInference {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly generation: bigint;
+        readonly submittedDispatches: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        tensorDevice(): WgpuTensorDevice;
+        upload(data: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        dispatch(): bigint;
+        outputTensor(): WgpuTensor;
+        snapshot(): GraphInferenceSnapshot;
+        free(): void;
+    }
+    export class GraphInferenceSnapshot {
+        private constructor();
+        readonly shape: Uint32Array;
+        readonly generation: bigint;
+        readonly submittedDispatch: bigint;
+        readValues(): Promise<Float32Array>;
         free(): void;
     }
 
@@ -39,6 +101,9 @@ declare module "spiraltorch-wasm" {
         readonly batchGeneration: bigint;
         adapterInfo(): { name: string; backend: string; device_type: string };
         uploadBatch(input: Float32Array, target: Float32Array): void;
+        uploadBatchTensors(input: WgpuTensor, target: WgpuTensor): void;
+        predictionTensor(): WgpuTensor;
+        inputGradientTensor(): WgpuTensor;
         /** Submitted attempt, not acceptance. Read its owning snapshot. */
         step(learning_rate: number): bigint;
         lossSnapshot(): TrainingLossSnapshot;
@@ -156,6 +221,8 @@ declare module "spiraltorch-wasm" {
         readonly generation: bigint;
         adapterInfo(): { name: string; backend: string; device_type: string };
         upload(values: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        tensorSnapshot(device: WgpuTensorDevice): WgpuTensor;
         dispatch(): bigint;
         snapshot(): InferenceSnapshot;
         free(): void;

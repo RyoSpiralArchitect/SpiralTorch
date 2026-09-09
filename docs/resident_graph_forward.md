@@ -54,10 +54,95 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 On WASM use asynchronous runtime discovery and `snapshot.read_async().await`.
-The same Rust compiler and executor run in the browser. This addition is a Rust
-API and an executable browser validation fixture, **not yet a public Python/JS
-mixed-inference handle**. Existing public dense-inference and mixed-training
-clients are unchanged; those clients can already transport the v2 plan.
+The same Rust compiler and executor run in the browser. Python and WASM expose
+this compiler through owning handles; neither client reconstructs the graph's
+operations, strides, broadcasting or error propagation.
+
+## Python And Browser Clients
+
+Use a current-source wheel with `nn` and `wgpu` (both are default features):
+
+```python
+import spiraltorch as st
+
+model = st.nn.Sequential()
+model.add(st.nn.Scaler.from_gain("scale", st.Tensor(1, 4, [1., .5, .75, 1.25])))
+model.add(st.nn.Linear(4, 7, name="up"))
+model.add(st.nn.Gelu())
+model.add(st.nn.Relu())
+model.add(st.nn.Linear(7, 3, name="down"))
+plan = model.inference_plan([2, 5, 4])
+gpu = plan.compile_graph_wgpu()
+device = gpu.tensor_device()
+x = device.upload([2, 5, 4], [.25] * 40)
+gpu.set_input_tensor(x.relu())
+gpu.dispatch()
+y = gpu.output_tensor().add(device.upload([3], [.1, .2, .3]))
+del gpu
+snapshot = y.snapshot()
+values = snapshot.read_values()  # explicit first host observation
+payload = plan.to_json()        # the same Rust-owned plan can go to a browser
+```
+
+The independent factory `st.WgpuTensorDevice.create()` uses the same default
+device/queue as NN compilation. `st.WgpuTensor`, `st.WgpuTensorDevice` and
+`st.WgpuTensorSnapshot` are also available under `spiraltorch.wgpu`. Only the
+factory/upload/operation methods create handles; direct constructors are not
+part of the API. Ordinary host-backed `st.Tensor` is a separate type.
+
+Build the production WASM package with `webgpu`, then use the exact plan JSON:
+
+```javascript
+import init, { InferencePlan } from "./pkg/spiraltorch_wasm.js";
+await init();
+const plan = InferencePlan.fromJson(payload);
+const pending = plan.compileGraphWebGpu();
+plan.free(); // the compilation promise already owns the Rust plan
+const gpu = await pending;
+const device = gpu.tensorDevice();
+const x = device.upload([2, 5, 4], new Float32Array(40).fill(.25));
+gpu.setInputTensor(x);
+gpu.dispatch();
+const y = gpu.outputTensor();
+gpu.free(); x.free(); device.free();
+const snapshot = y.snapshot();
+y.free();
+const shape = snapshot.shape; // Uint32Array; independent metadata
+const reading = snapshot.readValues();
+snapshot.free(); // the pending read owns its buffers, not this JS wrapper
+const values = await reading;
+```
+
+`WgpuTensorDevice.create()` is an asynchronous browser factory. Tensor methods
+`reshape`, `permute`, `narrow`, `broadcast_to`/`broadcastTo`, `contiguous`, `add`,
+`mul`, `relu`, `gelu` and `snapshot` all use the same Rust implementations.
+Shape/axes/index arguments must be integers, not booleans or fractional values;
+browser shape arguments are `number[]`, and data arguments are `Float32Array`.
+Shape/stride metadata is copied out, with strides measured in elements.
+Standalone tensors support scalar and empty layouts; NN plans still require
+nonempty last-axis inputs.
+
+The handle also connects existing public executors:
+
+- Dense inference accepts `set_input_tensor` / `setInputTensor`; its
+  `tensor_snapshot(device)` / `tensorSnapshot(device)` returns a GPU tensor.
+- Graph training accepts `upload_batch_tensors` / `uploadBatchTensors`, and
+  returns `prediction_tensor` / `predictionTensor` and `input_gradient_tensor`
+  / `inputGradientTensor`. Both are pre-update captures with the complete
+  training guard, not proof that an enqueued SGD step was accepted.
+- Mixed inference uses `output_tensor` / `outputTensor`; any of these results
+  can feed another compatible executor without intermediate host readback.
+
+Mixed `dispatch()` returns the submitted-dispatch counter; snapshot metadata
+retains input generation and dispatch separately. The legacy dense executor's
+return value remains its input generation. Snapshot reads consume the handle
+once, including a rejected read. An invalid upstream value stays invalid after
+ReLU, reshape or an NN pass; errors are deferred to explicit observation.
+
+CPU-only Python builds retain the class names but reject device creation and
+graph compilation with `NotImplementedError`. An `nn`-only WASM build transports
+plans and rejects `compileGraphWebGpu`; it does not export `WgpuTensor*` classes.
+Neither path substitutes host Tensor operations when WebGPU is unavailable.
 
 ## Transfer And Ownership Contract
 
@@ -87,6 +172,33 @@ clients are unchanged; those clients can already transport the v2 plan.
 
 These are structural transfer boundaries, not hardware-counter measurements
 or a claim that this path is faster than PyTorch.
+
+## Public Client Validation
+
+The production-client fixture imports a frozen core fixture, preserves its
+input values and plan contents, and executes 12 recipes through the public handles:
+
+```bash
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I bindings/st-py/tests/test_wgpu_tensor.py -v
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I bindings/st-py/tests/test_nn_resident_graph_forward.py -v
+python -I bindings/st-py/examples/resident_graph_forward.py \
+  --fixture native.json --output /tmp/new-python-forward.json
+# Build the production webgpu package, not the dedicated Rust fixture cdylib.
+OUT_DIR=/tmp/new-public-module EXAMPLES_DIR=/tmp/no-example-sync \
+  bash scripts/build_wasm_web.sh --features webgpu
+cp native.json /tmp/new-public-module/forward-fixture.json
+node tools/test_resident_browser.cjs /tmp/new-public-module /path/to/chromium \
+  /tmp/new-browser-forward.json '' '' '' '' nn-forward-clients
+PYTORCH_ENABLE_MPS_FALLBACK=0 /path/to/torch-python -I tools/verify_resident_graph_forward_torch.py \
+  native.json /tmp/new-python-forward.json /tmp/new-browser-forward.json \
+  --output /tmp/new-client-torch.json
+```
+
+The verifier requires the hash-matching core JSON alongside client reports and
+rejects input/plan/recipe drift before importing Torch. Browser asset hashes
+must also match the declared fixture lineage. Client ownership checks are
+reported separately from the core fixture's cross-device rejection checks;
+the public clients intentionally share one default runtime.
 
 ## Reproduce
 

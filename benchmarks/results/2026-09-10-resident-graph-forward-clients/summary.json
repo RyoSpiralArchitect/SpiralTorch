@@ -1,0 +1,198 @@
+{
+  "schema": "spiraltorch.resident_graph_forward_clients.evidence.v1",
+  "status": "bounded_correctness_passed",
+  "source": {
+    "base": "6da443ad3d4ec3e4a01a114be04bbecf40e15b8a",
+    "form": "working-tree patch bound by source-file SHA-256",
+    "files": {
+      "bindings/st-py/examples/resident_graph_forward.py": "633da715b771e7d188d0c6673c3dd7308a8007ab73c0dd7f8224b44a1bbfa0cc",
+      "bindings/st-py/src/nn_resident/forward.rs": "f70d61ec727ade3f0a45dd4ac7f1cbb6988c759491195e5be83d422002d7610b",
+      "bindings/st-py/src/wgpu_tensor.rs": "79ca29eed2f5c6dd7cebb60806fb07d3fde712d31e1d0944cf3ef26a4862dada",
+      "bindings/st-py/tests/test_nn_resident_graph_forward.py": "d1eff432a7fce6370aecd77eee4be40d5ec390221a5a1394ac7db4dabd314bd2",
+      "bindings/st-py/tests/test_wgpu_tensor.py": "ede1177da3a3d62c5b7d96dd98333fe0de88f358e4793086148a8ced17c893da",
+      "bindings/st-wasm/src/nn_resident/forward.rs": "71d55236d4ed7275b68dad8cc748cfd633d1b457133e1aba8a7445e26414490c",
+      "bindings/st-wasm/src/wgpu_tensor.rs": "a68b92ddbc6e416e1c98fe7ff3cc7953f7c1cfbbc43dfdf525ebeb07a8a7d7de",
+      "bindings/st-wasm/tests/resident_graph_forward_clients.html": "830702e46aea56506925edb0b96eee51e4ab6a814ca0176f2825ecdafd8eca72",
+      ".github/workflows/ci.yml": "c931d891c5e8e59b239b1a239d0cfe08005c443fc8f92eeecda0c6f9d9d56ddb",
+      "README.md": "b7b570758e16c997a6679517b446a8c80249f7a151e4e8c292db8373141f6a37",
+      "bindings/st-py/spiraltorch/__init__.py": "3b989d6cc4e18d7a050f2a17aeb73bfdaf6da497e8181828f09675f625deed32",
+      "bindings/st-py/spiraltorch/__init__.pyi": "3fa136c8751ef527468e886494af6dd82441a1bfcabf1e714e59bfa1ebbd5a6c",
+      "bindings/st-py/src/lib.rs": "bc6b8a8dcb7607078af422628f6e1db950ec61a7792914213b74daa29d97260c",
+      "bindings/st-py/src/nn.rs": "0d4967e9cea7bb6c85dab13bc81338a97bb8127bb85cfbe2ecbf1874c9593ccb",
+      "bindings/st-py/src/nn_resident.rs": "5e8eb8df12fd7e542e3e443fff02ef61efd6d0f924fba1c40b24410a29b25dae",
+      "bindings/st-py/src/nn_resident/graph.rs": "798a3167b366a743b9833c9f25f641a62cd9485e70715f05a41e9b36c8d8f62f",
+      "bindings/st-py/src/wgpu.rs": "16f547aaa389a81f94b533151872ab4d2adc41cf6c889ff32c29578586960fea",
+      "bindings/st-wasm/src/lib.rs": "7ea8e17b64e7f3587e414db8280be58e29544cf1726bd77f1791252718061833",
+      "bindings/st-wasm/src/nn_resident.rs": "0758aa84e681657aa7f14bc007ca1079e8be11cb1331a2dd9a1dd12fb5718f1b",
+      "bindings/st-wasm/src/nn_resident/graph.rs": "2e4f049bb1695fb48005206a8228a5afff86c108fca3b59778943bd51bbf121d",
+      "bindings/st-wasm/tests/nn_plan.cjs": "4ece9d0f36b84ef7d1bff3a8cf25e270255db7e75dbb53c1c2d20715b220c2bf",
+      "bindings/st-wasm/tests/resident_types.cjs": "d17e458a660c54deb21cb4b6d6993e132aad62e128cb760d861c03ac8e0c003a",
+      "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "ee5ab3865664987f9d5126d217e73b63d6d5e45205303dceca36c3da69d283a8",
+      "docs/resident_graph_forward.md": "87a2b6c5222bfc1ce190d06098fd2d8a2646f0db2c66659d2f4b6a26ccbc6fac",
+      "docs/resident_nn_inference.md": "07f9f082b2266df06e3d7b61bae23b16dc2295927cf9f5064755f694b0029ffb",
+      "tests/test_resident_graph_forward_validation.py": "72bdaae41e7f65a31dc06dfae5de438c011240a05243f2b5e24a069c89c3e16f",
+      "tools/test_resident_browser.cjs": "671be2b740cbe217af14a113d0f4fd3ac3d71edd111543ce8a4f8cf9b00e7663",
+      "tools/verify_resident_graph_forward_torch.py": "03aab73f256eea7e1fe83663d01143518da16becea5ce36da10555a1f3bdfe8e"
+    }
+  },
+  "native": {
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    },
+    "build_info": {
+      "package": "spiraltorch-py",
+      "version": "0.4.27",
+      "profile": "debug",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "family": "unix",
+        "pointer_width": 64
+      },
+      "features": {
+        "cpu": false,
+        "wgpu": true,
+        "wgpu-rt": false,
+        "mps": false,
+        "cuda": false,
+        "hip": false,
+        "hip-real": false,
+        "logic": false,
+        "logic-learn": false,
+        "kdsl": true,
+        "nn": true,
+        "rec": true,
+        "text": true,
+        "selfsup": true,
+        "robotics": true
+      }
+    },
+    "tests": 30,
+    "skipped": 0,
+    "recipes": 12
+  },
+  "cpu_python": {
+    "build_info": {
+      "package": "spiraltorch-py",
+      "version": "0.4.27",
+      "profile": "debug",
+      "target": {
+        "arch": "aarch64",
+        "os": "macos",
+        "family": "unix",
+        "pointer_width": 64
+      },
+      "features": {
+        "cpu": true,
+        "wgpu": false,
+        "wgpu-rt": false,
+        "mps": false,
+        "cuda": false,
+        "hip": false,
+        "hip-real": false,
+        "logic": false,
+        "logic-learn": false,
+        "kdsl": true,
+        "nn": true,
+        "rec": true,
+        "text": true,
+        "selfsup": true,
+        "robotics": true
+      }
+    },
+    "discovered_tests": 30,
+    "executed_tests": 11,
+    "gpu_only_skips": 19,
+    "gpu_available": false
+  },
+  "browser": {
+    "version": "152.0.7977.83",
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "physical_gpu_identity": "UNKNOWN",
+    "production_package": true,
+    "recipes": 12,
+    "assertions": 536,
+    "page_errors": [],
+    "asset_sha256": {
+      "/": "830702e46aea56506925edb0b96eee51e4ab6a814ca0176f2825ecdafd8eca72",
+      "/module/spiraltorch_wasm.js": "ff05d177d2656bbee7a9375ea2780e0fdb658c073fd940528c8d11392fd61f24",
+      "/module/spiraltorch_wasm_bg.wasm": "8f28116f94afcf5b0a89beca72f9ad00a438469d213584a5edba4fa95a4e9d87",
+      "/fixture.json": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0",
+      "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    }
+  },
+  "torch": {
+    "version": "2.12.1",
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "mps_fallback": "disabled",
+    "frozen_core_replays": 24,
+    "python_replays": 24,
+    "wasm_replays": 24,
+    "total_replays": 72,
+    "tensor_comparisons": 432,
+    "max_abs_error": 1.1920928955078125e-07,
+    "sources": [
+      {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/final/core-fixture.json",
+        "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+      },
+      {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/final/python.json",
+        "sha256": "8bb7b8e2cd8c40f1b5a1610d78ce125ee7948f2b8b26f210b8b8e069245cc33d"
+      },
+      {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/final/browser.json",
+        "sha256": "69217cd2a6511fa08c88ca93e748d4bd4cbbd68dd6c03fb60a96bf1687fc0fef"
+      }
+    ]
+  },
+  "serial_backend": {
+    "tests": 111,
+    "failed": 0,
+    "ignored": 0,
+    "runtime_opt_in": true
+  },
+  "admission_only_tests": {
+    "forward": 6,
+    "existing_clients": 5
+  },
+  "final_check_count": 20,
+  "products": {
+    "python-wgpu.dylib": "d21ff45aa96b053ab1f7757a1724dcfaa4690aaa61d2ef06f0124d717360c626",
+    "webgpu/spiraltorch_wasm.d.ts": "da63f6e7f3ed4204ae63ba5685e5745eac55ca3468062dfdb7f87fb430146e58",
+    "webgpu/spiraltorch_wasm.js": "ff05d177d2656bbee7a9375ea2780e0fdb658c073fd940528c8d11392fd61f24",
+    "webgpu/spiraltorch_wasm_bg.wasm.d.ts": "e66213559ab3ef81693d2a3fee3b589fdff2a1394e1df7b9e9482632088331c6",
+    "webgpu/spiraltorch_wasm_bg.wasm": "8f28116f94afcf5b0a89beca72f9ad00a438469d213584a5edba4fa95a4e9d87",
+    "webgpu/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+    "cpu/spiraltorch_wasm.d.ts": "83ba1d05481d97b9639166f1639f5f222682531f2dc1aa53e80c5c61c1b34848",
+    "cpu/spiraltorch_wasm.js": "b1b37a7f7d8e2f9e654e4eb69963b0ab689790de15c77e8f99fc5d053a486a4e",
+    "cpu/spiraltorch_wasm_bg.wasm.d.ts": "476d681da74cabb1a3a7e721ee896698d97d2a73398383491d078dc13ff27a79",
+    "cpu/spiraltorch_wasm_bg.wasm": "70eb5c4bd6a0cbf61a313f2b6408c752b64c44942a9abe43d9837bf20e4b3875",
+    "cpu/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+    "python-cpu.dylib": "839132316f75c0ad3962b8a68acc3fc2edab8dee06248f36b09bdfc8c87cbf3f"
+  },
+  "fixture_sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0",
+  "initial_evidence": "Preserved separately; only final/ is bound to all current source hashes.",
+  "unresolved_parallel_failure": {
+    "status": "UNKNOWN",
+    "evidence": "../2026-09-10-resident-graph-forward/README.md",
+    "note": "Earlier default-parallel backend suite failed once; not claimed fixed or pre-existing. This run is serial."
+  },
+  "boundaries": [
+    "Correctness, ownership and CPU feature boundaries only; no throughput or model-quality claim.",
+    "Python debug/native Metal, production WASM release/BrowserWebGpu, Torch eager CPU/MPS.",
+    "The frozen Rust fixture is reused, not a fresh third-client execution in this run.",
+    "Compiled internal graph edges share buffers; graph admission and output capture use GPU-only copies.",
+    "No automatic Module::forward, pure::Tensor, autograd or ModuleTrainer rerouting.",
+    "No CUDA execution, PyPI publication, push or merge in this validation."
+  ]
+}

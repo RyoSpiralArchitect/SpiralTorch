@@ -15,7 +15,9 @@ use st_backend_wgpu::{
 #[cfg(feature = "webgpu")]
 use wasm_bindgen_futures::future_to_promise;
 
+mod forward;
 mod graph;
+pub use forward::{WasmGraphInferenceSnapshot, WasmResidentGraphInference};
 pub use graph::{
     WasmGraphTrainingParametersSnapshot, WasmGraphTrainingSnapshot, WasmGraphTrainingState,
     WasmResidentGraphTraining,
@@ -183,6 +185,26 @@ impl WasmInferencePlan {
         }
     }
 
+    #[wasm_bindgen(js_name = compileGraphWebGpu, unchecked_return_type = "Promise<ResidentGraphInference>")]
+    pub fn compile_graph_webgpu(
+        &self,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        #[cfg(feature = "webgpu")]
+        {
+            forward::compile(&self.inner, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident graph inference requires the webgpu build feature",
+            ))
+        }
+    }
+
     #[wasm_bindgen(js_name = compileGraphTrainingWebGpu, unchecked_return_type = "Promise<ResidentGraphTraining>")]
     pub fn compile_graph_training_webgpu(
         &self,
@@ -227,6 +249,25 @@ pub struct WasmResidentInference {
 #[cfg(feature = "webgpu")]
 #[wasm_bindgen(js_class = ResidentInference)]
 impl WasmResidentInference {
+    #[wasm_bindgen(js_name = setInputTensor)]
+    pub fn set_input_tensor(
+        &mut self,
+        input: &crate::wgpu_tensor::WasmWgpuTensor,
+    ) -> Result<(), JsValue> {
+        self.inner.set_input_tensor(&input.inner).map_err(js_error)
+    }
+    #[wasm_bindgen(js_name = tensorSnapshot)]
+    pub fn tensor_snapshot(
+        &self,
+        device: &crate::wgpu_tensor::WasmWgpuTensorDevice,
+    ) -> Result<crate::wgpu_tensor::WasmWgpuTensor, JsValue> {
+        Ok(crate::wgpu_tensor::WasmWgpuTensor {
+            inner: self
+                .inner
+                .tensor_snapshot(&device.inner)
+                .map_err(js_error)?,
+        })
+    }
     #[wasm_bindgen(getter, js_name = inputShape)]
     pub fn input_shape(&self) -> Vec<u32> {
         self.inner

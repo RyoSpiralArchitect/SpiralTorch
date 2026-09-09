@@ -12,7 +12,8 @@ from pathlib import Path
 
 
 def admit(report):
-    if report.get("schema") != "spiraltorch.resident_graph_forward.v1" or report.get("status") != "passed":
+    client = report.get("schema") == "spiraltorch.resident_graph_forward_client.v1"
+    if (not client and report.get("schema") != "spiraltorch.resident_graph_forward.v1") or report.get("status") != "passed":
         raise ValueError("not a passed forward fixture")
     expected = {(seed, shape, kernel, accumulation) for seed in (17, 29)
                 for shape in ((4,), (3, 4), (2, 129, 4))
@@ -24,6 +25,12 @@ def admit(report):
     guards = {"pointwise_masked_overflow", "dense_masked_overflow", "whole_graph_guard_capture",
               "repeated_inherited_guard", "gpu_input_guard", "device_mismatch_atomic", "recovery",
               "broadcast_permute", "dense_v1_v2_specialized"}
+    if client:
+        guards = {"owned_output", "late_readback", "atomic_input", "single_consumption", "shared_runtime"}
+        if report.get("client") not in ("python", "wasm") or len(report.get("source_fixture_sha256", "")) != 64:
+            raise ValueError("missing client fixture lineage")
+        if report["client"] == "wasm" and report.get("asset_sha256", {}).get("/fixture.json") != report["source_fixture_sha256"]:
+            raise ValueError("browser fixture lineage mismatch")
     if set(report.get("guards", {})) != guards or not all(report["guards"][g] is True for g in guards):
         raise ValueError("missing guard checks")
     if report.get("page_errors"):
@@ -79,6 +86,21 @@ def forward(torch, plan, x, parameters):
     return current
 
 
+def check_lineage(documents, sources):
+    baselines = {source["sha256"]: doc for doc, source in zip(documents, sources)
+                 if doc["schema"] == "spiraltorch.resident_graph_forward.v1"}
+    fields = ("seed", "shape", "kernel", "accumulation", "plan", "input", "pre_gains", "post_shift", "dispatches_before_capture")
+    for doc in documents:
+        if doc["schema"] != "spiraltorch.resident_graph_forward_client.v1":
+            continue
+        baseline = baselines.get(doc["source_fixture_sha256"])
+        if baseline is None:
+            raise ValueError("include the hash-matching core JSON fixture alongside client reports")
+        for actual, expected in zip(doc["cases"], baseline["cases"]):
+            if any(actual[name] != expected[name] for name in fields):
+                raise ValueError("client changed the frozen input, plan or recipe")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+", type=Path)
@@ -89,11 +111,14 @@ def main():
                   scope="correctness only; explicit eager Torch devices; browser physical adapter unverified")
     with args.output.open("x", encoding="utf-8") as output:
         try:
-            inputs = []
+            inputs, documents = [], []
             for path in args.inputs:
                 raw = path.read_bytes()
-                inputs.append(admit(json.loads(raw)))
+                doc = json.loads(raw)
+                documents.append(doc)
+                inputs.append(admit(doc))
                 report["sources"].append(dict(path=str(path.resolve()), sha256=hashlib.sha256(raw).hexdigest()))
+            check_lineage(documents, report["sources"])
             import torch
             torch.set_num_threads(1)
             torch.set_float32_matmul_precision("highest")

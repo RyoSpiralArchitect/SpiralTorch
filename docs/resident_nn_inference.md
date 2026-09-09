@@ -16,7 +16,9 @@ postprocessing stay on the GPU, with explicit device copies and inherited guards
 For mixed Scaler/ReLU/Linear/GELU graphs without any training buffers, use
 the Rust [forward-only graph compiler](resident_graph_forward.md). Its
 `output_tensor` can feed further N-D operations or another resident graph.
-The public Python/JS examples below still describe the dense-only compiler.
+Python/JS clients can use `compile_graph_wgpu` / `compileGraphWebGpu` with the
+same owning `WgpuTensor` handles. The examples below describe the dense-only
+compiler, which also accepts resident inputs via `set_input_tensor`.
 
 ```text
 Sequential(Linear -> Gelu -> Linear)
