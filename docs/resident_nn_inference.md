@@ -13,6 +13,11 @@ Rust callers can connect [resident N-D tensors](resident_nd_tensor.md) with
 `set_input_tensor` and `tensor_snapshot`: preprocessing, NN execution and
 postprocessing stay on the GPU, with explicit device copies and inherited guards.
 
+For mixed Scaler/ReLU/Linear/GELU graphs without any training buffers, use
+the Rust [forward-only graph compiler](resident_graph_forward.md). Its
+`output_tensor` can feed further N-D operations or another resident graph.
+The public Python/JS examples below still describe the dense-only compiler.
+
 ```text
 Sequential(Linear -> Gelu -> Linear)
                   |
@@ -146,8 +151,9 @@ fallback when resident compilation is unavailable.
   fallback is inserted into a compiled chain.
 - `NdLayout` provides checked element-stride `permute`, `narrow`, `reshape`, and
   storage indexing. This executor accepts nonempty contiguous inputs at offset
-  zero and applies Linear to the last axis. Other views are rejected, not copied
-  or silently reinterpreted. Scalars/empty arrays have layout semantics but are
+  zero and applies Linear to the last axis. The compiled layout is contiguous;
+  `set_input_tensor` explicitly packs other logical views on-device before copying
+  them into that workspace. Scalars/empty arrays have layout semantics but are
   not supported by this inference executor.
 - Existing `pure::Tensor` is still host-backed and two-dimensional. This does
   not add general N-D broadcasting or device-resident autograd/optimizer updates.

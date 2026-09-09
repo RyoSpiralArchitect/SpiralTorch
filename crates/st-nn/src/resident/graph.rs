@@ -174,6 +174,38 @@ impl InferencePlan {
         Self::from_graph_definition(self.graph_definition()?.with_values(values)?)
     }
 
+    /// Forward-only compilation of either portable plan version, with resident
+    /// N-D input/output and no training tape or optimizer allocation.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_wgpu(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+    ) -> Result<st_backend_wgpu::resident_graph::ResidentGraph, InferenceError> {
+        self.compile_graph_wgpu_with_options(
+            runtime,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_graph::ResidentGraph, InferenceError> {
+        Ok(st_backend_wgpu::resident_graph::ResidentGraph::new(
+            runtime,
+            self.graph_definition()?,
+            tile,
+            kernel,
+            accumulation,
+        )?)
+    }
+
     /// Opt-in general graph training. Scaler policy must be chosen explicitly;
     /// ordinary Module::backward and the specialized dense path are unchanged.
     #[cfg(feature = "wgpu")]

@@ -93,6 +93,15 @@ name = "resident_graph_training"
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_graph_forward"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_graph_forward_browser"
+crate-type = ["cdylib"]
+required-features = ["wgpu"]
+
+[[example]]
 name = "resident_graph_training_browser"
 crate-type = ["cdylib"]
 required-features = ["wgpu"]

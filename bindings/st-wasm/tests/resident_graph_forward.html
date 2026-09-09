@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Rust resident forward graph</title>
+<pre id="result" data-status="running">Checking forward-only graph and resident N-D composition</pre>
+<script type="module">
+import init, {run_resident_graph_forward_fixture} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU fallback");
+  await init();
+  const report = JSON.parse(await run_resident_graph_forward_fixture());
+  if (report.status !== "passed" || report.cases?.length !== 12 ||
+      Object.keys(report.guards ?? {}).length !== 9 || !Object.values(report.guards).every(x => x === true))
+    throw Error("Incomplete forward graph fixture");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error", error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

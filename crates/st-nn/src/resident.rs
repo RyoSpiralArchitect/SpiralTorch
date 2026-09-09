@@ -33,7 +33,7 @@ pub enum InferenceError {
     InvalidLayout,
     #[error("inference plan contains no operations")]
     EmptyPlan,
-    #[error("this is a rich graph; use graph_definition/with_graph_values/compile_graph_training_wgpu, not the dense-only API")]
+    #[error("this is a rich graph; use graph_definition/with_graph_values/compile_graph_wgpu/compile_graph_training_wgpu, not the dense-only API")]
     RequiresGraph,
     #[error(transparent)]
     Graph(#[from] st_kernel_contracts::graph::GraphError),
@@ -58,6 +58,9 @@ pub enum InferenceError {
     #[cfg(feature = "wgpu")]
     #[error(transparent)]
     Gpu(#[from] st_backend_wgpu::resident_dense::DenseError),
+    #[cfg(feature = "wgpu")]
+    #[error(transparent)]
+    GraphGpu(#[from] st_backend_wgpu::resident_graph::GraphInferenceError),
     #[cfg(feature = "wgpu")]
     #[error(transparent)]
     Training(#[from] st_backend_wgpu::resident_training::TrainingError),
