@@ -88,9 +88,12 @@ impl WasmInferencePlan {
             return Err(js_error("plan string already exceeds the JSON byte budget"));
         }
         let payload = payload.as_string().unwrap();
-        Ok(Self {
-            inner: InferencePlan::from_json_with_limit(&payload, max_bytes).map_err(js_error)?,
-        })
+        let inner = InferencePlan::from_json_with_limit(&payload, max_bytes).map_err(js_error)?;
+        // Keep this dense-only facade closed until it exposes a graph executor.
+        if !inner.is_dense() {
+            return Err(js_error(st_nn::resident::InferenceError::RequiresGraph));
+        }
+        Ok(Self { inner })
     }
 
     #[wasm_bindgen(js_name = toJson)]

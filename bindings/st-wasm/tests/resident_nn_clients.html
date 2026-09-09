@@ -27,6 +27,10 @@ async function digest(text) {
 }
 try {
   await init();
+  await reject(() => InferencePlan.fromJson(JSON.stringify({
+    schema:"spiraltorch.nn.inference_plan.v2", input_shape:[2,2], parameters:[],
+    stages:[{kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]
+  })));
   const response = await fetch("/fixture.json");
   if (!response.ok) throw Error("Python fixture failed to load");
   const fixture = await response.json();

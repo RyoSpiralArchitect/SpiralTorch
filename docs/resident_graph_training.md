@@ -66,7 +66,8 @@ Module lowering keeps its exact feature-width check, not extra broadcasting.
 
 This addition is a Rust API and real browser-WASM fixture. General graph training
 is **not yet exposed by production Python/JavaScript wrapper classes**; their
-dense methods remain dense-only. It does not change `pure::Tensor` storage,
+dense-only plan entrypoints explicitly reject rich/v2 graphs before requesting a
+device. It does not change `pure::Tensor` storage,
 generic autograd, `ModuleTrainer` or GNN execution. General forward-only compilation
 and pooled pointwise VJP scratch remain follow-up work. There is no new graph
 throughput, browser speedup or CUDA performance claim.
