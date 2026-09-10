@@ -28,8 +28,19 @@ pub(super) fn capture(
     pool: &runtime::ReadbackPool,
     buffers: &[&wgpu::Buffer],
 ) -> Result<RawSnapshot, TrainingError> {
-    let lease = pool.checkout("training.snapshot");
     let mut encoder = context.device().create_command_encoder(&Default::default());
+    let snapshot = capture_into(context, pool, buffers, &mut encoder)?;
+    context.queue().submit(Some(encoder.finish()));
+    Ok(snapshot)
+}
+
+pub(super) fn capture_into(
+    context: &WgpuContext,
+    pool: &runtime::ReadbackPool,
+    buffers: &[&wgpu::Buffer],
+    encoder: &mut wgpu::CommandEncoder,
+) -> Result<RawSnapshot, TrainingError> {
+    let lease = pool.checkout("training.snapshot");
     let mut offset = 0u64;
     for buffer in buffers {
         let next = offset
@@ -44,7 +55,6 @@ pub(super) fn capture(
     if offset != lease.buffer().size() {
         return Err(TrainingError::InvalidReadback);
     }
-    context.queue().submit(Some(encoder.finish()));
     Ok(RawSnapshot {
         lease,
         context: context.clone(),

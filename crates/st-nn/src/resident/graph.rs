@@ -245,6 +245,29 @@ impl InferencePlan {
             )?,
         )
     }
+
+    /// Diagnostic-only compilation on a private timestamp-capable device. Does
+    /// not replace the default runtime or change the ordinary training schedule.
+    #[cfg(feature = "wgpu")]
+    pub async fn profile_graph_training_wgpu(
+        &self,
+        policy: GraphGradientPolicy,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ProfiledGraphTraining, InferenceError>
+    {
+        Ok(
+            st_backend_wgpu::resident_training::graph::ProfiledGraphTraining::request(
+                self.graph_definition()?,
+                policy,
+                tile,
+                kernel,
+                accumulation,
+            )
+            .await?,
+        )
+    }
 }
 
 #[cfg(test)]

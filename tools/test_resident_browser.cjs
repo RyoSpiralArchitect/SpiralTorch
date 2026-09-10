@@ -11,7 +11,7 @@ async function main() {
   if (!moduleDir || !executablePath || !outputPath) {
     throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-pair-lanes-matched|rank-prefix-matched|rank-count-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean|nn|nn-training|nd-tensor|nn-clients|nn-clients-cpu|nn-training-clients|nn-training-clients-cpu] [BASELINE_MODULE_DIR]");
   }
-  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu"].includes(fixture)) throw Error("unknown fixture");
+  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu"].includes(fixture)) throw Error("unknown fixture");
   const nnClientFixture = fixture === "nn-clients" || fixture === "nn-clients-cpu";
   const trainingClientFixture = fixture === "nn-training-clients" || fixture === "nn-training-clients-cpu";
   const graphClientFixture = fixture === "nn-graph-clients" || fixture === "nn-graph-clients-cpu";
@@ -30,6 +30,7 @@ async function main() {
     const moduleRoot = path.resolve(moduleDir);
     if(fixture === "nn-training") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_training.html"), "text/html"]);
     if(fixture === "nn-graph-training") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_training.html"), "text/html"]);
+    if(fixture === "nn-graph-training-profile") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_training_profile.html"), "text/html"]);
     if(fixture === "nn-graph-forward") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_forward.html"), "text/html"]);
     if(fixture === "nn-forward-clients") {
       files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_forward_clients.html"), "text/html"]);
@@ -118,7 +119,7 @@ async function main() {
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:fixture === "rank-prefix-matched" || fixture === "rank-count-matched" ? 600000 : 300000})]);
     report = JSON.parse(await page.locator("#result").textContent());
     if(pageErrors.length) report.status="error";
-    if(fixture === "rank-profile" && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
+    if((fixture === "rank-profile" || fixture === "nn-graph-training-profile") && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
       report.status="error";
       report.error="uncaptured WebGPU timestamp validation/allocation failure";
     }

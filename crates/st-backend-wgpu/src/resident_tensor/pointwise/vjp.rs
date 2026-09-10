@@ -1,6 +1,7 @@
 //! Checked reverse-mode pointwise contributions and deterministic unbroadcast.
 //! Forward is recomputed from immutable inputs; no mutable tape escapes.
 use super::*;
+use crate::runtime::timestamps::PassTimestampCursor;
 use st_kernel_contracts::pointwise::BroadcastAdjoint;
 
 #[derive(Debug)]
@@ -369,11 +370,48 @@ impl PointwiseVjpPlan {
         workspace: &VjpWorkspace,
         gradients: impl IntoIterator<Item = &'a wgpu::Buffer>,
     ) {
-        encode_bound(
+        self.encode_prepared_with_timestamps(
+            encoder,
+            workspace,
+            gradients,
+            &mut Default::default(),
+        );
+    }
+
+    pub(crate) fn profile_passes(&self, workspace: &VjpWorkspace) -> Vec<(Option<usize>, usize)> {
+        let mut passes = vec![(None, 0)];
+        for (slot, reduction) in workspace.reductions.iter().enumerate() {
+            if let ReductionWorkspace::Sum { second, .. } = reduction {
+                passes.push((Some(slot), 0));
+                if second.is_some() {
+                    passes.push((Some(slot), 1));
+                }
+            }
+        }
+        passes
+    }
+
+    pub(crate) fn direct_copy_bytes(&self) -> u64 {
+        self.reductions
+            .iter()
+            .filter(|r| r.direct)
+            .map(|r| r.layout.len() as u64 * 4)
+            .sum()
+    }
+
+    pub(crate) fn encode_prepared_with_timestamps<'a>(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        workspace: &VjpWorkspace,
+        gradients: impl IntoIterator<Item = &'a wgpu::Buffer>,
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
+        encode_bound_with_timestamps(
             encoder,
             &self.pipeline,
             &workspace.contribution_binding,
             [self.forward.grid[0], self.forward.grid[1]],
+            timestamps.next(),
         );
         let mut gradients = gradients.into_iter();
         for (reduction, bound) in self.reductions.iter().zip(&workspace.reductions) {
@@ -391,19 +429,21 @@ impl PointwiseVjpPlan {
                     }
                 }
                 ReductionWorkspace::Sum { first, second } => {
-                    encode_bound(
+                    encode_bound_with_timestamps(
                         encoder,
                         &self.reduction_pipeline,
                         first,
                         reduction.first_grid,
+                        timestamps.next(),
                     );
                     if let Some(second) = second {
                         let (_, binding) = second.as_ref();
-                        encode_bound(
+                        encode_bound_with_timestamps(
                             encoder,
                             &self.reduction_pipeline,
                             binding,
                             reduction.second.as_ref().unwrap().1,
+                            timestamps.next(),
                         );
                     }
                 }
@@ -439,9 +479,19 @@ pub(super) fn encode_bound(
     binding: &wgpu::BindGroup,
     grid: [u32; 2],
 ) {
+    encode_bound_with_timestamps(encoder, pipeline, binding, grid, None);
+}
+
+fn encode_bound_with_timestamps(
+    encoder: &mut wgpu::CommandEncoder,
+    pipeline: &wgpu::ComputePipeline,
+    binding: &wgpu::BindGroup,
+    grid: [u32; 2],
+    timestamp_writes: Option<wgpu::ComputePassTimestampWrites<'_>>,
+) {
     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
         label: Some("pointwise.vjp"),
-        timestamp_writes: None,
+        timestamp_writes,
     });
     pass.set_pipeline(pipeline);
     pass.set_bind_group(0, binding, &[]);

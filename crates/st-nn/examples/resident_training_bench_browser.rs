@@ -38,6 +38,14 @@ mod browser {
                 .map(|v| v.to_string())
                 .map_err(|e| JsValue::from_str(&e.to_string()))
         }
+        pub async fn profile(&self, policy: String) -> Result<String, JsValue> {
+            let policy = policy.parse().map_err(JsValue::from_str)?;
+            self.inner
+                .profile(policy)
+                .await
+                .map(|v| v.to_string())
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
         pub async fn sample(&self, cadence: String, capture: bool) -> Result<String, JsValue> {
             let cadence =
                 serde_json::from_str(&cadence).map_err(|e| JsValue::from_str(&e.to_string()))?;

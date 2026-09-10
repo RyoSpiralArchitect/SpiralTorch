@@ -38,6 +38,8 @@ pub enum TrainingError {
     MissingBatch,
     #[error("step the current batch before requesting training results")]
     StaleStep,
+    #[error("read the pending profile before reusing the private profiler; an abandoned or invalid profile requires a new workspace")]
+    PendingProfile,
     #[error("training counter or snapshot size exhausted")]
     Overflow,
     #[error(

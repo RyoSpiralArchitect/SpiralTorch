@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident training pass diagnostics</title>
+<pre id="result" data-status="running">Checking profiled and ordinary SGD trajectories</pre>
+<script type="module">
+import init, {TrainingBenchmark} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+const cases = [];
+try {
+  if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU/timer fallback");
+  await init();
+  const matrix = [[[2,16,32],2],[[2,129,32],4],[[4,32,64],8],
+                  [[4,64,64],8],[[2,128,128],8],[[2,64,256],4]];
+  for (const [shape,depth] of matrix) for (const seed of [17,29,43]) {
+    const config = {shape,depth,seed,steps:8,graph:true};
+    const bench = await TrainingBenchmark.create(JSON.stringify(config));
+    try {
+      const policies = shape.join(",")==="2,16,32" ? ["exact","module_compatible"] : ["exact"];
+      for (const policy of policies) {
+        const report = JSON.parse(await bench.profile(policy));
+        if (report.status !== "passed" || report.profiles?.length !== 12 ||
+            report.profiles.filter(p=>!p.warmup).length !== 9 ||
+            Object.values(report.guards).some(v=>v!==true))
+          throw Error("Incomplete profile fixture");
+        cases.push(report);
+      }
+    } finally { bench.free(); }
+  }
+  result.textContent = JSON.stringify({status:"passed",cases,
+    physical_gpu:"UNKNOWN",gpu_contention:"UNKNOWN",
+    boundary:"Private timestamp-enabled devices; unchanged compute-pass grouping; zero/quantized intervals retained. Not end-to-end timing."});
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error",error:String(error.stack||error),cases});
+  result.dataset.status = "error";
+}
+</script>

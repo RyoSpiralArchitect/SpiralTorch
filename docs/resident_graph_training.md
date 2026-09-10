@@ -181,6 +181,57 @@ for all measured cases, including regressions and the remaining PyTorch gap.
 The [forward-pass study](../benchmarks/results/2026-09-10-graph-training-forward-pass/README.md)
 retains both standard/wide matrices and the non-adopted browser trial.
 
+## Diagnostic Pass Profiling
+
+Rust's `InferencePlan::profile_graph_training_wgpu(policy, tile, kernel,
+accumulation).await` creates a **private timestamp-capable device** and returns
+`ProfiledGraphTraining`. This is an opt-in diagnostic workspace, not a replacement
+for the default runtime. Upload a host batch, call `step_profiled(rate)`, then
+`read()` (native) or `read_async().await` (WASM) on its owning receipt. The result's
+`report()` exposes the Rust-owned `spiraltorch.graph_training_gpu_profile.v1`
+schema. This API is not yet exposed by the production Python/WASM binding classes;
+the shared browser benchmark example calls the Rust API directly.
+
+Profiling calls the **same step encoder** as ordinary training. It neither splits
+nor fuses passes: Metal's forward is `forward_mixed`; `dense_backward` and
+`update` may contain multiple dispatches and are not isolated GEMM timings.
+Pointwise contribution and each unbroadcast pass remain distinct. Copies are
+untimed; phase sums exclude them, CPU encoding, uploads, query resolution and
+readback. GPU span includes inter-pass/copy gaps. Instrumentation can perturb
+execution, so use the separate end-to-end benchmark for performance decisions.
+Unsupported timestamp features are errors, never replaced with a CPU clock.
+Absolute ticks and counters are decimal strings; zero/quantized browser intervals
+are retained rather than discarded.
+
+Until the profile is read and validated, new steps, uploads and snapshots fail
+with `PendingProfile`. A decoded numerical rejection proves rollback and permits
+an explicit new attempt. An abandoned/cancelled receipt or GPU/readback failure
+quarantines that workspace: construct a new one rather than silently retrying.
+An owning receipt remains readable after the profiler is dropped. No device or
+resident tensor handle escapes the private workspace.
+
+The shared native/browser benchmark's profiling fixture compares twelve
+sequential updates from identical weights on the profiled workspace, an
+uninstrumented timestamp-capable control, and an ordinary device. All losses and
+final predictions, gradients and parameters are compared; three samples are
+warmups and nine retained. It also checks pending/cancellation, rollback and
+recovery. These are diagnostic synthetic trajectories, not long-run training.
+
+After freezing a clean source and building the existing benchmark examples:
+
+```bash
+python -I tools/profile_resident_graph_training.py \
+  --binary /path/to/resident_training_bench --source SOURCE_SHA --output /tmp/new-profile.json
+node tools/test_resident_browser.cjs /path/to/bench-module /path/to/chromium \
+  /tmp/new-browser-profile.json '' '' '' '' nn-graph-training-profile
+```
+
+The matrix covers both standard/wide recipes at seeds 17/29/43 with exact VJPs,
+plus the smallest recipe with module-compatible gain scaling at all three seeds.
+The fixture rejects reported CPU adapters and checks adapter metadata equality;
+browser physical GPU identity and background contention still require independent
+evidence.
+
 ## Reproduce
 
 Production client validation (use fresh output paths and a current-source WGPU

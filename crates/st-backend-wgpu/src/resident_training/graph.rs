@@ -14,6 +14,9 @@ pub use st_kernel_contracts::graph::{
 
 mod snapshot;
 pub use snapshot::{GraphParameterReadback, GraphState, GraphStateReadback};
+mod profile;
+use crate::runtime::timestamps::PassTimestampCursor;
+pub use profile::{GraphGpuProfile, GraphProfileReadback, ProfiledGraphTraining};
 
 enum Node {
     Linear {
@@ -633,14 +636,19 @@ impl ResidentGraphTraining {
         Ok(())
     }
 
-    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, passes: &[Pass]) {
+    fn encode_passes(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        passes: &[Pass],
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
         for chunk in passes.chunks(dispatches_per_pass(
             self.adapter_info().backend,
             passes.len(),
         )) {
             let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("graph.training"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             for pass in chunk {
                 pass.encode(&mut compute);
@@ -651,21 +659,45 @@ impl ResidentGraphTraining {
     /// One submission, no readback: forward -> MSE -> all VJPs -> prepare/vote/commit.
     /// An enqueued attempt is not an accepted step until a guarded snapshot is read.
     pub fn step(&mut self, rate: f32) -> Result<u64, TrainingError> {
+        let attempt = self.next_attempt(rate)?;
+        self.write_rate(rate);
+        let context = self.device.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        self.encode_step(&mut encoder, &mut Default::default());
+        context.queue().submit(Some(encoder.finish()));
+        self.mark_step(attempt);
+        Ok(attempt)
+    }
+
+    fn next_attempt(&self, rate: f32) -> Result<u64, TrainingError> {
         if !rate.is_finite() || rate < 0. {
             return Err(TrainingError::LearningRate);
         }
         if self.batch_generation == 0 {
             return Err(TrainingError::MissingBatch);
         }
-        let attempt = self
-            .submitted_steps
+        self.submitted_steps
             .checked_add(1)
-            .ok_or(TrainingError::Overflow)?;
+            .ok_or(TrainingError::Overflow)
+    }
+
+    fn mark_step(&mut self, attempt: u64) {
+        self.submitted_steps = attempt;
+        self.last_step = Some(attempt);
+    }
+
+    fn write_rate(&self, rate: f32) {
         let context = self.device.runtime().context();
         context
             .queue()
             .write_buffer(&self.step_config, 0, bytemuck::bytes_of(&rate));
-        let mut encoder = context.device().create_command_encoder(&Default::default());
+    }
+
+    fn encode_step(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
         encoder.clear_buffer(&self.validation, 0, None);
         encoder.clear_buffer(&self.pointwise_flags, 0, None);
         let n = self.nodes.len();
@@ -687,7 +719,7 @@ impl ResidentGraphTraining {
         {
             let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("graph.training.forward"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             for node in nodes {
                 match node {
@@ -698,10 +730,10 @@ impl ResidentGraphTraining {
                 }
             }
         }
-        self.encode_passes(&mut encoder, &self.loss_passes);
+        self.encode_passes(encoder, &self.loss_passes, timestamps);
         for (i, node) in self.nodes.iter().enumerate().rev() {
             match node {
-                Node::Linear { backward, .. } => self.encode_passes(&mut encoder, backward),
+                Node::Linear { backward, .. } => self.encode_passes(encoder, backward, timestamps),
                 Node::Pointwise {
                     plan,
                     parameters,
@@ -710,7 +742,7 @@ impl ResidentGraphTraining {
                 } => {
                     let gradients = std::iter::once(&self.gradients[i])
                         .chain(parameters.iter().map(|&id| &self.raw_gradients[id]));
-                    plan.encode_prepared(&mut encoder, workspace, gradients);
+                    plan.encode_prepared_with_timestamps(encoder, workspace, gradients, timestamps);
                 }
             }
         }
@@ -721,11 +753,7 @@ impl ResidentGraphTraining {
             (n + 2) as u64 * 4,
             4,
         );
-        self.encode_passes(&mut encoder, &self.update_passes);
-        context.queue().submit(Some(encoder.finish()));
-        self.submitted_steps = attempt;
-        self.last_step = Some(attempt);
-        Ok(attempt)
+        self.encode_passes(encoder, &self.update_passes, timestamps);
     }
 
     pub fn loss_snapshot(&self) -> Result<StepReadback, TrainingError> {
