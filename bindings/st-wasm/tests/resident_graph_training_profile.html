@@ -34,7 +34,20 @@ try {
       }
     } finally { bench.free(); }
   }
-  window.residentProfileReport = {status:"passed",cases,
+  const probe = await TrainingBenchmark.create(JSON.stringify({shape:[2,16,32],depth:2,seed:17,steps:8,graph:true}));
+  const originalDone = GPUQueue.prototype.onSubmittedWorkDone;
+  let completionRejection = false;
+  try {
+    // Only this isolated negative fixture replaces the browser callback.
+    GPUQueue.prototype.onSubmittedWorkDone = () => Promise.reject(new Error("injected completion rejection"));
+    try { await probe.profile("exact"); }
+    catch (error) { completionRejection = String(error).includes("submission callback disconnected"); }
+  } finally {
+    GPUQueue.prototype.onSubmittedWorkDone = originalDone;
+    probe.free();
+  }
+  if (!completionRejection) throw Error("Rejected completion was admitted or hung");
+  window.residentProfileReport = {status:"passed",cases,completion_rejection:completionRejection,
     physical_gpu:"UNKNOWN",gpu_contention:"UNKNOWN",
     boundary:"Private timestamp-enabled devices; unchanged compute-pass grouping; zero/quantized intervals retained. Not end-to-end timing."};
   result.textContent = "Passed " + cases.length + " profiling conditions; full states streamed separately.";
