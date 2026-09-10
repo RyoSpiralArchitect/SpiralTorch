@@ -20,6 +20,8 @@ async function main() {
   const rankFixture = fixture === "rank" || fixture === "rank-active-lanes" || fixture === "rank-tournament";
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
+  let profileFd, profileRows=0, profileBytes=0;
+  const profileHash=crypto.createHash("sha256");
   let metadata = {}, pageErrors = [], consoleMessages = [];
   try {
     const files = new Map([
@@ -91,11 +93,23 @@ async function main() {
     browser = await chromium.launch({executablePath,headless:true,args:["--enable-unsafe-webgpu"]});
     metadata.browser_version = browser.version();
     page = await browser.newPage();
+    if(fixture === "nn-graph-training-profile") {
+      profileFd=fs.openSync(outputPath+".cases.jsonl","wx");
+      await page.exposeFunction("publishResidentProfile",raw=>{
+        if(typeof raw !== "string" || Buffer.byteLength(raw)>64*1024*1024)
+          throw Error("profile state capture exceeds its per-case budget");
+        const data=Buffer.from(raw+"\n");
+        fs.writeFileSync(profileFd,data);
+        profileHash.update(data); profileBytes+=data.length; profileRows++;
+        return {line:profileRows,sha256:crypto.createHash("sha256").update(raw).digest("hex")};
+      });
+    }
     page.on("console", message=>{ if(consoleMessages.length<100) consoleMessages.push({type:message.type(),text:message.text()}); });
     let rejectPageError;
     const fatal = new Promise((_,reject)=>{ rejectPageError=reject; });
     fatal.catch(()=>{});
     page.on("pageerror", error=>{ pageErrors.push(String(error)); rejectPageError(error); });
+    page.on("crash",()=>{ const error=Error("owned test browser page crashed");pageErrors.push(String(error));rejectPageError(error); });
     page.on("response", response=>{
       if(response.status() >= 400 && /^\/(module|baseline)\//.test(new URL(response.url()).pathname)) {
         const error = Error("generated module asset failed: "+response.status()+" "+response.url());
@@ -117,7 +131,11 @@ async function main() {
     const query = "?"+params.toString();
     await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
     await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:fixture === "rank-prefix-matched" || fixture === "rank-count-matched" ? 600000 : 300000})]);
-    report = JSON.parse(await page.locator("#result").textContent());
+    report = fixture === "nn-graph-training-profile"
+      ? await page.evaluate(()=>window.residentProfileReport)
+      : JSON.parse(await page.locator("#result").textContent());
+    if(fixture === "nn-graph-training-profile" && (!report || report.cases?.length !== profileRows || profileRows !== 21))
+      throw Error("incomplete streamed profiling matrix");
     if(pageErrors.length) report.status="error";
     if((fixture === "rank-profile" || fixture === "nn-graph-training-profile") && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
       report.status="error";
@@ -129,6 +147,11 @@ async function main() {
   } finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));
+    if(profileFd !== undefined) {
+      fs.closeSync(profileFd);
+      metadata.profile_state_artifacts={path:path.basename(outputPath)+".cases.jsonl",
+        rows:profileRows,bytes:profileBytes,sha256:profileHash.digest("hex")};
+    }
     Object.assign(report,metadata,{page_errors:pageErrors,console_messages:consoleMessages});
     fs.writeFileSync(fd,JSON.stringify(report,null,2)+"\n");
     fs.closeSync(fd);
