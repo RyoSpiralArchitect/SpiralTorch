@@ -18,16 +18,19 @@ def validate(row):
     for index, profile in enumerate(row["profiles"]):
         if (profile.get("schema") != "spiraltorch.graph_training_gpu_profile.v1"
                 or profile.get("accepted") is not True or profile.get("instrumented") is not True
+                or profile.get("timing_complete") is not True or profile.get("ambiguous_zero_pairs") != 0
                 or profile.get("warmup") != (index < 3)
                 or profile.get("submitted_step") != str(index+1)
                 or profile.get("batch_generation") != "1"):
             raise ValueError("profile acceptance/counter mismatch")
         period = profile["timestamp_period_ns"]
-        if not math.isfinite(period) or period <= 0 or not profile["passes"]:
+        if type(period) not in (int, float) or not math.isfinite(period) or period <= 0 or not profile["passes"]:
             raise ValueError("invalid timestamp period/passes")
         totals = {}
         zeros = 0
         for item in profile["passes"]:
+            if item.get("sample_status") != "observed" or (item["start_tick"], item["end_tick"]) == ("0", "0"):
+                raise ValueError("ambiguous timestamp samples are not zero-cost evidence")
             for key in ("start_tick", "end_tick"):
                 if not isinstance(item[key], str) or not item[key].isdigit() or not 0 <= int(item[key]) < 2**64:
                     raise ValueError("ticks must be u64 decimal strings")

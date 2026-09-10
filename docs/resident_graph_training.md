@@ -239,6 +239,10 @@ The fixture rejects reported CPU adapters and checks adapter metadata equality;
 browser physical GPU identity and background contention still require independent
 evidence.
 
+See the [retained profiling and uninstrumented regression results](../benchmarks/results/2026-09-10-graph-training-gpu-profile/README.md).
+This includes the initial missing samples, browser collector crash and pinned
+WGPU completion stub, rather than treating those runs as successful timings.
+
 ## Reproduce
 
 Production client validation (use fresh output paths and a current-source WGPU

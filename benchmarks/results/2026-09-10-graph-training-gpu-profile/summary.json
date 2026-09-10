@@ -1,0 +1,635 @@
+{
+  "status": "passed",
+  "implementation_source": {
+    "commit": "04a014f077b2eab53e2efdfb581f7a5ca947177a",
+    "tree": "8cc27bae58685470767dfd7d764dbbcf4a21a33e"
+  },
+  "harness_source": "04a014f077b2eab53e2efdfb581f7a5ca947177a",
+  "clients": {
+    "native": {
+      "cases": 21,
+      "max_abs_error": 0.0,
+      "groups": [
+        {
+          "config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 692750.0,
+          "median_compute_sum_ns": 189458.0,
+          "zero_intervals": 0,
+          "intervals": 324,
+          "median_phase_ns": {
+            "dense_backward": 64834.0,
+            "forward_mixed": 41875.0,
+            "loss": 7458.0,
+            "pointwise_unbroadcast": 19458.0,
+            "pointwise_vjp": 20999.0,
+            "update": 26542.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.3479322881163372,
+            "forward_mixed": 0.2324734153241129,
+            "loss": 0.04046057988672485,
+            "pointwise_unbroadcast": 0.10243256289078724,
+            "pointwise_vjp": 0.11375326422410383,
+            "update": 0.14187485169058933
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2
+          },
+          "policy": "module_compatible",
+          "samples": 27,
+          "median_gpu_span_ns": 531000.0,
+          "median_compute_sum_ns": 180332.0,
+          "zero_intervals": 0,
+          "intervals": 324,
+          "median_phase_ns": {
+            "dense_backward": 63000.0,
+            "forward_mixed": 43708.0,
+            "loss": 7542.0,
+            "pointwise_unbroadcast": 18666.0,
+            "pointwise_vjp": 20542.0,
+            "update": 25833.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.34996534996534995,
+            "forward_mixed": 0.2423903739525349,
+            "loss": 0.04195326425881882,
+            "pointwise_unbroadcast": 0.1025278806589647,
+            "pointwise_vjp": 0.11477019810207865,
+            "update": 0.14166981488477523
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 4272291.0,
+          "median_compute_sum_ns": 3095916.0,
+          "zero_intervals": 0,
+          "intervals": 675,
+          "median_phase_ns": {
+            "dense_backward": 596374.0,
+            "forward_mixed": 96167.0,
+            "loss": 8417.0,
+            "pointwise_unbroadcast": 298959.0,
+            "pointwise_vjp": 60002.0,
+            "update": 48459.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.3849255148681138,
+            "forward_mixed": 0.11426423230274943,
+            "loss": 0.009592034684647836,
+            "pointwise_unbroadcast": 0.08881513596896144,
+            "pointwise_vjp": 0.059723237223051874,
+            "update": 0.023081954876084745
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 4941666.0,
+          "median_compute_sum_ns": 3755500.0,
+          "zero_intervals": 0,
+          "intervals": 972,
+          "median_phase_ns": {
+            "dense_backward": 740709.0,
+            "forward_mixed": 2000125.0,
+            "loss": 27416.0,
+            "pointwise_unbroadcast": 85417.0,
+            "pointwise_vjp": 143958.0,
+            "update": 95167.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.24294072514357273,
+            "forward_mixed": 0.6354123285847424,
+            "loss": 0.00869688215459466,
+            "pointwise_unbroadcast": 0.026936580132517995,
+            "pointwise_vjp": 0.05276548787563881,
+            "update": 0.025488226341536652
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              4,
+              64,
+              64
+            ],
+            "depth": 8
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 10583416.0,
+          "median_compute_sum_ns": 8987792.0,
+          "zero_intervals": 0,
+          "intervals": 972,
+          "median_phase_ns": {
+            "dense_backward": 2792917.0,
+            "forward_mixed": 3007875.0,
+            "loss": 25250.0,
+            "pointwise_unbroadcast": 233125.0,
+            "pointwise_vjp": 1097168.0,
+            "update": 289916.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.33244235024800606,
+            "forward_mixed": 0.32039749028459935,
+            "loss": 0.003197543940155945,
+            "pointwise_unbroadcast": 0.029220420007882927,
+            "pointwise_vjp": 0.11047566398688095,
+            "update": 0.03225664323339926
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "depth": 8
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 19535625.0,
+          "median_compute_sum_ns": 17521418.0,
+          "zero_intervals": 0,
+          "intervals": 972,
+          "median_phase_ns": {
+            "dense_backward": 6313792.0,
+            "forward_mixed": 4971584.0,
+            "loss": 17375.0,
+            "pointwise_unbroadcast": 1404376.0,
+            "pointwise_vjp": 3040417.0,
+            "update": 270833.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.37505509770676465,
+            "forward_mixed": 0.25219931771754683,
+            "loss": 0.0011067624435321297,
+            "pointwise_unbroadcast": 0.07695204688878586,
+            "pointwise_vjp": 0.1937880074984518,
+            "update": 0.019854272068619103
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              64,
+              256
+            ],
+            "depth": 4
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 14600125.0,
+          "median_compute_sum_ns": 13526457.0,
+          "zero_intervals": 0,
+          "intervals": 540,
+          "median_phase_ns": {
+            "dense_backward": 4281251.0,
+            "forward_mixed": 3660750.0,
+            "loss": 55417.0,
+            "pointwise_unbroadcast": 1522082.0,
+            "pointwise_vjp": 2100956.0,
+            "update": 375708.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.3405357370137629,
+            "forward_mixed": 0.2722400007993547,
+            "loss": 0.0034865503584032226,
+            "pointwise_unbroadcast": 0.10958907413469472,
+            "pointwise_vjp": 0.1553219738176819,
+            "update": 0.029608487440504885
+          }
+        }
+      ]
+    },
+    "browser": {
+      "cases": 21,
+      "max_abs_error": 0.0,
+      "groups": [
+        {
+          "config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 4330037.0,
+          "median_compute_sum_ns": 3531289.0,
+          "zero_intervals": 0,
+          "intervals": 1026,
+          "median_phase_ns": {
+            "dense_backward": 381918.0,
+            "forward_dense": 645181.0,
+            "forward_pointwise": 1170457.0,
+            "loss": 616268.0,
+            "pointwise_unbroadcast": 133490.0,
+            "pointwise_vjp": 80416.0,
+            "update": 47078.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.11768160042687525,
+            "forward_dense": 0.19524006191305382,
+            "forward_pointwise": 0.3515434786576767,
+            "loss": 0.16787739165516416,
+            "pointwise_unbroadcast": 0.04296203976980207,
+            "pointwise_vjp": 0.02899604260932469,
+            "update": 0.013017098340725172
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2
+          },
+          "policy": "module_compatible",
+          "samples": 27,
+          "median_gpu_span_ns": 3498626.0,
+          "median_compute_sum_ns": 3080669.0,
+          "zero_intervals": 0,
+          "intervals": 1026,
+          "median_phase_ns": {
+            "dense_backward": 340751.0,
+            "forward_dense": 370086.0,
+            "forward_pointwise": 1130004.0,
+            "loss": 360833.0,
+            "pointwise_unbroadcast": 122861.0,
+            "pointwise_vjp": 50785.0,
+            "update": 42914.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.11984585792441625,
+            "forward_dense": 0.1862380898223903,
+            "forward_pointwise": 0.3650501484843391,
+            "loss": 0.1202660810341937,
+            "pointwise_unbroadcast": 0.04644774879492444,
+            "pointwise_vjp": 0.0227334766750803,
+            "update": 0.013568593105040085
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 7249768.0,
+          "median_compute_sum_ns": 3906421.0,
+          "zero_intervals": 0,
+          "intervals": 2025,
+          "median_phase_ns": {
+            "dense_backward": 693176.0,
+            "forward_dense": 66667.0,
+            "forward_pointwise": 53626.0,
+            "loss": 10209.0,
+            "pointwise_unbroadcast": 192353.0,
+            "pointwise_vjp": 293592.0,
+            "update": 82957.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.18645755493550584,
+            "forward_dense": 0.07527832517508101,
+            "forward_pointwise": 0.05642401911846229,
+            "loss": 0.008297364774559628,
+            "pointwise_unbroadcast": 0.04604466992689318,
+            "pointwise_vjp": 0.06051037960366644,
+            "update": 0.01943423359716529
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 11125395.0,
+          "median_compute_sum_ns": 7708328.0,
+          "zero_intervals": 0,
+          "intervals": 3618,
+          "median_phase_ns": {
+            "dense_backward": 768416.0,
+            "forward_dense": 1561573.0,
+            "forward_pointwise": 2070280.0,
+            "loss": 10166.0,
+            "pointwise_unbroadcast": 101867.0,
+            "pointwise_vjp": 114659.0,
+            "update": 220116.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.15664881223483493,
+            "forward_dense": 0.2012202905740389,
+            "forward_pointwise": 0.2606307445605833,
+            "loss": 0.0013456188679757365,
+            "pointwise_unbroadcast": 0.017283890422809863,
+            "pointwise_vjp": 0.023250980155178225,
+            "update": 0.03766715267652573
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              4,
+              64,
+              64
+            ],
+            "depth": 8
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 9571208.0,
+          "median_compute_sum_ns": 6634966.0,
+          "zero_intervals": 0,
+          "intervals": 3618,
+          "median_phase_ns": {
+            "dense_backward": 1354771.0,
+            "forward_dense": 1398583.0,
+            "forward_pointwise": 1874885.0,
+            "loss": 11541.0,
+            "pointwise_unbroadcast": 126194.0,
+            "pointwise_vjp": 153240.0,
+            "update": 165438.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.22487216941809315,
+            "forward_dense": 0.1750709535737155,
+            "forward_pointwise": 0.22559436706562444,
+            "loss": 0.0018777980635092705,
+            "pointwise_unbroadcast": 0.020960921276763137,
+            "pointwise_vjp": 0.027507397863706984,
+            "update": 0.03221869494234737
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "depth": 8
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 12712266.0,
+          "median_compute_sum_ns": 9440910.0,
+          "zero_intervals": 0,
+          "intervals": 3618,
+          "median_phase_ns": {
+            "dense_backward": 3507709.0,
+            "forward_dense": 1568928.0,
+            "forward_pointwise": 2534676.0,
+            "loss": 14167.0,
+            "pointwise_unbroadcast": 1157762.0,
+            "pointwise_vjp": 560690.0,
+            "update": 178400.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.36971854751979144,
+            "forward_dense": 0.15647855364984714,
+            "forward_pointwise": 0.2548309781365011,
+            "loss": 0.0014258725480670617,
+            "pointwise_unbroadcast": 0.11994468253369255,
+            "pointwise_vjp": 0.06242352786619506,
+            "update": 0.01889662418343448
+          }
+        },
+        {
+          "config": {
+            "shape": [
+              2,
+              64,
+              256
+            ],
+            "depth": 4
+          },
+          "policy": "exact",
+          "samples": 27,
+          "median_gpu_span_ns": 12182840.0,
+          "median_compute_sum_ns": 11094617.0,
+          "zero_intervals": 0,
+          "intervals": 1890,
+          "median_phase_ns": {
+            "dense_backward": 1968549.0,
+            "forward_dense": 1619993.0,
+            "forward_pointwise": 2331687.0,
+            "loss": 16540.0,
+            "pointwise_unbroadcast": 1106758.0,
+            "pointwise_vjp": 1072311.0,
+            "update": 369725.0
+          },
+          "median_compute_share": {
+            "dense_backward": 0.2780510118977332,
+            "forward_dense": 0.15255650521167513,
+            "forward_pointwise": 0.2207993551945527,
+            "loss": 0.0028338402515895346,
+            "pointwise_unbroadcast": 0.09693194674297222,
+            "pointwise_vjp": 0.09506671490730625,
+            "update": 0.037288983649812854
+          }
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "adopted/native-profile.json": "3937cf3d4589c90e93ebe5a70bbd400c5ce7582c32bc6345b7bbde7f6718ad8d",
+    "adopted/browser-profile.json": "d04dd613df7b67745822ad04d21f9263281ae6d4d4566a282179ca3c3d33932f",
+    "adopted/browser-profile.json.cases.jsonl": "fd8f80c6954ca65988c61f666f57fd8ff4b5a843449529e4eb4a57bf61f66596",
+    "adopted/receipt.json": "7d4b32f2a8564f3b0e9f2e0d0da6023a576b16c8a37348906288cc0da7d804c7",
+    "verified/browser-profile.json": "ba9851ae694924ca4671200723080d4d411c93d1d963834564eebdca263dbe9d",
+    "browser-debug.json": "34116830e8b2b04b2547180bc6751c6de9b70563357a97a005575da20ff176bd",
+    "matrix-debug.json": "19548f3e796dd4e5ba5950f3f713fd96d9e448cadebbe7ca4bc18b4ed7872c2a",
+    "final/browser-profile.json": "7a05cf6b75c0b9b8fad8543c78f55b9805a2c8935d5d6461462d03edb5d9adba"
+  },
+  "development_failure": "Initial browser collector crashed after all 21 cases while materializing its giant final DOM report; streaming fixed it. Initial native same-submission query resolution produced ambiguous final-pass 0/0 samples; final profiling resolves after queue completion. This exposed pinned WGPU browser queue completion unimplemented; connected the native browser promise and tested deliberate rejection. No normal training pass/math change.",
+  "boundaries": [
+    "No pass splitting or normal schedule change.",
+    "These are diagnostic compute-pass timings, not end-to-end speedup.",
+    "Compute sums exclude copies and gaps. Dense-backward groups include several dispatches.",
+    "Browser physical GPU and background contention UNKNOWN."
+  ],
+  "regression": {
+    "standard": {
+      "native": {
+        "immediate": {
+          "geomean_baseline_over_candidate": 1.014134807535126,
+          "range": [
+            0.8047981174905918,
+            1.2077839355593876
+          ],
+          "cases_faster_or_equal": 5,
+          "cases": 9,
+          "geomean_torch_over_candidate": 0.8902453646313245
+        },
+        "deferred": {
+          "geomean_baseline_over_candidate": 0.9729533367356712,
+          "range": [
+            0.8254612154829755,
+            1.1286966272545484
+          ],
+          "cases_faster_or_equal": 5,
+          "cases": 9,
+          "geomean_torch_over_candidate": 0.8542183856725405
+        }
+      },
+      "browser": {
+        "immediate": {
+          "geomean_baseline_over_candidate": 0.999933145447452,
+          "range": [
+            0.9891304346241606,
+            1.0227272730736323
+          ],
+          "cases_faster_or_equal": 6,
+          "cases": 9
+        },
+        "deferred": {
+          "geomean_baseline_over_candidate": 0.9914784451919042,
+          "range": [
+            0.9183673472180559,
+            1.0888888902134366
+          ],
+          "cases_faster_or_equal": 3,
+          "cases": 9
+        }
+      }
+    },
+    "wide": {
+      "native": {
+        "immediate": {
+          "geomean_baseline_over_candidate": 1.0496363291697595,
+          "range": [
+            0.9663546621989385,
+            1.1225087036211383
+          ],
+          "cases_faster_or_equal": 7,
+          "cases": 9,
+          "geomean_torch_over_candidate": 0.4893563560958161
+        },
+        "deferred": {
+          "geomean_baseline_over_candidate": 1.03862118081678,
+          "range": [
+            0.9831156138138105,
+            1.121319207288818
+          ],
+          "cases_faster_or_equal": 6,
+          "cases": 9,
+          "geomean_torch_over_candidate": 0.49560830106482034
+        }
+      },
+      "browser": {
+        "immediate": {
+          "geomean_baseline_over_candidate": 1.002485039667469,
+          "range": [
+            0.9650959859110899,
+            1.0487444608105538
+          ],
+          "cases_faster_or_equal": 4,
+          "cases": 9
+        },
+        "deferred": {
+          "geomean_baseline_over_candidate": 1.00383089526012,
+          "range": [
+            0.9029850748384828,
+            1.111801242194826
+          ],
+          "cases_faster_or_equal": 5,
+          "cases": 9
+        }
+      }
+    }
+  },
+  "comparisons": {
+    "standard": {
+      "max_abs_error": 1.4901161193847656e-08,
+      "all_loss_sequences_decreased": true
+    },
+    "wide": {
+      "max_abs_error": 1.4901161193847656e-08,
+      "all_loss_sequences_decreased": true
+    }
+  },
+  "regression_boundary": "One fresh paired round per matrix/client; 2 warmups + 8 retained rotated blocks/cadence. Ratios of case medians, then geometric mean. No speedup/parity guarantee from noise-sensitive observations.",
+  "benchmark_counts": {
+    "raw_intervals": 1800,
+    "retained_intervals": 1440,
+    "sgd_updates_over_reset_trajectories": 14400
+  },
+  "profile_counts": {
+    "cases_per_client": 21,
+    "updates_per_trajectory": 12,
+    "controls_per_case": 2,
+    "profiled_updates_both_clients": 504,
+    "retained_profiles": 378,
+    "main_updates_all_three_workspaces": 1512
+  },
+  "verification": {
+    "backend": 114,
+    "nn": 733,
+    "integration": 6,
+    "python_gpu": 30,
+    "profile_admission": 4,
+    "benchmark_admission": 10,
+    "torch": {
+      "cases": 24,
+      "comparisons": 5184,
+      "max_abs_error": 1.1920928955078125e-07
+    }
+  },
+  "inference": "Diagnostic timestamps have substantial dispersion and instrumentation effects. Dense backward and mixed/pointwise forward are candidates for bounded follow-up, not proven uninstrumented bottlenecks. No optimization default changed.",
+  "residuals": [
+    "Ordinary Module::forward, ModuleTrainer, pure::Tensor storage and generic autograd routing remain unchanged.",
+    "Profiler is public Rust and exercised by the shared WASM benchmark, not yet exposed by production Python/WASM classes.",
+    "Prior one-off parallel GPU VJP failure remains UNKNOWN; serial checks here do not establish its cause.",
+    "No CUDA/Furnace, push, PR, merge or release in this turn; no fastest-PyTorch/application-quality claim."
+  ]
+}

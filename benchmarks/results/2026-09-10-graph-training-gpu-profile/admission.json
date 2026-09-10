@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "implementation_source": "04a014f0",
+  "validator_sha256": "736789d5366a47b8ece581315c34a7a604ffbf625391a3873ff133c136e8894e",
+  "tests_sha256": "d3ee48a20275600610f9f22a3aad3ab309109e547d2a1700717896a10e324cc3",
+  "conditions": {
+    "native": 21,
+    "browser": 21
+  },
+  "tests": {
+    "exit_code": 0,
+    "output": "test_exact_integer_ticks_and_zero_intervals_remain_valid (__main__.ProfileAdmission.test_exact_integer_ticks_and_zero_intervals_remain_valid) ... ok\ntest_no_acceptance_or_counter_shortcuts (__main__.ProfileAdmission.test_no_acceptance_or_counter_shortcuts) ... ok\ntest_no_float_ticks_reversed_intervals_or_invented_durations (__main__.ProfileAdmission.test_no_float_ticks_reversed_intervals_or_invented_durations) ... ok\ntest_no_missing_guards_samples_or_phase_totals (__main__.ProfileAdmission.test_no_missing_guards_samples_or_phase_totals) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.002s\n\nOK\n"
+  },
+  "legacy_same_submission_cases_not_admitted": 21
+}

@@ -13,10 +13,11 @@ class ProfileAdmission(unittest.TestCase):
         profile = dict(
             schema="spiraltorch.graph_training_gpu_profile.v1",
             accepted=True, instrumented=True, batch_generation="1",
+            timing_complete=True, ambiguous_zero_pairs=0,
             timestamp_period_ns=2., zero_intervals=1, gpu_span_ns=8.,
             passes=[
-                dict(phase="forward_mixed", start_tick=str(tick), end_tick=str(tick), elapsed_ns=0.),
-                dict(phase="update", start_tick=str(tick+1), end_tick=str(tick+4), elapsed_ns=6.),
+                dict(phase="forward_mixed", sample_status="observed", start_tick=str(tick), end_tick=str(tick), elapsed_ns=0.),
+                dict(phase="update", sample_status="observed", start_tick=str(tick+1), end_tick=str(tick+4), elapsed_ns=6.),
             ],
             phase_totals_ns=dict(forward_mixed=0., update=6.),
         )
@@ -28,6 +29,7 @@ class ProfileAdmission(unittest.TestCase):
 
     def test_no_acceptance_or_counter_shortcuts(self):
         for field, bad in [("accepted", False), ("instrumented", False), ("submitted_step", 1),
+                           ("timing_complete", False), ("ambiguous_zero_pairs", 1),
                            ("batch_generation", "2"), ("warmup", False), ("timestamp_period_ns", 0),
                            ("zero_intervals", 0), ("gpu_span_ns", 6.)]:
             with self.subTest(field=field):
@@ -38,6 +40,7 @@ class ProfileAdmission(unittest.TestCase):
 
     def test_no_float_ticks_reversed_intervals_or_invented_durations(self):
         for field, bad in [("start_tick", 2**60), ("start_tick", str(2**64)),
+                           ("sample_status", "ambiguous_zero_pair"),
                            ("end_tick", "0"), ("elapsed_ns", 10.), ("elapsed_ns", float("nan"))]:
             with self.subTest(field=field):
                 row = self.fixture()
