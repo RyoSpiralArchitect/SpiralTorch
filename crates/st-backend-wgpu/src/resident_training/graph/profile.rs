@@ -2,6 +2,7 @@
 use super::*;
 use crate::runtime::timestamps::{
     PassTimestampRecorder, PassTimestamps, TimestampErrorScopes, TimestampReadback,
+    TimestampValidation,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -207,12 +208,15 @@ impl ProfiledGraphTraining {
             step: attempt,
             batch_generation: self.inner.batch_generation,
         };
-        let mut timestamps = recorder.resolve(&mut encoder);
         let checked = Shared::new(AtomicBool::new(false));
         self.pending = Some(checked.clone());
         self.inner.write_rate(rate);
         context.queue().submit(Some(encoder.finish()));
-        timestamps.validate(errors.finish());
+        let timestamps = DeferredTimestamps {
+            recorder,
+            validation: errors.finish(),
+            context: context.clone(),
+        };
         let direct_copy_bytes = self
             .inner
             .nodes
@@ -237,13 +241,66 @@ impl ProfiledGraphTraining {
 
 /// Owning result of exactly one attempt; safe after profiler drop.
 pub struct GraphProfileReadback {
-    timestamps: TimestampReadback,
+    timestamps: DeferredTimestamps,
     loss: StepReadback,
     checked: Shared<AtomicBool>,
     passes: Vec<ProfilePass>,
     step: u64,
     batch_generation: u64,
     direct_copy_bytes: u64,
+}
+
+struct DeferredTimestamps {
+    recorder: PassTimestampRecorder,
+    validation: TimestampValidation,
+    context: runtime::WgpuContext,
+}
+
+fn resolve_timestamps(
+    context: runtime::WgpuContext,
+    recorder: PassTimestampRecorder,
+) -> Result<TimestampReadback, TrainingError> {
+    let errors = TimestampErrorScopes::try_new(context.clone())?;
+    let mut encoder = context.device().create_command_encoder(&Default::default());
+    let mut readback = recorder.resolve(&mut encoder);
+    context.queue().submit(Some(encoder.finish()));
+    readback.validate(errors.finish());
+    Ok(readback)
+}
+
+impl DeferredTimestamps {
+    // Metal may expose unwritten final-pass samples if queries are resolved in
+    // the training command buffer. Wait for that submission, without changing
+    // its pass/copy schedule; query resolution is diagnostic-only follow-up work.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read(self) -> Result<PassTimestamps, TrainingError> {
+        runtime::submit_with_timeout(
+            self.context.device(),
+            self.context.queue(),
+            std::iter::empty(),
+            std::time::Duration::from_secs(30),
+            "graph.profile.completion",
+        )?;
+        pollster::block_on(self.validation.check())?;
+        Ok(resolve_timestamps(self.context, self.recorder)?.read()?)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn read_async(self) -> Result<PassTimestamps, TrainingError> {
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        self.context.queue().on_submitted_work_done(move || {
+            let _ = sender.send(());
+        });
+        receiver
+            .await
+            .map_err(|_| WgpuRuntimeError::SubmissionCallbackDisconnected {
+                operation: "graph.profile.completion",
+            })?;
+        self.validation.check().await?;
+        Ok(resolve_timestamps(self.context, self.recorder)?
+            .read_async()
+            .await?)
+    }
 }
 
 fn release_after_guard(checked: &AtomicBool, loss: &Result<f32, TrainingError>) {
@@ -319,13 +376,22 @@ impl GraphGpuProfile {
 
     /// Rust-owned client schema. Absolute ticks/counters are strings, not JS f64.
     pub fn report(&self) -> serde_json::Value {
-        let mut totals = std::collections::BTreeMap::<&str, f64>::new();
+        let mut totals = std::collections::BTreeMap::<&str, Option<f64>>::new();
         let mut zero_intervals = 0;
+        let mut ambiguous_pairs = 0;
         let passes: Vec<_> = self.passes.iter().zip(&self.timestamps.passes).map(|(metadata, time)| {
-            *totals.entry(metadata.phase).or_default() += time.elapsed_ns;
+            let ambiguous = time.start_tick == 0 && time.end_tick == 0;
+            let total = totals.entry(metadata.phase).or_insert(Some(0.));
+            if ambiguous {
+                *total = None;
+                ambiguous_pairs += 1;
+            } else if let Some(total) = total {
+                *total += time.elapsed_ns;
+            }
             zero_intervals += usize::from(time.elapsed_ns == 0.);
             serde_json::json!({"phase":metadata.phase,"node":metadata.node,"part":metadata.part,
                 "dispatches":metadata.dispatches,"operand":metadata.operand,
+                "sample_status":if ambiguous {"ambiguous_zero_pair"} else {"observed"},
                 "start_tick":time.start_tick.to_string(),"end_tick":time.end_tick.to_string(),"elapsed_ns":time.elapsed_ns})
         }).collect();
         let span = self
@@ -333,12 +399,14 @@ impl GraphGpuProfile {
             .passes
             .first()
             .zip(self.timestamps.passes.last())
+            .filter(|_| ambiguous_pairs == 0)
             .and_then(|(first, last)| last.end_tick.checked_sub(first.start_tick))
             .map(|ticks| ticks as f64 * self.timestamps.timestamp_period_ns);
         serde_json::json!({"schema":"spiraltorch.graph_training_gpu_profile.v1","instrumented":true,"accepted":true,
             "boundary":"Diagnostic timestamps at existing compute-pass boundaries on a private device. No pass splitting; forward/dense-backward/update may each contain multiple dispatches. Excludes uploads, CPU encoding, query resolve/readback and untimed copies from compute sums; GPU span includes inter-pass/copy gaps. Instrumentation may perturb execution and browser timestamps may quantize to zero.",
             "submitted_step":self.step.to_string(),"batch_generation":self.batch_generation.to_string(),"loss":self.loss,
             "timestamp_period_ns":self.timestamps.timestamp_period_ns,"zero_intervals":zero_intervals,"gpu_span_ns":span,
+            "timing_complete":ambiguous_pairs == 0,"ambiguous_zero_pairs":ambiguous_pairs,
             "direct_vjp_copy_bytes":self.direct_copy_bytes.to_string(),"phase_totals_ns":totals,"passes":passes})
     }
 }
@@ -398,6 +466,18 @@ mod tests {
         assert_eq!(report["phase_totals_ns"]["forward_mixed"], 0.);
         assert_eq!(report["phase_totals_ns"]["update"], 6.);
         assert_eq!(report["gpu_span_ns"], 16.);
+        assert_eq!(report["timing_complete"], true);
+        let mut unknown = profile;
+        unknown.timestamps.passes[1] = PassTimestamp {
+            start_tick: 0,
+            end_tick: 0,
+            elapsed_ns: 0.,
+        };
+        let report = unknown.report();
+        assert_eq!(report["timing_complete"], false);
+        assert_eq!(report["ambiguous_zero_pairs"], 1);
+        assert!(report["phase_totals_ns"]["update"].is_null());
+        assert!(report["gpu_span_ns"].is_null());
     }
 
     #[test]

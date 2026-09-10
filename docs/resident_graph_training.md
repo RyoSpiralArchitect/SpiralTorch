@@ -202,6 +202,13 @@ execution, so use the separate end-to-end benchmark for performance decisions.
 Unsupported timestamp features are errors, never replaced with a CPU clock.
 Absolute ticks and counters are decimal strings; zero/quantized browser intervals
 are retained rather than discarded.
+Query resolution occurs only after the training submission completes, outside
+the recorded pass interval. This avoids unwritten final-pass samples observed
+with same-command-buffer resolution on native Metal. A raw `0/0` pair remains
+ambiguous: `timing_complete=false`, its phase total and GPU span are null, never
+a claim that the update cost was zero. Equal **nonzero** ticks remain valid
+quantized zero intervals. Browser full-state captures are streamed to a hash-bound
+`.cases.jsonl` artifact instead of materialized in the page's DOM.
 
 Until the profile is read and validated, new steps, uploads and snapshots fail
 with `PendingProfile`. A decoded numerical rejection proves rollback and permits
