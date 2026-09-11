@@ -90,7 +90,17 @@ update for bit identity. Separate public Python/WASM clients exercise ownership,
 batch limits, stale state and zero-weight invalid-source rollback.
 
 These are bounded learning/correctness fixtures, not model-quality or throughput
-claims. This first update path creates temporary composition buffers; it is not
+claims. Composition uses prepared weight/flag/shape buffers and writes groups of
+up to four contributions directly into the graph's gradient buffers. Each product
+and ordered intermediate sum retains the shared finite checks; one unit-weight
+source uses a direct copy. The derivative outputs are still owning GPU snapshots,
+and composing updates still creates bind groups and dispatches. This is not
 a fused optimizer or a general reverse-mode tape for arbitrary `WgpuTensor`
 expressions. External objectives supply their cotangents. Cross-forward
 microbatch accumulation, Adam/momentum and mixed precision are not provided.
+
+The source-bound training benchmark has a separate `--graph --learner` workload.
+It times full quadratic/quartic seed construction, both VJPs and weighted SGD.
+Rust captures and reads every update acceptance receipt; Torch synchronizes
+completion without claiming equivalent guards/rollback. Losses are observed only
+in untimed initial/final probes. Ordinary MSE timings remain a separate workload.

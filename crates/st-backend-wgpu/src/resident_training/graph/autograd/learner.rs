@@ -1,6 +1,7 @@
 //! Explicit custom-loss SGD on the resident graph, not a ModuleTrainer policy.
 use super::*;
-use st_kernel_contracts::elementwise::ElementwiseOp;
+mod composition;
+use composition::Composition;
 
 const MAX_TERMS: usize = 256;
 
@@ -40,6 +41,7 @@ impl GraphGradientBatch {
 pub struct ResidentGraphLearner {
     autograd: ResidentGraphAutograd,
     update_validation: wgpu::Buffer,
+    composition: Composition,
     updates: u64,
     last_update: Option<(u64, u64)>,
 }
@@ -67,9 +69,11 @@ impl ResidentGraphLearner {
             graph.nodes.len() + 4,
             wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         )?;
+        let composition = Composition::new(&graph)?;
         Ok(Self {
             autograd: ResidentGraphAutograd::from_prepared(graph)?,
             update_validation,
+            composition,
             updates: 0,
             last_update: None,
         })
@@ -171,68 +175,9 @@ impl ResidentGraphLearner {
         let attempt = self.updates.checked_add(1).ok_or(TrainingError::Overflow)?;
         let g = &self.autograd.graph;
         let context = g.device.runtime().context();
-        let flag_count = terms.len() + g.parameters.len();
-        storage_limit(flag_count, &context.device().limits())?;
-        let inherited = runtime::empty_buffer::<u32>(
-            context.device(),
-            "graph.learner.sources",
-            flag_count,
-            wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-        )?;
-        let scales: Vec<_> = terms
-            .iter()
-            .map(|(_, value)| g.device.upload(&[], &[*value]))
-            .collect::<Result<_, _>>()?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&g.validation, 0, None);
-        // Include every whole-VJP flag even for parameterless graphs or zero weights.
-        for (i, (source, _)) in terms.iter().enumerate() {
-            encoder.copy_buffer_to_buffer(source.input.flags(), 0, &inherited, i as u64 * 4, 4);
-        }
-        for id in 0..g.parameters.len() {
-            let scaled = |i: usize, encoder: &mut wgpu::CommandEncoder| {
-                let source = &terms[i].0.parameters[id];
-                if terms[i].1 == 1. {
-                    Ok(source.clone())
-                } else {
-                    source.apply_into(encoder, ElementwiseOp::Multiply, Some(&scales[i]))
-                }
-            };
-            let mut sum = scaled(0, &mut encoder)?;
-            for i in 1..terms.len() {
-                let next = scaled(i, &mut encoder)?;
-                sum = sum.apply_into(&mut encoder, ElementwiseOp::Add, Some(&next))?;
-            }
-            encoder.copy_buffer_to_buffer(
-                sum.values(),
-                0,
-                &g.raw_gradients[id],
-                0,
-                g.raw_gradients[id].size(),
-            );
-            encoder.copy_buffer_to_buffer(
-                sum.flags(),
-                0,
-                &inherited,
-                (terms.len() + id) as u64 * 4,
-                4,
-            );
-        }
-        // Reduce all source and composition guards through the shared tensor
-        // identity kernel. This scalar is only a guard carrier, never a loss.
-        let guard = g.device.capture_into(
-            &mut encoder,
-            &NdLayout::contiguous(&[]).map_err(TensorError::from)?,
-            terms[0].0.input.values(),
-            &inherited,
-        )?;
-        encoder.copy_buffer_to_buffer(
-            guard.flags(),
-            0,
-            &g.validation,
-            (g.nodes.len() + 2) as u64 * 4,
-            4,
-        );
+        let weights = self.composition.encode(g, terms, &mut encoder);
         g.encode_passes(&mut encoder, &g.update_passes, &mut Default::default());
         encoder.copy_buffer_to_buffer(
             &g.validation,
@@ -242,6 +187,7 @@ impl ResidentGraphLearner {
             g.validation.size(),
         );
         // Nothing fallible remains after changing a queue-visible learning rate.
+        self.composition.write_weights(context.queue(), &weights);
         g.write_rate(rate);
         context.queue().submit(Some(encoder.finish()));
         self.last_update = Some((current.generation, current.submission));

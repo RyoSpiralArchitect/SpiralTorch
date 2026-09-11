@@ -56,7 +56,7 @@ fn source() -> String {
     ))
 }
 
-fn substitute_ops(source: String) -> String {
+pub(crate) fn substitute_ops(source: String) -> String {
     let mut source = source.replace("INVALID_TENSOR_FLAG", &format!("{INVALID_TENSOR_FLAG}u"));
     for (name, op) in [
         ("OP_ADD", ElementwiseOp::Add),

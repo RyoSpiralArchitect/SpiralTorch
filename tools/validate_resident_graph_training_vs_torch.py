@@ -252,7 +252,7 @@ def main():
                             report["cases"].append(result)
                     learning = fixture.get("learning")
                     if learning is not None:
-                        assert len(learning["cases"]) == 12 and len(learning["guards"]) == 5
+                        assert len(learning["cases"]) == 12 and len(learning["guards"]) == 8
                         assert all(g["passed"] for g in learning["guards"])
                         for case in learning["cases"]:
                             result = replay_learning(case, device)

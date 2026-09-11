@@ -287,6 +287,18 @@ async fn guards(runtime: WgpuRuntime) -> Result<Vec<Value>> {
             vec![1., 1., -1.],
             0.1,
         ),
+        (
+            "chunk_product_cancellation",
+            2.,
+            vec![f32::MAX, 0., 0., 0., -f32::MAX],
+            0.1,
+        ),
+        (
+            "chunk_sum_cancellation",
+            f32::MAX,
+            vec![0.5, 0.5, 0., 0., 0.5, -0.5],
+            0.1,
+        ),
     ] {
         let mut gpu =
             plan.compile_graph_learner_wgpu(runtime.clone(), GraphGradientPolicy::Exact)?;
@@ -363,10 +375,76 @@ async fn guards(runtime: WgpuRuntime) -> Result<Vec<Value>> {
     gpu.upload(&[1.])?;
     let f = gpu.forward()?;
     let g = gpu.backward(&f, &poison)?;
-    gpu.sgd_weighted(&[(&g, 0.)], 0.1)?;
+    let good = gpu.backward(&f, &seed)?;
+    let mut terms = vec![(&good, 0.); 255];
+    terms.push((&g, 0.));
+    gpu.sgd_weighted(&terms, 0.1)?;
     if accepted(gpu.update_snapshot()?).await.is_ok() {
         return Err("parameterless update lost guard".into());
     }
     records.push(json!({"case":"parameterless_invalid_source","passed":true}));
+    let runtime = gpu.tensor_device().runtime().clone();
+    records.push(composition_reuse(runtime).await?);
     Ok(records)
+}
+
+async fn composition_reuse(runtime: WgpuRuntime) -> Result<Value> {
+    let shape = [2, 3, 257];
+    let plan = InferencePlan::from_module(
+        &Scaler::new("composition_gain", 257)?,
+        NdLayout::contiguous(&shape)?,
+    )?;
+    let mut gpu = plan.compile_graph_learner_wgpu(runtime, GraphGradientPolicy::Exact)?;
+    let d = gpu.tensor_device().clone();
+    let input: Vec<_> = (0..1542).map(|i| ((i % 7) as f32 - 3.) * 0.125).collect();
+    gpu.upload(&input)?;
+    let seeds = [
+        d.upload(&shape, &vec![0.5; 1542])?,
+        d.upload(&shape, &vec![-0.25; 1542])?,
+    ];
+    let raw: Vec<Vec<f32>> = [0.5, -0.25]
+        .iter()
+        .map(|seed| {
+            (0..257)
+                .map(|c| (0..6).map(|r| input[r * 257 + c] * seed).sum())
+                .collect()
+        })
+        .collect();
+    let mut expected = plan.graph_definition()?.parameters()[0].values.clone();
+    let counts = [1, 2, 3, 4, 5, 17, 256, 1, 5];
+    let mut captures = Vec::new();
+    for (step, count) in counts.into_iter().enumerate() {
+        let f = gpu.forward()?;
+        let g = [gpu.backward(&f, &seeds[0])?, gpu.backward(&f, &seeds[1])?];
+        let terms: Vec<_> = (0..count)
+            .map(|i| (&g[i % 2], [1., 0.125, -0.5, 0.][(i + step) % 4]))
+            .collect();
+        for (c, value) in expected.iter_mut().enumerate() {
+            let mut gradient = raw[0][c] * terms[0].1;
+            for (i, (_, weight)) in terms.iter().enumerate().skip(1) {
+                gradient += raw[i % 2][c] * weight;
+            }
+            *value -= 0.03125 * gradient;
+        }
+        gpu.sgd_weighted(&terms, 0.03125)?;
+        captures.push((
+            gpu.update_snapshot()?,
+            gpu.parameter_snapshot()?,
+            expected.clone(),
+        ));
+    }
+    drop(gpu);
+    let mut maximum = 0f32;
+    for (i, (receipt, snapshot, reference)) in captures.into_iter().enumerate() {
+        if accepted(receipt).await? != i as u64 + 1 {
+            return Err("composition receipt reuse".into());
+        }
+        maximum = maximum.max(close(
+            &parameters(snapshot).await?.parameters()[0].values,
+            &reference,
+        )?);
+    }
+    Ok(
+        json!({"case":"composition_reuse","passed":true,"terms":counts,"width":257,"max_abs_error":maximum}),
+    )
 }
