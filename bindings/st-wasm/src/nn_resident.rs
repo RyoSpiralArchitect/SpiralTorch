@@ -104,6 +104,14 @@ impl WasmInferencePlan {
         self.inner.to_json().map_err(js_error)
     }
 
+    /// Return a new Rust-fused plan; parameter IDs stay fixed, stage IDs may change.
+    #[wasm_bindgen(js_name = fusePointwise)]
+    pub fn fuse_pointwise(&self) -> Result<WasmInferencePlan, JsValue> {
+        Ok(Self {
+            inner: self.inner.fuse_pointwise().map_err(js_error)?,
+        })
+    }
+
     #[wasm_bindgen(getter, js_name = inputShape)]
     pub fn input_shape(&self) -> Vec<u32> {
         self.inner

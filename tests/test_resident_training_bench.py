@@ -15,6 +15,25 @@ spec.loader.exec_module(validation)
 
 
 class Admission(unittest.TestCase):
+    def test_fusion_equivalence_rejects_residual_rebinding_or_changed_math(self):
+        source = dict(schema="spiraltorch.nn.inference_plan.v2", input_shape=[2, 1],
+            parameters=[dict(role="gain", shape=[1], values=[2.])], stages=[
+                dict(kind="pointwise", parameters=[0], steps=[dict(op="multiply", rhs=1)]),
+                dict(kind="pointwise", parameters=[], steps=[dict(op="relu", rhs=None)])])
+        fused = copy.deepcopy(source)
+        fused["stages"] = [dict(kind="pointwise", parameters=[0],
+            steps=[dict(op="multiply", rhs=1), dict(op="relu", rhs=None)])]
+        check = lambda a,b: bench.graph_reference.require_fusion_equivalent(json.dumps(a), json.dumps(b))
+        check(source, fused)
+        for key,value in (("op","gelu"),("rhs",0)):
+            bad=copy.deepcopy(fused); bad["stages"][0]["steps"][1][key]=value
+            with self.assertRaises(ValueError): check(source,bad)
+        bad=copy.deepcopy(fused); bad["parameters"][0]["values"]=[3.]
+        with self.assertRaises(ValueError): check(source,bad)
+        source["stages"][1]["steps"]=[dict(op="add",rhs=0)]
+        fused["stages"][0]["steps"][1]=dict(op="add",rhs=0)
+        with self.assertRaises(ValueError): check(source,fused)
+
     def test_wide_matrix_is_explicit_bounded_and_separate(self):
         values=bench.recipes(True,"wide")
         self.assertEqual(len(values),9)

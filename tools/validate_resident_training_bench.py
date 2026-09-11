@@ -128,6 +128,10 @@ def run(args, result):
     require(browser.get("matrix", "standard") == matrix, "workload matrix differs")
     configs = bench.recipes(graph, matrix)
     result["matrix"] = matrix
+    fusion = native.get("pointwise_fusion", False)
+    require(type(fusion) is bool and browser.get("pointwise_fusion", False) is fusion and
+            (not fusion or graph), "pointwise fusion selection differs")
+    result["pointwise_fusion"] = fusion
     sources = {lane: bench.source_for(getattr(args, lane + "_source")) for lane in ("baseline", "candidate")}
     result["native_products"] = native["native_products"]
     result["source_bindings"] = {lane: manifest_binding(native["native_products"][lane]["identity"]["manifest"], source)
@@ -149,6 +153,12 @@ def run(args, result):
         for manifest in (n["fixture"]["build_manifest"], b["fixture"]["build_manifest"]):
             manifest_binding(manifest, sources["baseline"])
         manifest_binding(b["candidate_build_manifest"], sources["candidate"])
+        if fusion:
+            for measured in (n, b):
+                bench.graph_reference.match_fused_fixture(measured["fixture"], measured["candidate_fixture"])
+                manifest_binding(measured["candidate_fixture"]["build_manifest"], sources["candidate"])
+            require(n["candidate_fixture"]["plan_json"] == b["candidate_fixture"]["plan_json"],
+                    "native/browser fused plans differ")
         require(n["fixture"]["adapter"]["device_type"] != "Cpu" and
                 b["fixture"]["adapter"]["backend"] == "BrowserWebGpu", "incorrect recorded backend")
         fixed = n["captures"]["immediate_torch"]

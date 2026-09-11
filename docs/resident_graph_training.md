@@ -52,6 +52,42 @@ tensors with the **whole transaction's guard**, even if a later gain fails.
 
 ## Compatibility
 
+### Opt-In Pointwise Fusion
+
+`plan.fuse_pointwise()?` (Rust), `plan.fuse_pointwise()` (Python), and
+`plan.fusePointwise()` (WASM) return a **new** portable plan. For example,
+`Scaler -> ReLU -> Scaler` becomes one checked pointwise forward dispatch and
+one fused VJP contribution dispatch, followed by the same deterministic gain
+reductions. Intermediate activation buffers/copies and separate VJP passes are
+removed. There is no intermediate host readback in either resident route.
+
+The transform lives in Rust, not in either client's math. It preserves operation
+order, parameter IDs/roles/values, N-D shapes and both gradient policies. It
+retains finite checks for each forward/adjoint intermediate and the all-or-none
+update. Stage numbering and parameter **owner stages** refer to the new fused
+plan. The original plan, imported JSON and source Module stay untouched.
+
+Fusion stops at Linear, a later stage's explicit `rhs=0` residual, 256 steps, or
+more than three inputs (activation plus two parameters). This input budget fits
+the portable training binding floor; existing larger stages are not split.
+Direct Rust `GraphDefinition::fuse_pointwise(max_inputs)` allows an explicit
+budget of 1..=16; actual device limits still apply. Dense-only legacy plans keep
+their original representation and specialized fast path.
+
+Compile the returned plan with the existing forward or training compiler:
+
+```python
+optimized = model.inference_plan([2, 5, 4]).fuse_pointwise()
+graph = optimized.compile_graph_training_wgpu(gradient_policy="exact")
+```
+
+This is an explicit optimization, not a new default or a universal speed claim.
+The training A/B harness accepts `--graph --fuse-pointwise`; the browser harness
+accepts `graph standard fuse-pointwise` (or `wide`). Both retain original and
+executed plans. Validation checks the ordered operations and operand identities
+and compares losses, gradients and updated parameters against unfused/eager
+Torch trajectories before interpreting timing.
+
 The specialized `compile_wgpu` / `compile_training_wgpu` Linear/GELU fast paths
 are unchanged. They reject rich graphs instead of silently dropping Scaler/ReLU.
 Legacy `parameter_snapshots()` exposes Linear weight/bias pairs only; use

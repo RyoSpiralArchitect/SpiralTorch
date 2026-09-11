@@ -22,6 +22,8 @@ try {
       throw Error("Invalid or repeated masked-overflow guard");
   }
   if(masked.length!==32||expected.size) throw Error("Missing masked-overflow guard");
+  if(report.pointwise_fusion?.cases?.length!==6||report.pointwise_fusion?.guards?.length!==16)
+    throw Error("Missing fused forward/VJP/rollback comparisons");
   result.textContent = JSON.stringify(report);
   result.dataset.status = "passed";
 } catch (error) {

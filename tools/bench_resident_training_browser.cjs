@@ -4,10 +4,11 @@ const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypt
 const {chromium}=require("playwright");
 function digest(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
 async function main() {
-  const [baseline,candidate,chrome,output,workload="dense",matrix="standard"]=process.argv.slice(2);
+  const [baseline,candidate,chrome,output,workload="dense",matrix="standard",optimization="none"]=process.argv.slice(2);
   if(!baseline||!candidate||!chrome||!output||!["dense","graph"].includes(workload)||
-     !["standard","wide"].includes(matrix)||(matrix==="wide"&&workload!=="graph"))
-    throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph] [standard|wide (graph only)]");
+     !["standard","wide"].includes(matrix)||(matrix==="wide"&&workload!=="graph")||
+     !["none","fuse-pointwise"].includes(optimization)||(optimization!=="none"&&workload!=="graph"))
+    throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph] [standard|wide] [none|fuse-pointwise (graph only)]");
   const fd=fs.openSync(output,"wx");
   let server,browser,page,progressFd,casesFd,report={status:"error"},metadata={},errors=[],consoleMessages=[];
   const cases=[];
@@ -53,7 +54,7 @@ async function main() {
     const fatal=new Promise((_,reject)=>{fail=reject;});fatal.catch(()=>{});
     page.on("pageerror",error=>{errors.push(String(error));fail(error);});
     page.on("console",message=>{if(consoleMessages.length<100)consoleMessages.push({type:message.type(),text:message.text()});});
-    await page.goto("http://127.0.0.1:"+server.address().port+"/?workload="+workload+"&matrix="+matrix);
+    await page.goto("http://127.0.0.1:"+server.address().port+"/?workload="+workload+"&matrix="+matrix+"&optimization="+optimization);
     await Promise.race([fatal,page.locator("#result:not([data-status='running'])").waitFor({timeout:600000})]);
     report=JSON.parse(await page.locator("#result").textContent());
     if(report.status==="passed"&&(report.cases?.length!==9||cases.length!==9)) throw Error("missing completed cases");

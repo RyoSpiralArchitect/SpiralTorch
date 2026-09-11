@@ -9,8 +9,10 @@ import initB, {TrainingBenchmark as B} from "/candidate/spiraltorch_wasm.js";
 const element=document.querySelector("#result");
 const graph=new URL(location.href).searchParams.get("workload")==="graph";
 const matrix=new URL(location.href).searchParams.get("matrix")??"standard";
+const optimization=new URL(location.href).searchParams.get("optimization")??"none";
+const fusion=optimization==="fuse-pointwise";
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
-  workload:graph?"graph":"dense",matrix,
+  workload:graph?"graph":"dense",matrix,pointwise_fusion:fusion,
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
 async function progress(value) {
   element.textContent=JSON.stringify(value);
@@ -44,6 +46,7 @@ function compare(a,b) {
 }
 try {
   require(["standard","wide"].includes(matrix)&&(matrix!=="wide"||graph),"invalid workload matrix");
+  require(["none","fuse-pointwise"].includes(optimization)&&(!fusion||graph),"invalid optimization");
   await progress({stage:"initialize_modules"});
   await initA(); await initB();
   const adapter=await navigator.gpu.requestAdapter();
@@ -59,11 +62,18 @@ try {
     const workers={};
     try {
     workers.baseline=await A.create(JSON.stringify(config));
-    workers.candidate=await B.create(JSON.stringify(config));
+    workers.candidate=await B.create(JSON.stringify({...config,...(fusion?{fuse_pointwise:true}:{})}));
     const fixtures=Object.fromEntries(Object.entries(workers).map(([k,v])=>[k,JSON.parse(v.fixture())]));
-    for(const key of ["config","plan_json","input","target","learning_rate","kernel","accumulation","adapter"])
+    for(const key of [...(fusion?[]:["config","plan_json"]),"input","target","learning_rate","kernel","accumulation","adapter"])
       require(JSON.stringify(fixtures.baseline[key])===JSON.stringify(fixtures.candidate[key]),"paired fixture differs: "+key);
+    if(fusion) {
+      require(fixtures.candidate.source_plan_json===fixtures.baseline.plan_json,"fusion source plan differs");
+      require(JSON.stringify({...fixtures.candidate.config,fuse_pointwise:false})===
+        JSON.stringify({...fixtures.baseline.config,fuse_pointwise:false}),"fusion recipe differs");
+      require(fixtures.candidate.config.fuse_pointwise===true,"fusion was not selected");
+    }
     const row={config,fixture:fixtures.baseline,candidate_build_manifest:fixtures.candidate.build_manifest,
+      ...(fusion?{candidate_fixture:fixtures.candidate}:{}),
       captures:{},fingerprints:{},samples:[]};
       for(const cadence of ["immediate","deferred"]) {
         const captures={};

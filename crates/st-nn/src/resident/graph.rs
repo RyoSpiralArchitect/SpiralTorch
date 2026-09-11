@@ -5,6 +5,19 @@ use st_kernel_contracts::{
 };
 
 impl InferencePlan {
+    /// Opt in to checked forward/VJP fusion without changing this frozen plan.
+    /// Up to three inputs fit the portable graph-training binding floor (eight
+    /// storage bindings including VJP scratch/guards). Noncomposable residuals
+    /// and resource budgets retain their stage boundary. No CPU fallback occurs.
+    /// Diagnostics on the returned plan use its fused stage numbering; parameter
+    /// IDs/roles/shapes and the explicit gradient policy keep their meaning.
+    pub fn fuse_pointwise(&self) -> Result<Self, InferenceError> {
+        match &self.graph {
+            Some(graph) => Self::from_graph_definition(graph.fuse_pointwise(3)?),
+            None => Ok(self.clone()),
+        }
+    }
+
     pub fn is_dense(&self) -> bool {
         self.graph.is_none()
     }
@@ -277,6 +290,51 @@ mod tests {
         layers::{Gelu, Relu, Scaler},
         Linear, Sequential,
     };
+    #[test]
+    fn pointwise_fusion_is_explicit_portable_and_keeps_dense_fast_path() {
+        let mut model = Sequential::new();
+        model.push(Scaler::new("first", 4).unwrap());
+        model.push(Relu::new());
+        model.push(Scaler::new("second", 4).unwrap());
+        model.push(Gelu::new());
+        model.push(Linear::new("linear", 4, 3).unwrap());
+        model.push(Gelu::new());
+        model.push(Relu::new());
+        model.push(Scaler::new("output", 3).unwrap());
+        let plan =
+            InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 5, 4]).unwrap()).unwrap();
+        let original = plan.to_json().unwrap();
+        let fused = plan.fuse_pointwise().unwrap();
+        assert_eq!((plan.stage_count(), fused.stage_count()), (7, 3));
+        assert_eq!(
+            fused.source_operation_count(),
+            plan.source_operation_count()
+        );
+        assert_eq!(plan.to_json().unwrap(), original);
+        let graph = fused.graph_definition().unwrap();
+        assert_eq!(graph.parameter_owners(), &[0, 0, 1, 1, 2]);
+        assert_eq!(fused.output_layout(), plan.output_layout());
+        let portable = fused.to_json().unwrap();
+        assert_eq!(
+            InferencePlan::from_json(&portable)
+                .unwrap()
+                .to_json()
+                .unwrap(),
+            portable
+        );
+        assert_eq!(fused.fuse_pointwise().unwrap().to_json().unwrap(), portable);
+        let dense = InferencePlan::from_module(
+            &Linear::new("dense", 4, 3).unwrap(),
+            NdLayout::contiguous(&[4]).unwrap(),
+        )
+        .unwrap();
+        assert!(dense.fuse_pointwise().unwrap().is_dense());
+        assert_eq!(
+            dense.fuse_pointwise().unwrap().to_json().unwrap(),
+            dense.to_json().unwrap()
+        );
+    }
+
     #[test]
     fn existing_scaler_relu_lower_with_owned_parameters_and_no_silent_dense_downgrade() {
         assert!(InferencePlan::from_module(

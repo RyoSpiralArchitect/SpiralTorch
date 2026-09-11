@@ -147,8 +147,12 @@ def main():
                     }
                 )
                 for device in args.devices:
-                    for case in fixture["cases"]:
+                    fusion = fixture.get("pointwise_fusion")
+                    if fusion is not None:
+                        assert len(fusion["cases"]) == 6 and len(fusion["guards"]) == 16
+                    for case in fixture["cases"] + (fusion["cases"] if fusion else []):
                         result = replay(case, device)
+                        result["pointwise_fusion"] = "source_plan" in case
                         result["input"] = str(path.resolve())
                         report["cases"].append(result)
             report["status"] = "passed"

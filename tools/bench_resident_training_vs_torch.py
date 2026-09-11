@@ -162,9 +162,14 @@ def run(args, result, baseline_stderr, candidate_stderr):
             row = dict(config=config,samples=[],captures={},fingerprints={})
             result["cases"].append(row)
             fixture = workers["baseline"].request(dict(op="init",config=config))
-            candidate = workers["candidate"].request(dict(op="init",config=config))
-            for key in ("config","plan_json","input","target","learning_rate","kernel","accumulation","adapter"):
-                if fixture[key] != candidate[key]: raise ValueError("native paired fixture differs: "+key)
+            fusion = getattr(args, "fuse_pointwise", False)
+            candidate = workers["candidate"].request(dict(op="init",config=dict(config, **({"fuse_pointwise": True} if fusion else {}))))
+            if fusion:
+                graph_reference.match_fused_fixture(fixture, candidate)
+                row["candidate_fixture"] = candidate
+            else:
+                for key in ("config","plan_json","input","target","learning_rate","kernel","accumulation","adapter"):
+                    if fixture[key] != candidate[key]: raise ValueError("native paired fixture differs: "+key)
             match_adapter(fixture["adapter"],args.device,name)
             row["fixture"] = fixture
             for cadence in ("immediate","deferred"):
@@ -213,15 +218,19 @@ def main():
         parser.add_argument("--"+label+"-source",required=True)
     parser.add_argument("--device",choices=("mps","cuda"),required=True)
     parser.add_argument("--graph",action="store_true",help="v2 Linear/GELU/gain/ReLU graph, exact gradients")
+    parser.add_argument("--fuse-pointwise",action="store_true",help="opt in to candidate graph fusion; preserve and structurally compare both plans")
     parser.add_argument("--matrix",choices=("standard","wide"),default="standard",
                         help="wide: graph-only 64/128/256 feature widths, same eight SGD updates")
     parser.add_argument("--output",type=Path,required=True)
     args=parser.parse_args()
     if args.matrix == "wide" and not args.graph:
         parser.error("--matrix wide requires --graph")
+    if args.fuse_pointwise and not args.graph:
+        parser.error("--fuse-pointwise requires --graph")
     result=dict(schema="spiraltorch.resident_training_comparison.v1",status="error",cases=[],
         workload="graph" if args.graph else "dense",
         matrix=args.matrix,
+        pointwise_fusion=args.fuse_pointwise,
         boundary="rotating native A/B and eager torch; f32 tanh-GELU mean-MSE plain SGD; device-persistent batch/weights; 8 updates, all losses read; 2 warmups+8 retained samples per cadence; reset/probes excluded; no fastest-PyTorch/quality claim",
         safety_difference="Rust validates every intermediate and commits parameters transactionally; eager torch has no matching per-stage finite/rollback checks for these fixed finite fixtures",
         readback_difference="Immediate reads each step; deferred Rust reads owning snapshots after enqueue, while torch stacks retained losses for one final host copy")

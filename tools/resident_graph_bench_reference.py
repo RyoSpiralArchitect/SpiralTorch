@@ -4,6 +4,50 @@ import math
 import time
 
 
+def require_fusion_equivalent(source_json, fused_json):
+    """Test-only structural proof: same ordered SSA operations/operands, not a rewrite."""
+    def program(payload):
+        plan = json.loads(payload)
+        if plan["schema"] != "spiraltorch.nn.inference_plan.v2":
+            raise ValueError("fusion comparison requires v2 graphs")
+        operations = []
+        for stage in plan["stages"]:
+            if stage["kind"] == "linear":
+                operations.append(("linear", len(operations), stage["weight"], stage["bias"]))
+                if stage["gelu"]:
+                    operations.append(("gelu", len(operations), None))
+            elif stage["kind"] == "pointwise":
+                inputs = [("activation", len(operations)),
+                          *(("parameter", i) for i in stage["parameters"])]
+                for step in stage["steps"]:
+                    binary = step["op"] in ("add", "multiply")
+                    if step["op"] not in ("identity", "relu", "gelu", "add", "multiply"):
+                        raise ValueError("unknown pointwise op")
+                    slot = step["rhs"]
+                    if binary:
+                        if type(slot) is not int or not 0 <= slot < len(inputs):
+                            raise ValueError("invalid pointwise rhs")
+                    elif slot is not None:
+                        raise ValueError("unary rhs is not empty")
+                    operations.append((step["op"], len(operations), inputs[slot] if binary else None))
+            else:
+                raise ValueError("unknown graph stage")
+        return plan["input_shape"], plan["parameters"], operations
+    if program(source_json) != program(fused_json):
+        raise ValueError("fusion changed parameter identity or ordered operations/operands")
+
+
+def match_fused_fixture(source, candidate):
+    if candidate["config"] != dict(source["config"], fuse_pointwise=True):
+        raise ValueError("fusion recipe differs")
+    for key in ("input", "target", "learning_rate", "kernel", "accumulation", "adapter"):
+        if source[key] != candidate[key]:
+            raise ValueError("fusion fixture differs: " + key)
+    if candidate["source_plan_json"] != source["plan_json"]:
+        raise ValueError("fusion source plan differs")
+    require_fusion_equivalent(source["plan_json"], candidate["plan_json"])
+
+
 def compare(actual, expected):
     maximum = 0.0
 

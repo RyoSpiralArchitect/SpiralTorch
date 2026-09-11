@@ -36,6 +36,8 @@ pub struct Config {
     pub steps: usize,
     #[serde(default, skip_serializing_if = "is_false")]
     pub graph: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fuse_pointwise: bool,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -48,6 +50,7 @@ pub enum Cadence {
 pub struct Benchmark {
     runtime: WgpuRuntime,
     plan: InferencePlan,
+    source_plan: Option<InferencePlan>,
     input: Tensor,
     target: Tensor,
     config: Config,
@@ -134,6 +137,7 @@ impl Benchmark {
             || config.steps == 0
             || config.steps > 32
             || config.seed == 0
+            || (config.fuse_pointwise && !config.graph)
         {
             return Err("benchmark exceeds bounded shape/depth/steps/seed".into());
         }
@@ -182,9 +186,15 @@ impl Benchmark {
             0.4 * input.data()[r * width + c] - 0.2 * input.data()[r * width + (c + 1) % width]
         })?;
         let plan = InferencePlan::from_module(&model, layout)?;
+        let (plan, source_plan) = if config.fuse_pointwise {
+            (plan.fuse_pointwise()?, Some(plan))
+        } else {
+            (plan, None)
+        };
         Ok(Self {
             runtime,
             plan,
+            source_plan,
             input,
             target,
             config,
@@ -192,13 +202,15 @@ impl Benchmark {
     }
 
     pub fn fixture(&self) -> Result<Value> {
-        Ok(
-            json!({"config":self.config,"plan_json":self.plan.to_json()?,"input":self.input.data(),"target":self.target.data(),
+        let mut fixture = json!({"config":self.config,"plan_json":self.plan.to_json()?,"input":self.input.data(),"target":self.target.data(),
             "learning_rate":0.01,"kernel":"register_2x2","accumulation":"sequential",
             "adapter":{"name":self.runtime.adapter_info().name,"backend":format!("{:?}",self.runtime.adapter_info().backend),
                 "device_type":format!("{:?}",self.runtime.adapter_info().device_type)},
-            "build_manifest":serde_json::from_str::<Value>(st_core::build_manifest_json())?}),
-        )
+            "build_manifest":serde_json::from_str::<Value>(st_core::build_manifest_json())?});
+        if let Some(source) = &self.source_plan {
+            fixture["source_plan_json"] = json!(source.to_json()?);
+        }
+        Ok(fixture)
     }
 
     pub async fn sample(&self, cadence: Cadence, capture: bool, now: fn() -> f64) -> Result<Value> {

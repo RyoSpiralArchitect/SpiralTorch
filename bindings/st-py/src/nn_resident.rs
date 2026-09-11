@@ -118,6 +118,13 @@ impl PyInferencePlan {
         self.inner.to_json().map_err(plan_error)
     }
 
+    /// Return a new Rust-fused plan; parameter IDs stay fixed, stage IDs may change.
+    fn fuse_pointwise(&self) -> PyResult<Self> {
+        Ok(Self {
+            inner: self.inner.fuse_pointwise().map_err(plan_error)?,
+        })
+    }
+
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.inner.input_layout().shape().iter().copied())
