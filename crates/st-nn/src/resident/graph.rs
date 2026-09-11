@@ -5,6 +5,47 @@ use st_kernel_contracts::{
 };
 
 impl InferencePlan {
+    /// Compile separate forward/VJP phases with explicit transactional SGD.
+    /// Custom objectives and weighted VJP terms stay resident; no ModuleTrainer
+    /// policy, automatic loss or implicit accumulation is substituted.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_learner_wgpu(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        policy: GraphGradientPolicy,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphLearner, InferenceError>
+    {
+        self.compile_graph_learner_wgpu_with_options(
+            runtime,
+            policy,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_learner_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        policy: GraphGradientPolicy,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphLearner, InferenceError>
+    {
+        Ok(
+            st_backend_wgpu::resident_training::graph::ResidentGraphLearner::new(
+                runtime,
+                self.graph_definition()?,
+                policy,
+                tile,
+                kernel,
+                accumulation,
+            )?,
+        )
+    }
+
     /// Compile a frozen graph with separate forward and exact, arbitrary-seed
     /// backward. No MSE, optimizer, ModuleTrainer policy or CPU fallback is added.
     #[cfg(feature = "wgpu")]

@@ -116,7 +116,7 @@ impl WasmResidentGraphAutograd {
 #[wasm_bindgen(js_name = GraphForward)]
 pub struct WasmGraphForward {
     #[cfg(feature = "webgpu")]
-    inner: GraphForward,
+    pub(super) inner: GraphForward,
 }
 #[cfg(feature = "webgpu")]
 #[wasm_bindgen(js_class = GraphForward)]
@@ -140,7 +140,7 @@ impl WasmGraphForward {
 #[wasm_bindgen(js_name = GraphGradients)]
 pub struct WasmGraphGradients {
     #[cfg(feature = "webgpu")]
-    inner: GraphGradients,
+    pub(super) inner: GraphGradients,
 }
 #[cfg(feature = "webgpu")]
 #[wasm_bindgen(js_class = GraphGradients)]

@@ -396,6 +396,19 @@ impl ResidentTensor {
     }
 
     pub fn apply(&self, op: ElementwiseOp, rhs: Option<&Self>) -> Result<Self, TensorError> {
+        let context = self.device.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let output = self.apply_into(&mut encoder, op, rhs)?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(output)
+    }
+
+    pub(crate) fn apply_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        op: ElementwiseOp,
+        rhs: Option<&Self>,
+    ) -> Result<Self, TensorError> {
         if op.is_binary() != rhs.is_some() {
             return Err(TensorError::Operands);
         }
@@ -404,7 +417,8 @@ impl ResidentTensor {
         let shape = broadcast_shape(self.layout.shape(), rhs.layout.shape())?;
         let a = self.layout.broadcast_to(&shape)?;
         let b = rhs.layout.broadcast_to(&shape)?;
-        self.device.execute(
+        self.device.encode(
+            encoder,
             op,
             Operand {
                 values: &self.storage.values,

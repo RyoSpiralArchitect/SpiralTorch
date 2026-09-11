@@ -119,7 +119,7 @@ impl PyResidentGraphAutograd {
 #[pyclass(name = "GraphForward", module = "spiraltorch.nn")]
 pub(super) struct PyGraphForward {
     #[cfg(feature = "wgpu")]
-    inner: GraphForward,
+    pub(super) inner: GraphForward,
 }
 #[cfg(feature = "wgpu")]
 #[pymethods]
@@ -142,7 +142,7 @@ impl PyGraphForward {
 #[pyclass(name = "GraphGradients", module = "spiraltorch.nn")]
 pub(super) struct PyGraphGradients {
     #[cfg(feature = "wgpu")]
-    inner: GraphGradients,
+    pub(super) inner: GraphGradients,
 }
 #[cfg(feature = "wgpu")]
 #[pymethods]

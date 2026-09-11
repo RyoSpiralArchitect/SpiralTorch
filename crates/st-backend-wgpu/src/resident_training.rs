@@ -42,6 +42,10 @@ pub enum TrainingError {
     StaleStep,
     #[error("forward the current input before backward; the token must belong to this workspace and its latest forward")]
     StaleForward,
+    #[error("gradient terms must contain 1..=256 same-forward contributions with finite weights")]
+    GradientTerms,
+    #[error("submit an SGD update before requesting its receipt")]
+    MissingUpdate,
     #[error("read the pending profile before reusing the private profiler; an abandoned or invalid profile requires a new workspace")]
     PendingProfile,
     #[error("training counter or snapshot size exhausted")]

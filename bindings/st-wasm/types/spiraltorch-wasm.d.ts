@@ -26,6 +26,8 @@ declare module "spiraltorch-wasm" {
         compileGraphWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphInference>;
         /** Frozen parameters, exact arbitrary-cotangent VJPs; no loss or optimizer. */
         compileGraphAutogradWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphAutograd>;
+        /** Custom cotangents and weighted SGD; explicit Rust update policy. */
+        compileGraphLearnerWebGpu(gradient_policy: string, tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphLearner>;
         /** Mean-MSE, VJP and plain SGD use the same Rust core as native training. */
         compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentTraining>;
         /** Explicit Rust policy: "exact" or "module_compatible". Requires webgpu. */
@@ -100,6 +102,44 @@ declare module "spiraltorch-wasm" {
         setInputTensor(input: WgpuTensor): void;
         forward(): GraphForward;
         backward(forward: GraphForward, cotangent: WgpuTensor): GraphGradients;
+        free(): void;
+    }
+    export class ResidentGraphLearner {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly gradientPolicy: string;
+        readonly inputGeneration: bigint;
+        readonly submittedForwards: bigint;
+        readonly submittedBackwards: bigint;
+        readonly submittedUpdates: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        tensorDevice(): WgpuTensorDevice;
+        upload(input: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        forward(): GraphForward;
+        backward(forward: GraphForward, cotangent: WgpuTensor): GraphGradients;
+        /** Attempt number; acceptance requires reading an update snapshot. */
+        sgd(gradients: GraphGradients, rate: number): bigint;
+        sgdWeighted(batch: GraphGradientBatch, rate: number): bigint;
+        parameterSnapshot(): GraphTrainingParametersSnapshot;
+        updateSnapshot(): GraphUpdateSnapshot;
+        free(): void;
+    }
+    export class GraphGradientBatch {
+        constructor();
+        readonly length: number;
+        add(gradients: GraphGradients, weight: number): void;
+        free(): void;
+    }
+    export class GraphUpdateSnapshot {
+        private constructor();
+        readonly inputGeneration: bigint;
+        readonly submittedForward: bigint;
+        readonly submittedUpdate: bigint;
+        read(): Promise<bigint>;
         free(): void;
     }
     export class GraphForward {

@@ -247,9 +247,9 @@ impl PyGraphTrainingSnapshot {
 }
 
 #[pyclass(name = "GraphTrainingParametersSnapshot", module = "spiraltorch.nn")]
-struct PyGraphTrainingParametersSnapshot {
+pub(super) struct PyGraphTrainingParametersSnapshot {
     #[cfg(feature = "wgpu")]
-    inner: Option<backend::GraphParameterReadback>,
+    pub(super) inner: Option<backend::GraphParameterReadback>,
 }
 
 #[cfg(feature = "wgpu")]

@@ -19,11 +19,13 @@ mod autograd;
 mod forward;
 pub use autograd::{WasmGraphForward, WasmGraphGradients, WasmResidentGraphAutograd};
 mod graph;
+mod learner;
 pub use forward::{WasmGraphInferenceSnapshot, WasmResidentGraphInference};
 pub use graph::{
     WasmGraphTrainingParametersSnapshot, WasmGraphTrainingSnapshot, WasmGraphTrainingState,
     WasmResidentGraphTraining,
 };
+pub use learner::{WasmGraphGradientBatch, WasmGraphUpdateSnapshot, WasmResidentGraphLearner};
 mod training;
 pub use training::{
     WasmResidentTraining, WasmTrainingLossSnapshot, WasmTrainingParametersSnapshot,
@@ -257,6 +259,32 @@ impl WasmInferencePlan {
             let _ = (policy, tile_mnk, kernel, accumulation);
             Err(js_error(
                 "resident graph training requires the webgpu build feature",
+            ))
+        }
+    }
+
+    #[wasm_bindgen(js_name=compileGraphLearnerWebGpu,unchecked_return_type="Promise<ResidentGraphLearner>")]
+    pub fn compile_graph_learner_webgpu(
+        &self,
+        gradient_policy: JsString,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        let policy = gradient_policy
+            .as_string()
+            .ok_or_else(|| js_error("gradient_policy must be a string"))?
+            .parse::<st_nn::resident::GraphGradientPolicy>()
+            .map_err(js_error)?;
+        #[cfg(feature = "webgpu")]
+        {
+            learner::compile(&self.inner, policy, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (policy, tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident graph learning requires the webgpu build feature",
             ))
         }
     }

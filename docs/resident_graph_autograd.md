@@ -6,6 +6,9 @@ kernels, without coupling differentiation to mean-MSE or SGD. Rust owns tape
 identity, shape/device checks, derivatives and finite guards. Python and WASM
 only expose owning handles.
 
+For mutable parameters and weighted custom-loss updates, use the separate
+[resident learner](resident_graph_learner.md); this workspace stays frozen.
+
 ```python
 import spiraltorch as st
 

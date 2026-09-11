@@ -15,7 +15,10 @@ pub use st_kernel_contracts::graph::{
 mod snapshot;
 pub use snapshot::{GraphParameterReadback, GraphState, GraphStateReadback};
 mod autograd;
-pub use autograd::{GraphForward, GraphGradients, ResidentGraphAutograd};
+pub use autograd::{
+    GraphForward, GraphGradientBatch, GraphGradients, GraphUpdateReadback, ResidentGraphAutograd,
+    ResidentGraphLearner,
+};
 mod profile;
 use crate::runtime::timestamps::PassTimestampCursor;
 pub use profile::{GraphGpuProfile, GraphProfileReadback, ProfiledGraphTraining};
@@ -31,6 +34,13 @@ enum Node {
         forward: wgpu::BindGroup,
         parameters: Vec<usize>,
     },
+}
+
+#[derive(Clone, Copy)]
+enum Preparation {
+    Autograd,
+    Learner(GraphGradientPolicy),
+    MseSgd(GraphGradientPolicy),
 }
 
 /// A mutable execution of a validated graph, with immutable terminal snapshots.
@@ -89,24 +99,28 @@ impl ResidentGraphTraining {
         Self::prepare(
             runtime,
             definition,
-            Some(policy),
+            Preparation::MseSgd(policy),
             tile,
             kernel,
             accumulation,
         )
     }
 
-    // None prepares the same forward/VJP kernels without a loss or optimizer.
+    // Reuse the same kernels; loss and optimizer preparation are independent.
     fn prepare(
         runtime: WgpuRuntime,
         definition: GraphDefinition,
-        policy: Option<GraphGradientPolicy>,
+        mode: Preparation,
         tile: MatmulTile,
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<Self, TrainingError> {
-        let training = policy.is_some();
-        let policy = policy.unwrap_or(GraphGradientPolicy::Exact);
+        let training = !matches!(mode, Preparation::Autograd);
+        let mse = matches!(mode, Preparation::MseSgd(_));
+        let policy = match mode {
+            Preparation::Autograd => GraphGradientPolicy::Exact,
+            Preparation::Learner(policy) | Preparation::MseSgd(policy) => policy,
+        };
         let context = runtime.context();
         let gpu = context.device();
         let limits = gpu.limits();
@@ -179,14 +193,14 @@ impl ResidentGraphTraining {
         };
         let target = empty(
             "graph.target",
-            if training {
+            if mse {
                 definition.output_layout().len()
             } else {
                 1
             },
         )?;
         let loss = empty("graph.loss", 1)?;
-        let partial_count = if training {
+        let partial_count = if mse {
             definition.output_layout().len().div_ceil(256)
         } else {
             1
@@ -476,7 +490,7 @@ impl ResidentGraphTraining {
             });
         }
         let loss_params = params(count, 0, definition.output_layout().len(), false);
-        let loss_passes = if training {
+        let loss_passes = if mse {
             vec![
                 element(
                     &pipeline("mse_partials"),

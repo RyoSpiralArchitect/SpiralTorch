@@ -218,7 +218,7 @@ impl WasmGraphTrainingSnapshot {
 #[wasm_bindgen(js_name = GraphTrainingParametersSnapshot)]
 pub struct WasmGraphTrainingParametersSnapshot {
     #[cfg(feature = "webgpu")]
-    inner: Option<backend::GraphParameterReadback>,
+    pub(super) inner: Option<backend::GraphParameterReadback>,
 }
 
 #[cfg(feature = "webgpu")]

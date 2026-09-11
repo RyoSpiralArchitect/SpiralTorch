@@ -1,5 +1,7 @@
 //! Loss-independent resident VJPs of a frozen graph. No optimizer is executed.
 use super::*;
+mod learner;
+pub use learner::{GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner};
 
 struct ForwardIdentity {
     generation: u64,
@@ -28,6 +30,7 @@ impl GraphForward {
 
 /// Immutable, whole-VJP-guarded tensors in the graph's stable parameter order.
 /// A submission is not numerical acceptance; guarded tensor reads prove that.
+#[derive(Clone)]
 pub struct GraphGradients {
     input: ResidentTensor,
     parameters: Vec<ResidentTensor>,
@@ -73,8 +76,17 @@ impl ResidentGraphAutograd {
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<Self, TrainingError> {
-        let graph =
-            ResidentGraphTraining::prepare(runtime, definition, None, tile, kernel, accumulation)?;
+        Self::from_prepared(ResidentGraphTraining::prepare(
+            runtime,
+            definition,
+            Preparation::Autograd,
+            tile,
+            kernel,
+            accumulation,
+        )?)
+    }
+
+    fn from_prepared(graph: ResidentGraphTraining) -> Result<Self, TrainingError> {
         let forward_validation = runtime::empty_buffer::<u32>(
             graph.device.runtime().context().device(),
             "graph.autograd.forward_flags",

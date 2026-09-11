@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Rust custom-objective resident learning</title>
+<pre id="result" data-status="running">Checking weighted VJPs, updates and checkpoints</pre>
+<script type="module">
+import init, {InferencePlan, GraphGradientBatch} from "./module/spiraltorch_wasm.js";
+const element=document.querySelector("#result");
+const report={status:"error",schema:"spiraltorch.graph_learner_clients.v1",cases:[]};
+const f32=v=>new Float32Array(v);
+const same=(a,b)=>{if(JSON.stringify(a)!==JSON.stringify(b))throw Error(`mismatch ${a} vs ${b}`);};
+const near=(a,b)=>{if(!Number.isFinite(a)||Math.abs(a-b)>2e-5)throw Error(`numeric mismatch ${a} vs ${b}`);};
+const fail=fn=>{let caught=false;try{fn();}catch{caught=true;}if(!caught)throw Error("invalid operation accepted");};
+const reject=async fn=>{let caught=false;try{await fn();}catch{caught=true;}if(!caught)throw Error("invalid transaction accepted");};
+async function checkpoint(gpu){const s=gpu.parameterSnapshot();try{return await s.readPlan();}finally{s.free();}}
+async function weight(gpu){const p=await checkpoint(gpu);try{return JSON.parse(p.toJson()).parameters[0].values[0];}finally{p.free();}}
+try {
+  await init();
+  const source=InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2,2,1],
+    parameters:[{role:"gain",shape:[1],values:[2]}],stages:[
+      {kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1}]},
+      {kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]}));
+  const plan=source.fusePointwise();
+  fail(()=>plan.compileGraphLearnerWebGpu("unknown"));
+  for(const [policy,scale] of [["exact",1],["module_compatible",.25]]){
+    const gpu=await plan.compileGraphLearnerWebGpu(policy), device=gpu.tensorDevice();
+    report.adapter=gpu.adapterInfo();
+    if(report.adapter.device_type==="Cpu"||report.adapter.backend!=="BrowserWebGpu")throw Error("wrong backend");
+    same([gpu.gradientPolicy,gpu.stageCount,gpu.parameterCount],[policy,1,1]);
+    same([...gpu.inputShape],[2,2,1]);same([...gpu.outputShape],[2,2,1]);
+    const input=device.upload([2,2,1],f32([1,1,1,1]));gpu.setInputTensor(input);input.free();
+    const norm=device.upload([],f32([.25])), negative=device.upload([],f32([-1]));
+    function update(owner){
+      const f=owner.forward(), prediction=f.predictionTensor(), e=prediction.add(negative),
+        a=e.mul(norm), square=e.mul(e), cube=square.mul(e), b=cube.mul(norm);
+      const g1=owner.backward(f,a), g2=owner.backward(f,b), batch=new GraphGradientBatch();
+      batch.add(g1,.75);batch.add(g2,.25);same(batch.length,2);g1.free();g2.free();
+      owner.sgdWeighted(batch,.1);
+      fail(()=>owner.sgdWeighted(batch,0));fail(()=>owner.backward(f,a));
+      const receipt=owner.updateSnapshot();
+      for(const h of [f,prediction,e,a,square,cube,b,batch])h.free();
+      return receipt;
+    }
+    let expected=2;const receipts=[];
+    for(let step=0;step<32;step++){
+      receipts.push(update(gpu));const e=expected-1;expected-=.1*scale*(.75*e+.25*e**3);
+    }
+    near(await weight(gpu),expected);if((expected-1)**2>=1)throw Error("no learning");
+    const saved=await checkpoint(gpu), restored=InferencePlan.fromJson(saved.toJson());
+    const resumed=await restored.compileGraphLearnerWebGpu(policy);resumed.upload(f32([1,1,1,1]));
+    const a=update(gpu), b=update(resumed);
+    same(await weight(gpu),await weight(resumed));same((await a.read()).toString(),"33");same((await b.read()).toString(),"1");
+    same([gpu.inputGeneration,gpu.submittedForwards,gpu.submittedBackwards,gpu.submittedUpdates].map(String),["1","33","66","33"]);
+    for(const h of [gpu,resumed,device,norm,negative,saved,restored,a,b])h.free();
+    for(let i=0;i<receipts.length;i++){
+      const r=receipts[i];same([r.inputGeneration,r.submittedForward,r.submittedUpdate].map(String),["1",String(i+1),String(i+1)]);
+      same((await r.read()).toString(),String(i+1));fail(()=>r.read());r.free();
+    }
+    report.cases.push({policy,updates:32,gain:expected,resume:"bit_identical"});
+  }
+  const gpu=await plan.compileGraphLearnerWebGpu("exact"), other=await plan.compileGraphLearnerWebGpu("exact"), d=gpu.tensorDevice();
+  for(const owner of [gpu,other])owner.upload(f32([1,1,1,1]));
+  const seed=d.upload([2,2,1],f32([1,1,1,1])), f=gpu.forward(), alienF=other.forward(),
+    good=gpu.backward(f,seed), alien=other.backward(alienF,seed), batch=new GraphGradientBatch();
+  fail(()=>gpu.updateSnapshot());fail(()=>gpu.sgdWeighted(batch,.1));batch.add(good,1);
+  for(const invalid of [()=>batch.add(alien,1),()=>batch.add(good,NaN),()=>batch.add(good,Infinity)]){
+    fail(invalid);same(batch.length,1);
+  }
+  for(const rate of [-1,NaN,Infinity])fail(()=>gpu.sgdWeighted(batch,rate));
+  for(let i=1;i<256;i++)batch.add(good,0);
+  fail(()=>batch.add(good,0));same(batch.length,256);same(gpu.submittedUpdates.toString(),"0");
+  same(await weight(gpu),2);gpu.sgdWeighted(batch,0);fail(()=>gpu.sgdWeighted(batch,.1));
+  const zeroReceipt=gpu.updateSnapshot();same((await zeroReceipt.read()).toString(),"1");zeroReceipt.free();
+  const max=d.upload([],f32([3.4028234663852886e38])), two=d.upload([],f32([2])), huge=seed.mul(max), poison=huge.mul(two);
+  const fresh=gpu.forward(), bad=gpu.backward(fresh,poison), valid=gpu.backward(fresh,seed), badBatch=new GraphGradientBatch();
+  badBatch.add(bad,0);badBatch.add(valid,1);gpu.sgdWeighted(badBatch,0);
+  const rejected=gpu.updateSnapshot(), unchanged=gpu.parameterSnapshot();fail(()=>gpu.sgd(valid,0));
+  const next=gpu.forward(), recovery=gpu.backward(next,seed), difference=new GraphGradientBatch();
+  difference.add(recovery,2);difference.add(recovery,-1);gpu.sgdWeighted(difference,.1);
+  const recovered=gpu.updateSnapshot();gpu.upload(f32([0,0,0,0]));const later=gpu.forward();
+  near(await weight(gpu),1.6);same([recovered.inputGeneration,recovered.submittedForward,recovered.submittedUpdate].map(String),["1","3","3"]);
+  gpu.free();other.free();d.free();
+  await reject(()=>rejected.read());fail(()=>rejected.read());
+  const original=await unchanged.readPlan();same(JSON.parse(original.toJson()).parameters[0].values,[2]);
+  same((await recovered.read()).toString(),"3");
+  for(const h of [source,plan,seed,f,alienF,good,alien,batch,max,two,huge,poison,fresh,bad,valid,badBatch,rejected,unchanged,next,recovery,difference,recovered,later,original])h.free();
+  report.identity_limits_zero_weight_rollback_ownership="passed";report.status="passed";
+}catch(error){report.error=String(error.stack||error);}
+element.textContent=JSON.stringify(report);element.dataset.status=report.status;
+</script>

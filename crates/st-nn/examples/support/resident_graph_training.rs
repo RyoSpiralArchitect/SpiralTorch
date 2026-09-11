@@ -28,6 +28,8 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 mod autograd;
 #[path = "resident_graph_training/fusion.rs"]
 mod fusion;
+#[path = "resident_graph_training/learning.rs"]
+mod learning;
 macro_rules! readback {
     ($name:ident,$input:ty,$output:ty) => {
         async fn $name(value: $input) -> Result<$output> {
@@ -315,6 +317,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         "adapter":format!("{:?}",runtime.adapter_info()),"cases":cases,"guards":guards,
         "workspace_reuse":workspace_reuse,"pointwise_fusion":fusion::run(runtime.clone()).await?,
         "autograd":autograd::run(runtime.clone()).await?,
+        "learning":learning::run(runtime.clone()).await?,
         "scope":"Sequential with owned gains; mean-MSE plain SGD; no intermediate host readbacks; not a throughput claim"}),
     )
 }

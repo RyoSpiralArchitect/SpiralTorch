@@ -15,6 +15,7 @@ use st_tensor::NdLayout;
 mod autograd;
 mod forward;
 mod graph;
+mod learner;
 mod training;
 
 fn plan_error(error: InferenceError) -> PyErr {
@@ -216,6 +217,25 @@ impl PyInferencePlan {
     }
 
     #[pyo3(signature = (*, gradient_policy, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_graph_learner_wgpu(
+        &self,
+        py: Python<'_>,
+        gradient_policy: &str,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<learner::PyResidentGraphLearner> {
+        learner::compile(
+            &self.inner,
+            py,
+            gradient_policy,
+            tile_mnk,
+            kernel,
+            accumulation,
+        )
+    }
+
+    #[pyo3(signature = (*, gradient_policy, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
     fn compile_graph_training_wgpu(
         &self,
         py: Python<'_>,
@@ -402,5 +422,6 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     graph::register(module)?;
     forward::register(module)?;
     autograd::register(module)?;
+    learner::register(module)?;
     Ok(())
 }

@@ -47,10 +47,10 @@ function checkRankContract(types, label) {
 
 const shipped = fs.readFileSync(path.join(__dirname, "../types/spiraltorch-wasm.d.ts"), "utf8");
 function checkNnContract(types, label) {
-  const get = name => {
+  const get = (name, constructible = false) => {
     const declaration = types.match(new RegExp("^( *)export class " + name + " \\{[\\s\\S]*?^\\1\\}", "m"))?.[0];
     assert.ok(declaration, label + " must export " + name);
-    assert.match(declaration, /private constructor\(\)/);
+    assert.match(declaration, constructible ? /^\s+constructor\(\);$/m : /private constructor\(\)/);
     return declaration;
   };
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
@@ -130,6 +130,19 @@ function checkNnContract(types, label) {
   assert.match(token, /predictionTensor\(\): WgpuTensor/);
   assert.match(gradients, /inputGradientTensor\(\): WgpuTensor/);
   assert.match(gradients, /parameterGradientTensor\(index: number\): WgpuTensor/);
+  assert.match(plan, /compileGraphLearnerWebGpu\(gradient_policy: string[^\n]*\): Promise<ResidentGraphLearner>/);
+  const learner=get("ResidentGraphLearner"), batch=get("GraphGradientBatch", true), update=get("GraphUpdateSnapshot");
+  assert.match(learner, /backward\(forward: GraphForward, cotangent: WgpuTensor\): GraphGradients/);
+  assert.match(learner, /sgdWeighted\(batch: GraphGradientBatch, rate: number\): bigint/);
+  assert.match(learner, /sgd\(gradients: GraphGradients, rate: number\): bigint/);
+  assert.match(learner, /readonly submittedUpdates: bigint/);
+  assert.match(learner, /updateSnapshot\(\): GraphUpdateSnapshot/);
+  assert.match(batch, /constructor\(\)/);
+  assert.match(batch, /add\(gradients: GraphGradients, weight: number\): void/);
+  assert.match(batch, /readonly length: number/);
+  assert.match(update, /read\(\): Promise<bigint>/);
+  for (const name of ["inputGeneration", "submittedForward", "submittedUpdate"])
+    assert.match(update, new RegExp("readonly "+name+": bigint"));
   const forward=get("ResidentGraphInference"), forwardSnapshot=get("GraphInferenceSnapshot"),
     tensor=get("WgpuTensor"), tensorDevice=get("WgpuTensorDevice"), tensorSnapshot=get("WgpuTensorSnapshot");
   assert.match(forward, /setInputTensor\(input: WgpuTensor\): void/);
