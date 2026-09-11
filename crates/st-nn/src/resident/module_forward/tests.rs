@@ -76,6 +76,39 @@ fn operation_cache_checks_bits_layout_program_and_foreign_values() {
 }
 
 #[test]
+fn bulk_comparison_matches_scalar_bits_at_odd_lengths_and_nonfinite_payloads() {
+    let patterns = [
+        0,
+        0x8000_0000,
+        1,
+        0x3f80_0000,
+        0x7f80_0000,
+        0xff80_0000,
+        0x7fc0_0001,
+        0x7fc0_0002,
+    ];
+    for len in [1, 3, 31, 1025] {
+        let original = Tensor::from_vec(
+            1,
+            len,
+            (0..len)
+                .map(|i| f32::from_bits(patterns[i % patterns.len()]))
+                .collect(),
+        )
+        .unwrap();
+        let frozen = original.snapshot();
+        assert!(same_tensor(&original, &frozen));
+        assert!(same_tensor(&frozen, &frozen.clone()));
+        for index in [0, len / 2, len - 1] {
+            let mut changed = original.clone();
+            changed.data_mut()[index] = f32::from_bits(original.data()[index].to_bits() ^ 1);
+            assert!(!same_tensor(&frozen, &changed), "len={len}, index={index}");
+            assert!(same_tensor(&frozen, &original));
+        }
+    }
+}
+
+#[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn ordinary_module_runs_twenty_resident_forwards_with_one_compilation() {
     let Some(device) = device() else { return };
@@ -237,6 +270,86 @@ fn external_dlpack_writes_recompile_and_invalid_parameters_never_reuse_old_weigh
         &[1., 2., 3., 1., 2., 3.],
     );
     drop(owner);
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn bulk_cache_detects_signed_zero_and_last_word_foreign_linear_updates() {
+    let Some(device) = device() else { return };
+    let linear = Linear::new("foreign", 33, 35).unwrap();
+    let weights = linear.weight().value().to_dlpack().unwrap();
+    let biases = linear.bias().value().to_dlpack().unwrap();
+    let wp = unsafe { (*weights).dl_tensor.data.cast::<f32>() };
+    let bp = unsafe { (*biases).dl_tensor.data.cast::<f32>() };
+    let weights = unsafe { Tensor::from_dlpack(weights).unwrap() };
+    let biases = unsafe { Tensor::from_dlpack(biases).unwrap() };
+    unsafe {
+        *wp = 0.;
+    }
+    let mut model = Sequential::new();
+    model.push(linear);
+    model.push(Gelu::new());
+    let input = device.upload(&[2, 3, 33], &[0.001; 198]).unwrap();
+    let reference = || {
+        let mut output = Vec::new();
+        for _ in 0..6 {
+            for col in 0..35 {
+                let mut value = 0.;
+                for row in 0..33 {
+                    value += 0.001 * weights.data()[row * 35 + col];
+                }
+                value += biases.data()[col];
+                output.push(
+                    st_kernel_contracts::elementwise::ElementwiseOp::Gelu
+                        .apply(value, 0.)
+                        .unwrap(),
+                );
+            }
+        }
+        output
+    };
+    let first = model.forward_resident(&input).unwrap();
+    let initial = reference();
+    close(&first.snapshot().unwrap().read().unwrap(), &initial);
+    for change in 0..3 {
+        // Producer writes are serialized between forwards, not concurrent with
+        // Rust borrows or GPU consumption of a mutable host buffer.
+        unsafe {
+            match change {
+                0 => *wp = -0.,
+                1 => *wp.add(1154) += 0.5,
+                _ => *bp.add(34) += 0.25,
+            }
+        }
+        let output = model.forward_resident(&input).unwrap();
+        close(&output.snapshot().unwrap().read().unwrap(), &reference());
+        assert_eq!(
+            model.resident_forward_stats().unwrap().compilations,
+            change + 2
+        );
+    }
+    let previous = unsafe { *wp.add(1154) };
+    let before = model.resident_forward_stats();
+    unsafe {
+        *wp.add(1154) = f32::NAN;
+    }
+    assert!(model.forward_resident(&input).is_err());
+    assert_eq!(model.resident_forward_stats(), before);
+    unsafe {
+        *wp.add(1154) = previous;
+    }
+    close(
+        &model
+            .forward_resident(&input)
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap(),
+        &reference(),
+    );
+    assert_eq!(model.resident_forward_stats().unwrap().compilations, 4);
+    close(&first.snapshot().unwrap().read().unwrap(), &initial);
 }
 
 #[test]

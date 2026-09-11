@@ -34,6 +34,15 @@ pub enum InferenceOp {
     Scale { gain: Tensor },
 }
 
+pub(crate) fn collect_inference_ops(
+    module: &(impl Module + ?Sized),
+    capacity: usize,
+) -> Result<Vec<InferenceOp>, InferenceError> {
+    let mut operations = Vec::with_capacity(capacity);
+    module.append_inference_ops(&mut operations)?;
+    Ok(operations)
+}
+
 impl InferenceOp {
     #[cfg(feature = "wgpu")]
     pub(crate) fn snapshot(&self) -> Self {

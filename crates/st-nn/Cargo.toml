@@ -17,7 +17,7 @@ psychoid = ["st-core/psychoid"]
 collapse = ["psi", "st-core/collapse"]
 golden = ["st-core/golden"]
 kdsl = ["st-core/kdsl"]
-wgpu = ["st-core/wgpu-rt", "st-tensor/wgpu", "dep:st-backend-wgpu"]
+wgpu = ["st-core/wgpu-rt", "st-tensor/wgpu", "dep:st-backend-wgpu", "dep:bytemuck"]
 cuda = ["st-core/cuda", "st-tensor/cuda"]
 hip = ["st-core/hip", "st-tensor/hip"]
 selfsup = []
@@ -25,6 +25,7 @@ selfsup = []
 [dependencies]
 st-kernel-contracts = { path = "../st-kernel-contracts" }
 st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
+bytemuck = { version = "1.25", optional = true }
 st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"] }
 st-core = { path = "../st-core", default-features = false }
 st-frac = { path = "../st-frac" }

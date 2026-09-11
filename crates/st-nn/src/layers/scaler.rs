@@ -266,9 +266,17 @@ impl Module for Scaler {
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
-        Ok(vec![crate::resident::InferenceOp::Scale {
+        crate::resident::collect_inference_ops(self, 1)
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        operations.push(crate::resident::InferenceOp::Scale {
             gain: self.gain.value().clone(),
-        }])
+        });
+        Ok(())
     }
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();

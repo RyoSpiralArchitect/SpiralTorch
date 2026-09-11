@@ -127,7 +127,15 @@ impl Module for Gelu {
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
-        Ok(vec![crate::resident::InferenceOp::Gelu])
+        crate::resident::collect_inference_ops(self, 1)
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        operations.push(crate::resident::InferenceOp::Gelu);
+        Ok(())
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {

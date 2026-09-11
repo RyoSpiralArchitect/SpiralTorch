@@ -89,7 +89,17 @@ optimizer-state resume.
   parameter-bit changes rebuild it. Identical values reuse it.
 - Mutable/foreign parameters are compared by bits on every call. This deliberately
   includes externally shared DLPack writes; pointer identity is not sufficient.
-  Comparison is O(parameter values) CPU work, not an unmeasured zero-cost claim.
+  Exact byte-slice comparison preserves raw bits without building temporary
+  bit arrays, but is still O(parameter values) CPU work, not a zero-cost claim. Signed
+  zero, shape and layout differences still invalidate the cache; Linear's finite
+  parameter validation remains enabled.
+- Built-in modules append descriptors to one shared vector rather than allocating
+  a temporary vector per leaf. `Module::append_inference_ops` is an optional
+  allocation-saving companion to `inference_ops`, with the same validation and
+  descriptor semantics. Its default calls the existing custom module lowering;
+  Sequential restores the caller's prefix if a child fails. Descriptor collection
+  still allocates its final vector and clones parameter handles; it is not a new
+  zero-copy parameter/versioning contract.
 - Cached graph forwards bind contiguous, offset-zero inputs directly and write
   the final stage directly into an owning output version. There are no full-sized
   input/output bridge copies on that path. Strided/offset views are packed only

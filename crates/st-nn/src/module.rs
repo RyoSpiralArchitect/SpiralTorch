@@ -781,6 +781,19 @@ pub trait Module {
         ))
     }
 
+    /// Append the same descriptors as `inference_ops`, without a temporary
+    /// vector per child. Optional companion optimization, not a second lowering.
+    /// Implementations must leave the existing prefix intact, including on error.
+    /// Callers discard the appended suffix on error. The default preserves
+    /// existing custom modules that implement only `inference_ops`.
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        operations.extend(self.inference_ops()?);
+        Ok(())
+    }
+
     /// Runs a forward pass.
     fn forward(&self, input: &Tensor) -> PureResult<Tensor>;
 

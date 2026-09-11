@@ -102,11 +102,21 @@ impl Module for Sequential {
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
-        let mut operations = Vec::new();
+        crate::resident::collect_inference_ops(self, self.layers.len())
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        let start = operations.len();
         for layer in &self.layers {
-            operations.extend(layer.inference_ops()?);
+            if let Err(error) = layer.append_inference_ops(operations) {
+                operations.truncate(start);
+                return Err(error);
+            }
         }
-        Ok(operations)
+        Ok(())
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {

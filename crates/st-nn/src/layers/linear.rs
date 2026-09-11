@@ -119,11 +119,19 @@ impl Module for Linear {
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        crate::resident::collect_inference_ops(self, 1)
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
         self.validate_parameters()?;
-        Ok(vec![crate::resident::InferenceOp::Linear {
+        operations.push(crate::resident::InferenceOp::Linear {
             weight: self.weight.value().clone(),
             bias: self.bias.value().clone(),
-        }])
+        });
+        Ok(())
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
