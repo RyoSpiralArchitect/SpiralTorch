@@ -62,6 +62,16 @@ All compilers also have explicit tile/kernel/accumulation options.
   gradient handles are frozen by GPU operations in their respective submission.
   That avoids host round trips, not all GPU copies or dispatch overhead.
 
+The gradient snapshot path prepares fixed contiguous source bindings and shape
+metadata once. It copies the input and parameter gradients in one compute pass,
+with a new immutable values buffer per tensor and one shared finite guard per
+VJP. That guard includes every upstream flag and every captured value, including
+late parameter failures. It is never reused by a later backward. Clones and
+views retain it after the original gradient container or workspace is dropped.
+This removes per-output metadata/guard allocations and separate capture passes,
+not the value copies, output allocations, or individual copy dispatches. The
+general tensor/view evaluator and ordinary MSE/SGD encoder remain separate.
+
 ## Scope
 
 Supports the same `Linear`, `Gelu`, `Scaler`, `Relu`, nested `Sequential` and

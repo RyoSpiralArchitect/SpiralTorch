@@ -61,6 +61,7 @@ impl GraphGradients {
 /// accumulate or apply batch normalization, loss scaling, or an optimizer.
 pub struct ResidentGraphAutograd {
     graph: ResidentGraphTraining,
+    capture: crate::resident_tensor::capture::PreparedCapture,
     forward_validation: wgpu::Buffer,
     input_source: Option<ResidentTensor>,
     current: Option<Shared<ForwardIdentity>>,
@@ -87,6 +88,20 @@ impl ResidentGraphAutograd {
     }
 
     fn from_prepared(graph: ResidentGraphTraining) -> Result<Self, TrainingError> {
+        let parameter_layouts = graph
+            .definition
+            .parameters()
+            .iter()
+            .map(|p| NdLayout::contiguous(&p.shape).map_err(TensorError::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        let sources = std::iter::once((graph.input_layout(), &graph.gradients[0]))
+            .chain(parameter_layouts.iter().zip(&graph.raw_gradients))
+            .collect::<Vec<_>>();
+        let capture = crate::resident_tensor::capture::PreparedCapture::new(
+            &graph.device,
+            &sources,
+            &graph.validation,
+        )?;
         let forward_validation = runtime::empty_buffer::<u32>(
             graph.device.runtime().context().device(),
             "graph.autograd.forward_flags",
@@ -95,6 +110,7 @@ impl ResidentGraphAutograd {
         )?;
         Ok(Self {
             graph,
+            capture,
             forward_validation,
             input_source: None,
             current: None,
@@ -301,20 +317,9 @@ impl ResidentGraphAutograd {
             (g.nodes.len() + 3) as u64 * 4,
             4,
         );
-        let input = g.device.capture_into(
-            &mut encoder,
-            g.input_layout(),
-            &g.gradients[0],
-            &g.validation,
-        )?;
-        let mut parameters = Vec::with_capacity(g.parameters.len());
-        for (p, values) in g.definition.parameters().iter().zip(&g.raw_gradients) {
-            let layout = NdLayout::contiguous(&p.shape).map_err(TensorError::from)?;
-            parameters.push(
-                g.device
-                    .capture_into(&mut encoder, &layout, values, &g.validation)?,
-            );
-        }
+        let mut captured = self.capture.encode(&mut encoder)?.into_iter();
+        let input = captured.next().expect("prepared input gradient capture");
+        let parameters = captured.collect();
         context.queue().submit(Some(encoder.finish()));
         self.backwards = submission;
         Ok(GraphGradients {

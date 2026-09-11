@@ -8,6 +8,7 @@ use st_kernel_contracts::{
 };
 use thiserror::Error;
 
+pub(crate) mod capture;
 pub mod pointwise;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
@@ -204,7 +205,10 @@ impl TensorDevice {
         )?;
         let flags = runtime::upload_slice(device, "tensor.flags", &[0u32], usage)?;
         Ok(ResidentTensor {
-            storage: Shared::new(Storage { values, flags }),
+            storage: Shared::new(Storage {
+                values,
+                flags: Shared::new(flags),
+            }),
             layout,
             device: self.clone(),
         })
@@ -290,7 +294,10 @@ impl TensorDevice {
             pass.dispatch_workgroups(x, y, 1);
         }
         Ok(ResidentTensor {
-            storage: Shared::new(Storage { values, flags }),
+            storage: Shared::new(Storage {
+                values,
+                flags: Shared::new(flags),
+            }),
             layout,
             device: self.clone(),
         })
@@ -348,7 +355,7 @@ impl TensorDevice {
 #[derive(Debug)]
 struct Storage {
     values: wgpu::Buffer,
-    flags: wgpu::Buffer,
+    flags: Shared<wgpu::Buffer>,
 }
 
 /// No mutable buffer escapes this handle. Clones and views cannot be invalidated

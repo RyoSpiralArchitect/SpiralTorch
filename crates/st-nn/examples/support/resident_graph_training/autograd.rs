@@ -318,7 +318,7 @@ async fn guards(runtime: WgpuRuntime) -> Result<Vec<Value>> {
         }],
         vec![],
     )?)?;
-    let mut residual = residual.compile_graph_autograd_wgpu(runtime)?;
+    let mut residual = residual.compile_graph_autograd_wgpu(runtime.clone())?;
     residual.upload(&[-2., -1., 1., 2.])?;
     let tape = residual.forward()?;
     let g = residual.backward(&tape, &device.upload(&[2, 2], &[0.5, -1., 2., -0.5])?)?;
@@ -332,5 +332,82 @@ async fn guards(runtime: WgpuRuntime) -> Result<Vec<Value>> {
         return Err("parameterless residual acquired parameter slots".into());
     }
     records.push(json!({"case":"parameterless_repeated_residual","passed":true}));
+    records.push(capture_reuse(runtime).await?);
     Ok(records)
+}
+
+async fn capture_reuse(runtime: WgpuRuntime) -> Result<Value> {
+    let mut linear = Linear::new("wide", 257, 3)?;
+    linear.visit_parameters_mut(&mut |p| {
+        p.value_mut().data_mut().fill(0.);
+        Ok(())
+    })?;
+    let mut model = Sequential::new();
+    model.push(Scaler::from_gain(
+        "gain",
+        Tensor::from_vec(1, 257, vec![1.; 257])?,
+    )?);
+    model.push(linear);
+    let plan = InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 3, 257])?)?;
+    let mut gpu = plan.compile_graph_autograd_wgpu(runtime)?;
+    let device = gpu.tensor_device().clone();
+    gpu.upload(&vec![0.; 1542])?;
+    let forward = gpu.forward()?;
+    let mut saved = Vec::new();
+    for seed in [1., 0.5, f32::MAX / 4., 0.25] {
+        let gradients = gpu.backward(&forward, &device.upload(&[2, 3, 3], &[seed; 18])?)?;
+        // Retain detached tensor handles, not the gradient container or workspace.
+        let tensors: Vec<_> = std::iter::once(gradients.input_gradient())
+            .chain(gradients.parameter_gradients())
+            .cloned()
+            .collect();
+        for (i, tensor) in tensors.iter().enumerate() {
+            if tensors
+                .iter()
+                .skip(i + 1)
+                .any(|other| tensor.shares_storage_with(other))
+            {
+                return Err("distinct VJP outputs alias value storage".into());
+            }
+        }
+        saved.push(tensors);
+    }
+    let poisoned_view = saved[2][2]
+        .narrow(0, 256, 1)?
+        .mul(&device.upload(&[], &[0.])?)?;
+    gpu.upload(&vec![1.; 1542])?;
+    gpu.forward()?;
+    drop(gpu);
+    let expected_shapes = [vec![2, 3, 257], vec![257], vec![257, 3], vec![3]];
+    for (trial, tensors) in saved.iter().enumerate() {
+        for (slot, (tensor_value, shape)) in tensors.iter().zip(&expected_shapes).enumerate() {
+            if tensor_value.layout().shape() != shape {
+                return Err("capture changed logical gradient shape/order".into());
+            }
+            let read = tensor(tensor_value.snapshot()?).await;
+            if trial == 2 {
+                if read.is_ok() {
+                    return Err("late bias overflow escaped shared VJP guard".into());
+                }
+            } else {
+                let expected = if slot == 3 {
+                    [6., 3., 0., 1.5][trial]
+                } else {
+                    0.
+                };
+                close(&read?, &vec![expected; tensor_value.layout().len()])?;
+            }
+        }
+        if tensors.len() != 4 {
+            return Err("capture omitted a gradient".into());
+        }
+    }
+    if tensor(poisoned_view.snapshot()?).await.is_ok() {
+        return Err("detached gradient view lost its invalid VJP guard".into());
+    }
+    close(&tensor(forward.prediction().snapshot()?).await?, &[0.; 18])?;
+    Ok(
+        json!({"case":"queued_capture_tail_shapes_detached_guard_recovery", "passed":true,
+        "input_shape":[2,3,257], "captured_vjps":4, "observation":"after_workspace_drop"}),
+    )
 }

@@ -243,7 +243,7 @@ def main():
                     autograd = fixture.get("autograd")
                     if autograd is not None:
                         assert len(autograd["cases"]) == 6
-                        assert len(autograd["guards"]) == 11
+                        assert len(autograd["guards"]) == 12
                         assert all(g["passed"] for g in autograd["guards"])
                         for case in autograd["cases"]:
                             result = replay(case, device)

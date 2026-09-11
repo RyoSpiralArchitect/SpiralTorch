@@ -248,7 +248,7 @@ impl PointwiseVjpPlan {
             result.push(ResidentTensor {
                 storage: Shared::new(Storage {
                     values,
-                    flags: result_flags,
+                    flags: Shared::new(result_flags),
                 }),
                 layout: reduction.layout.clone(),
                 device: device.clone(),

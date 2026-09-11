@@ -308,7 +308,10 @@ impl PointwisePlan {
                 &flags,
             );
             ResidentTensor {
-                storage: Shared::new(Storage { values, flags }),
+                storage: Shared::new(Storage {
+                    values,
+                    flags: Shared::new(flags),
+                }),
                 layout,
                 device: self.device.clone(),
             }
