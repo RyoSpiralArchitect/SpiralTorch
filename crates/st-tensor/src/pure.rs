@@ -6542,9 +6542,14 @@ impl Tensor {
         }
 
         let data = if self.layout == Layout::ColMajor {
-            // Column-major A already stores row-major A^T. Tensor mutation is
-            // copy-on-write, so the source remains independent of this view.
-            self.data.clone()
+            // Column-major A already stores row-major A^T. Only snapshots can
+            // share: exporting the result via DLPack must not expose the input
+            // through a writable alias that bypasses Rust copy-on-write.
+            if self.is_snapshot() {
+                self.data.clone()
+            } else {
+                Arc::new(TensorBuffer::from_aligned(aligned_from_slice(self.data())))
+            }
         } else {
             let row_major;
             let input = if self.layout == Layout::RowMajor {
@@ -16489,6 +16494,35 @@ mod tests {
                 .shape(),
             (3, 0)
         );
+    }
+
+    #[test]
+    fn column_major_transpose_does_not_export_a_writable_alias_to_its_source() {
+        let column = Tensor::from_vec(2, 3, vec![1., 2., 3., 4., 5., 6.])
+            .unwrap()
+            .to_layout(Layout::ColMajor)
+            .unwrap();
+        let frozen = column.snapshot();
+        let native_result = column.transpose();
+        let snapshot_result = frozen.transpose();
+        assert_eq!(frozen.data().as_ptr(), snapshot_result.data().as_ptr());
+        for result in [&native_result, &snapshot_result] {
+            // DLPack remains row-major-only: export the transpose, not its input.
+            let export = result.to_dlpack().unwrap();
+            let producer = unsafe { (*export).dl_tensor.data.cast::<f32>() };
+            let foreign = unsafe { Tensor::from_dlpack(export).unwrap() };
+            let foreign_transpose = foreign.transpose();
+            // Simulate a producer write while the imported owner is alive.
+            unsafe {
+                *producer = 99.;
+            }
+            assert_eq!(foreign.data()[0], 99.);
+            assert_eq!(foreign_transpose.shape(), (2, 3));
+            assert_eq!(foreign_transpose.data(), &[1., 2., 3., 4., 5., 6.]);
+            assert_eq!(column.data(), &[1., 4., 2., 5., 3., 6.]);
+            assert_eq!(frozen.data(), &[1., 4., 2., 5., 3., 6.]);
+        }
+        assert_eq!(snapshot_result.data(), &[1., 4., 2., 5., 3., 6.]);
     }
 
     #[test]

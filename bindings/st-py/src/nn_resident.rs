@@ -118,10 +118,11 @@ impl PyInferencePlan {
     ) -> PyResult<usize> {
         let policy = optimizer_state.parse().map_err(plan_error)?;
         crate::nn::with_module_mut(module, |model| {
-            self.inner
-                .apply_parameters_to(model, &updated.inner, policy)
-                .map_err(|error| st_tensor::TensorError::Generic(error.to_string()))
-        })
+            Ok(self
+                .inner
+                .apply_parameters_to(model, &updated.inner, policy))
+        })?
+        .map_err(plan_error)
     }
 
     #[staticmethod]

@@ -8728,6 +8728,13 @@ class _NnZSpaceBatchNorm1d:
 
 
 class _NnInferencePlan:
+    def apply_parameters_to(
+        self,
+        module: _NnLinear | _NnGelu | _NnRelu | _NnScaler | _NnSequential,
+        updated: _NnInferencePlan,
+        *,
+        optimizer_state: Literal["reject", "reset"] = "reject",
+    ) -> int: ...
     @staticmethod
     def from_json(payload: str, *, max_bytes: int = ...) -> _NnInferencePlan: ...
     def to_json(self) -> str: ...

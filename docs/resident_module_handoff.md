@@ -113,4 +113,8 @@ This integration also exposed a column-major `pure::Tensor` transpose bug that
 affected `Linear.backward` input gradients. Transpose now preserves logical
 values on CPU and WGPU; the existing row-major CPU/kernel paths are retained.
 The regression tests cover non-square/edge shapes and CPU copy-on-write. They
-do not certify every tensor layout or optimizer's layout handling.
+also check that exporting the result via DLPack does not expose the original
+input to external writes, and that foreign-backed inputs produce independent
+results. DLPack remains row-major-only; protected snapshots can share storage.
+These tests do not certify
+every tensor layout or optimizer's layout handling.

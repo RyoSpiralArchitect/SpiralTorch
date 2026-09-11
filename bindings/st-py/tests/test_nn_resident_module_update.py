@@ -1,4 +1,6 @@
 """The host handoff and all acceptance policy live in Rust, including CPU builds."""
+import ast
+import inspect
 import json
 import os
 from pathlib import Path
@@ -18,6 +20,21 @@ def changed(base):
 
 
 class Surface(unittest.TestCase):
+    def test_typing_stub_matches_the_native_handoff_signature(self):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / "spiraltorch/__init__.pyi").read_text())
+        cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "_NnInferencePlan")
+        method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "apply_parameters_to")
+        signature = inspect.signature(st.nn.InferencePlan.apply_parameters_to)
+        self.assertEqual([a.arg for a in method.args.args], ["self", "module", "updated"])
+        self.assertEqual(list(signature.parameters), ["self", "module", "updated", "optimizer_state"])
+        self.assertEqual([a.arg for a in method.args.kwonlyargs], ["optimizer_state"])
+        self.assertEqual(signature.parameters["optimizer_state"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertEqual(ast.literal_eval(method.args.kw_defaults[0]), signature.parameters["optimizer_state"].default)
+        policy = method.args.kwonlyargs[0].annotation
+        self.assertEqual(ast.unparse(policy.value), "Literal")
+        self.assertEqual(ast.literal_eval(policy.slice), ("reject", "reset"))
+        self.assertEqual(ast.unparse(method.returns), "int")
+
     def test_all_roles_fusion_drift_and_explicit_reset(self):
         host = model()
         base = host.inference_plan(SHAPE)
