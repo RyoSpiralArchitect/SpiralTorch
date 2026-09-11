@@ -361,7 +361,26 @@ fn committed_tensor_plan_is_not_silently_bypassed() {
         Err(InferenceError::ResidentForwardPolicy)
     ));
     assert_eq!(net.resident_forward_stats(), before);
+    let binding = st_tensor::execution::current_execution_plan_binding().unwrap();
+    let nested = cpu();
+    assert!(matches!(
+        net.forward_resident(&x),
+        Err(InferenceError::ResidentForwardPolicy)
+    ));
+    drop(nested);
     drop(scope);
+    let direct = st_tensor::execution::push_execution_plan_binding(binding);
+    assert!(crate::execution::current_backend_policy().is_none());
+    assert!(matches!(
+        net.forward_resident(&x),
+        Err(InferenceError::ResidentForwardPolicy)
+    ));
+    assert!(matches!(
+        Relu::new().forward_resident(&x),
+        Err(InferenceError::ResidentForwardPolicy)
+    ));
+    assert_eq!(net.resident_forward_stats(), before);
+    drop(direct);
     net.forward_resident(&x)
         .unwrap()
         .snapshot()

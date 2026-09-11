@@ -39,9 +39,9 @@ impl std::fmt::Debug for ResidentForwardCache {
 }
 
 pub(crate) fn require_uncommitted_route() -> Result<(), InferenceError> {
-    if crate::execution::current_backend_policy()
-        .is_some_and(|p| p.runtime_plan_output_sha256().is_some())
-    {
+    // The tensor binding remains active even under an uncommitted nested NN
+    // policy, and can also be installed directly by a Rust caller.
+    if st_tensor::execution::current_execution_plan_binding().is_some() {
         return Err(InferenceError::ResidentForwardPolicy);
     }
     Ok(())
