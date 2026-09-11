@@ -167,8 +167,10 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
   forward dispatches on Metal only; its loss/backward/update boundaries remain
   separate. Browser training keeps the measured original schedule.
 - `output_tensor` freezes output and all guards into an immutable GPU tensor.
-  It performs an on-device identity/capture pass, not a CPU readback or mutable
-  workspace alias. Subsequent dispatches cannot invalidate the returned tensor.
+  After explicit `dispatch` it performs an on-device identity/capture pass.
+  After `forward_tensor` it clones the already owning result without a values
+  copy. Neither route performs CPU readback or exposes a mutable workspace alias;
+  subsequent dispatches cannot invalidate the returned tensor.
 - `snapshot` freezes output and stage flags into an owned readback buffer.
   Reading is explicit and consumes the snapshot. Graph drop/reuse is safe.
 - `dispatch` returns the submitted-dispatch counter, **not** a success receipt.

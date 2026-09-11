@@ -128,3 +128,8 @@ run in separate processes; browser physical GPU identity remains unknown.
 The [source-bound first record](../benchmarks/results/2026-09-12-module-resident-forward/README.md)
 includes the small-model slowdown as well as the deeper-model wins, CPU-only
 build checks, independent Torch replay and the rejected exploratory attempts.
+
+The [direct-I/O follow-up](../benchmarks/results/2026-09-12-module-direct-io/README.md)
+adds same-page WASM A/B timings. The small burst improves in this fixture;
+larger and single-call cases do not uniformly improve. All control drift and
+regressions remain in the record rather than being filtered out.
