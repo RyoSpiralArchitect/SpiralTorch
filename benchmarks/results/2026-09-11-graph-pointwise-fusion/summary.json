@@ -1,0 +1,409 @@
+{
+  "schema": "spiraltorch.graph_pointwise_fusion_evidence.v1",
+  "status": "passed",
+  "candidate_source": {
+    "commit": "f3a4b271bdf5929088eda74f3f9d7e2f42634bdc",
+    "tree": "820ee7658e203bcb91f3dd6a440ee671b4a852e6"
+  },
+  "rounds": [
+    {
+      "name": "timing-b",
+      "matrices": {
+        "standard": {
+          "max_abs": 1.4901161193847656e-08,
+          "native": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.0472524279669817,
+              "minimum_ratio": 0.8870612911360038,
+              "maximum_ratio": 1.3817130728708702,
+              "worst_config": {
+                "shape": [
+                  2,
+                  129,
+                  32
+                ],
+                "depth": 4,
+                "seed": 17,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.8925035336355676
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.1609019473855806,
+              "minimum_ratio": 1.0804699686201629,
+              "maximum_ratio": 1.2418745645467353,
+              "worst_config": {
+                "shape": [
+                  2,
+                  129,
+                  32
+                ],
+                "depth": 4,
+                "seed": 29,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.9850746829554887
+            }
+          },
+          "browser": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.1686912806770162,
+              "minimum_ratio": 1.066666666832235,
+              "maximum_ratio": 1.2947019868362497,
+              "worst_config": {
+                "shape": [
+                  2,
+                  129,
+                  32
+                ],
+                "depth": 4,
+                "seed": 17,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.1743671660156334,
+              "minimum_ratio": 0.8648648648376531,
+              "maximum_ratio": 1.5897435895966354,
+              "worst_config": {
+                "shape": [
+                  2,
+                  16,
+                  32
+                ],
+                "depth": 2,
+                "seed": 17,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            }
+          }
+        },
+        "wide": {
+          "max_abs": 1.4901161193847656e-08,
+          "native": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.1239817446081692,
+              "minimum_ratio": 1.006653419021292,
+              "maximum_ratio": 1.351781200241515,
+              "worst_config": {
+                "shape": [
+                  2,
+                  64,
+                  256
+                ],
+                "depth": 4,
+                "seed": 17,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.5141716238290134
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.087693748671114,
+              "minimum_ratio": 0.9890715586972953,
+              "maximum_ratio": 1.1617834653964043,
+              "worst_config": {
+                "shape": [
+                  2,
+                  64,
+                  256
+                ],
+                "depth": 4,
+                "seed": 43,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.46690471107945153
+            }
+          },
+          "browser": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.110298117408075,
+              "minimum_ratio": 1.0328820115170534,
+              "maximum_ratio": 1.22405660386932,
+              "worst_config": {
+                "shape": [
+                  2,
+                  64,
+                  256
+                ],
+                "depth": 4,
+                "seed": 43,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.1120601113532738,
+              "minimum_ratio": 1.057644110296515,
+              "maximum_ratio": 1.1766917292854004,
+              "worst_config": {
+                "shape": [
+                  2,
+                  64,
+                  256
+                ],
+                "depth": 4,
+                "seed": 43,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "timing-c",
+      "matrices": {
+        "standard": {
+          "max_abs": 1.4901161193847656e-08,
+          "native": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.1291720776065968,
+              "minimum_ratio": 0.9950111547997902,
+              "maximum_ratio": 1.3567744090411995,
+              "worst_config": {
+                "shape": [
+                  4,
+                  32,
+                  64
+                ],
+                "depth": 8,
+                "seed": 29,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.9296627645532465
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.0928602949422068,
+              "minimum_ratio": 0.943145922941454,
+              "maximum_ratio": 1.2532980756623369,
+              "worst_config": {
+                "shape": [
+                  2,
+                  16,
+                  32
+                ],
+                "depth": 2,
+                "seed": 17,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.9890632794423526
+            }
+          },
+          "browser": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.171499877991409,
+              "minimum_ratio": 1.0549450549360577,
+              "maximum_ratio": 1.353356890450061,
+              "worst_config": {
+                "shape": [
+                  2,
+                  16,
+                  32
+                ],
+                "depth": 2,
+                "seed": 29,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.167140919416657,
+              "minimum_ratio": 1.0952380949002005,
+              "maximum_ratio": 1.212389380385101,
+              "worst_config": {
+                "shape": [
+                  2,
+                  16,
+                  32
+                ],
+                "depth": 2,
+                "seed": 29,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            }
+          }
+        },
+        "wide": {
+          "max_abs": 1.4901161193847656e-08,
+          "native": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.0727161966206005,
+              "minimum_ratio": 0.995253475401839,
+              "maximum_ratio": 1.1474948688091489,
+              "worst_config": {
+                "shape": [
+                  2,
+                  64,
+                  256
+                ],
+                "depth": 4,
+                "seed": 43,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.46707586758015845
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.0700854040967411,
+              "minimum_ratio": 1.0305875303305834,
+              "maximum_ratio": 1.1318016279188952,
+              "worst_config": {
+                "shape": [
+                  2,
+                  64,
+                  256
+                ],
+                "depth": 4,
+                "seed": 43,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9,
+              "torch_over_candidate_geomean": 0.4647510982168096
+            }
+          },
+          "browser": {
+            "immediate": {
+              "baseline_over_candidate_geomean": 1.1033289082885986,
+              "minimum_ratio": 1.0595463138062446,
+              "maximum_ratio": 1.1436721991657048,
+              "worst_config": {
+                "shape": [
+                  4,
+                  64,
+                  64
+                ],
+                "depth": 8,
+                "seed": 17,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            },
+            "deferred": {
+              "baseline_over_candidate_geomean": 1.1189942327706994,
+              "minimum_ratio": 1.0246835442937843,
+              "maximum_ratio": 1.2336956521590585,
+              "worst_config": {
+                "shape": [
+                  2,
+                  64,
+                  256
+                ],
+                "depth": 4,
+                "seed": 29,
+                "steps": 8,
+                "graph": true
+              },
+              "cases": 9
+            }
+          }
+        }
+      }
+    }
+  ],
+  "correctness": {
+    "native-correctness": {
+      "cases": 6,
+      "guards": 16,
+      "fused_unfused_max_abs": 0.0
+    },
+    "browser-correctness": {
+      "cases": 6,
+      "guards": 16,
+      "fused_unfused_max_abs": 0
+    },
+    "torch": {
+      "trajectories": 48,
+      "comparisons": 10368,
+      "max_abs": 1.1920928955078125e-07
+    },
+    "python": {
+      "status": "passed",
+      "tests": 32,
+      "skipped": 0,
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/graph-pointwise-fusion-20260911/verified/python-release.dylib",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "wgpu_available": true
+    },
+    "wasm_clients": "passed"
+  },
+  "default_changed": false,
+  "scope": "Explicit Rust plan fusion, not generic Module/autograd migration or a universal speedup.",
+  "excluded_attempts": [
+    {
+      "name": "timing-a",
+      "reason": "Browser admission compared JSON key insertion order before any browser samples. Native standard result is retained but not a complete paired round."
+    }
+  ],
+  "boundaries": [
+    "Eager Torch, not torch.compile or the fastest possible PyTorch route.",
+    "Native Metal/MPS and Chrome WebGPU on this host only; no CUDA/remote GPU claim.",
+    "Prior parallel GPU VJP one-off remains UNKNOWN; current GPU tests are serial.",
+    "Current-source bindings only; no wheel release, push or merge in this change."
+  ],
+  "measurement_counts": {
+    "completed_paired_rounds": 2,
+    "raw_intervals": 3600,
+    "retained_intervals": 2880,
+    "nonzero_sgd_updates": 28800
+  },
+  "test_counts": {
+    "contracts": 22,
+    "nn-serial": 734,
+    "backend-serial": 114,
+    "integration": 6
+  },
+  "artifacts": 81,
+  "compressed_bytes": 183508356
+}
