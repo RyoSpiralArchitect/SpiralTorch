@@ -12,8 +12,9 @@ const learner=workload==="learner", graph=workload==="graph"||learner;
 const matrix=new URL(location.href).searchParams.get("matrix")??"standard";
 const optimization=new URL(location.href).searchParams.get("optimization")??"none";
 const fusion=optimization==="fuse-pointwise";
+const seedFusion=optimization==="fuse-learner-seeds";
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
-  workload,matrix,pointwise_fusion:fusion,
+  workload,matrix,pointwise_fusion:fusion,learner_seed_fusion:seedFusion,
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
 if(learner)report.boundary="paired rotating Rust weighted-learning workloads; quadratic/quartic cotangents and exact VJPs; all update receipts read; no timed loss observations; 2 warmups+8 samples; no cross-framework timing ratio";
 async function progress(value) {
@@ -53,7 +54,7 @@ function compare(a,b) {
 }
 try {
   require(["standard","wide"].includes(matrix)&&(matrix!=="wide"||graph),"invalid workload matrix");
-  require(["none","fuse-pointwise"].includes(optimization)&&(!fusion||(graph&&!learner)),"invalid optimization");
+  require(["none","fuse-pointwise","fuse-learner-seeds"].includes(optimization)&&(!fusion||(graph&&!learner))&&(!seedFusion||learner),"invalid optimization");
   await progress({stage:"initialize_modules"});
   await initA(); await initB();
   const adapter=await navigator.gpu.requestAdapter();
@@ -69,9 +70,9 @@ try {
     const workers={};
     try {
     workers.baseline=await A.create(JSON.stringify(config));
-    workers.candidate=await B.create(JSON.stringify({...config,...(fusion?{fuse_pointwise:true}:{})}));
+    workers.candidate=await B.create(JSON.stringify({...config,...(fusion?{fuse_pointwise:true}:{}),...(seedFusion?{fuse_learner_seeds:true}:{})}));
     const fixtures=Object.fromEntries(Object.entries(workers).map(([k,v])=>[k,JSON.parse(v.fixture())]));
-    for(const key of [...(fusion?[]:["config","plan_json"]),"input","target","learning_rate","kernel","accumulation","adapter"])
+    for(const key of [...(fusion?[]:seedFusion?["plan_json"]:["config","plan_json"]),"input","target","learning_rate","kernel","accumulation","adapter"])
       require(JSON.stringify(fixtures.baseline[key])===JSON.stringify(fixtures.candidate[key]),"paired fixture differs: "+key);
     if(fusion) {
       require(fixtures.candidate.source_plan_json===fixtures.baseline.plan_json,"fusion source plan differs");
@@ -82,14 +83,18 @@ try {
         "fusion recipe differs");
       require(selected===true,"fusion was not selected");
     }
+    if(seedFusion) {
+      const {fuse_learner_seeds:selected,...candidateConfig}=fixtures.candidate.config;
+      require(selected===true&&JSON.stringify(candidateConfig)===JSON.stringify(fixtures.baseline.config),"seed fusion recipe differs");
+    }
     const row={config,fixture:fixtures.baseline,candidate_build_manifest:fixtures.candidate.build_manifest,
-      ...(fusion?{candidate_fixture:fixtures.candidate}:{}),
+      ...(fusion||seedFusion?{candidate_fixture:fixtures.candidate}:{}),
       captures:{},fingerprints:{},samples:[]};
       for(const cadence of ["immediate","deferred"]) {
         const captures={};
         for(let block=0;block<10;block++) {
           const order=(block+seed)%2===0 ? ["baseline","candidate"] : ["candidate","baseline"];
-          const sample={cadence,block,warmup:block<2,order,times_ms:{}};
+          const sample={cadence,block,warmup:block<2,order,times_ms:{},fused_learner_seeds:{}};
           row.samples.push(sample);
           for(const lane of order) {
             await progress({stage:"sample_started",config,cadence,block,lane});
@@ -97,6 +102,8 @@ try {
             require(value.status==="passed"&&value.steps===8&&value.cadence===cadence&&value.losses.length===(learner?0:8)&&
               Number.isFinite(value.elapsed_ms)&&value.elapsed_ms>0,"sample identity/timing differs");
             require((value.learner??false)===learner,"wrong learner workload");
+            require((value.fused_learner_seeds??false)===(seedFusion&&lane==="candidate"),"wrong seed execution");
+            sample.fused_learner_seeds[lane]=value.fused_learner_seeds??false;
             if(learner)require(value.completed_updates===8&&value.acceptance==="guarded_receipts"&&
               JSON.stringify(value.accepted_updates)==="[2,3,4,5,6,7,8,9]"&&
               Number.isFinite(value.initial_loss)&&Number.isFinite(value.final_loss),"missing update acceptance");
@@ -106,7 +113,7 @@ try {
             close(value.losses,captures[lane].losses);
             sample.times_ms[lane]=value.elapsed_ms;
             await progress({stage:"sample_finished",config,cadence,block,lane,
-              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256});
+              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256,fused_learner_seeds:value.fused_learner_seeds??false});
           }
         }
         row.captures[cadence+"_baseline"]=captures.baseline;

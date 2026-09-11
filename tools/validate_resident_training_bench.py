@@ -37,11 +37,14 @@ def manifest_binding(manifest, source):
     return binding
 
 
-def summarize_case(row, config, lanes, *, learner=False):
+def summarize_case(row, config, lanes, *, learner=False, seed_fusion=False):
     require(row["config"] == config and row["fixture"]["config"] == config, "recipe differs")
     samples = row["samples"]
     require(len(samples) == 20, "expected two warmups and eight retained blocks per cadence")
     for index, sample in enumerate(samples):
+        selected = sample.get("fused_learner_seeds", {lane: False for lane in lanes})
+        require(set(selected) == set(lanes) and all(selected[lane] is (seed_fusion and lane == "candidate") for lane in lanes),
+                "per-interval seed fusion differs")
         cadence, block = CADENCES[index // 10], index % 10
         rotation = (block + config["seed"]) % len(lanes)
         order = lanes[rotation:] + lanes[:rotation]
@@ -58,7 +61,7 @@ def summarize_case(row, config, lanes, *, learner=False):
             statistics_by_lane[lane] = dict(median_ms=statistics.median(values), min_ms=min(values),
                                              max_ms=max(values), retained=len(values))
             capture = row["captures"][cadence + "_" + lane]
-            bench.validate_sample(capture, cadence, config["steps"], learner=learner, lane=lane)
+            bench.validate_sample(capture, cadence, config["steps"], learner=learner, lane=lane, seed_fusion=seed_fusion and lane=="candidate")
             bench.close_values(capture["losses"], capture["losses"])
             require(positive(capture["initial_loss"]), "invalid initial loss")
             if lane != "torch":
@@ -75,7 +78,7 @@ def summarize_case(row, config, lanes, *, learner=False):
     return result
 
 
-def validate_progress(path, cases):
+def validate_progress(path, cases, seed_fusion=False):
     expected = []
     for row in cases:
         for sample in row["samples"]:
@@ -96,6 +99,7 @@ def validate_progress(path, cases):
                 require(started is None, "overlapping browser samples")
                 started = identity
             else:
+                require(event.get("fused_learner_seeds", False) is (seed_fusion and lane=="candidate"), "browser interval seed fusion differs")
                 require(started == identity and event["elapsed_ms"] == sample["times_ms"][lane] and
                         event["state_sha256"] == row["fingerprints"][lane] and
                         type(event["setup_ms"]) in (int, float) and math.isfinite(event["setup_ms"]) and
@@ -123,6 +127,10 @@ def run(args, result):
     require(workload in ("dense", "graph", "learner") and browser.get("workload", "dense") == workload,
             "workload differs")
     learner = workload == "learner"
+    seed_fusion = native.get("learner_seed_fusion", False)
+    require(type(seed_fusion) is bool and browser.get("learner_seed_fusion", False) is seed_fusion and (not seed_fusion or learner),
+            "seed fusion selection differs")
+    result["learner_seed_fusion"] = seed_fusion
     graph = workload in ("graph", "learner")
     result["workload"] = workload
     matrix = native.get("matrix", "standard")
@@ -131,7 +139,7 @@ def run(args, result):
     result["matrix"] = matrix
     fusion = native.get("pointwise_fusion", False)
     require(type(fusion) is bool and browser.get("pointwise_fusion", False) is fusion and
-            (not fusion or graph), "pointwise fusion selection differs")
+            (not fusion or (graph and not learner)), "pointwise fusion selection differs")
     result["pointwise_fusion"] = fusion
     sources = {lane: bench.source_for(getattr(args, lane + "_source")) for lane in ("baseline", "candidate")}
     result["native_products"] = native["native_products"]
@@ -146,8 +154,8 @@ def run(args, result):
     result["device_admission"] = native["device_admission"]
     result["torch"] = dict(version=native["torch"], device=native["torch_device"])
     for config, n, b in zip(configs, native["cases"], browser["cases"]):
-        row = dict(config=config, native=summarize_case(n, config, ("baseline", "candidate", "torch"), learner=learner),
-                   browser=summarize_case(b, config, ("baseline", "candidate"), learner=learner), max_abs_errors={})
+        row = dict(config=config, native=summarize_case(n, config, ("baseline", "candidate", "torch"), learner=learner, seed_fusion=seed_fusion),
+                   browser=summarize_case(b, config, ("baseline", "candidate"), learner=learner, seed_fusion=seed_fusion), max_abs_errors={})
         result["cases"].append(row)
         for key in ("config", "plan_json", "input", "target", "learning_rate", "kernel", "accumulation"):
             require(n["fixture"][key] == b["fixture"][key], "native/browser fixture differs: " + key)
@@ -160,6 +168,10 @@ def run(args, result):
                 manifest_binding(measured["candidate_fixture"]["build_manifest"], sources["candidate"])
             require(n["candidate_fixture"]["plan_json"] == b["candidate_fixture"]["plan_json"],
                     "native/browser fused plans differ")
+        if seed_fusion:
+            for measured in (n, b):
+                bench.match_seed_fixture(measured["fixture"], measured["candidate_fixture"])
+                manifest_binding(measured["candidate_fixture"]["build_manifest"], sources["candidate"])
         require(n["fixture"]["adapter"]["device_type"] != "Cpu" and
                 b["fixture"]["adapter"]["backend"] == "BrowserWebGpu", "incorrect recorded backend")
         fixed = n["captures"]["immediate_torch"]
@@ -171,7 +183,7 @@ def run(args, result):
                          max(reference.compare(capture["state"], fixed["state"]).values()))
                 row["max_abs_errors"][origin + "_" + key] = error
         row["losses"] = fixed["losses"]
-    result["browser_intervals_revalidated"] = validate_progress(args.browser_progress, browser["cases"])
+    result["browser_intervals_revalidated"] = validate_progress(args.browser_progress, browser["cases"], seed_fusion)
     require(identities == [bench.audit.file_identity(path) for path in paths], "evidence changed during validation")
 
 

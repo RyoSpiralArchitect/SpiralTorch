@@ -43,6 +43,21 @@ declare module "spiraltorch-wasm" {
         adapterInfo(): { name: string; backend: string; device_type: string };
         free(): void;
     }
+    export class WgpuPointwiseInputs {
+        constructor();
+        free(): void;
+        readonly length: number;
+        add(tensor: WgpuTensor): void;
+        set(slot: number, tensor: WgpuTensor): void;
+        compile(steps: string): WgpuPointwisePlan;
+    }
+
+    export class WgpuPointwisePlan {
+        private constructor();
+        free(): void;
+        run(inputs: WgpuPointwiseInputs, execution: string): WgpuTensor;
+    }
+
     export class WgpuTensor {
         private constructor();
         readonly shape: Uint32Array;

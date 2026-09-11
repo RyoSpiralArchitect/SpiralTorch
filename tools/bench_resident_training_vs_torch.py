@@ -126,7 +126,11 @@ def torch_sample(torch, fixture, device, cadence, synchronize):
                 losses=losses,initial_loss=initial["loss"],state=state)
 
 
-def validate_sample(value, cadence, steps, *, learner=False, lane=None):
+def validate_sample(value, cadence, steps, *, learner=False, lane=None, seed_fusion=False):
+    if seed_fusion and not learner:
+        raise ValueError("seed fusion requires the learner workload")
+    if value.get("fused_learner_seeds", False) is not seed_fusion:
+        raise ValueError("incorrect seed fusion execution")
     if (value.get("status") != "passed" or value.get("cadence") != cadence or value.get("steps") != steps or
             len(value.get("losses", [])) != (0 if learner else steps) or type(value.get("elapsed_ms")) not in (int, float) or
             not math.isfinite(value["elapsed_ms"]) or value["elapsed_ms"] <= 0):
@@ -148,9 +152,18 @@ def validate_sample(value, cadence, steps, *, learner=False, lane=None):
             raise ValueError("missing ordered update receipts")
 
 
+def match_seed_fixture(baseline, candidate):
+    config = dict(candidate["config"])
+    if config.pop("fuse_learner_seeds", None) is not True or config != baseline["config"]:
+        raise ValueError("seed fusion recipe differs")
+    for key in ("plan_json", "input", "target", "learning_rate", "kernel", "accumulation", "adapter"):
+        if candidate[key] != baseline[key]: raise ValueError("seed fusion fixture differs: " + key)
+
+
 def run(args, result, baseline_stderr, candidate_stderr):
     graph = getattr(args, "graph", False)
     learner = getattr(args, "learner", False)
+    seed_fusion = getattr(args, "fuse_learner_seeds", False)
     compare = learner_reference.compare if learner else (graph_reference.compare if graph else reference.compare)
     sample_torch = learner_reference.torch_sample if learner else (graph_reference.torch_sample if graph else torch_sample)
     result["device_admission"] = admit_device(args.device)
@@ -180,9 +193,12 @@ def run(args, result, baseline_stderr, candidate_stderr):
             result["cases"].append(row)
             fixture = workers["baseline"].request(dict(op="init",config=config))
             fusion = getattr(args, "fuse_pointwise", False)
-            candidate = workers["candidate"].request(dict(op="init",config=dict(config, **({"fuse_pointwise": True} if fusion else {}))))
+            candidate = workers["candidate"].request(dict(op="init",config=dict(config, **({"fuse_pointwise": True} if fusion else {}), **({"fuse_learner_seeds": True} if seed_fusion else {}))))
             if fusion:
                 graph_reference.match_fused_fixture(fixture, candidate)
+                row["candidate_fixture"] = candidate
+            elif seed_fusion:
+                match_seed_fixture(fixture, candidate)
                 row["candidate_fixture"] = candidate
             else:
                 for key in ("config","plan_json","input","target","learning_rate","kernel","accumulation","adapter"):
@@ -195,7 +211,7 @@ def run(args, result, baseline_stderr, candidate_stderr):
                     lanes=["baseline","candidate","torch"]
                     rotation=(block+config["seed"])%3
                     order=lanes[rotation:]+lanes[:rotation]
-                    sample=dict(cadence=cadence,block=block,warmup=block<2,order=order,times_ms={})
+                    sample=dict(cadence=cadence,block=block,warmup=block<2,order=order,times_ms={},fused_learner_seeds={})
                     row["samples"].append(sample)
                     for lane in order:
                         if lane == "torch":
@@ -204,7 +220,8 @@ def run(args, result, baseline_stderr, candidate_stderr):
                             value=workers[lane].request(dict(op="learn" if learner else "sample",cadence=cadence,capture=lane not in captured))
                             fingerprint=row["fingerprints"].setdefault(lane,value["state_sha256"])
                             if value["state_sha256"] != fingerprint: raise ValueError("native state changed across identical reset trajectories")
-                        validate_sample(value,cadence,config["steps"],learner=learner,lane=lane)
+                        validate_sample(value,cadence,config["steps"],learner=learner,lane=lane,seed_fusion=seed_fusion and lane=="candidate")
+                        sample["fused_learner_seeds"][lane] = value.get("fused_learner_seeds", False)
                         if lane not in captured: captured[lane]=value
                         if lane == "torch": compare(value["state"],captured[lane]["state"])
                         close_values(value["losses"],captured[lane]["losses"])
@@ -236,6 +253,7 @@ def main():
     parser.add_argument("--device",choices=("mps","cuda"),required=True)
     parser.add_argument("--graph",action="store_true",help="v2 Linear/GELU/gain/ReLU graph, exact gradients")
     parser.add_argument("--learner",action="store_true",help="custom quadratic/quartic VJPs and weighted SGD; update receipts, not per-step loss reads")
+    parser.add_argument("--fuse-learner-seeds",action="store_true",help="candidate-only reusable cubic-cotangent fusion; unchanged graph and optimizer")
     parser.add_argument("--fuse-pointwise",action="store_true",help="opt in to candidate graph fusion; preserve and structurally compare both plans")
     parser.add_argument("--matrix",choices=("standard","wide"),default="standard",
                         help="wide: graph-only 64/128/256 feature widths, same eight SGD updates")
@@ -247,10 +265,13 @@ def main():
         parser.error("--fuse-pointwise requires --graph")
     if args.learner and (not args.graph or args.fuse_pointwise):
         parser.error("--learner requires --graph and disallows changing fusion between lanes")
+    if args.fuse_learner_seeds and not args.learner:
+        parser.error("--fuse-learner-seeds requires --learner")
     result=dict(schema="spiraltorch.resident_training_comparison.v1",status="error",cases=[],
         workload="learner" if args.learner else ("graph" if args.graph else "dense"),
         matrix=args.matrix,
         pointwise_fusion=args.fuse_pointwise,
+        learner_seed_fusion=args.fuse_learner_seeds,
         boundary="rotating native A/B and eager torch; f32 tanh-GELU mean-MSE plain SGD; device-persistent batch/weights; 8 updates, all losses read; 2 warmups+8 retained samples per cadence; reset/probes excluded; no fastest-PyTorch/quality claim",
         safety_difference="Rust validates every intermediate and commits parameters transactionally; eager torch has no matching per-stage finite/rollback checks for these fixed finite fixtures",
         readback_difference="Immediate reads each step; deferred Rust reads owning snapshots after enqueue, while torch stacks retained losses for one final host copy")

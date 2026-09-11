@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Public reusable tensor fusion</title>
+<pre id="result" data-status="running">Checking Rust pointwise plans and custom learning</pre>
+<script type="module">
+import init,{WgpuTensorDevice,WgpuPointwiseInputs,InferencePlan} from "./module/spiraltorch_wasm.js";
+const element=document.querySelector("#result"),report={status:"error",assertions:0};
+const handles=new Set(),own=h=>(handles.add(h),h),release=h=>{h.free();handles.delete(h);};
+const f32=v=>new Float32Array(v);
+function check(ok,message){if(!ok)throw Error(message);report.assertions++;}
+const same=(a,b)=>check(JSON.stringify(a)===JSON.stringify(b),"value differs");
+async function read(t){const s=own(t.snapshot());const result=[...await s.readValues()];release(s);return result;}
+function fail(fn){let failed=false;try{fn();}catch{failed=true;}check(failed,"bad call accepted");}
+async function reject(fn){let failed=false;try{await fn();}catch{failed=true;}check(failed,"bad result accepted");}
+function inputs(...values){const b=own(new WgpuPointwiseInputs());for(const v of values)b.add(v);return b;}
+try {
+  await init();const d=own(await WgpuTensorDevice.create());report.adapter=d.adapterInfo();
+  check(report.adapter.backend==="BrowserWebGpu"&&report.adapter.device_type!=="Cpu","wrong backend");
+  const root=own(d.upload([2,3,2],f32(Array.from({length:12},(_,i)=>i-3))));
+  const permuted=own(root.permute([1,0,2])),x=own(permuted.narrow(0,1,2)),rhs=own(d.upload([2],f32([2,3])));
+  const b=inputs(x,rhs),plan=own(b.compile(JSON.stringify([["multiply",1],["add",0],["relu",null]])));
+  const expected=(await read(x)).map((v,i)=>Math.max(v*[2,3][i%2]+v,0));
+  const saved=[];for(const mode of ["sequential","batched","fused"])saved.push(own(plan.run(b,mode)));
+  for(const bad of [true,-1,.5,"0",Infinity,2**32])fail(()=>b.set(bad,x));
+  const wrong=own(d.upload([8],f32(Array(8).fill(9))));fail(()=>b.set(0,wrong));
+  for(const steps of [[],[["mul",1]],[["relu",1]],[["multiply",null]],[["add",true]],[["add",2]],[["identity",null]],Array(257).fill(["add",1])])
+    fail(()=>b.compile(JSON.stringify(steps)));
+  fail(()=>b.compile(" ".repeat(65537)));fail(()=>plan.run(b,"auto"));
+  const root2=own(d.upload([2,3,2],f32(Array(12).fill(1)))),p2=own(root2.permute([1,0,2])),x2=own(p2.narrow(0,1,2));
+  b.set(0,x2);const next=own(plan.run(b,"fused"));release(b);release(plan);release(root);release(x);release(permuted);
+  for(const value of saved){same([...value.shape],[2,2,2]);same(await read(value),expected);}
+  same(await read(next),[3,4,3,4,3,4,3,4]);
+  const huge=own(d.upload([1],f32([-3.4028234663852886e38]))),two=own(d.upload([],f32([2]))),badInputs=inputs(huge,two);
+  const mask=own(badInputs.compile(JSON.stringify([["multiply",1],["relu",null]])));
+  for(const mode of ["sequential","batched","fused"]){
+    const bad=own(mask.run(badInputs,mode));await reject(()=>read(bad));
+    const empty=own(bad.broadcastTo([0])),bindings=inputs(empty),identity=own(bindings.compile('[["identity",null]]'));
+    await reject(()=>read(own(identity.run(bindings,mode))));
+  }
+  const good=own(d.upload([1],f32([3])));badInputs.set(0,good);same(await read(own(mask.run(badInputs,"fused"))),[6]);
+  for(const [shape,data] of [[[],[-0]],[[0,3],[]]]){
+    const t=own(d.upload(shape,f32(data))),i=inputs(t),p=own(i.compile('[["identity",null]]'));
+    const values=await read(own(p.run(i,"fused")));same(values,data);if(!shape.length)check(Object.is(values[0],-0),"signed zero changed");
+  }
+  const model=own(InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2,1],
+    parameters:[{role:"gain",shape:[1],values:[2]}],stages:[{kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1}]}]})));
+  const gpu=own(await model.compileGraphLearnerWebGpu("exact")),device=own(gpu.tensorDevice());gpu.upload(f32([1,2]));
+  const f=own(gpu.forward()),prediction=own(f.predictionTensor()),norm=own(device.upload([],f32([.5]))),seeds=inputs(prediction,norm);
+  const cube=own(seeds.compile('[["multiply",0],["multiply",0],["multiply",1]]')),seed=own(cube.run(seeds,"fused"));
+  const gradient=own(gpu.backward(f,seed)),raw=own(gradient.parameterGradientTensor(0));same(await read(raw),[68]);
+  gpu.sgd(gradient,.01);const receipt=own(gpu.updateSnapshot());check(await receipt.read()===1n,"update not accepted");
+  gpu.upload(f32([1,2]));const fresh=own(gpu.forward()),updated=own(fresh.predictionTensor()),values=await read(updated);
+  check(Math.abs(values[0]-1.32)<1e-5&&Math.abs(values[1]-2.64)<1e-5,"fused seed did not train the model");
+  report.custom_loss_update="passed";report.status="passed";
+}catch(error){report.error=String(error.stack||error);}
+finally{for(const h of [...handles].reverse())h.free();}
+element.textContent=JSON.stringify(report);element.dataset.status=report.status;
+</script>

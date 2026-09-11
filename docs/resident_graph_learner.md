@@ -6,6 +6,10 @@ It shares Rust graph preparation, derivatives, guarded tensor operations and
 atomic parameter commits with the existing resident paths. Python and WASM
 only expose that implementation; they do not reconstruct update semantics.
 
+For reusable GPU-side cotangent arithmetic from Python or WASM, see the
+[public pointwise plans](resident_pointwise_clients.md). They compose directly
+with `backward` without returning the seed to host memory.
+
 The frozen [autograd workspace](resident_graph_autograd.md) remains available
 without optimizer-sized scratch. The existing mean-MSE+SGD workspace keeps its
 prepared fast path. This learner allocates optimizer scratch, but no MSE target

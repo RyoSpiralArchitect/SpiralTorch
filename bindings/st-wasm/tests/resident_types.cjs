@@ -154,6 +154,9 @@ function checkNnContract(types, label) {
   for (const value of [forwardSnapshot,tensorSnapshot]) assert.match(value, /readValues\(\): Promise<Float32Array>/);
   assert.match(tensorDevice, /create\(\): Promise<WgpuTensorDevice>/);
   assert.match(tensorDevice, /upload\(shape: number\[\], data: Float32Array\): WgpuTensor/);
+  assert.match(get("WgpuPointwiseInputs"), /compile\(steps: string\): WgpuPointwisePlan/);
+  assert.match(get("WgpuPointwiseInputs"), /set\(slot: number, tensor: WgpuTensor\): void/);
+  assert.match(get("WgpuPointwisePlan"), /run\(inputs: WgpuPointwiseInputs, execution: string\): WgpuTensor/);
   assert.match(tensor, /readonly strides: Uint32Array/);
   assert.match(tensor, /narrow\(axis: number, start: number, length: number\): WgpuTensor/);
   assert.match(tensor, /snapshot\(\): WgpuTensorSnapshot/);

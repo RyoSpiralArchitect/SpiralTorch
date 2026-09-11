@@ -7,8 +7,9 @@ async function main() {
   const [baseline,candidate,chrome,output,workload="dense",matrix="standard",optimization="none"]=process.argv.slice(2);
   if(!baseline||!candidate||!chrome||!output||!["dense","graph","learner"].includes(workload)||
      !["standard","wide"].includes(matrix)||(matrix==="wide"&&workload==="dense")||
-     !["none","fuse-pointwise"].includes(optimization)||(optimization!=="none"&&workload!=="graph"))
-    throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph|learner] [standard|wide] [none|fuse-pointwise (graph only)]");
+     !["none","fuse-pointwise","fuse-learner-seeds"].includes(optimization)||(optimization==="fuse-pointwise"&&workload!=="graph")||
+     (optimization==="fuse-learner-seeds"&&workload!=="learner"))
+    throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph|learner] [standard|wide] [none|fuse-pointwise|fuse-learner-seeds]");
   const fd=fs.openSync(output,"wx");
   let server,browser,page,progressFd,casesFd,report={status:"error"},metadata={},errors=[],consoleMessages=[];
   const cases=[];

@@ -15,6 +15,23 @@ spec.loader.exec_module(validation)
 
 
 class Admission(unittest.TestCase):
+    def test_seed_fusion_cannot_change_model_or_hide_its_execution(self):
+        base=dict(config=dict(graph=True,shape=[2,1],steps=8),plan_json="unchanged",
+            input=[1.],target=[2.],learning_rate=.01,kernel="register_2x2",accumulation="sequential",adapter={})
+        candidate=copy.deepcopy(base);candidate["config"]["fuse_learner_seeds"]=True
+        bench.match_seed_fixture(base,candidate)
+        for key,value in (("plan_json","different"),("input",[3.]),("learning_rate",.2)):
+            bad=copy.deepcopy(candidate);bad[key]=value
+            with self.assertRaises(ValueError):bench.match_seed_fixture(base,bad)
+        for selected in (False,1,None):
+            bad=copy.deepcopy(candidate);bad["config"]["fuse_learner_seeds"]=selected
+            with self.assertRaises(ValueError):bench.match_seed_fixture(base,bad)
+        value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
+            accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],initial_loss=.2,final_loss=.1,elapsed_ms=1.)
+        with self.assertRaises(ValueError):bench.validate_sample(value,"deferred",8,learner=True,seed_fusion=True)
+        bench.validate_sample(dict(value,fused_learner_seeds=True),"deferred",8,learner=True,seed_fusion=True)
+        with self.assertRaises(ValueError):bench.validate_sample(dict(value,fused_learner_seeds=1),"deferred",8,learner=True,seed_fusion=True)
+
     def test_learner_requires_actual_receipts_not_loss_or_torch_surrogates(self):
         value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
                    accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],
@@ -113,6 +130,12 @@ class Admission(unittest.TestCase):
 
 
 class Revalidation(unittest.TestCase):
+    def test_per_interval_seed_policy_cannot_be_relabelled(self):
+        row=self.row()
+        row["samples"][4]["fused_learner_seeds"]={"baseline":False,"candidate":True}
+        with self.assertRaisesRegex(ValueError,"seed fusion"):
+            validation.summarize_case(row,row["config"],("baseline","candidate"))
+
     def row(self):
         config=bench.recipes()[0]
         row=dict(config=config,fixture=dict(config=config),samples=[],captures={},fingerprints={})

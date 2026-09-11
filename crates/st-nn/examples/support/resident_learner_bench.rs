@@ -1,11 +1,13 @@
 //! Custom-objective timing, distinct from the ordinary mean-MSE benchmark.
 use super::*;
 use st_backend_wgpu::{
+    resident_tensor::pointwise::PointwisePlan,
     resident_tensor::{ResidentTensor, TensorReadback},
     resident_training::graph::{
         GraphForward, GraphGradients, GraphUpdateReadback, ResidentGraphLearner,
     },
 };
+use st_tensor::{PointwiseChain, PointwiseExecution, PointwiseStep};
 
 async fn accepted(receipt: GraphUpdateReadback) -> Result<u64> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -28,11 +30,16 @@ fn vjps(
     gpu: &mut ResidentGraphLearner,
     negative: &ResidentTensor,
     norm: &ResidentTensor,
+    cube: Option<&PointwisePlan>,
 ) -> Result<(GraphForward, [GraphGradients; 2])> {
     let f = gpu.forward()?;
     let e = f.prediction().add(negative)?;
     let first = gpu.backward(&f, &e.mul(norm)?)?;
-    let second = gpu.backward(&f, &e.mul(&e)?.mul(&e)?.mul(norm)?)?;
+    let seed = match cube {
+        Some(plan) => plan.run(&[&e, norm], PointwiseExecution::Fused)?,
+        None => e.mul(&e)?.mul(&e)?.mul(norm)?,
+    };
+    let second = gpu.backward(&f, &seed)?;
     Ok((f, [first, second]))
 }
 
@@ -67,7 +74,23 @@ impl Benchmark {
         )?;
         let norm = d.upload(&[], &[1. / self.target.data().len() as f32])?;
         gpu.upload(self.input.data())?;
-        let (initial, g) = vjps(&mut gpu, &negative, &norm)?;
+        let cube = if self.config.fuse_learner_seeds {
+            Some(PointwisePlan::new(
+                d.clone(),
+                PointwiseChain::new(
+                    2,
+                    vec![
+                        PointwiseStep::named("multiply", Some(0))?,
+                        PointwiseStep::named("multiply", Some(0))?,
+                        PointwiseStep::named("multiply", Some(1))?,
+                    ],
+                )?,
+                vec![gpu.output_layout().clone(), norm.layout().clone()],
+            )?)
+        } else {
+            None
+        };
+        let (initial, g) = vjps(&mut gpu, &negative, &norm, cube.as_ref())?;
         gpu.sgd_weighted(&[(&g[0], 0.75), (&g[1], 0.25)], 0.)?;
         if accepted(gpu.update_snapshot()?).await? != 1 {
             return Err("initial update identity".into());
@@ -79,7 +102,7 @@ impl Benchmark {
         let mut accepted_updates = Vec::with_capacity(self.config.steps);
         let start = now();
         for _ in 0..self.config.steps {
-            let (_, g) = vjps(&mut gpu, &negative, &norm)?;
+            let (_, g) = vjps(&mut gpu, &negative, &norm, cube.as_ref())?;
             gpu.sgd_weighted(&[(&g[0], 0.75), (&g[1], 0.25)], 0.01)?;
             let receipt = gpu.update_snapshot()?;
             match cadence {
@@ -98,7 +121,7 @@ impl Benchmark {
             return Err("invalid learner interval or missing acceptance".into());
         }
         // Final full state observation is outside timing, including the host objective.
-        let (f, g) = vjps(&mut gpu, &negative, &norm)?;
+        let (f, g) = vjps(&mut gpu, &negative, &norm, cube.as_ref())?;
         let prediction = values(f.prediction()).await?;
         let final_loss = objective(&prediction, self.target.data());
         let mut input_gradients = Vec::new();
@@ -121,6 +144,7 @@ impl Benchmark {
         let state_sha256 = format!("{:x}", Sha256::digest(serde_json::to_vec(&final_state)?));
         Ok(
             json!({"status":"passed","learner":true,"cadence":cadence,"steps":self.config.steps,
+            "fused_learner_seeds":self.config.fuse_learner_seeds,
             "completed_updates":self.config.steps,"accepted_updates":accepted_updates,"acceptance":"guarded_receipts",
             "losses":[],"initial_loss":initial_loss,"final_loss":final_loss,"elapsed_ms":elapsed_ms,"setup_ms":setup_ms,
             "state_sha256":state_sha256,"state":if capture { final_state } else { Value::Null },

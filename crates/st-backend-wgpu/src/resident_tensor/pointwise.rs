@@ -5,7 +5,9 @@ use super::*;
 use st_kernel_contracts::pointwise::{PointwiseChain, PointwiseError, PointwiseExecution};
 use std::fmt::Write;
 
+mod inputs;
 pub mod vjp;
+pub use inputs::PointwiseInputs;
 
 #[derive(Debug)]
 pub struct PointwisePlan {

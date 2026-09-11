@@ -1,5 +1,6 @@
 //! Owning Python handles over Rust's immutable N-D GPU storage.
 use pyo3::prelude::*;
+mod pointwise;
 #[cfg(feature = "wgpu")]
 use pyo3::{
     exceptions::{PyRuntimeError, PyTypeError, PyValueError},
@@ -219,6 +220,7 @@ pub(crate) fn register(parent: &Bound<'_, PyModule>, module: &Bound<'_, PyModule
         target.add_class::<PyWgpuTensorDevice>()?;
         target.add_class::<PyWgpuTensor>()?;
         target.add_class::<PyWgpuTensorSnapshot>()?;
+        pointwise::register(target)?;
     }
     Ok(())
 }

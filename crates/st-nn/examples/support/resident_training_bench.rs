@@ -40,6 +40,8 @@ pub struct Config {
     pub graph: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub fuse_pointwise: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fuse_learner_seeds: bool,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -140,6 +142,7 @@ impl Benchmark {
             || config.steps > 32
             || config.seed == 0
             || (config.fuse_pointwise && !config.graph)
+            || (config.fuse_learner_seeds && (!config.graph || config.fuse_pointwise))
         {
             return Err("benchmark exceeds bounded shape/depth/steps/seed".into());
         }
@@ -216,6 +219,9 @@ impl Benchmark {
     }
 
     pub async fn sample(&self, cadence: Cadence, capture: bool, now: fn() -> f64) -> Result<Value> {
+        if self.config.fuse_learner_seeds {
+            return Err("seed fusion requires the learner workload".into());
+        }
         let setup = now();
         let mut gpu = if self.config.graph {
             Training::Graph(self.plan.compile_graph_training_wgpu_with_options(
