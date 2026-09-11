@@ -153,3 +153,9 @@ checks safe reuse with live views, consumers and snapshots, and retains four
 counterbalanced timing matrices. Small bursts improve in this fixture;
 middle bursts are approximately unchanged, and large Python bursts regress.
 Fewer allocations are not by themselves evidence of a universal speedup.
+
+The [shared-stage-guard follow-up](../benchmarks/results/2026-09-12-module-shared-guard/README.md)
+removes per-pointwise flag clears/copies. Four paired matrices show lower burst
+medians across the tested sizes, with two small native regressions retained.
+Browser single-call medians remain approximately unchanged. The explicit graph
+reference also changes with this patch; only eager Torch is an unchanged implementation.

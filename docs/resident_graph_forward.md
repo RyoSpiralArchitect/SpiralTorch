@@ -191,6 +191,10 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
 These are structural transfer boundaries, not hardware-counter measurements
 or a claim that this path is faster than PyTorch.
 
+The [shared-guard verification and timings](../benchmarks/results/2026-09-12-module-shared-guard/README.md)
+cover indexed stage errors, inherited empty-input guards and four paired
+native/browser matrices, including small native timing regressions.
+
 ## Timing The Connected Path
 
 `resident_graph_forward_bench` measures existing `Module::forward` with a
