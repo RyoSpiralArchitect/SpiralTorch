@@ -61,6 +61,10 @@ with `sgd_batch`. WASM exposes `await plan.compileGraphLearnerWebGpu("exact")`,
 `parameterSnapshot().readPlan()` exports an owning weight-only checkpoint.
 Call `.free()` on WASM handles when finished, including intermediate tensors.
 
+To return learned weights to the original `Module`, use the explicit
+[module handoff](resident_module_handoff.md). It checks the retained baseline,
+invalidates packed weights and rejects attached optimizer state by default.
+
 ## Update Contract
 
 - Contributions are an ordered sum of 1..=256 finite-weighted exact VJPs from

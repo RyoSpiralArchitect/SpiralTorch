@@ -5139,7 +5139,7 @@ fn with_module_ref<R>(
 }
 
 #[cfg(feature = "nn")]
-fn with_module_mut<R>(
+pub(crate) fn with_module_mut<R>(
     module: &Bound<'_, PyAny>,
     f: impl FnOnce(&mut dyn Module) -> Result<R, TensorError>,
 ) -> PyResult<R> {

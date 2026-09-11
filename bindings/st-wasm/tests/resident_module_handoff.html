@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident training to original Module handoff</title>
+<pre id="result" data-status="running">Training an exported Module on WebGPU</pre>
+<script type="module">
+import init,{InferencePlan} from "./module/spiraltorch_wasm.js";
+const element=document.querySelector("#result"), report={status:"error",cases:[]};
+const handles=new Set(), own=h=>(handles.add(h),h), release=h=>{h.free();handles.delete(h);};
+try {
+  await init();
+  const response=await fetch("/fixture.json");if(!response.ok)throw Error("missing fixture");
+  const fixture=await response.json();report.fixture=fixture;
+  if(fixture.schema!=="spiraltorch.resident_module_handoff_fixture.v1"||fixture.steps!==16)throw Error("unexpected fixture");
+  const source=own(InferencePlan.fromJson(fixture.baseline_plan));
+  for(const policy of ["exact","module_compatible"])for(const fused of [false,true]){
+    const plan=fused?own(source.fusePointwise()):source;
+    const gpu=own(await plan.compileGraphTrainingWebGpu(policy));report.adapter=gpu.adapterInfo();
+    if(report.adapter.backend!=="BrowserWebGpu"||report.adapter.device_type==="Cpu")throw Error("wrong backend");
+    gpu.uploadBatch(new Float32Array(fixture.input),new Float32Array(fixture.target));
+    const losses=[];
+    for(let i=0;i<fixture.steps;i++){
+      gpu.step(fixture.learning_rate);const loss=own(gpu.lossSnapshot());losses.push(await loss.read());release(loss);
+    }
+    gpu.step(0);const pending=own(gpu.stateSnapshot()), state=own(await pending.readState());release(pending);
+    const saved=own(state.toPlan());
+    report.cases.push({policy,fused,updates:fixture.steps,submitted_steps:Number(gpu.submittedSteps),
+      losses,trained_plan:saved.toJson(),prediction:[...state.predictionValues()]});
+    release(gpu);release(state);release(saved);if(fused)release(plan);
+  }
+  report.status="passed";
+}catch(error){report.error=String(error.stack||error);}
+finally{for(const h of [...handles].reverse())h.free();}
+element.textContent=JSON.stringify(report);element.dataset.status=report.status;
+</script>

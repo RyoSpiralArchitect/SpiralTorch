@@ -58,7 +58,7 @@ pub struct GraphParameter {
     pub values: Vec<f32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GraphStage {
     Linear {
         weight: usize,

@@ -68,7 +68,7 @@ pub enum PointwiseError {
     Layout(#[from] NdLayoutError),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PointwiseChain {
     input_count: usize,
     steps: Vec<PointwiseStep>,

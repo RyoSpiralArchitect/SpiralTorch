@@ -701,6 +701,16 @@ impl Parameter {
         *self.value_mut() = value.clone();
         Ok(())
     }
+
+    /// Commit an entirely prevalidated resident handoff, including pack invalidation.
+    pub(crate) fn commit_resident_value(&mut self, value: Tensor, reset_optimizer: bool) {
+        *self.value_mut() = value;
+        if reset_optimizer {
+            self.gradient = None;
+            self.hypergrad = None;
+            self.realgrad = None;
+        }
+    }
 }
 
 fn parameter_value_fingerprint(name: &str, value: &Tensor) -> String {
@@ -727,6 +737,19 @@ fn parameter_value_fingerprint(name: &str, value: &Tensor) -> String {
 /// High-level module trait inspired by PyTorch's `nn.Module` but expressed in
 /// pure Rust so it can be used from WebGPU, HIP, or CPU flows alike.
 pub trait Module {
+    /// Explicit parameter ownership in inference-lowering slot order. Every
+    /// parameter must appear once, with its graph role and a unique name. The
+    /// immutable/mutable visitors must expose these same actual parameters.
+    /// Opt in explicitly; inference support alone never guesses this mapping.
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        Err(crate::resident::InferenceError::UnsupportedModule(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
     /// Explicit, snapshot-based inference lowering. Unknown modules cannot
     /// silently execute on CPU inside a resident GPU plan.
     fn inference_ops(

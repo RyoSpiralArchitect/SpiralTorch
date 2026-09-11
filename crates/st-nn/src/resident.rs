@@ -13,7 +13,9 @@ use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
 mod graph;
+mod module_update;
 mod portable;
+pub use module_update::{ModuleOptimizerStatePolicy, ResidentParameterBinding};
 pub use portable::{DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, INFERENCE_PLAN_SCHEMA};
 
 /// Modules must emit operations equivalent to their ordinary forward semantics.
@@ -27,6 +29,8 @@ pub enum InferenceOp {
 
 #[derive(Debug, Error)]
 pub enum InferenceError {
+    #[error("resident module update rejected: {0}")]
+    ModuleUpdate(&'static str),
     #[error("module has no resident inference lowering: {0}")]
     UnsupportedModule(&'static str),
     #[error("inference requires a nonempty contiguous last-axis input at offset zero")]

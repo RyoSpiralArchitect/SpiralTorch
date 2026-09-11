@@ -108,6 +108,13 @@ impl Gelu {
 }
 
 impl Module for Gelu {
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        Ok(vec![])
+    }
+
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {

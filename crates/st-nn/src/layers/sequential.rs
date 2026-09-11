@@ -65,6 +65,17 @@ impl Sequential {
 }
 
 impl Module for Sequential {
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        let mut bindings = Vec::new();
+        for layer in &self.layers {
+            bindings.extend(layer.resident_parameter_bindings()?);
+        }
+        Ok(bindings)
+    }
+
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {

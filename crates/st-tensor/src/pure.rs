@@ -6487,7 +6487,7 @@ impl Tensor {
     /// Returns the transpose of the tensor.
     pub fn transpose(&self) -> Tensor {
         self.transpose_with_backend(TensorUtilBackend::Auto)
-            .expect("CPU transpose is infallible")
+            .expect("transpose requires a supported tensor layout")
     }
 
     /// Returns the transpose of the tensor with an explicit utility backend selection.
@@ -6502,7 +6502,14 @@ impl Tensor {
                 && self.cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::transpose(self.data(), self.rows, self.cols) {
+                let row_major;
+                let input = if self.layout == Layout::RowMajor {
+                    self
+                } else {
+                    row_major = self.to_layout(Layout::RowMajor)?;
+                    &row_major
+                };
+                match wgpu_dense::transpose(input.data(), self.rows, self.cols) {
                     Ok(buffer) => {
                         let output = Tensor::from_vec(self.cols, self.rows, buffer)?;
                         crate::emit_tensor_op(
@@ -6534,14 +6541,28 @@ impl Tensor {
             }
         }
 
-        let mut data = aligned_zeroed(self.len());
-        for r in 0..self.rows {
-            for c in 0..self.cols {
-                data[c * self.rows + r] = self.data[r * self.cols + c];
+        let data = if self.layout == Layout::ColMajor {
+            // Column-major A already stores row-major A^T. Tensor mutation is
+            // copy-on-write, so the source remains independent of this view.
+            self.data.clone()
+        } else {
+            let row_major;
+            let input = if self.layout == Layout::RowMajor {
+                self
+            } else {
+                row_major = self.to_layout(Layout::RowMajor)?;
+                &row_major
+            };
+            let mut data = aligned_zeroed(self.len());
+            for r in 0..self.rows {
+                for c in 0..self.cols {
+                    data[c * self.rows + r] = input.data[r * self.cols + c];
+                }
             }
-        }
+            Arc::new(TensorBuffer::from_aligned(data))
+        };
         let output = Tensor {
-            data: Arc::new(TensorBuffer::from_aligned(data)),
+            data,
             rows: self.cols,
             cols: self.rows,
             layout: Layout::RowMajor,
@@ -16440,6 +16461,78 @@ mod tests {
         let standard = unwrap_ok(lhs.matmul(&rhs_t));
         let prepacked = unwrap_ok(lhs.matmul_prepacked(&packed_t));
         assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn column_major_transpose_and_packed_transpose_preserve_logical_values() {
+        let row = unwrap_ok(Tensor::from_vec(2, 3, vec![1., 2., 3., 4., 5., 6.]));
+        let column = unwrap_ok(row.to_layout(Layout::ColMajor));
+        let mut transposed = unwrap_ok(column.transpose_with_backend(TensorUtilBackend::Cpu));
+        assert_eq!(transposed.shape(), (3, 2));
+        assert_eq!(transposed.layout(), Layout::RowMajor);
+        assert_eq!(transposed.data(), &[1., 4., 2., 5., 3., 6.]);
+        assert_eq!(transposed, row.transpose());
+        let packed = unwrap_ok(PackedB::from_tensor_transpose(&column, Tile::col_major()));
+        let x = unwrap_ok(Tensor::from_vec(2, 3, vec![1., 0., 2., 3., 1., 4.]));
+        assert_eq!(
+            unwrap_ok(x.matmul_prepacked(&packed)),
+            unwrap_ok(x.matmul(&row.transpose()))
+        );
+        transposed.data_mut()[0] = 99.;
+        assert_eq!(column.data(), &[1., 4., 2., 5., 3., 6.]);
+        assert_eq!(row.data(), &[1., 2., 3., 4., 5., 6.]);
+        assert_eq!(
+            unwrap_ok(Tensor::zeros(0, 3))
+                .to_layout(Layout::ColMajor)
+                .unwrap()
+                .transpose()
+                .shape(),
+            (3, 0)
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "wgpu_dense", not(target_arch = "wasm32")))]
+    fn column_major_transpose_uses_wgpu_without_changing_logical_values() {
+        if !run_wgpu_runtime_tests() {
+            return;
+        }
+        let (runtime, _) = st_backend_wgpu::runtime::ensure_default_runtime_blocking(
+            "tensor.column_major_transpose.test",
+        )
+        .unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        assert!(wgpu_dense::is_available());
+        let _lock = observer_lock();
+        for (rows, cols) in [(2, 3), (17, 35)] {
+            let row = Tensor::from_vec(
+                rows,
+                cols,
+                (0..rows * cols).map(|i| (i as f32 - 17.) / 8.).collect(),
+            )
+            .unwrap();
+            let expected = row.transpose_with_backend(TensorUtilBackend::Cpu).unwrap();
+            for layout in [Layout::RowMajor, Layout::ColMajor] {
+                let input = row.to_layout(layout).unwrap();
+                let events = Arc::new(Mutex::new(Vec::new()));
+                let captured = events.clone();
+                let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+                    captured
+                        .lock()
+                        .unwrap()
+                        .push((event.op_name, event.data.clone()));
+                })));
+                let result = input.transpose_with_backend(TensorUtilBackend::GpuWgpu);
+                crate::set_thread_meta_observer(previous);
+                assert_eq!(result.unwrap(), expected);
+                let events = events.lock().unwrap();
+                let (_, data) = events.iter().find(|(op, _)| *op == "transpose").unwrap();
+                assert_eq!(data["backend"], "wgpu_dense");
+                assert_eq!(data["requested_backend"], "wgpu");
+                assert_eq!(data["kernel"], "tensor_util.transpose");
+                assert!(data.get("fallback").is_none());
+            }
+        }
     }
 
     #[test]

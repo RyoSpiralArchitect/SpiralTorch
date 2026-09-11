@@ -84,6 +84,17 @@ impl Linear {
 }
 
 impl Module for Linear {
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        use crate::resident::ParameterRole;
+        Ok(vec![
+            (ParameterRole::Weight, &self.weight),
+            (ParameterRole::Bias, &self.bias),
+        ])
+    }
+
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
