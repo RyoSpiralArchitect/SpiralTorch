@@ -24,9 +24,13 @@ try {
   if(masked.length!==32||expected.size) throw Error("Missing masked-overflow guard");
   if(report.pointwise_fusion?.cases?.length!==6||report.pointwise_fusion?.guards?.length!==16)
     throw Error("Missing fused forward/VJP/rollback comparisons");
-  if(report.autograd?.cases?.length!==6||report.autograd?.guards?.length!==11||
+  if(report.autograd?.cases?.length!==6||report.autograd?.guards?.length!==12||
       report.autograd.cases.some(c=>c.replays.length!==4)||report.autograd.guards.some(g=>g.passed!==true))
     throw Error("Missing arbitrary-cotangent VJP and recovery checks");
+  const capture = report.autograd.guards.filter(g=>g.case==="queued_capture_tail_shapes_detached_guard_recovery");
+  if(capture.length!==1||capture[0].captured_vjps!==4||capture[0].observation!=="after_workspace_drop"||
+      JSON.stringify(capture[0].input_shape)!=="[2,3,257]")
+    throw Error("Missing detached VJP capture and shared-guard recovery checks");
   result.textContent = JSON.stringify(report);
   result.dataset.status = "passed";
 } catch (error) {

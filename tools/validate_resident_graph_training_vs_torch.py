@@ -245,6 +245,9 @@ def main():
                         assert len(autograd["cases"]) == 6
                         assert len(autograd["guards"]) == 12
                         assert all(g["passed"] for g in autograd["guards"])
+                        capture = [g for g in autograd["guards"] if g["case"] == "queued_capture_tail_shapes_detached_guard_recovery"]
+                        assert len(capture) == 1 and capture[0]["captured_vjps"] == 4
+                        assert capture[0]["input_shape"] == [2, 3, 257] and capture[0]["observation"] == "after_workspace_drop"
                         for case in autograd["cases"]:
                             result = replay(case, device)
                             result["input"] = str(path.resolve())
