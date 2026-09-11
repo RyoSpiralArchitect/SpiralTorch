@@ -1,0 +1,822 @@
+{
+  "schema": "spiraltorch.pointwise_clients_seed_fusion_evidence.v1",
+  "status": "passed",
+  "source": {
+    "commit": "f583e5dc60879d1c45d88f7de5cd67345f4002d9",
+    "tree": "03af7060eeefc771565f94d397abe05758478a60"
+  },
+  "adopted": "verified-c",
+  "correctness": {
+    "native": {
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "learner_cases": 12,
+      "learner_guards": 8,
+      "learning_updates": 768,
+      "retained_checkpoints": 60,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08,
+      "cases": [
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        }
+      ],
+      "composition_reuse": {
+        "case": "composition_reuse",
+        "max_abs_error": 0.0,
+        "passed": true,
+        "terms": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          17,
+          256,
+          1,
+          5
+        ],
+        "width": 257
+      },
+      "autograd_cases": 6,
+      "autograd_guards": 12,
+      "capture_reuse": {
+        "captured_vjps": 4,
+        "case": "queued_capture_tail_shapes_detached_guard_recovery",
+        "input_shape": [
+          2,
+          3,
+          257
+        ],
+        "observation": "after_workspace_drop",
+        "passed": true
+      },
+      "prior_fusion_cases": 6
+    },
+    "browser": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "learner_cases": 12,
+      "learner_guards": 8,
+      "learning_updates": 768,
+      "retained_checkpoints": 60,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08,
+      "cases": [
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        }
+      ],
+      "composition_reuse": {
+        "case": "composition_reuse",
+        "max_abs_error": 0,
+        "passed": true,
+        "terms": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          17,
+          256,
+          1,
+          5
+        ],
+        "width": 257
+      },
+      "autograd_cases": 6,
+      "autograd_guards": 12,
+      "capture_reuse": {
+        "captured_vjps": 4,
+        "case": "queued_capture_tail_shapes_detached_guard_recovery",
+        "input_shape": [
+          2,
+          3,
+          257
+        ],
+        "observation": "after_workspace_drop",
+        "passed": true
+      },
+      "prior_fusion_cases": 6
+    },
+    "torch": {
+      "version": "2.12.1",
+      "cases": 120,
+      "comparisons": 17136,
+      "max_abs": 5.7220458984375e-06,
+      "weighted_learning": {
+        "cases": 48,
+        "updates": 3072,
+        "comparisons": 5904,
+        "max_abs": 5.960464477539063e-08
+      }
+    },
+    "python_existing": {
+      "status": "passed",
+      "tests": 32,
+      "skipped": 0,
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/pointwise-clients-seed-fusion-20260912/verified-c/python-release.dylib",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "wgpu_available": true
+    },
+    "python-autograd": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "python-learner": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "wasm-learner": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2,
+      "cases": [
+        {
+          "policy": "exact",
+          "updates": 32,
+          "gain": 1.0702553610510797,
+          "resume": "bit_identical"
+        },
+        {
+          "policy": "module_compatible",
+          "updates": 32,
+          "gain": 1.4896127003921353,
+          "resume": "bit_identical"
+        }
+      ]
+    },
+    "wasm-autograd": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-fusion": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2
+    },
+    "wasm-forward": {
+      "status": "passed",
+      "assertions": 536,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 12
+    },
+    "wasm-pointwise": {
+      "status": "passed",
+      "assertions": 38,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "custom_loss_update": "passed"
+    },
+    "python-pointwise": {
+      "tests": 5,
+      "status": "passed"
+    }
+  },
+  "rounds": [
+    {
+      "name": "timing",
+      "workload": "learner",
+      "comparison": "explicit candidate seed fusion A/B",
+      "learner_seed_fusion": true,
+      "baseline": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "candidate": {
+        "commit": "f583e5dc60879d1c45d88f7de5cd67345f4002d9",
+        "tree": "03af7060eeefc771565f94d397abe05758478a60"
+      },
+      "max_abs": 1.7695128917694092e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.9145644027492765,
+          "min_ratio": 0.5732630093568123,
+          "max_ratio": 1.1585028219425213,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.705975017037071
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0620543257246395,
+          "min_ratio": 0.830315209486542,
+          "max_ratio": 1.7499741986816009,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.6520148134018786
+        },
+        "matching_final_state_fingerprints": 9
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0775363944866716,
+          "min_ratio": 0.831497083601912,
+          "max_ratio": 1.4536842105248453,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.1873130713366657,
+          "min_ratio": 0.8077617328515114,
+          "max_ratio": 1.9668202764926168,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "matching_final_state_fingerprints": 9
+      }
+    },
+    {
+      "name": "timing-b",
+      "workload": "learner",
+      "comparison": "explicit candidate seed fusion A/B",
+      "learner_seed_fusion": true,
+      "baseline": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "candidate": {
+        "commit": "f583e5dc60879d1c45d88f7de5cd67345f4002d9",
+        "tree": "03af7060eeefc771565f94d397abe05758478a60"
+      },
+      "max_abs": 1.7695128917694092e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.9709850714143639,
+          "min_ratio": 0.6944924680705008,
+          "max_ratio": 1.6827167100499427,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.6347844828919665
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.2187766700469491,
+          "min_ratio": 0.6163282624438075,
+          "max_ratio": 2.3755338281329834,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.5807135852679682
+        },
+        "matching_final_state_fingerprints": 9
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0318274466820492,
+          "min_ratio": 0.8627925746571361,
+          "max_ratio": 1.4893410852715385,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0795495842853735,
+          "min_ratio": 0.7372881355949343,
+          "max_ratio": 1.9336099585056228,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "matching_final_state_fingerprints": 9
+      }
+    },
+    {
+      "name": "control",
+      "workload": "learner",
+      "comparison": "unfused learner A/B control",
+      "learner_seed_fusion": false,
+      "baseline": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "candidate": {
+        "commit": "f583e5dc60879d1c45d88f7de5cd67345f4002d9",
+        "tree": "03af7060eeefc771565f94d397abe05758478a60"
+      },
+      "max_abs": 1.7695128917694092e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0597329519432839,
+          "min_ratio": 0.9423324994746763,
+          "max_ratio": 1.3038283359797558,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.646751119047451
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 0.9705670930265168,
+          "min_ratio": 0.7228560701291973,
+          "max_ratio": 2.014876091079082,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.6036891257817952
+        },
+        "matching_final_state_fingerprints": 9
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.9830278858210972,
+          "min_ratio": 0.868852459017484,
+          "max_ratio": 1.100636942675605,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0323010882543087,
+          "min_ratio": 0.8861047835988473,
+          "max_ratio": 1.186246418338606,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "matching_final_state_fingerprints": 9
+      }
+    }
+  ],
+  "verification": {
+    "steps": 31,
+    "frozen_products": 19
+  },
+  "scope": "Public owning PointwiseInputs and reusable PointwisePlan clients expose existing Rust fusion to Python/WASM. Shape/device checks and operation vocabulary stay in Rust. Caller-selected cubic-cotangent fusion replaces three elementwise tensor submissions with one prepared dispatch; graph and optimizer remain unchanged.",
+  "performance_scope": "End-to-end custom learner performance: GPU quadratic/quartic seeds, two exact VJPs, weighted SGD and all update acceptance receipts. Initial/final loss/state probes outside timing. The control is the same unfused learner, not ordinary MSE. Model-graph fusion is disabled in all lanes; only candidate cubic-cotangent fusion is selected in the two treatment rounds. Python boundary overhead is not timed.",
+  "boundaries": [
+    "No ModuleTrainer, generic autograd or pure::Tensor migration. No Adam, momentum, cross-forward accumulation or mixed precision.",
+    "Learning fixture uses three seed/shape pairs, not an independent crossed seed-by-shape sweep. Bounded numerical learning, not model quality.",
+    "Submitted updates are attempts; only their individual captured receipts establish acceptance.",
+    "Owned GPU work serial; host contention UNKNOWN. Prior parallel GPU VJP one-off remains UNKNOWN.",
+    "Prior ordinary MSE native timing regressions remain unresolved; this control measures the unfused custom learner, not ordinary MSE.",
+    "Native Apple M4 Metal/MPS; Chrome WebGPU does not attest an exact physical browser adapter.",
+    "Eager Torch only, not torch.compile or the fastest possible Torch. No CUDA/Furnace, push, merge or wheel release."
+  ],
+  "exploratory_failures": [
+    {
+      "path": "exploratory-admission.log",
+      "phase": "new-admission-test",
+      "cause": "New negative test passed a three-lane expectation to an existing two-lane fixture. Corrected the test, retained the initial failure and the passing rerun."
+    },
+    {
+      "path": "verified/receipt.json",
+      "phase": "client-types",
+      "cause": "Type checker assumed an opaque constructor for the intentionally public WgpuPointwiseInputs builder. Fixed the checker; the first result is not adopted."
+    },
+    {
+      "path": "verified-b/receipt.json",
+      "phase": "interrupted-python-build",
+      "cause": "Execution handle 89270 was missing and a live process search found no driver, build or test process. The incomplete receipt ended after cpu-check; a new full verification was started in verified-c without overwriting the interrupted logs."
+    }
+  ],
+  "test_counts": {
+    "contracts": 23,
+    "nn-serial": 734,
+    "backend-serial": 117,
+    "integration": 6
+  },
+  "measurement_counts": {
+    "raw_intervals": 2700,
+    "retained_intervals": 2160,
+    "nonzero_sgd_updates": 21600
+  },
+  "performance_conclusion": {
+    "status": "mixed_no_universal_speedup",
+    "native": "Immediate-cadence aggregate ratios are below one in both treatment rounds. Deferred aggregates improve, but individual conditions regress substantially.",
+    "browser": "Both treatment rounds improve in aggregate for both cadences, but individual conditions regress; this is not uniform improvement.",
+    "control": "The unfused learner A/B control also varies. It uses different source-bound products, not identical-product A/A, and is not a scalar correction to the treatment.",
+    "torch": "Eager Torch has lower aggregate elapsed time in every native round/cadence. Its completion synchronization does not supply equivalent Rust finite-check or rollback receipts.",
+    "decision": "Keep fusion explicit. No automatic routing change, latency-regression-free claim, Python-call timing claim, or isolated-kernel causal attribution follows from this set."
+  },
+  "external_python_loader": {
+    "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+    "sha256": "b1997314bfd3cc08014549d99eae1836e01a9e50e7aa337509c3dba4e386b4c6",
+    "boundary": "Loader archived at collection time; tests assert the loaded extension is the frozen product, not an installed wheel."
+  },
+  "artifacts": 147,
+  "compressed_bytes": 39391824,
+  "raw_bytes": 606821015
+}
