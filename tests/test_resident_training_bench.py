@@ -15,6 +15,31 @@ spec.loader.exec_module(validation)
 
 
 class Admission(unittest.TestCase):
+    def test_learner_requires_actual_receipts_not_loss_or_torch_surrogates(self):
+        value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
+                   accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],
+                   initial_loss=.2,final_loss=.1,elapsed_ms=1.)
+        bench.validate_sample(value,"deferred",8,learner=True,lane="candidate")
+        for key,invalid in (("learner",False),("accepted_updates",list(range(1,9))),
+                            ("completed_updates",7),("acceptance","synchronized_only"),
+                            ("final_loss",float("nan")),("losses",[.1]*8)):
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                bench.validate_sample(dict(value,**{key:invalid}),"deferred",8,learner=True,lane="candidate")
+        with self.assertRaises(ValueError):bench.validate_sample(value,"deferred",8,learner=True,lane="torch")
+        with self.assertRaises(ValueError):bench.validate_sample(value,"deferred",8)
+        torch=dict(value,acceptance="synchronized_only");del torch["accepted_updates"]
+        bench.validate_sample(torch,"deferred",8,learner=True,lane="torch")
+        with self.assertRaises(ValueError):bench.validate_sample(torch,"deferred",8,learner=True,lane="baseline")
+
+    def test_learner_oracle_checks_both_vjps_and_all_updated_weights(self):
+        value=dict(loss=.1,prediction=[.2],input_gradients=[[.1],[.3]],
+                   raw_gradients=[[[.1],[.2]],[[.3],[.4]]],parameters=[[.5],[.6]])
+        self.assertEqual(bench.learner_reference.compare(value,value),0.)
+        for key,replacement in (("input_gradients",[[.1]]),("raw_gradients",[[[.1],[.2]],[[.3],[100.]]]),
+                                ("parameters",[[float("nan")],[.6]])):
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                bench.learner_reference.compare(dict(value,**{key:replacement}),value)
+
     def test_fusion_equivalence_rejects_residual_rebinding_or_changed_math(self):
         source = dict(schema="spiraltorch.nn.inference_plan.v2", input_shape=[2, 1],
             parameters=[dict(role="gain", shape=[1], values=[2.])], stages=[

@@ -37,7 +37,7 @@ def manifest_binding(manifest, source):
     return binding
 
 
-def summarize_case(row, config, lanes):
+def summarize_case(row, config, lanes, *, learner=False):
     require(row["config"] == config and row["fixture"]["config"] == config, "recipe differs")
     samples = row["samples"]
     require(len(samples) == 20, "expected two warmups and eight retained blocks per cadence")
@@ -58,7 +58,7 @@ def summarize_case(row, config, lanes):
             statistics_by_lane[lane] = dict(median_ms=statistics.median(values), min_ms=min(values),
                                              max_ms=max(values), retained=len(values))
             capture = row["captures"][cadence + "_" + lane]
-            bench.validate_sample(capture, cadence, config["steps"])
+            bench.validate_sample(capture, cadence, config["steps"], learner=learner, lane=lane)
             bench.close_values(capture["losses"], capture["losses"])
             require(positive(capture["initial_loss"]), "invalid initial loss")
             if lane != "torch":
@@ -120,9 +120,10 @@ def run(args, result):
                 "expected complete successful reports")
     require(not browser["page_errors"], "browser page errors")
     workload = native.get("workload", "dense")
-    require(workload in ("dense", "graph") and browser.get("workload", "dense") == workload,
+    require(workload in ("dense", "graph", "learner") and browser.get("workload", "dense") == workload,
             "workload differs")
-    graph = workload == "graph"
+    learner = workload == "learner"
+    graph = workload in ("graph", "learner")
     result["workload"] = workload
     matrix = native.get("matrix", "standard")
     require(browser.get("matrix", "standard") == matrix, "workload matrix differs")
@@ -145,8 +146,8 @@ def run(args, result):
     result["device_admission"] = native["device_admission"]
     result["torch"] = dict(version=native["torch"], device=native["torch_device"])
     for config, n, b in zip(configs, native["cases"], browser["cases"]):
-        row = dict(config=config, native=summarize_case(n, config, ("baseline", "candidate", "torch")),
-                   browser=summarize_case(b, config, ("baseline", "candidate")), max_abs_errors={})
+        row = dict(config=config, native=summarize_case(n, config, ("baseline", "candidate", "torch"), learner=learner),
+                   browser=summarize_case(b, config, ("baseline", "candidate"), learner=learner), max_abs_errors={})
         result["cases"].append(row)
         for key in ("config", "plan_json", "input", "target", "learning_rate", "kernel", "accumulation"):
             require(n["fixture"][key] == b["fixture"][key], "native/browser fixture differs: " + key)
@@ -165,7 +166,8 @@ def run(args, result):
         for origin, value in (("native", n), ("browser", b)):
             for key, capture in value["captures"].items():
                 bench.close_values(capture["losses"], fixed["losses"])
-                error = (bench.graph_reference.compare(capture["state"], fixed["state"]) if graph else
+                error = (bench.learner_reference.compare(capture["state"], fixed["state"]) if learner else
+                         bench.graph_reference.compare(capture["state"], fixed["state"]) if graph else
                          max(reference.compare(capture["state"], fixed["state"]).values()))
                 row["max_abs_errors"][origin + "_" + key] = error
         row["losses"] = fixed["losses"]

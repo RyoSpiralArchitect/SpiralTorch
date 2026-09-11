@@ -55,5 +55,14 @@ mod browser {
                 .map(|v| v.to_string())
                 .map_err(|e| JsValue::from_str(&e.to_string()))
         }
+        pub async fn learn(&self, cadence: String, capture: bool) -> Result<String, JsValue> {
+            let cadence =
+                serde_json::from_str(&cadence).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            self.inner
+                .learn(cadence, capture, now)
+                .await
+                .map(|v| v.to_string())
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
     }
 }

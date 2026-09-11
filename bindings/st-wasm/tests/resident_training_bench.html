@@ -7,13 +7,15 @@
 import initA, {TrainingBenchmark as A} from "/baseline/spiraltorch_wasm.js";
 import initB, {TrainingBenchmark as B} from "/candidate/spiraltorch_wasm.js";
 const element=document.querySelector("#result");
-const graph=new URL(location.href).searchParams.get("workload")==="graph";
+const workload=new URL(location.href).searchParams.get("workload")??"dense";
+const learner=workload==="learner", graph=workload==="graph"||learner;
 const matrix=new URL(location.href).searchParams.get("matrix")??"standard";
 const optimization=new URL(location.href).searchParams.get("optimization")??"none";
 const fusion=optimization==="fuse-pointwise";
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
-  workload:graph?"graph":"dense",matrix,pointwise_fusion:fusion,
+  workload,matrix,pointwise_fusion:fusion,
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
+if(learner)report.boundary="paired rotating Rust weighted-learning workloads; quadratic/quartic cotangents and exact VJPs; all update receipts read; no timed loss observations; 2 warmups+8 samples; no cross-framework timing ratio";
 async function progress(value) {
   element.textContent=JSON.stringify(value);
   await globalThis.recordTrainingProgress(value);
@@ -23,6 +25,7 @@ function close(a,b) {
   require(a.length===b.length,"length differs");
   let maximum=0;
   a.forEach((x,i)=>{
+    if(learner&&Array.isArray(x)){maximum=Math.max(maximum,close(x,b[i]));return;}
     require(Number.isFinite(x)&&Number.isFinite(b[i])&&Math.abs(x-b[i])<=1e-5+1e-4*Math.abs(b[i]),"numeric state differs");
     maximum=Math.max(maximum,Math.abs(x-b[i]));
   });
@@ -30,6 +33,10 @@ function close(a,b) {
 }
 function compare(a,b) {
   let maximum=close([a.loss],[b.loss]);
+  if(learner){
+    for(const key of ["prediction","input_gradients","parameters","raw_gradients"])maximum=Math.max(maximum,close(a[key],b[key]));
+    return maximum;
+  }
   for(const key of ["prediction","input_gradient"]) maximum=Math.max(maximum,close(a[key],b[key]));
   if(graph) {
     for(const key of ["parameters","raw_gradients","effective_gradients"]) {
@@ -46,7 +53,7 @@ function compare(a,b) {
 }
 try {
   require(["standard","wide"].includes(matrix)&&(matrix!=="wide"||graph),"invalid workload matrix");
-  require(["none","fuse-pointwise"].includes(optimization)&&(!fusion||graph),"invalid optimization");
+  require(["none","fuse-pointwise"].includes(optimization)&&(!fusion||(graph&&!learner)),"invalid optimization");
   await progress({stage:"initialize_modules"});
   await initA(); await initB();
   const adapter=await navigator.gpu.requestAdapter();
@@ -86,9 +93,13 @@ try {
           row.samples.push(sample);
           for(const lane of order) {
             await progress({stage:"sample_started",config,cadence,block,lane});
-            const value=JSON.parse(await workers[lane].sample(JSON.stringify(cadence),!captures[lane]));
-            require(value.status==="passed"&&value.steps===8&&value.cadence===cadence&&value.losses.length===8&&
+            const value=JSON.parse(await workers[lane][learner?"learn":"sample"](JSON.stringify(cadence),!captures[lane]));
+            require(value.status==="passed"&&value.steps===8&&value.cadence===cadence&&value.losses.length===(learner?0:8)&&
               Number.isFinite(value.elapsed_ms)&&value.elapsed_ms>0,"sample identity/timing differs");
+            require((value.learner??false)===learner,"wrong learner workload");
+            if(learner)require(value.completed_updates===8&&value.acceptance==="guarded_receipts"&&
+              JSON.stringify(value.accepted_updates)==="[2,3,4,5,6,7,8,9]"&&
+              Number.isFinite(value.initial_loss)&&Number.isFinite(value.final_loss),"missing update acceptance");
             row.fingerprints[lane]??=value.state_sha256;
             require(row.fingerprints[lane]===value.state_sha256,"reset trajectory is nondeterministic");
             captures[lane]??=value;

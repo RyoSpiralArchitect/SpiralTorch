@@ -48,7 +48,7 @@ def match_fused_fixture(source, candidate):
     require_fusion_equivalent(source["plan_json"], candidate["plan_json"])
 
 
-def compare(actual, expected):
+def compare(actual, expected, fields=("prediction", "input_gradient", "parameters", "raw_gradients", "effective_gradients")):
     maximum = 0.0
 
     def check(a, b):
@@ -65,7 +65,7 @@ def compare(actual, expected):
                 maximum = max(maximum, abs(x-y))
 
     check([actual["loss"]], [expected["loss"]])
-    for key in ("prediction", "input_gradient", "parameters", "raw_gradients", "effective_gradients"):
+    for key in fields:
         check(actual[key], expected[key])
     return maximum
 

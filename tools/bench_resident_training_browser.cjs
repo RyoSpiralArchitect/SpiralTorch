@@ -5,10 +5,10 @@ const {chromium}=require("playwright");
 function digest(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
 async function main() {
   const [baseline,candidate,chrome,output,workload="dense",matrix="standard",optimization="none"]=process.argv.slice(2);
-  if(!baseline||!candidate||!chrome||!output||!["dense","graph"].includes(workload)||
-     !["standard","wide"].includes(matrix)||(matrix==="wide"&&workload!=="graph")||
+  if(!baseline||!candidate||!chrome||!output||!["dense","graph","learner"].includes(workload)||
+     !["standard","wide"].includes(matrix)||(matrix==="wide"&&workload==="dense")||
      !["none","fuse-pointwise"].includes(optimization)||(optimization!=="none"&&workload!=="graph"))
-    throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph] [standard|wide] [none|fuse-pointwise (graph only)]");
+    throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph|learner] [standard|wide] [none|fuse-pointwise (graph only)]");
   const fd=fs.openSync(output,"wx");
   let server,browser,page,progressFd,casesFd,report={status:"error"},metadata={},errors=[],consoleMessages=[];
   const cases=[];

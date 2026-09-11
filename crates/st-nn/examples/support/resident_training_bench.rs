@@ -20,6 +20,8 @@ use st_tensor::{NdLayout, Tensor};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[path = "resident_learner_bench.rs"]
+mod learner;
 #[path = "resident_training_profile.rs"]
 mod profile;
 

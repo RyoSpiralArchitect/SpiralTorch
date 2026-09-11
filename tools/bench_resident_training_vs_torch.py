@@ -22,6 +22,7 @@ import bench_rank_vs_torch as audit
 from bench_resident_nn_vs_torch import admit_device, match_adapter
 import validate_resident_training_vs_torch as reference
 import resident_graph_bench_reference as graph_reference
+import resident_learner_bench_reference as learner_reference
 
 
 def recipes(graph=False, matrix="standard"):
@@ -125,17 +126,33 @@ def torch_sample(torch, fixture, device, cadence, synchronize):
                 losses=losses,initial_loss=initial["loss"],state=state)
 
 
-def validate_sample(value, cadence, steps):
+def validate_sample(value, cadence, steps, *, learner=False, lane=None):
     if (value.get("status") != "passed" or value.get("cadence") != cadence or value.get("steps") != steps or
-            len(value.get("losses", [])) != steps or type(value.get("elapsed_ms")) not in (int, float) or
+            len(value.get("losses", [])) != (0 if learner else steps) or type(value.get("elapsed_ms")) not in (int, float) or
             not math.isfinite(value["elapsed_ms"]) or value["elapsed_ms"] <= 0):
         raise ValueError("sample contract differs")
+    if value.get("learner", False) is not learner:
+        raise ValueError("wrong learning workload")
+    if learner:
+        if value.get("losses") != [] or type(value.get("completed_updates")) is not int or value["completed_updates"] != steps:
+            raise ValueError("missing completed learner updates")
+        for key in ("initial_loss", "final_loss"):
+            if type(value.get(key)) not in (int,float) or not math.isfinite(value[key]) or value[key] < 0:
+                raise ValueError("invalid learner objective")
+        if lane == "torch":
+            if value.get("acceptance") != "synchronized_only" or "accepted_updates" in value:
+                raise ValueError("Torch cannot claim Rust guard receipts")
+        elif (value.get("acceptance") != "guarded_receipts" or
+              value.get("accepted_updates") != list(range(2,steps+2)) or
+              any(type(v) is not int for v in value["accepted_updates"])):
+            raise ValueError("missing ordered update receipts")
 
 
 def run(args, result, baseline_stderr, candidate_stderr):
     graph = getattr(args, "graph", False)
-    compare = graph_reference.compare if graph else reference.compare
-    sample_torch = graph_reference.torch_sample if graph else torch_sample
+    learner = getattr(args, "learner", False)
+    compare = learner_reference.compare if learner else (graph_reference.compare if graph else reference.compare)
+    sample_torch = learner_reference.torch_sample if learner else (graph_reference.torch_sample if graph else torch_sample)
     result["device_admission"] = admit_device(args.device)
     before = audit.source_identity()
     if before["tracked_dirty"] or audit.git_bytes("ls-files", "--others", "--exclude-standard"):
@@ -184,10 +201,10 @@ def run(args, result, baseline_stderr, candidate_stderr):
                         if lane == "torch":
                             value=sample_torch(torch,fixture,args.device,cadence,synchronize)
                         else:
-                            value=workers[lane].request(dict(op="sample",cadence=cadence,capture=lane not in captured))
+                            value=workers[lane].request(dict(op="learn" if learner else "sample",cadence=cadence,capture=lane not in captured))
                             fingerprint=row["fingerprints"].setdefault(lane,value["state_sha256"])
                             if value["state_sha256"] != fingerprint: raise ValueError("native state changed across identical reset trajectories")
-                        validate_sample(value,cadence,config["steps"])
+                        validate_sample(value,cadence,config["steps"],learner=learner,lane=lane)
                         if lane not in captured: captured[lane]=value
                         if lane == "torch": compare(value["state"],captured[lane]["state"])
                         close_values(value["losses"],captured[lane]["losses"])
@@ -218,6 +235,7 @@ def main():
         parser.add_argument("--"+label+"-source",required=True)
     parser.add_argument("--device",choices=("mps","cuda"),required=True)
     parser.add_argument("--graph",action="store_true",help="v2 Linear/GELU/gain/ReLU graph, exact gradients")
+    parser.add_argument("--learner",action="store_true",help="custom quadratic/quartic VJPs and weighted SGD; update receipts, not per-step loss reads")
     parser.add_argument("--fuse-pointwise",action="store_true",help="opt in to candidate graph fusion; preserve and structurally compare both plans")
     parser.add_argument("--matrix",choices=("standard","wide"),default="standard",
                         help="wide: graph-only 64/128/256 feature widths, same eight SGD updates")
@@ -227,13 +245,18 @@ def main():
         parser.error("--matrix wide requires --graph")
     if args.fuse_pointwise and not args.graph:
         parser.error("--fuse-pointwise requires --graph")
+    if args.learner and (not args.graph or args.fuse_pointwise):
+        parser.error("--learner requires --graph and disallows changing fusion between lanes")
     result=dict(schema="spiraltorch.resident_training_comparison.v1",status="error",cases=[],
-        workload="graph" if args.graph else "dense",
+        workload="learner" if args.learner else ("graph" if args.graph else "dense"),
         matrix=args.matrix,
         pointwise_fusion=args.fuse_pointwise,
         boundary="rotating native A/B and eager torch; f32 tanh-GELU mean-MSE plain SGD; device-persistent batch/weights; 8 updates, all losses read; 2 warmups+8 retained samples per cadence; reset/probes excluded; no fastest-PyTorch/quality claim",
         safety_difference="Rust validates every intermediate and commits parameters transactionally; eager torch has no matching per-stage finite/rollback checks for these fixed finite fixtures",
         readback_difference="Immediate reads each step; deferred Rust reads owning snapshots after enqueue, while torch stacks retained losses for one final host copy")
+    if args.learner:
+        result.update(boundary="rotating native A/B and eager Torch; two custom GPU cotangents, exact VJPs and weighted SGD; eight nonzero-rate updates; all Rust acceptance receipts read; reset/probes and terminal state excluded; two warmups+eight retained blocks",
+            readback_difference="Rust reads every owning update receipt; Torch only synchronizes completion, per step or at the end. No timed loss observations or equivalent Torch guard/rollback claim.")
     with args.output.open("x") as output, args.output.with_suffix(".baseline.stderr").open("xb") as baseline_stderr, args.output.with_suffix(".candidate.stderr").open("xb") as candidate_stderr:
         try:
             run(args,result,baseline_stderr,candidate_stderr)
