@@ -49,16 +49,13 @@ impl GuardCapture {
         Self { layout, pipeline }
     }
 
-    /// Both buffers belong to this graph's device; upstream stages have all
-    /// finished. A fresh private destination is written exactly once.
-    pub(crate) fn encode(
+    pub(crate) fn bind(
         &self,
         gpu: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
         upstream: &wgpu::Buffer,
         destination: &wgpu::Buffer,
-    ) {
-        let binding = gpu.create_bind_group(&wgpu::BindGroupDescriptor {
+    ) -> wgpu::BindGroup {
+        gpu.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("graph.guard_capture"),
             layout: &self.layout,
             entries: &[
@@ -71,13 +68,18 @@ impl GuardCapture {
                     resource: destination.as_entire_binding(),
                 },
             ],
-        });
+        })
+    }
+
+    /// Upstream stages have finished; this output version is not externally
+    /// visible yet. atomicStore overwrites a recycled destination's entire guard.
+    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, binding: &wgpu::BindGroup) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("graph.guard_capture.pass"),
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &binding, &[]);
+        pass.set_bind_group(0, binding, &[]);
         pass.dispatch_workgroups(1, 1, 1);
     }
 }

@@ -406,6 +406,15 @@ impl ResidentTensor {
         Shared::ptr_eq(&self.storage, &other.storage)
     }
 
+    /// Private recycling gate. No other tensor/view (or weak storage owner) can
+    /// resurrect this version. Prepared operations must retain their input
+    /// tensors until submission; already submitted reads precede reuse on the
+    /// same queue. GPU flags are rewritten together with values, never separately.
+    pub(crate) fn exclusively_owned(&mut self) -> bool {
+        Shared::get_mut(&mut self.storage)
+            .is_some_and(|storage| Shared::get_mut(&mut storage.flags).is_some())
+    }
+
     fn view(&self, layout: NdLayout) -> Result<Self, TensorError> {
         validate_view(
             &layout,

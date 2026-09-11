@@ -96,6 +96,34 @@ try{
   failed=false;try{await read(masked);}catch(e){failed=/non-finite/.test(String(e));}
   check(failed,"direct guard was erased by later valid output");
   report.direct_io_guards=true;
+  const pooled=keep(await directPlan.compileGraphWebGpu()),versions=[];
+  for(let i=0;i<12;i++){
+    const input=keep(d.upload([2,1],f32([i+1,i+1]))),output=keep(pooled.forwardTensor(input));free(input);
+    check(versions.every(old=>!output.sharesStorageWith(old)),"live output storage was reused");
+    versions.push(output);
+  }
+  const oldView=keep(versions[0].narrow(0,0,1)),oldRead=keep(versions[1].snapshot());
+  const bound=keep(new st.WgpuPointwiseInputs());bound.add(versions[0]);
+  const boundPlan=keep(bound.compile('[["identity",null]]'));
+  const consumer=keep(await directPlan.compileGraphWebGpu());consumer.setInputTensor(versions[2]);
+  for(let i=0;i<versions.length;i++){close(await read(versions[i]),[2*(i+1),2*(i+1)]);free(versions[i]);}
+  for(let i=0;i<20;i++){
+    const input=keep(d.upload([2,1],f32([i+20,i+20]))),output=keep(pooled.forwardTensor(input));
+    if(i===19)close(await read(output),[78.,78.]);free(input);free(output);
+  }
+  free(pooled);close(await read(oldView),[2.]);close(await oldRead.readValues(),[4.,4.]);free(oldRead);
+  close(await read(keep(boundPlan.run(bound,"fused"))),[2.,2.]);
+  consumer.dispatch();close(await read(keep(consumer.outputTensor())),[12.,12.]);
+  const explosive=keep(new st.Sequential());explosive.addScaler("huge",f32([3.4028234663852886e38]));explosive.addRelu();
+  const badPlan=keep(explosive.inferencePlan([1])),badGraph=keep(await badPlan.compileGraphWebGpu());
+  const negative=keep(d.upload([1],f32([-2.]))),badOutput=keep(badGraph.forwardTensor(negative));
+  const oldError=keep(badOutput.snapshot());free(badOutput);
+  const safe=keep(d.upload([1],f32([0.])));
+  for(let i=0;i<20;i++)free(keep(badGraph.forwardTensor(safe)));
+  close(await read(keep(badGraph.outputTensor())),[0.]);free(badGraph);
+  failed=false;try{await oldError.readValues();}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"recycling overwrote a pending invalid snapshot");free(oldError);
+  report.output_reuse_guards=true;
   report.status="passed";
 }catch(e){report.error=String(e.stack||e);}
 finally{for(const v of owned)v.free();}

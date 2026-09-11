@@ -16,6 +16,9 @@ use st_kernel_contracts::{
 };
 use thiserror::Error;
 
+mod direct;
+use direct::OutputSlot;
+
 #[derive(Debug, Error)]
 pub enum GraphInferenceError {
     #[error(transparent)]
@@ -75,6 +78,10 @@ pub struct ResidentGraph {
     input_direct: bool,
     resident_output: Option<ResidentTensor>,
     guard_capture: Option<GuardCapture>,
+    output_slots: Vec<OutputSlot>,
+    input_binding: Option<BoundaryBinding>,
+    #[cfg(test)]
+    direct_stats: direct::DirectStats,
     // Retire device resources before their owning runtime.
     device: TensorDevice,
 }
@@ -237,6 +244,10 @@ impl ResidentGraph {
             input_direct: false,
             resident_output: None,
             guard_capture: None,
+            output_slots: Vec::new(),
+            input_binding: None,
+            #[cfg(test)]
+            direct_stats: Default::default(),
             device,
         })
     }
@@ -289,6 +300,7 @@ impl ResidentGraph {
         self.generation = generation;
         self.output_generation = None;
         self.input_source = None;
+        self.input_binding = None;
         self.input_direct = false;
         self.resident_output = None;
         Ok(())
@@ -319,69 +331,10 @@ impl ResidentGraph {
         self.generation = generation;
         self.output_generation = None;
         self.input_source = Some(input);
+        self.input_binding = None;
         self.input_direct = false;
         self.resident_output = None;
         Ok(())
-    }
-
-    /// Read resident input directly and write the last stage into a fresh owning
-    /// tensor. Views are packed only when required, within the same submission.
-    /// No full-sized input/output bridge copies occur for packed offset-zero input.
-    /// The returned tensor is immutable, including after later workspace reuse.
-    pub fn forward_tensor(
-        &mut self,
-        input: &ResidentTensor,
-    ) -> Result<ResidentTensor, GraphInferenceError> {
-        input.require_context(self.device.runtime().context())?;
-        if input.layout().shape() != self.input_layout().shape() {
-            return Err(GraphInferenceError::InputShape);
-        }
-        let generation = self
-            .generation
-            .checked_add(1)
-            .ok_or(GraphInferenceError::CounterOverflow)?;
-        let dispatch = self
-            .submitted_dispatches
-            .checked_add(1)
-            .ok_or(GraphInferenceError::CounterOverflow)?;
-        let context = self.device.runtime().context();
-        let gpu = context.device();
-        let mut encoder = gpu.create_command_encoder(&Default::default());
-        let packed = input.contiguous_into(&mut encoder)?;
-        let output = self.device.allocate_output(self.output_layout())?;
-        let last = self.nodes.len() - 1;
-        let first = self.bind_boundary(
-            0,
-            packed.values(),
-            if last == 0 {
-                output.values()
-            } else {
-                &self.activations[1]
-            },
-        );
-        let final_binding = if last == 0 {
-            None
-        } else {
-            Some(self.bind_boundary(last, &self.activations[last], output.values()))
-        };
-        self.encode_graph(
-            &mut encoder,
-            Some(&packed),
-            Some(&first),
-            final_binding.as_ref(),
-        );
-        let guard = self
-            .guard_capture
-            .get_or_insert_with(|| GuardCapture::new(gpu));
-        guard.encode(gpu, &mut encoder, &self.validation, output.flags());
-        context.queue().submit(Some(encoder.finish()));
-        self.generation = generation;
-        self.submitted_dispatches = dispatch;
-        self.output_generation = Some(generation);
-        self.input_source = Some(packed);
-        self.input_direct = true;
-        self.resident_output = Some(output.clone());
-        Ok(output)
     }
 
     fn bind_boundary(

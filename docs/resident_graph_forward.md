@@ -121,7 +121,9 @@ nonempty last-axis inputs.
 
 `forward_tensor` / `forwardTensor` advances the input generation and dispatch
 counter together. Packed offset-zero inputs are read directly and the last stage
-writes a fresh owning output. View packing (when required), graph evaluation and
+writes an owning output version. Fully unobserved storage and its final/guard
+bindings may be recycled within a four-slot / 32 MiB retained-output budget.
+Live tensors, views and bound consumers prevent recycling. View packing, graph evaluation and
 error-guard capture use one submission, with no intermediate host observation.
 The older `set_input_tensor` / `dispatch` / `output_tensor` sequence remains
 available. It can be interleaved with direct calls; all returned tensors and

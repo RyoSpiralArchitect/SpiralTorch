@@ -91,12 +91,23 @@ optimizer-state resume.
   includes externally shared DLPack writes; pointer identity is not sufficient.
   Comparison is O(parameter values) CPU work, not an unmeasured zero-cost claim.
 - Cached graph forwards bind contiguous, offset-zero inputs directly and write
-  the final stage directly into a fresh owning output. There are no full-sized
+  the final stage directly into an owning output version. There are no full-sized
   input/output bridge copies on that path. Strided/offset views are packed only
   when needed. Packing, NN dispatches and the owning error guard share one queue
   submission; observing a snapshot is explicitly separate.
-- Output allocation, boundary bind groups, small stage-flag copies and the final
-  guard pass remain. This is not allocation-free execution. Legacy explicit
+- Each graph retains at most four output slots and 32 MiB of output values/flags.
+  A slot is reusable only when no other tensor/view or weak storage owner exists.
+  Held outputs, bound consumers and the current graph state prevent recycling.
+  Saturated or oversized outputs allocate separately, without waiting or fallback.
+  The budget covers retained output data, not all model/scratch/binding memory.
+- Each retained output keeps its final-stage and guard bindings. Multi-stage
+  graphs also reuse the first-stage binding for the same packed input storage;
+  successful host upload/set-input invalidates that key. Single-stage or changed
+  input boundaries still rebind. Clearing the Module cache drops the pool without
+  invalidating externally held outputs.
+- Packing, new/uncacheable output allocation, command encoding, small stage-flag
+  copies and the final guard pass remain. This is not globally allocation-free
+  execution. Legacy explicit
   `set_input_tensor` / `dispatch` / `output_tensor` APIs retain their semantics;
   switching from direct forwarding back to `dispatch` copies the current input
   into stable workspace storage once.

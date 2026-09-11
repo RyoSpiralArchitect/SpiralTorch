@@ -5,7 +5,7 @@ use st_kernel_contracts::{
     pointwise::{PointwiseChain, PointwiseStep},
 };
 
-fn runtime() -> Option<WgpuRuntime> {
+pub(super) fn runtime() -> Option<WgpuRuntime> {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
         return None;
     }
@@ -21,7 +21,7 @@ fn pointwise() -> GraphStage {
     }
 }
 
-fn definition(kinds: &str, gelu: bool) -> GraphDefinition {
+pub(super) fn definition(kinds: &str, gelu: bool) -> GraphDefinition {
     let mut stages = Vec::new();
     let mut parameters = Vec::new();
     let mut width = 3;
@@ -59,7 +59,7 @@ fn definition(kinds: &str, gelu: bool) -> GraphDefinition {
     .unwrap()
 }
 
-fn graph(runtime: &WgpuRuntime, definition: GraphDefinition) -> ResidentGraph {
+pub(super) fn graph(runtime: &WgpuRuntime, definition: GraphDefinition) -> ResidentGraph {
     ResidentGraph::new(
         runtime.clone(),
         definition,
@@ -70,7 +70,7 @@ fn graph(runtime: &WgpuRuntime, definition: GraphDefinition) -> ResidentGraph {
     .unwrap()
 }
 
-fn read(tensor: &ResidentTensor) -> Vec<f32> {
+pub(super) fn read(tensor: &ResidentTensor) -> Vec<f32> {
     tensor.snapshot().unwrap().read().unwrap()
 }
 

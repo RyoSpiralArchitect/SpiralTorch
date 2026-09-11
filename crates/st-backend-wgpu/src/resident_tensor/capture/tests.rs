@@ -65,7 +65,13 @@ fn packed_captures_own_values_and_whole_guards_on_real_gpu() {
         queue.submit(Some(encoder.finish()));
         result
     };
-    let original = capture();
+    let mut original = capture();
+    assert!(
+        original
+            .iter_mut()
+            .all(|tensor| !tensor.exclusively_owned()),
+        "independent values still share one guard, so they cannot be recycled independently"
+    );
     queue.write_buffer(&guards, 16, bytemuck::cast_slice(&[1u32]));
     let inherited = capture();
     queue.write_buffer(&guards, 16, bytemuck::cast_slice(&[0u32]));
@@ -88,13 +94,16 @@ fn packed_captures_own_values_and_whole_guards_on_real_gpu() {
     drop(scalar);
     drop(empty);
     drop(guards);
-    for result in [original, recovered] {
+    for mut result in [original, recovered] {
         assert_eq!(
             result[0].snapshot().unwrap().read().unwrap()[0].to_bits(),
             (-0f32).to_bits()
         );
         assert_eq!(result[1].snapshot().unwrap().read().unwrap(), expected);
         assert!(result[2].snapshot().unwrap().read().unwrap().is_empty());
+        let mut singleton = result.remove(0);
+        drop(result);
+        assert!(singleton.exclusively_owned());
     }
     for result in [inherited, invalid] {
         for tensor in result {

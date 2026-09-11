@@ -1,5 +1,6 @@
 """One original NN model, explicit host/resident inputs, no hidden transfers."""
 import ast
+import gc
 import json
 import os
 from pathlib import Path
@@ -55,6 +56,34 @@ class Gpu(unittest.TestCase):
         values = gpu.snapshot().read_values()
         self.assertEqual(len(values), len(host))
         for a, b in zip(values, host): self.assertAlmostEqual(a, b, delta=2e-5)
+
+    def test_live_versions_views_and_bound_consumers_survive_output_reuse(self):
+        net = st.nn.Sequential()
+        net.add(st.nn.Scaler.from_gain("gain",st.Tensor(1,1,[2.])))
+        net.add(st.nn.Relu())
+        outputs = [net(self.d.upload([2,1],[float(i+1)]*2)) for i in range(12)]
+        for i,output in enumerate(outputs):
+            self.assertEqual(output.snapshot().read_values(),[2.*(i+1)]*2)
+            self.assertTrue(all(not output.shares_storage_with(other) for other in outputs[:i]))
+        view = outputs[0].narrow(0,0,1)
+        inputs = st.WgpuPointwiseInputs();inputs.add(outputs[0])
+        pointwise = inputs.compile([("identity",None)])
+        snapshot = outputs[1].snapshot()
+        consumer = net.inference_plan([2,1]).compile_graph_wgpu()
+        consumer.set_input_tensor(outputs[2])
+        del outputs,output
+        gc.collect()
+        for i in range(20):
+            latest = net(self.d.upload([2,1],[float(i+20)]*2))
+        self.assertEqual(net.resident_cache_info(),dict(compilations=1,cache_hits=31,submitted_forwards=32))
+        net.clear_resident_cache();del net
+        gc.collect()
+        self.assertEqual(latest.snapshot().read_values(),[78.,78.])
+        self.assertEqual(view.snapshot().read_values(),[2.])
+        self.assertEqual(snapshot.read_values(),[4.,4.])
+        self.assertEqual(pointwise.run(inputs).snapshot().read_values(),[2.,2.])
+        consumer.dispatch()
+        self.assertEqual(consumer.snapshot().read_values(),[12.,12.])
 
     def test_twenty_ordinary_calls_chain_nd_views_and_own_outputs(self):
         net = model()
