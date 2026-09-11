@@ -89,7 +89,7 @@ optimizer-state resume.
   parameter-bit changes rebuild it. Identical values reuse it.
 - Mutable/foreign parameters are compared by bits on every call. This deliberately
   includes externally shared DLPack writes; pointer identity is not sufficient.
-  Exact byte-slice comparison preserves raw bits without building temporary
+  Per-element bit comparison preserves raw bits without building temporary
   bit arrays, but is still O(parameter values) CPU work, not a zero-cost claim. Signed
   zero, shape and layout differences still invalidate the cache; Linear's finite
   parameter validation remains enabled.
@@ -170,8 +170,13 @@ medians across the tested sizes, with two small native regressions retained.
 Browser single-call medians remain approximately unchanged. The explicit graph
 reference also changes with this patch; only eager Torch is an unchanged implementation.
 
-The [descriptor-assembly follow-up](../benchmarks/results/2026-09-12-module-descriptor-assembly/README.md)
+The [combined preparation experiment](../benchmarks/results/2026-09-12-module-descriptor-assembly/README.md)
 verifies fewer CPU allocations and exact parameter-bit checks, but does not
 establish a speed improvement: middle browser bursts and large native bursts
-regress across the retained four-matrix comparison. It remains a local candidate
-for separate assembly/comparison ablations, not an accepted fastest-path update.
+regress across the retained four-matrix comparison.
+
+The [four-way isolation](../benchmarks/results/2026-09-12-module-preparation-factorial/README.md)
+compares assembly-only, bulk-comparison-only, both, and the preceding baseline.
+The current source retains checked single-vector assembly but restores the
+per-element bit comparison. Assembly-only burst medians are approximately at
+baseline in the isolation worktree; that is not a universal speedup claim.

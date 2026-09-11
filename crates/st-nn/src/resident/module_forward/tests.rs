@@ -76,7 +76,7 @@ fn operation_cache_checks_bits_layout_program_and_foreign_values() {
 }
 
 #[test]
-fn bulk_comparison_matches_scalar_bits_at_odd_lengths_and_nonfinite_payloads() {
+fn exact_comparison_preserves_bits_at_odd_lengths_and_nonfinite_payloads() {
     let patterns = [
         0,
         0x8000_0000,
@@ -274,7 +274,7 @@ fn external_dlpack_writes_recompile_and_invalid_parameters_never_reuse_old_weigh
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn bulk_cache_detects_signed_zero_and_last_word_foreign_linear_updates() {
+fn cache_detects_signed_zero_and_last_word_foreign_linear_updates() {
     let Some(device) = device() else { return };
     let linear = Linear::new("foreign", 33, 35).unwrap();
     let weights = linear.weight().value().to_dlpack().unwrap();

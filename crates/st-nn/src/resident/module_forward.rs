@@ -59,10 +59,10 @@ fn same_tensor(a: &Tensor, b: &Tensor) -> bool {
     a.shape() == b.shape()
         && a.layout() == b.layout()
         && ((a.is_snapshot() && b.is_snapshot() && a.data().as_ptr() == b.data().as_ptr())
-            // Byte-slice equality retains signed-zero/NaN payload identity and
-            // enables the platform's bulk comparison, without hashes or copies.
-            || bytemuck::cast_slice::<f32, u8>(a.data())
-                == bytemuck::cast_slice::<f32, u8>(b.data()))
+            || a.data()
+                .iter()
+                .zip(b.data())
+                .all(|(a, b)| a.to_bits() == b.to_bits()))
 }
 
 fn same_operations(a: &[InferenceOp], b: &[InferenceOp]) -> bool {

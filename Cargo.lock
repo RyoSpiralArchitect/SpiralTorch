@@ -3297,7 +3297,6 @@ name = "st-nn"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "bytemuck",
  "futures",
  "nalgebra 0.32.6",
  "num-complex",
