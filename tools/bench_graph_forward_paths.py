@@ -152,7 +152,8 @@ def eager(torch, plan, x, parameters):
         if stage["kind"] == "linear":
             shape = current.shape
             current = torch.addmm(parameters[stage["bias"]], current.reshape(-1, shape[-1]),
-                                  parameters[stage["weight"]]).reshape(shape)
+                                  parameters[stage["weight"]]).reshape(
+                                      (*shape[:-1], parameters[stage["weight"]].shape[1]))
             if stage["gelu"]:
                 current = torch.nn.functional.gelu(current, approximate="tanh")
         else:
