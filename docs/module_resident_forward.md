@@ -169,3 +169,9 @@ removes per-pointwise flag clears/copies. Four paired matrices show lower burst
 medians across the tested sizes, with two small native regressions retained.
 Browser single-call medians remain approximately unchanged. The explicit graph
 reference also changes with this patch; only eager Torch is an unchanged implementation.
+
+The [descriptor-assembly follow-up](../benchmarks/results/2026-09-12-module-descriptor-assembly/README.md)
+verifies fewer CPU allocations and exact parameter-bit checks, but does not
+establish a speed improvement: middle browser bursts and large native bursts
+regress across the retained four-matrix comparison. It remains a local candidate
+for separate assembly/comparison ablations, not an accepted fastest-path update.
