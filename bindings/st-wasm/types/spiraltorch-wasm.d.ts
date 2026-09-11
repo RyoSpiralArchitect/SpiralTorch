@@ -119,6 +119,7 @@ declare module "spiraltorch-wasm" {
         tensorDevice(): WgpuTensorDevice;
         upload(data: Float32Array): void;
         setInputTensor(input: WgpuTensor): void;
+        forwardTensor(input: WgpuTensor): WgpuTensor;
         dispatch(): bigint;
         outputTensor(): WgpuTensor;
         snapshot(): GraphInferenceSnapshot;

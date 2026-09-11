@@ -90,9 +90,16 @@ optimizer-state resume.
 - Mutable/foreign parameters are compared by bits on every call. This deliberately
   includes externally shared DLPack writes; pointer identity is not sufficient.
   Comparison is O(parameter values) CPU work, not an unmeasured zero-cost claim.
-- Input packing and owning output capture copy on the GPU. There is no per-layer
-  host readback, but this is not zero-copy and does not promise one queue submission
-  for the entire public call.
+- Cached graph forwards bind contiguous, offset-zero inputs directly and write
+  the final stage directly into a fresh owning output. There are no full-sized
+  input/output bridge copies on that path. Strided/offset views are packed only
+  when needed. Packing, NN dispatches and the owning error guard share one queue
+  submission; observing a snapshot is explicitly separate.
+- Output allocation, boundary bind groups, small stage-flag copies and the final
+  guard pass remain. This is not allocation-free execution. Legacy explicit
+  `set_input_tensor` / `dispatch` / `output_tensor` APIs retain their semantics;
+  switching from direct forwarding back to `dispatch` copies the current input
+  into stable workspace storage once.
 - The existing Linear/bias/GELU fusion is reused. Broader pointwise fusion is not
   enabled implicitly. Returned tensors survive cache reuse, clear and model drop.
   Invalid-input flags remain visible at explicit readback even after zero gains
@@ -109,8 +116,14 @@ For timing, `tools/bench_graph_forward_paths.py --include-module` adds ordinary
 `model(WgpuTensor)` calls to the existing matched fixture and PyTorch controls.
 The module d2h route excludes input upload; compare it separately from h2h.
 The fixed-input burst routes each perform eight independent forwards and one
-terminal host read. Per-call parameter comparison and GPU copies are timed;
+terminal host read. Per-call parameter comparison and resident I/O are timed;
 cold compilation is recorded separately.
+
+`nn-module-matched` in `tools/test_resident_browser.cjs` loads two frozen WASM
+packages in one page and rotates baseline/candidate model routes plus explicit
+graph controls. `tools/validate_module_direct_io.py` checks the full nine-case
+matrix, source/product hashes, captures and cache counters. The native versions
+run in separate processes; browser physical GPU identity remains unknown.
 
 The [source-bound first record](../benchmarks/results/2026-09-12-module-resident-forward/README.md)
 includes the small-model slowdown as well as the deeper-model wins, CPU-only

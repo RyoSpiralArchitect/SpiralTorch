@@ -82,7 +82,7 @@ def main():
     args = p.parse_args()
     paths = [args.native,args.python,args.browser]
     report = dict(schema="spiraltorch.module_forward_validation.v1",status="error",
-        boundary="Correctness and bounded completed eager timings. Lower ratios are faster. GPU input/output copies and host parameter comparison included. No autograd migration, zero-copy or fastest-Torch claim. Browser physical GPU identity UNKNOWN.")
+        boundary="Correctness and bounded completed eager timings. Lower ratios are faster. The hashed artifact's resident I/O and host parameter comparison are included. No autograd migration or fastest-Torch claim. Browser physical GPU identity UNKNOWN.")
     with args.output.open("x") as out:
         try:
             hashes = {str(path.resolve()):digest(path) for path in paths}

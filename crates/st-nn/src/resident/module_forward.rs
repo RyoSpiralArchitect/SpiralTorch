@@ -140,10 +140,9 @@ impl ResidentForwardCache {
             state.stats.compilations = compilations;
         }
         let cached = state.current.as_mut().unwrap();
-        cached.graph.set_input_tensor(input)?;
-        cached.graph.dispatch()?;
+        let output = cached.graph.forward_tensor(input)?;
         state.stats.submitted_forwards = submissions;
-        Ok(state.current.as_ref().unwrap().graph.output_tensor()?)
+        Ok(output)
     }
 }
 

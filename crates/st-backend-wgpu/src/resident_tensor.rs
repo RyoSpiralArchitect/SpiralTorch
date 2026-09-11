@@ -9,6 +9,7 @@ use st_kernel_contracts::{
 use thiserror::Error;
 
 pub(crate) mod capture;
+pub(crate) mod guard_capture;
 pub mod pointwise;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
@@ -180,6 +181,33 @@ impl TensorDevice {
 
     pub fn runtime(&self) -> &WgpuRuntime {
         &self.0.runtime
+    }
+
+    /// Private graph destination. A caller must encode all values and the guard,
+    /// then submit, before exposing this immutable handle outside the backend.
+    pub(crate) fn allocate_output(&self, layout: &NdLayout) -> Result<ResidentTensor, TensorError> {
+        let layout = NdLayout::contiguous(layout.shape())?;
+        let gpu = self.runtime().context().device();
+        validate_view(&layout, layout.len(), &gpu.limits())?;
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+        Ok(ResidentTensor {
+            storage: Shared::new(Storage {
+                values: runtime::empty_buffer::<f32>(
+                    gpu,
+                    "tensor.direct_output",
+                    layout.len().max(1),
+                    usage,
+                )?,
+                flags: Shared::new(runtime::empty_buffer::<u32>(
+                    gpu,
+                    "tensor.direct_guard",
+                    1,
+                    usage,
+                )?),
+            }),
+            layout,
+            device: self.clone(),
+        })
     }
 
     pub fn upload(&self, shape: &[usize], values: &[f32]) -> Result<ResidentTensor, TensorError> {
@@ -458,6 +486,18 @@ impl ResidentTensor {
             Ok(self.clone())
         } else {
             self.apply(ElementwiseOp::Identity, None)
+        }
+    }
+
+    /// Pack only if needed, within the caller's existing GPU submission.
+    pub(crate) fn contiguous_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Self, TensorError> {
+        if self.layout.is_contiguous() && self.layout.offset() == 0 {
+            Ok(self.clone())
+        } else {
+            self.apply_into(encoder, ElementwiseOp::Identity, None)
         }
     }
 

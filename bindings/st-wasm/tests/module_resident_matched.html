@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Matched original Module resident I/O</title>
+<pre id="result" data-status="running">Loading frozen WASM modules</pre>
+<script type="module">
+import initCandidate, * as candidate from "./module/spiraltorch_wasm.js";
+import initBaseline, * as baseline from "./baseline/spiraltorch_wasm.js";
+const routes=["baseline_module_d2h","candidate_module_d2h","baseline_module_burst","candidate_module_burst","baseline_scalar_burst","candidate_scalar_burst"];
+const report={schema:"spiraltorch.module_direct_io_matched.v1",status:"error",warmup:3,samples_per_route:9,burst:8,routes,cases:[],
+  boundary:"Same browser page, separate WASM/device instances. Rotated serial baseline/candidate routes, three warmups and nine retained blocks. Eight fixed-input independent forwards per burst, final completed host read included; parameter checks and output ownership included. Setup excluded, cold model call recorded separately. Physical adapter and host contention UNKNOWN; no fastest-Torch claim."};
+const owned=new Set(),keep=v=>(owned.add(v),v),f32=v=>new Float32Array(v);
+function free(v){owned.delete(v);v.free();}
+function check(ok,why){if(!ok)throw Error(why);}
+async function read(t){const snapshot=keep(t.snapshot()),pending=snapshot.readValues();free(snapshot);return [...await pending];}
+function close(a,b){check(a.length===b.length,"length differs");let maximum=0;for(let i=0;i<a.length;i++){
+  check(Number.isFinite(a[i])&&Number.isFinite(b[i])&&Math.abs(a[i]-b[i])<=2e-5+2e-4*Math.abs(b[i]),"output differs");
+  maximum=Math.max(maximum,Math.abs(a[i]-b[i]));}return maximum;}
+function stats(m){const s=keep(m.residentCacheInfo()),value={compilations:String(s.compilations),cache_hits:String(s.cacheHits),submitted_forwards:String(s.submittedForwards)};free(s);return value;}
+async function context(st,c){
+  const m=keep(new st.Sequential()),width=c.shape.at(-1);
+  for(let i=0;i<c.depth;i++){
+    m.addScaler("scale"+i,f32(c.plan.parameters[3*i].values));
+    m.addLinear("linear"+i,width,width);m.addGelu();m.addRelu();
+  }
+  const initial=keep(m.inferencePlan(c.shape)),fixed=keep(st.InferencePlan.fromJson(JSON.stringify(c.plan)));
+  check(initial.applyParametersTo(m,fixed)===c.depth*3,"parameter handoff differs");free(initial);
+  const lowered=keep(m.inferencePlan(c.shape));
+  check(JSON.stringify(JSON.parse(lowered.toJson()))===JSON.stringify(JSON.parse(fixed.toJson())),"model lowering differs");free(lowered);
+  const graph=keep(await fixed.compileGraphWebGpu()),device=keep(graph.tensorDevice());
+  const adapter=graph.adapterInfo();check(adapter.device_type!=="Cpu","CPU adapter forbidden");
+  const input=keep(device.upload(c.shape,f32(c.input)));
+  const start=performance.now(),coldOutput=keep(m.forward(input));
+  const coldValues=await read(coldOutput),cold_ms=performance.now()-start;
+  close(coldValues,c.reference);free(coldOutput);
+  return {m,graph,device,input,adapter,cold_ms};
+}
+try{
+  check(!!navigator.gpu,"WebGPU required; no CPU fallback");
+  await initBaseline();await initCandidate();
+  const fixture=await (await fetch("./fixture.json")).json();
+  check(fixture.status==="passed"&&fixture.schema==="spiraltorch.graph_forward_bench.v1"&&fixture.cases.length===9,"native fixture required");
+  for(const c of fixture.cases){
+    const ctx={baseline:await context(baseline,c),candidate:await context(candidate,c)};
+    const row={shape:c.shape,depth:c.depth,seed:c.seed,routes,samples:[],last_outputs:{},
+      adapters:Object.fromEntries(Object.entries(ctx).map(([k,v])=>[k,v.adapter])),
+      cold_ms:Object.fromEntries(Object.entries(ctx).map(([k,v])=>[k,v.cold_ms]))};
+    for(let block=0;block<report.warmup+report.samples_per_route;block++){
+      const offset=(block+c.seed)%routes.length,order=[...routes.slice(offset),...routes.slice(0,offset)];
+      for(const route of order){
+        const [version,family,cadence]=route.split("_"),v=ctx[version],forwards=cadence==="burst"?report.burst:1;
+        if(family==="scalar"){
+          v.graph.upload(f32(c.input));v.graph.dispatch();
+          const ready=keep(v.graph.snapshot());await ready.readValues();free(ready);
+        }
+        let output,values;
+        const before=v.graph.submittedDispatches,start=performance.now();
+        if(family==="module"){
+          for(let i=0;i<forwards;i++){const next=keep(v.m.forward(v.input));if(output)free(output);output=next;}
+          values=await read(output);
+        }else{
+          for(let i=0;i<forwards;i++)v.graph.dispatch();
+          output=keep(v.graph.snapshot());values=[...await output.readValues()];
+        }
+        const elapsed_ms=performance.now()-start;
+        free(output);
+        if(family==="scalar")check(v.graph.submittedDispatches-before===BigInt(forwards),"dispatch count differs");
+        const max_abs_error=close(values,c.reference);row.last_outputs[route]=values;
+        if(block>=report.warmup)row.samples.push({block:block-report.warmup,route,order,forwards,elapsed_ms,max_abs_error});
+      }
+    }
+    row.cache=Object.fromEntries(Object.entries(ctx).map(([k,v])=>[k,stats(v.m)]));
+    for(const cache of Object.values(row.cache))check(JSON.stringify(cache)===JSON.stringify({compilations:"1",cache_hits:"108",submitted_forwards:"109"}),"cache contract differs");
+    report.cases.push(row);
+    for(const v of owned)v.free();owned.clear();
+  }
+  report.status="passed";
+}catch(error){report.error=String(error.stack||error);}
+finally{for(const v of owned)v.free();}
+const result=document.querySelector("#result");result.textContent=JSON.stringify(report);result.dataset.status=report.status;
+</script>

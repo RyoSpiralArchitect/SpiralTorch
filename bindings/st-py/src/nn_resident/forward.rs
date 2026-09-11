@@ -103,6 +103,13 @@ impl PyResidentGraphInference {
     fn dispatch(&mut self, py: Python<'_>) -> PyResult<u64> {
         py.detach(|| self.inner.dispatch()).map_err(error)
     }
+    fn forward_tensor(&mut self, py: Python<'_>, input: &PyWgpuTensor) -> PyResult<PyWgpuTensor> {
+        Ok(PyWgpuTensor {
+            inner: py
+                .detach(|| self.inner.forward_tensor(&input.inner))
+                .map_err(error)?,
+        })
+    }
     fn output_tensor(&self, py: Python<'_>) -> PyResult<PyWgpuTensor> {
         Ok(PyWgpuTensor {
             inner: py.detach(|| self.inner.output_tensor()).map_err(error)?,

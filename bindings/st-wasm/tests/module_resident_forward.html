@@ -75,6 +75,27 @@ try{
   check(failed,"invalid input got masked");
   const good=keep(d.upload([1],f32([1.])));close(await read(keep(m.forward(good))),[0.]);
   check(stats(m).compilations==="1","valid recovery rebuilt");
+  const directModel=keep(new st.Sequential());directModel.addScaler("scale",f32([2.]));directModel.addRelu();
+  const directPlan=keep(directModel.inferencePlan([2,1]));
+  const graph=keep(await directPlan.compileGraphWebGpu());
+  const source=keep(d.upload([2,2],f32([99.,-1.,99.,2.]))),view=keep(source.narrow(1,1,1));
+  const first=keep(graph.forwardTensor(view)),snapshot=keep(graph.snapshot());
+  const second=keep(graph.forwardTensor(first));
+  check(graph.generation===2n&&graph.submittedDispatches===2n,"direct counters");
+  check(graph.dispatch()===3n,"explicit transition");close(await read(keep(graph.outputTensor())),[0.,8.]);
+  rejects(()=>graph.forwardTensor(good));rejects(()=>graph.forwardTensor(null));
+  check(graph.generation===2n&&graph.submittedDispatches===3n,"invalid call changed counters");
+  graph.upload(f32([1.,1.]));graph.dispatch();
+  const fresh=keep(graph.snapshot());close(await fresh.readValues(),[2.,2.]);free(fresh);
+  graph.setInputTensor(view);graph.dispatch();close(await read(keep(graph.outputTensor())),[0.,4.]);
+  free(graph);close(await snapshot.readValues(),[0.,4.]);free(snapshot);
+  close(await read(first),[0.,4.]);close(await read(second),[0.,8.]);
+  const zeroPlan=keep(m.inferencePlan([1])),zeroGraph=keep(await zeroPlan.compileGraphWebGpu());
+  const masked=keep(zeroGraph.forwardTensor(invalid));
+  close(await read(keep(zeroGraph.forwardTensor(good))),[0.]);free(zeroGraph);
+  failed=false;try{await read(masked);}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"direct guard was erased by later valid output");
+  report.direct_io_guards=true;
   report.status="passed";
 }catch(e){report.error=String(e.stack||e);}
 finally{for(const v of owned)v.free();}

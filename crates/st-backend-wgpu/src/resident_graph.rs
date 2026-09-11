@@ -5,7 +5,8 @@ use crate::{
     resident_dense::{DenseDispatch, DenseError, DenseKernel},
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulShape, MatmulTile},
     resident_tensor::{
-        pointwise::PointwisePlan, storage_limit, ResidentTensor, TensorDevice, TensorError,
+        guard_capture::GuardCapture, pointwise::PointwisePlan, storage_limit, ResidentTensor,
+        TensorDevice, TensorError,
     },
     runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError},
 };
@@ -50,11 +51,19 @@ enum Node {
     },
 }
 
+enum BoundaryBinding {
+    Linear(DenseDispatch),
+    Pointwise(wgpu::BindGroup),
+}
+
 /// An inference workspace, not a training workspace with zero learning rate.
 /// It has no target, gradient, loss, optimizer or preactivation-tape buffers.
 pub struct ResidentGraph {
     definition: GraphDefinition,
     activations: Vec<wgpu::Buffer>,
+    parameters: Vec<wgpu::Buffer>,
+    unused: wgpu::Buffer,
+    empty_flags: wgpu::Buffer,
     nodes: Vec<Node>,
     kernel: Option<DenseKernel>,
     validation: wgpu::Buffer,
@@ -63,6 +72,9 @@ pub struct ResidentGraph {
     submitted_dispatches: u64,
     output_generation: Option<u64>,
     input_source: Option<ResidentTensor>,
+    input_direct: bool,
+    resident_output: Option<ResidentTensor>,
+    guard_capture: Option<GuardCapture>,
     // Retire device resources before their owning runtime.
     device: TensorDevice,
 }
@@ -211,6 +223,9 @@ impl ResidentGraph {
         Ok(Self {
             definition,
             activations,
+            parameters,
+            unused,
+            empty_flags,
             nodes,
             kernel,
             validation,
@@ -219,6 +234,9 @@ impl ResidentGraph {
             submitted_dispatches: 0,
             output_generation: None,
             input_source: None,
+            input_direct: false,
+            resident_output: None,
+            guard_capture: None,
             device,
         })
     }
@@ -271,6 +289,8 @@ impl ResidentGraph {
         self.generation = generation;
         self.output_generation = None;
         self.input_source = None;
+        self.input_direct = false;
+        self.resident_output = None;
         Ok(())
     }
 
@@ -299,7 +319,104 @@ impl ResidentGraph {
         self.generation = generation;
         self.output_generation = None;
         self.input_source = Some(input);
+        self.input_direct = false;
+        self.resident_output = None;
         Ok(())
+    }
+
+    /// Read resident input directly and write the last stage into a fresh owning
+    /// tensor. Views are packed only when required, within the same submission.
+    /// No full-sized input/output bridge copies occur for packed offset-zero input.
+    /// The returned tensor is immutable, including after later workspace reuse.
+    pub fn forward_tensor(
+        &mut self,
+        input: &ResidentTensor,
+    ) -> Result<ResidentTensor, GraphInferenceError> {
+        input.require_context(self.device.runtime().context())?;
+        if input.layout().shape() != self.input_layout().shape() {
+            return Err(GraphInferenceError::InputShape);
+        }
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(GraphInferenceError::CounterOverflow)?;
+        let dispatch = self
+            .submitted_dispatches
+            .checked_add(1)
+            .ok_or(GraphInferenceError::CounterOverflow)?;
+        let context = self.device.runtime().context();
+        let gpu = context.device();
+        let mut encoder = gpu.create_command_encoder(&Default::default());
+        let packed = input.contiguous_into(&mut encoder)?;
+        let output = self.device.allocate_output(self.output_layout())?;
+        let last = self.nodes.len() - 1;
+        let first = self.bind_boundary(
+            0,
+            packed.values(),
+            if last == 0 {
+                output.values()
+            } else {
+                &self.activations[1]
+            },
+        );
+        let final_binding = if last == 0 {
+            None
+        } else {
+            Some(self.bind_boundary(last, &self.activations[last], output.values()))
+        };
+        self.encode_graph(
+            &mut encoder,
+            Some(&packed),
+            Some(&first),
+            final_binding.as_ref(),
+        );
+        let guard = self
+            .guard_capture
+            .get_or_insert_with(|| GuardCapture::new(gpu));
+        guard.encode(gpu, &mut encoder, &self.validation, output.flags());
+        context.queue().submit(Some(encoder.finish()));
+        self.generation = generation;
+        self.submitted_dispatches = dispatch;
+        self.output_generation = Some(generation);
+        self.input_source = Some(packed);
+        self.input_direct = true;
+        self.resident_output = Some(output.clone());
+        Ok(output)
+    }
+
+    fn bind_boundary(
+        &self,
+        index: usize,
+        input: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+    ) -> BoundaryBinding {
+        let gpu = self.device.runtime().context().device();
+        match (&self.nodes[index], &self.definition.stages()[index]) {
+            (Node::Linear(template), GraphStage::Linear { weight, bias, .. }) => {
+                BoundaryBinding::Linear(self.kernel.as_ref().unwrap().rebind(
+                    gpu,
+                    template,
+                    input,
+                    output,
+                    &self.parameters[*weight],
+                    &self.parameters[*bias],
+                    &self.unused,
+                    &self.validation,
+                ))
+            }
+            (Node::Pointwise { plan, flags, .. }, GraphStage::Pointwise { parameters, .. }) => {
+                let inputs: Vec<_> = std::iter::once(input)
+                    .chain(parameters.iter().map(|&id| &self.parameters[id]))
+                    .collect();
+                BoundaryBinding::Pointwise(plan.bind_into(
+                    &inputs,
+                    output,
+                    &self.empty_flags,
+                    flags,
+                ))
+            }
+            _ => unreachable!("node kind is fixed by the validated definition"),
+        }
     }
 
     /// One submission, no per-dispatch buffer/binding allocation or readback.
@@ -314,8 +431,35 @@ impl ResidentGraph {
             .ok_or(GraphInferenceError::CounterOverflow)?;
         let context = self.device.runtime().context();
         let mut encoder = context.device().create_command_encoder(&Default::default());
+        if self.input_direct {
+            // Switching back to the explicit stable-workspace API preserves its
+            // current-input semantics. Only this transition needs a bridge copy.
+            encoder.copy_buffer_to_buffer(
+                self.input_source.as_ref().unwrap().values(),
+                0,
+                &self.activations[0],
+                0,
+                self.activations[0].size(),
+            );
+        }
+        self.encode_graph(&mut encoder, self.input_source.as_ref(), None, None);
+        context.queue().submit(Some(encoder.finish()));
+        self.output_generation = Some(self.generation);
+        self.submitted_dispatches = dispatch;
+        self.input_direct = false;
+        self.resident_output = None;
+        Ok(dispatch)
+    }
+
+    fn encode_graph(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        input: Option<&ResidentTensor>,
+        first: Option<&BoundaryBinding>,
+        last: Option<&BoundaryBinding>,
+    ) {
         encoder.clear_buffer(&self.validation, 0, None);
-        if let Some(input) = &self.input_source {
+        if let Some(input) = input {
             encoder.copy_buffer_to_buffer(
                 input.flags(),
                 0,
@@ -336,16 +480,32 @@ impl ResidentGraph {
                 label: Some("graph.forward.pass"),
                 timestamp_writes: None,
             });
-            for node in &self.nodes {
-                match node {
-                    Node::Linear(binding) => self
+            for (i, node) in self.nodes.iter().enumerate() {
+                let boundary = if i == 0 {
+                    first
+                } else if i + 1 == self.nodes.len() {
+                    last
+                } else {
+                    None
+                };
+                match (node, boundary) {
+                    (Node::Linear(_), Some(BoundaryBinding::Linear(binding))) => self
                         .kernel
                         .as_ref()
                         .unwrap()
                         .encode_in_pass(&mut pass, binding),
-                    Node::Pointwise { plan, binding, .. } => {
+                    (Node::Pointwise { plan, .. }, Some(BoundaryBinding::Pointwise(binding))) => {
                         plan.encode_in_pass(&mut pass, binding)
                     }
+                    (Node::Linear(binding), None) => self
+                        .kernel
+                        .as_ref()
+                        .unwrap()
+                        .encode_in_pass(&mut pass, binding),
+                    (Node::Pointwise { plan, binding, .. }, None) => {
+                        plan.encode_in_pass(&mut pass, binding)
+                    }
+                    _ => unreachable!("boundary binding kind matches the graph node"),
                 }
             }
         }
@@ -355,10 +515,6 @@ impl ResidentGraph {
                 encoder.copy_buffer_to_buffer(flags, 0, &self.validation, i as u64 * 4, 4);
             }
         }
-        context.queue().submit(Some(encoder.finish()));
-        self.output_generation = Some(self.generation);
-        self.submitted_dispatches = dispatch;
-        Ok(dispatch)
     }
 
     fn require_output(&self) -> Result<(), GraphInferenceError> {
@@ -373,7 +529,10 @@ impl ResidentGraph {
         self.require_output()?;
         let context = self.device.runtime().context();
         let staging = self.readbacks.checkout("graph.forward.snapshot");
-        let output = self.activations.last().unwrap();
+        let output = self
+            .resident_output
+            .as_ref()
+            .map_or_else(|| self.activations.last().unwrap(), ResidentTensor::values);
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(output, 0, staging.buffer(), 0, output.size());
         encoder.copy_buffer_to_buffer(
@@ -395,9 +554,13 @@ impl ResidentGraph {
     }
 
     /// An immutable GPU-only capture for further N-D operations or another graph.
-    /// This is an on-device copy, not a mutable alias or a CPU readback.
+    /// Direct forwards already own their output; explicit dispatches copy on-device.
+    /// Neither route exposes a mutable alias or performs a CPU readback.
     pub fn output_tensor(&self) -> Result<ResidentTensor, GraphInferenceError> {
         self.require_output()?;
+        if let Some(output) = &self.resident_output {
+            return Ok(output.clone());
+        }
         Ok(self.device.capture(
             self.output_layout(),
             self.activations.last().unwrap(),
@@ -405,6 +568,10 @@ impl ResidentGraph {
         )?)
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "resident_graph/direct_io_tests.rs"]
+mod direct_io_tests;
 
 pub struct GraphReadback {
     staging: runtime::ReadbackLease,

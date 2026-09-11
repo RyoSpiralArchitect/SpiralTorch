@@ -176,6 +176,7 @@ pub(crate) struct DenseKernel {
 
 pub(crate) struct DenseDispatch {
     binding: wgpu::BindGroup,
+    uniform: runtime::Shared<wgpu::Buffer>,
     groups: [u32; 2],
 }
 
@@ -226,14 +227,67 @@ impl DenseKernel {
             validation_index: stage,
             padding: [0; 2],
         };
-        let uniform = runtime::upload_slice(
+        let uniform = runtime::Shared::new(runtime::upload_slice(
             device,
             "dense.params",
             &[params],
             wgpu::BufferUsages::UNIFORM,
-        )?;
+        )?);
+        let binding = self.bind_resources(
+            device, input, output, weight, bias, unused, validation, &uniform,
+        );
+        let [tm, tn, _] = self.tile.dimensions();
+        Ok(DenseDispatch {
+            binding,
+            uniform,
+            groups: [(cols as u32).div_ceil(tn), (rows as u32).div_ceil(tm)],
+        })
+    }
+
+    /// Same validated dimensions/parameters; only the private boundary buffers
+    /// change. Reuse the template's uniform rather than re-uploading it per call.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rebind(
+        &self,
+        device: &wgpu::Device,
+        template: &DenseDispatch,
+        input: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+        weight: &wgpu::Buffer,
+        bias: &wgpu::Buffer,
+        unused: &wgpu::Buffer,
+        validation: &wgpu::Buffer,
+    ) -> DenseDispatch {
+        DenseDispatch {
+            binding: self.bind_resources(
+                device,
+                input,
+                output,
+                weight,
+                bias,
+                unused,
+                validation,
+                &template.uniform,
+            ),
+            uniform: template.uniform.clone(),
+            groups: template.groups,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_resources(
+        &self,
+        device: &wgpu::Device,
+        input: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+        weight: &wgpu::Buffer,
+        bias: &wgpu::Buffer,
+        unused: &wgpu::Buffer,
+        validation: &wgpu::Buffer,
+        uniform: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
         let resources = [
-            input, weight, output, bias, unused, unused, &uniform, validation,
+            input, weight, output, bias, unused, unused, uniform, validation,
         ];
         let entries: Vec<_> = resources
             .iter()
@@ -243,15 +297,10 @@ impl DenseKernel {
                 resource: buffer.as_entire_binding(),
             })
             .collect();
-        let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("dense.stage"),
             layout: &self.layout,
             entries: &entries,
-        });
-        let [tm, tn, _] = self.tile.dimensions();
-        Ok(DenseDispatch {
-            binding,
-            groups: [(cols as u32).div_ceil(tn), (rows as u32).div_ceil(tm)],
         })
     }
 

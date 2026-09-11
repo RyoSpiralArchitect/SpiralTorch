@@ -267,7 +267,7 @@ def main():
                   boundary="Three warmups, nine retained rotated blocks. H2H includes input transfer and host-list output. Burst keeps fixed input device-resident for eight independent forwards and includes one final host-list read. Setup excluded; numerical checks outside timing. Torch eager addmm/bias/tanh-GELU, no compile; native controls measured separately. macOS GPU contention UNKNOWN; no fastest-Torch claim.")
     if args.include_module:
         report["schema"] = "spiraltorch.module_forward_paths.v1"
-        report["boundary"] += " Module routes use the same original Rust NN model; d2h keeps input resident and reads one output, burst performs eight independent forwards and reads the last output. Per-call weight bit checks and owning GPU input/output copies are included; this is not zero-copy. Cold compilation is recorded separately. d2h is not interchangeable with h2h."
+        report["boundary"] += " Module routes use the same original Rust NN model; d2h keeps input resident and reads one output, burst performs eight independent forwards and reads the last output. Per-call weight bit checks and the resident I/O implementation of the hashed native artifact are included. No host transfer occurs between resident forwards. Cold compilation is recorded separately. d2h is not interchangeable with h2h."
     paths = [args.fixture.resolve(strict=True), args.native_library.resolve(strict=True)]
     identities = {str(path): digest(path) for path in paths}
     with args.output.open("x") as output:

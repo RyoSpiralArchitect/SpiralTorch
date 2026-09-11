@@ -24,6 +24,42 @@ class ForwardSurface(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class ForwardGpu(unittest.TestCase):
+    def test_direct_forward_interleaves_with_explicit_steps_without_aliases(self):
+        graph = model().inference_plan([2,1]).compile_graph_wgpu()
+        device = graph.tensor_device()
+        view = device.upload([2,2], [99.,-1.,99.,2.]).narrow(1,1,1)
+        first = graph.forward_tensor(view)
+        snapshot = graph.snapshot()
+        second = graph.forward_tensor(first)
+        self.assertEqual((graph.generation, graph.submitted_dispatches), (2,2))
+        self.assertEqual(graph.dispatch(), 3)
+        self.assertEqual(graph.output_tensor().snapshot().read_values(), [0.,8.])
+        for bad in (None, st.Tensor(2,1,[0.,0.]), device.upload([1,2],[0.,0.])):
+            with self.assertRaises((TypeError,ValueError)): graph.forward_tensor(bad)
+        self.assertEqual((graph.generation, graph.submitted_dispatches), (2,3))
+        graph.upload_values([1.,1.]); graph.dispatch()
+        self.assertEqual(graph.snapshot().read_values(), [2.,2.])
+        graph.set_input_tensor(view); graph.dispatch()
+        self.assertEqual(graph.snapshot().read_values(), [0.,4.])
+        del graph, device, view
+        gc.collect()
+        self.assertEqual(snapshot.read_values(), [0.,4.])
+        self.assertEqual(first.snapshot().read_values(), [0.,4.])
+        self.assertEqual(second.snapshot().read_values(), [0.,8.])
+
+    def test_direct_forward_preserves_failed_guards_after_valid_recovery(self):
+        graph = model(float.fromhex("0x1.fffffep+127")).inference_plan([2,1]).compile_graph_wgpu()
+        device = graph.tensor_device()
+        bad = graph.forward_tensor(device.upload([2,1],[-2.,-2.]))
+        failed = graph.snapshot()
+        self.assertEqual(graph.forward_tensor(device.upload([2,1],[0.,0.])).snapshot().read_values(),[0.,0.])
+        for read in (failed.read_values, bad.snapshot().read_values):
+            with self.assertRaisesRegex(ValueError,"non-finite"): read()
+        zero = model(0.).inference_plan([2,1]).compile_graph_wgpu()
+        masked = zero.forward_tensor(bad)
+        zero.forward_tensor(device.upload([2,1],[1.,1.]))
+        with self.assertRaisesRegex(ValueError,"non-finite"): masked.snapshot().read_values()
+
     def test_graph_to_graph_owns_values_after_source_reuse(self):
         plan = model().inference_plan([2,1])
         graph, other = plan.compile_graph_wgpu(), plan.compile_graph_wgpu()

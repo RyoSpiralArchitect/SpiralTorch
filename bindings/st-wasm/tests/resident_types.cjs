@@ -154,6 +154,7 @@ function checkNnContract(types, label) {
   const forward=get("ResidentGraphInference"), forwardSnapshot=get("GraphInferenceSnapshot"),
     tensor=get("WgpuTensor"), tensorDevice=get("WgpuTensorDevice"), tensorSnapshot=get("WgpuTensorSnapshot");
   assert.match(forward, /setInputTensor\(input: WgpuTensor\): void/);
+  assert.match(forward, /forwardTensor\(input: WgpuTensor\): WgpuTensor/);
   assert.match(forward, /outputTensor\(\): WgpuTensor/);
   assert.match(forward, /tensorDevice\(\): WgpuTensorDevice/);
   assert.match(forward, /snapshot\(\): GraphInferenceSnapshot/);

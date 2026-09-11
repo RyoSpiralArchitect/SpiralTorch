@@ -38,9 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input = device.upload(&[2, 5, 4], &[0.25; 40])?;
     let gains = device.upload(&[4], &[1., 0.5, 0.75, 1.25])?;
     let preprocessed = input.mul(&gains)?.relu()?;
-    graph.set_input_tensor(&preprocessed)?;
-    graph.dispatch()?;
-    let result = graph.output_tensor()?;
+    let result = graph.forward_tensor(&preprocessed)?;
     let shifted = result.add(&device.upload(&[3], &[0.1, 0.2, 0.3])?)?;
 
     let next = InferencePlan::from_module(&Relu::new(), graph.output_layout().clone())?;
@@ -78,9 +76,7 @@ plan = model.inference_plan([2, 5, 4])
 gpu = plan.compile_graph_wgpu()
 device = gpu.tensor_device()
 x = device.upload([2, 5, 4], [.25] * 40)
-gpu.set_input_tensor(x.relu())
-gpu.dispatch()
-y = gpu.output_tensor().add(device.upload([3], [.1, .2, .3]))
+y = gpu.forward_tensor(x.relu()).add(device.upload([3], [.1, .2, .3]))
 del gpu
 snapshot = y.snapshot()
 values = snapshot.read_values()  # explicit first host observation
@@ -104,9 +100,7 @@ plan.free(); // the compilation promise already owns the Rust plan
 const gpu = await pending;
 const device = gpu.tensorDevice();
 const x = device.upload([2, 5, 4], new Float32Array(40).fill(.25));
-gpu.setInputTensor(x);
-gpu.dispatch();
-const y = gpu.outputTensor();
+const y = gpu.forwardTensor(x);
 gpu.free(); x.free(); device.free();
 const snapshot = y.snapshot();
 y.free();
@@ -124,6 +118,15 @@ browser shape arguments are `number[]`, and data arguments are `Float32Array`.
 Shape/stride metadata is copied out, with strides measured in elements.
 Standalone tensors support scalar and empty layouts; NN plans still require
 nonempty last-axis inputs.
+
+`forward_tensor` / `forwardTensor` advances the input generation and dispatch
+counter together. Packed offset-zero inputs are read directly and the last stage
+writes a fresh owning output. View packing (when required), graph evaluation and
+error-guard capture use one submission, with no intermediate host observation.
+The older `set_input_tensor` / `dispatch` / `output_tensor` sequence remains
+available. It can be interleaved with direct calls; all returned tensors and
+snapshots stay independent of later workspace reuse. A later `dispatch` repeats
+the current input, not the preceding output.
 
 The handle also connects existing public executors:
 

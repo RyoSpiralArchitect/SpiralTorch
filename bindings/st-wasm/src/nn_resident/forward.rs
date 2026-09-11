@@ -93,6 +93,12 @@ impl WasmResidentGraphInference {
     pub fn dispatch(&mut self) -> Result<u64, JsValue> {
         self.inner.dispatch().map_err(js_error)
     }
+    #[wasm_bindgen(js_name = forwardTensor)]
+    pub fn forward_tensor(&mut self, input: &WasmWgpuTensor) -> Result<WasmWgpuTensor, JsValue> {
+        Ok(WasmWgpuTensor {
+            inner: self.inner.forward_tensor(&input.inner).map_err(js_error)?,
+        })
+    }
     #[wasm_bindgen(js_name = outputTensor)]
     pub fn output_tensor(&self) -> Result<WasmWgpuTensor, JsValue> {
         Ok(WasmWgpuTensor {
