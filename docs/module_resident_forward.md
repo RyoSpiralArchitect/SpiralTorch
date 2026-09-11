@@ -144,3 +144,9 @@ The [direct-I/O follow-up](../benchmarks/results/2026-09-12-module-direct-io/REA
 adds same-page WASM A/B timings. The small burst improves in this fixture;
 larger and single-call cases do not uniformly improve. All control drift and
 regressions remain in the record rather than being filtered out.
+
+The [bounded-output follow-up](../benchmarks/results/2026-09-12-module-output-reuse/README.md)
+checks safe reuse with live views, consumers and snapshots, and retains four
+counterbalanced timing matrices. Small bursts improve in this fixture;
+middle bursts are approximately unchanged, and large Python bursts regress.
+Fewer allocations are not by themselves evidence of a universal speedup.

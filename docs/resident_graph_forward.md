@@ -123,8 +123,10 @@ nonempty last-axis inputs.
 counter together. Packed offset-zero inputs are read directly and the last stage
 writes an owning output version. Fully unobserved storage and its final/guard
 bindings may be recycled within a four-slot / 32 MiB retained-output budget.
-Live tensors, views and bound consumers prevent recycling. View packing, graph evaluation and
-error-guard capture use one submission, with no intermediate host observation.
+Live tensors, views and bound consumers prevent recycling. View packing, graph
+evaluation and error-guard capture use one submission, with no intermediate
+host observation. See the [ownership checks and paired timings](../benchmarks/results/2026-09-12-module-output-reuse/README.md);
+the retained-output budget is not a total GPU-memory limit or a universal-speedup claim.
 The older `set_input_tensor` / `dispatch` / `output_tensor` sequence remains
 available. It can be interleaved with direct calls; all returned tensors and
 snapshots stay independent of later workspace reuse. A later `dispatch` repeats
