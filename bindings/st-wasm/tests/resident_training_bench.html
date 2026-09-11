@@ -68,9 +68,12 @@ try {
       require(JSON.stringify(fixtures.baseline[key])===JSON.stringify(fixtures.candidate[key]),"paired fixture differs: "+key);
     if(fusion) {
       require(fixtures.candidate.source_plan_json===fixtures.baseline.plan_json,"fusion source plan differs");
-      require(JSON.stringify({...fixtures.candidate.config,fuse_pointwise:false})===
-        JSON.stringify({...fixtures.baseline.config,fuse_pointwise:false}),"fusion recipe differs");
-      require(fixtures.candidate.config.fuse_pointwise===true,"fusion was not selected");
+      const {fuse_pointwise: selected,...candidateConfig}=fixtures.candidate.config;
+      const referenceConfig=fixtures.baseline.config;
+      require(Object.keys(candidateConfig).length===Object.keys(referenceConfig).length&&
+        Object.keys(referenceConfig).every(key=>JSON.stringify(referenceConfig[key])===JSON.stringify(candidateConfig[key])),
+        "fusion recipe differs");
+      require(selected===true,"fusion was not selected");
     }
     const row={config,fixture:fixtures.baseline,candidate_build_manifest:fixtures.candidate.build_manifest,
       ...(fusion?{candidate_fixture:fixtures.candidate}:{}),

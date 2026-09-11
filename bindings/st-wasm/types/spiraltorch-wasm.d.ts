@@ -14,6 +14,8 @@ declare module "spiraltorch-wasm" {
         private constructor();
         static fromJson(payload: string, max_bytes?: number | null): InferencePlan;
         toJson(): string;
+        /** New checked Rust plan; parameter IDs stay fixed, stage IDs may change. */
+        fusePointwise(): InferencePlan;
         readonly inputShape: Uint32Array;
         readonly outputShape: Uint32Array;
         readonly stageCount: number;

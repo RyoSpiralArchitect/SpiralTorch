@@ -55,6 +55,7 @@ function checkNnContract(types, label) {
   };
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
   assert.match(plan, /static fromJson\(payload: string, max_bytes\?: number(?: \| null)?\): InferencePlan/);
+  assert.match(plan, /fusePointwise\(\): InferencePlan/);
   assert.match(plan, /compileWebGpu\([^\n]*\): Promise<ResidentInference>/);
   for (const declaration of [plan, gpu]) {
     assert.match(declaration, /readonly inputShape: Uint32Array/);
