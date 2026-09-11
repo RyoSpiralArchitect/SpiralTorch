@@ -6,6 +6,11 @@ candidate. **Checked assembly is selected for main-worktree confirmation;
 bulk parameter comparison is removed from the current implementation.**
 This is a regression-avoidance decision, not an established universal speedup.
 
+The subsequent [main-worktree confirmation](../2026-09-12-module-assembly-confirmation/README.md)
+passes its complete pipeline and four fresh paired matrices against the original
+baseline. The selected assembly-only source remains approximately baseline in
+group-level burst timing; individual regressions are retained there as well.
+
 See [API](../../../docs/module_resident_forward.md), [summary](summary.json),
 [manifest](manifest.json), and [previous negative record](../2026-09-12-module-descriptor-assembly/README.md).
 

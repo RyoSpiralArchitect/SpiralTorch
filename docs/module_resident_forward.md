@@ -180,3 +180,9 @@ compares assembly-only, bulk-comparison-only, both, and the preceding baseline.
 The current source retains checked single-vector assembly but restores the
 per-element bit comparison. Assembly-only burst medians are approximately at
 baseline in the isolation worktree; that is not a universal speedup claim.
+
+The [main-worktree confirmation](../benchmarks/results/2026-09-12-module-assembly-confirmation/README.md)
+rebuilds this selected source and repeats the complete verification and four
+paired timing matrices against the original baseline. Burst medians remain
+approximately baseline, with fewer descriptor allocations and individual
+regressions retained. Parameter scans and finite checks are still performed.
