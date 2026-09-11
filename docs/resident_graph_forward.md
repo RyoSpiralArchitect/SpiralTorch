@@ -164,9 +164,10 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
 - Parameters, bindings and activation buffers are prepared once. `dispatch`
   uses one command submission, with no per-dispatch buffer/binding allocation
   or host readback. Intermediate activation buffers are shared between stages.
-  All nodes execute in one compute pass. Private pointwise validation flags are
-  cleared before that pass and copied into the graph guard afterward, without
-  changing logical stage/error indices or masking earlier failures. Dense-only
+  All nodes execute in one compute pass. Dense and pointwise nodes write their
+  own indexed words directly into one shared validation buffer. One whole-guard
+  clear replaces per-pointwise clears/copies, without changing logical
+  stage/error indices or masking earlier failures. Dense-only
   inference retains its existing schedule. Mixed graph training batches its
   forward dispatches on Metal only; its loss/backward/update boundaries remain
   separate. Browser training keeps the measured original schedule.

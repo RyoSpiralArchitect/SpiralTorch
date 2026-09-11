@@ -18,6 +18,7 @@ pub struct PointwisePlan {
     pipeline: wgpu::ComputePipeline,
     metadata: wgpu::Buffer,
     grid: [u32; 3],
+    flag_slot: u32,
 }
 
 fn fused_source(chain: &PointwiseChain) -> String {
@@ -60,7 +61,8 @@ fn generated_source(chain: &PointwiseChain, vjp: bool) -> String {
         .unwrap();
         code.push_str(include_str!("../shaders/gelu_derivative.wgsl"));
     }
-    // params: length, rank, grid-x, group-count, shape, (offset, strides)*inputs.
+    // params: length, rank, grid-x, group-count, shape,
+    // (offset, strides)*inputs, output flag slot.
     code.push_str(
         r#"
 fn address(index: u32, slot: u32) -> u32 {
@@ -83,7 +85,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     if (i == 0u) {
         var bits = 0u;
         for (var j = 0u; j < arrayLength(&inherited); j++) { bits |= inherited[j]; }
-        if (bits != 0u) { atomicOr(&flags[0], INVALID_TENSOR_FLAG); }
+        if (bits != 0u) { atomicOr(&flags[CHECKED_FLAG_INDEX], INVALID_TENSOR_FLAG); }
     }
     if (i >= params[0]) { return; }
 "#,
@@ -158,7 +160,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     } else {
         code.push_str("    out[i] = current;\n}\n");
     }
-    substitute_ops(code)
+    substitute_ops(code.replace("CHECKED_FLAG_INDEX", "params[arrayLength(&params) - 1u]"))
 }
 
 impl PointwisePlan {
@@ -169,9 +171,26 @@ impl PointwisePlan {
         chain: PointwiseChain,
         layouts: Vec<NdLayout>,
     ) -> Result<Self, TensorError> {
+        Self::new_with_flag_slot(device, chain, layouts, 0)
+    }
+
+    /// Graph-private variant: write directly to one word of a shared guard.
+    /// Callers retain/clear the whole guard and never expose this plan for run().
+    pub(crate) fn new_with_flag_slot(
+        device: TensorDevice,
+        chain: PointwiseChain,
+        layouts: Vec<NdLayout>,
+        flag_slot: u32,
+    ) -> Result<Self, TensorError> {
         chain.validate_layouts(&layouts)?;
         let gpu = device.runtime().context().device();
         let limits = gpu.limits();
+        storage_limit(
+            (flag_slot as usize)
+                .checked_add(1)
+                .ok_or(TensorError::Limit("pointwise guard slot"))?,
+            &limits,
+        )?;
         let bindings = chain.input_count() as u32 + 4;
         if bindings > limits.max_storage_buffers_per_shader_stage
             || bindings > limits.max_bindings_per_bind_group
@@ -189,6 +208,7 @@ impl PointwisePlan {
             metadata.push(layout.offset() as u32);
             metadata.extend(layout.strides().iter().map(|&n| n as u32));
         }
+        metadata.push(flag_slot);
         storage_limit(metadata.len(), &limits)?;
         let metadata = runtime::upload_slice(
             gpu,
@@ -238,6 +258,7 @@ impl PointwisePlan {
             pipeline,
             metadata,
             grid,
+            flag_slot,
         })
     }
 
@@ -345,6 +366,7 @@ impl PointwisePlan {
         flags: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         assert_eq!(inputs.len(), self.layouts.len());
+        assert!(flags.size() >= (u64::from(self.flag_slot) + 1) * 4);
         let buffers: Vec<_> = inputs
             .iter()
             .copied()

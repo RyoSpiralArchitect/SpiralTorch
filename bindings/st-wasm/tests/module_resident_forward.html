@@ -124,6 +124,27 @@ try{
   failed=false;try{await oldError.readValues();}catch(e){failed=/non-finite/.test(String(e));}
   check(failed,"recycling overwrote a pending invalid snapshot");free(oldError);
   report.output_reuse_guards=true;
+  for(const bad of [0,7,11]){
+    const net=keep(new st.Sequential());
+    for(let block=0;block<12;block++){
+      net.addScaler(`gain${block}`,f32([block===bad ? -3.4028234663852886e38 : 1.]));net.addRelu();
+    }
+    const plan=keep(net.inferencePlan([2,1])),graph=keep(await plan.compileGraphWebGpu());
+    const input=keep(d.upload([2,1],f32([2.,2.]))),safe=keep(d.upload([2,1],f32([0.,0.])));
+    const invalid=keep(graph.forwardTensor(input)),pending=keep(graph.snapshot());
+    for(let i=0;i<8;i++)free(keep(graph.forwardTensor(safe)));
+    close(await read(keep(graph.outputTensor())),[0.,0.]);
+    let error;try{await pending.readValues();}catch(e){error=String(e);}free(pending);
+    check(error?.includes(`stage ${2*bad},`),"wrong first failing pointwise stage");
+    error=undefined;try{await read(invalid);}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"held failure was erased by shared guard reuse");
+    error=undefined;try{await read(keep(net.forward(input)));}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"Module masked a late stage failure");
+    close(await read(keep(net.forward(safe))),[0.,0.]);
+    check(stats(net).compilations==="1","valid shared-guard recovery rebuilt");
+    free(graph);free(plan);free(net);free(input);free(safe);free(invalid);
+  }
+  report.shared_stage_guards=true;
   report.status="passed";
 }catch(e){report.error=String(e.stack||e);}
 finally{for(const v of owned)v.free();}

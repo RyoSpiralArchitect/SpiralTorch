@@ -57,6 +57,30 @@ class Gpu(unittest.TestCase):
         self.assertEqual(len(values), len(host))
         for a, b in zip(values, host): self.assertAlmostEqual(a, b, delta=2e-5)
 
+    def test_late_pointwise_stage_guards_survive_masking_and_valid_reuse(self):
+        for bad in [0, 7, 11]:
+            with self.subTest(bad=bad):
+                net = st.nn.Sequential()
+                for block in range(12):
+                    gain = -float.fromhex("0x1.fffffep+127") if block == bad else 1.
+                    net.add(st.nn.Scaler.from_gain(f"gain{block}", st.Tensor(1,1,[gain])))
+                    net.add(st.nn.Relu())
+                graph = net.inference_plan([2,1]).compile_graph_wgpu()
+                invalid = graph.forward_tensor(self.d.upload([2,1],[2.,2.]))
+                pending = graph.snapshot()
+                safe = self.d.upload([2,1],[0.,0.])
+                for _ in range(8):
+                    graph.forward_tensor(safe)
+                self.assertEqual(graph.snapshot().read_values(),[0.,0.])
+                with self.assertRaisesRegex(ValueError,rf"stage {2*bad},"):
+                    pending.read_values()
+                with self.assertRaisesRegex(ValueError,"non-finite"):
+                    invalid.snapshot().read_values()
+                with self.assertRaisesRegex(ValueError,"non-finite"):
+                    net(self.d.upload([2,1],[2.,2.])).snapshot().read_values()
+                self.close(net(safe),[0.,0.])
+                self.assertEqual(net.resident_cache_info()["compilations"],1)
+
     def test_live_versions_views_and_bound_consumers_survive_output_reuse(self):
         net = st.nn.Sequential()
         net.add(st.nn.Scaler.from_gain("gain",st.Tensor(1,1,[2.])))

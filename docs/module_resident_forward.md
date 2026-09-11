@@ -105,8 +105,11 @@ optimizer-state resume.
   successful host upload/set-input invalidates that key. Single-stage or changed
   input boundaries still rebind. Clearing the Module cache drops the pool without
   invalidating externally held outputs.
-- Packing, new/uncacheable output allocation, command encoding, small stage-flag
-  copies and the final guard pass remain. This is not globally allocation-free
+- Dense and pointwise stages write disjoint words of one shared graph guard.
+  One clear and the upstream-input guard copy replace per-pointwise clears/copies;
+  logical stage error indices and the owning output guard are preserved.
+- Packing, new/uncacheable output allocation, command encoding, the upstream
+  guard copy and the final guard pass remain. This is not globally allocation-free
   execution. Legacy explicit
   `set_input_tensor` / `dispatch` / `output_tensor` APIs retain their semantics;
   switching from direct forwarding back to `dispatch` copies the current input

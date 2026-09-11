@@ -50,7 +50,6 @@ enum Node {
     Pointwise {
         plan: Box<PointwisePlan>,
         binding: wgpu::BindGroup,
-        flags: wgpu::Buffer,
     },
 }
 
@@ -198,24 +197,18 @@ impl ResidentGraph {
                                 .map_err(TensorError::from)?,
                         );
                     }
-                    let plan =
-                        Box::new(PointwisePlan::new(device.clone(), chain.clone(), layouts)?);
+                    let plan = Box::new(PointwisePlan::new_with_flag_slot(
+                        device.clone(),
+                        chain.clone(),
+                        layouts,
+                        i as u32,
+                    )?);
                     let inputs: Vec<_> = std::iter::once(&activations[i])
                         .chain(ids.iter().map(|&id| &parameters[id]))
                         .collect();
-                    let flags = runtime::empty_buffer::<u32>(
-                        gpu,
-                        "graph.forward.pointwise_flags",
-                        1,
-                        usage,
-                    )?;
                     let binding =
-                        plan.bind_into(&inputs, &activations[i + 1], &empty_flags, &flags);
-                    Node::Pointwise {
-                        plan,
-                        binding,
-                        flags,
-                    }
+                        plan.bind_into(&inputs, &activations[i + 1], &empty_flags, &validation);
+                    Node::Pointwise { plan, binding }
                 }
             });
         }
@@ -357,7 +350,7 @@ impl ResidentGraph {
                     &self.validation,
                 ))
             }
-            (Node::Pointwise { plan, flags, .. }, GraphStage::Pointwise { parameters, .. }) => {
+            (Node::Pointwise { plan, .. }, GraphStage::Pointwise { parameters, .. }) => {
                 let inputs: Vec<_> = std::iter::once(input)
                     .chain(parameters.iter().map(|&id| &self.parameters[id]))
                     .collect();
@@ -365,7 +358,7 @@ impl ResidentGraph {
                     &inputs,
                     output,
                     &self.empty_flags,
-                    flags,
+                    &self.validation,
                 ))
             }
             _ => unreachable!("node kind is fixed by the validated definition"),
@@ -421,13 +414,8 @@ impl ResidentGraph {
                 4,
             );
         }
-        // Each pointwise node owns its flags. Clear/capture them outside one
-        // compute pass so blit encoders do not split every pair of NN stages.
-        for node in &self.nodes {
-            if let Node::Pointwise { flags, .. } = node {
-                encoder.clear_buffer(flags, 0, None);
-            }
-        }
+        // Dense and pointwise nodes write disjoint words of this one guard.
+        // One clear preserves logical stage indices without per-node blits.
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("graph.forward.pass"),
@@ -460,12 +448,6 @@ impl ResidentGraph {
                     }
                     _ => unreachable!("boundary binding kind matches the graph node"),
                 }
-            }
-        }
-        for (i, node) in self.nodes.iter().enumerate() {
-            if let Node::Pointwise { flags, .. } = node {
-                // Keep every logical stage's error, including masked earlier overflow.
-                encoder.copy_buffer_to_buffer(flags, 0, &self.validation, i as u64 * 4, 4);
             }
         }
     }
@@ -525,6 +507,10 @@ impl ResidentGraph {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "resident_graph/direct_io_tests.rs"]
 mod direct_io_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "resident_graph/guard_tests.rs"]
+mod guard_tests;
 
 pub struct GraphReadback {
     staging: runtime::ReadbackLease,
