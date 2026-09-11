@@ -1,0 +1,296 @@
+{
+  "schema": "spiraltorch.graph_arbitrary_vjp_evidence.v1",
+  "status": "passed",
+  "source": {
+    "commit": "16d41e643c260592b8e246cfbf73f399599dc066",
+    "tree": "975159a90e4f7869c187d48c181d19f0b2a8d597"
+  },
+  "adopted": "verified-b",
+  "first_attempt": {
+    "name": "verified",
+    "status": "error",
+    "reason": "The runner omitted forward-fixture.json for the old forward client suite; ENOENT before GPU execution of that suite. Earlier suites passed. The complete runner was corrected and rerun without code changes."
+  },
+  "scope": "Opt-in frozen graph forward plus arbitrary-cotangent exact VJP; Python and WASM use the same Rust kernels and guards. Not a ModuleTrainer, generic autograd or pure::Tensor migration.",
+  "performance_scope": "Regression comparison of the unchanged ordinary MSE/SGD route, NOT a benchmark of the new arbitrary-cotangent API. Fusion disabled in both lanes.",
+  "boundaries": [
+    "No optimizer/accumulation policy is injected into the new API.",
+    "Owned GPU work serial; host contention UNKNOWN. Prior parallel GPU VJP one-off remains UNKNOWN.",
+    "Apple M4 Metal/MPS for native; Chrome WebGPU does not attest an exact physical browser adapter.",
+    "Eager Torch only, not torch.compile or the fastest possible Torch. No CUDA/Furnace, push, merge or wheel release."
+  ],
+  "correctness": {
+    "native": {
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "cases": 6,
+      "guards": 11,
+      "vjp_replays": 24,
+      "max_abs_error_vs_rust_module": 9.5367431640625e-07,
+      "fused_unfused_training_max_abs": 0.0
+    },
+    "browser": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "cases": 6,
+      "guards": 11,
+      "vjp_replays": 24,
+      "max_abs_error_vs_rust_module": 1.1920928955078125e-06,
+      "fused_unfused_training_max_abs": 0
+    },
+    "torch": {
+      "version": "2.12.1",
+      "cases": 72,
+      "comparisons": 11232,
+      "max_abs": 5.7220458984375e-06,
+      "arbitrary_cotangent": {
+        "cases": 24,
+        "replays": 96,
+        "comparisons": 864,
+        "max_abs": 5.7220458984375e-06
+      }
+    },
+    "python_existing": {
+      "status": "passed",
+      "tests": 32,
+      "skipped": 0,
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/graph-arbitrary-vjp-20260912/verified-b/python-release.dylib",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "wgpu_available": true
+    },
+    "python_autograd": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "wasm-autograd": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-fusion": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-forward": {
+      "status": "passed",
+      "assertions": 536,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    }
+  },
+  "rounds": [
+    {
+      "name": "timing",
+      "baseline": {
+        "commit": "f3a4b271bdf5929088eda74f3f9d7e2f42634bdc",
+        "tree": "820ee7658e203bcb91f3dd6a440ee671b4a852e6"
+      },
+      "candidate": {
+        "commit": "16d41e643c260592b8e246cfbf73f399599dc066",
+        "tree": "975159a90e4f7869c187d48c181d19f0b2a8d597"
+      },
+      "max_abs": 1.4901161193847656e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.9725918668819867,
+          "min_ratio": 0.7562015378173111,
+          "max_ratio": 1.1070697399007476,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8303122628800477
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0411403327958069,
+          "min_ratio": 0.8365267049753335,
+          "max_ratio": 1.2089603272861074,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.885335095303454
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0037533139470387,
+          "min_ratio": 0.9762611275738058,
+          "max_ratio": 1.0210526315005202,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0012889235009799,
+          "min_ratio": 0.99253731359881,
+          "max_ratio": 1.021739129941833,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    },
+    {
+      "name": "timing-b",
+      "baseline": {
+        "commit": "f3a4b271bdf5929088eda74f3f9d7e2f42634bdc",
+        "tree": "820ee7658e203bcb91f3dd6a440ee671b4a852e6"
+      },
+      "candidate": {
+        "commit": "16d41e643c260592b8e246cfbf73f399599dc066",
+        "tree": "975159a90e4f7869c187d48c181d19f0b2a8d597"
+      },
+      "max_abs": 1.4901161193847656e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.014558172140686,
+          "min_ratio": 0.8221268307456324,
+          "max_ratio": 1.298202285386713,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8411209646195987
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0229629023622087,
+          "min_ratio": 0.9621130640393958,
+          "max_ratio": 1.1413449980418937,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8476948069697366
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.996201210130364,
+          "min_ratio": 0.9574468086624156,
+          "max_ratio": 1.0326086961407221,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 0.9968288732690656,
+          "min_ratio": 0.9708029198152089,
+          "max_ratio": 1.0465116285919949,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    }
+  ],
+  "test_counts": {
+    "contracts": 22,
+    "nn-serial": 734,
+    "backend-serial": 114,
+    "integration": 6
+  },
+  "measurement_counts": {
+    "raw_intervals": 1800,
+    "retained_intervals": 1440,
+    "nonzero_sgd_updates": 14400
+  },
+  "artifacts": 101,
+  "compressed_bytes": 17239088,
+  "raw_bytes": 336480715
+}
