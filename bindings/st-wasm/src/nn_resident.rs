@@ -15,7 +15,9 @@ use st_backend_wgpu::{
 #[cfg(feature = "webgpu")]
 use wasm_bindgen_futures::future_to_promise;
 
+mod autograd;
 mod forward;
+pub use autograd::{WasmGraphForward, WasmGraphGradients, WasmResidentGraphAutograd};
 mod graph;
 pub use forward::{WasmGraphInferenceSnapshot, WasmResidentGraphInference};
 pub use graph::{
@@ -209,6 +211,26 @@ impl WasmInferencePlan {
             let _ = (tile_mnk, kernel, accumulation);
             Err(js_error(
                 "resident graph inference requires the webgpu build feature",
+            ))
+        }
+    }
+
+    #[wasm_bindgen(js_name = compileGraphAutogradWebGpu, unchecked_return_type = "Promise<ResidentGraphAutograd>")]
+    pub fn compile_graph_autograd_webgpu(
+        &self,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        #[cfg(feature = "webgpu")]
+        {
+            autograd::compile(&self.inner, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident graph autograd requires the webgpu build feature",
             ))
         }
     }

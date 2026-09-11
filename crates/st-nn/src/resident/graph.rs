@@ -5,6 +5,42 @@ use st_kernel_contracts::{
 };
 
 impl InferencePlan {
+    /// Compile a frozen graph with separate forward and exact, arbitrary-seed
+    /// backward. No MSE, optimizer, ModuleTrainer policy or CPU fallback is added.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_autograd_wgpu(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphAutograd, InferenceError>
+    {
+        self.compile_graph_autograd_wgpu_with_options(
+            runtime,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_autograd_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphAutograd, InferenceError>
+    {
+        Ok(
+            st_backend_wgpu::resident_training::graph::ResidentGraphAutograd::new(
+                runtime,
+                self.graph_definition()?,
+                tile,
+                kernel,
+                accumulation,
+            )?,
+        )
+    }
+
     /// Opt in to checked forward/VJP fusion without changing this frozen plan.
     /// Up to three inputs fit the portable graph-training binding floor (eight
     /// storage bindings including VJP scratch/guards). Noncomposable residuals

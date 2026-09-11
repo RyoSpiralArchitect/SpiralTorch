@@ -52,6 +52,11 @@ tensors with the **whole transaction's guard**, even if a later gain fails.
 
 ## Compatibility
 
+For custom losses and repeated band/cotangent replay, use the separate
+[loss-independent resident autograd compiler](resident_graph_autograd.md).
+It shares forward/VJP kernels but does not run MSE, normalize gain gradients,
+accumulate, or update parameters.
+
 ### Opt-In Pointwise Fusion
 
 `plan.fuse_pointwise()?` (Rust), `plan.fuse_pointwise()` (Python), and

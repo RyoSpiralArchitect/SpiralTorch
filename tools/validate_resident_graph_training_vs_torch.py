@@ -17,7 +17,9 @@ import torch
 def replay(case, device, *, expected_steps=9):
     plan = case["plan"]
     assert plan["schema"] == "spiraltorch.nn.inference_plan.v2"
-    assert case["policy"] in ("Exact", "ModuleCompatible")
+    vjp = "replays" in case
+    if not vjp:
+        assert case["policy"] in ("Exact", "ModuleCompatible")
     x = torch.tensor(case["input"], dtype=torch.float32, device=device).reshape(
         plan["input_shape"]
     )
@@ -44,8 +46,13 @@ def replay(case, device, *, expected_steps=9):
         )
         comparisons += 1
 
-    assert len(case["steps"]) == len(case["rates"]) == expected_steps
-    for rate, expected in zip(case["rates"], case["steps"]):
+    if vjp:
+        assert len(case["replays"]) == 4
+        steps = [(None, r) for r in case["replays"]]
+    else:
+        assert len(case["steps"]) == len(case["rates"]) == expected_steps
+        steps = zip(case["rates"], case["steps"])
+    for rate, expected in steps:
         current = x
         for stage in plan["stages"]:
             if stage["kind"] == "linear":
@@ -72,6 +79,15 @@ def replay(case, device, *, expected_steps=9):
                         raise ValueError(f"unknown operation {op}")
             else:
                 raise ValueError("unknown stage")
+        if vjp:
+            cotangent = torch.tensor(expected["cotangent"], dtype=torch.float32, device=device).reshape(current.shape)
+            dx, *raw = torch.autograd.grad(current, [x, *parameters], grad_outputs=cotangent)
+            check(current, case["prediction"])
+            check(dx, expected["input_gradient"])
+            assert len(raw) == len(expected["raw_gradients"])
+            for actual, reference in zip(raw, expected["raw_gradients"]):
+                check(actual, reference)
+            continue
         target = torch.tensor(
             case["target"], dtype=torch.float32, device=device
         ).reshape(current.shape)
@@ -99,7 +115,8 @@ def replay(case, device, *, expected_steps=9):
         "device": device,
         "seed": case["seed"],
         "input_shape": case["input_shape"],
-        "policy": case["policy"],
+        "policy": "Exact" if vjp else case["policy"],
+        "arbitrary_cotangent": vjp,
         "comparisons": comparisons,
         "max_abs_error": maximum,
     }
@@ -155,6 +172,16 @@ def main():
                         result["pointwise_fusion"] = "source_plan" in case
                         result["input"] = str(path.resolve())
                         report["cases"].append(result)
+                    autograd = fixture.get("autograd")
+                    if autograd is not None:
+                        assert len(autograd["cases"]) == 6
+                        assert len(autograd["guards"]) == 11
+                        assert all(g["passed"] for g in autograd["guards"])
+                        for case in autograd["cases"]:
+                            result = replay(case, device)
+                            result["input"] = str(path.resolve())
+                            result["pointwise_fusion"] = case["fused"]
+                            report["cases"].append(result)
             report["status"] = "passed"
         except Exception as error:
             report["error"] = f"{type(error).__name__}: {error}"

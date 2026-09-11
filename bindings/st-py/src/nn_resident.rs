@@ -12,6 +12,7 @@ use pyo3::{
 use st_nn::resident::{InferenceError, InferencePlan, DEFAULT_MAX_PLAN_JSON_BYTES};
 use st_tensor::NdLayout;
 
+mod autograd;
 mod forward;
 mod graph;
 mod training;
@@ -190,6 +191,17 @@ impl PyInferencePlan {
         accumulation: &str,
     ) -> PyResult<training::PyResidentTraining> {
         training::compile(&self.inner, py, tile_mnk, kernel, accumulation)
+    }
+
+    #[pyo3(signature = (*, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_graph_autograd_wgpu(
+        &self,
+        py: Python<'_>,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<autograd::PyResidentGraphAutograd> {
+        autograd::compile(&self.inner, py, tile_mnk, kernel, accumulation)
     }
 
     #[pyo3(signature = (*, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
@@ -389,5 +401,6 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     training::register(module)?;
     graph::register(module)?;
     forward::register(module)?;
+    autograd::register(module)?;
     Ok(())
 }

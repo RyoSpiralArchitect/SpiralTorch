@@ -318,6 +318,31 @@ impl TensorDevice {
             layout.shape(),
         )
     }
+
+    /// Freeze within the caller's submission, retaining every upstream guard.
+    pub(crate) fn capture_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        layout: &NdLayout,
+        values: &wgpu::Buffer,
+        flags: &wgpu::Buffer,
+    ) -> Result<ResidentTensor, TensorError> {
+        self.encode(
+            encoder,
+            ElementwiseOp::Identity,
+            Operand {
+                values,
+                flags,
+                layout,
+            },
+            Operand {
+                values,
+                flags,
+                layout,
+            },
+            layout.shape(),
+        )
+    }
 }
 
 #[derive(Debug)]

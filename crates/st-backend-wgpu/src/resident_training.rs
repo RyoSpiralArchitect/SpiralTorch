@@ -36,8 +36,12 @@ pub enum TrainingError {
     LearningRate,
     #[error("upload a complete input/target batch before stepping")]
     MissingBatch,
+    #[error("upload an input before forwarding the autograd graph")]
+    MissingInput,
     #[error("step the current batch before requesting training results")]
     StaleStep,
+    #[error("forward the current input before backward; the token must belong to this workspace and its latest forward")]
+    StaleForward,
     #[error("read the pending profile before reusing the private profiler; an abandoned or invalid profile requires a new workspace")]
     PendingProfile,
     #[error("training counter or snapshot size exhausted")]

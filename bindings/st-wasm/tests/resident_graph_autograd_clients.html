@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Rust graph arbitrary-cotangent clients</title>
+<pre id="result" data-status="running">Checking resident forward and exact VJP</pre>
+<script type="module">
+import init, {InferencePlan} from "./module/spiraltorch_wasm.js";
+const element=document.querySelector("#result");
+const report={status:"error",schema:"spiraltorch.graph_autograd_clients.v1"};
+const same=(a,b)=>{if(JSON.stringify(a)!==JSON.stringify(b))throw Error(`mismatch ${a} vs ${b}`);};
+const fail=fn=>{let caught=false;try{fn();}catch{caught=true;}if(!caught)throw Error("invalid operation accepted");};
+const f32=v=>new Float32Array(v);
+async function read(t){const s=t.snapshot();try{return [...await s.readValues()];}finally{s.free();t.free();}}
+async function rejected(t){let caught=false;try{await read(t);}catch{caught=true;}if(!caught)throw Error("invalid tensor accepted");}
+try {
+  await init();
+  const source=InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2,2,1],
+    parameters:[{role:"gain",shape:[1],values:[2]}],stages:[
+      {kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1}]},
+      {kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]}));
+  const plan=source.fusePointwise(), gpu=await plan.compileGraphAutogradWebGpu(), other=await plan.compileGraphAutogradWebGpu();
+  report.adapter=gpu.adapterInfo();
+  if(report.adapter.device_type==="Cpu"||report.adapter.backend!=="BrowserWebGpu")throw Error("wrong backend");
+  const device=gpu.tensorDevice(), one=device.upload([2,2,1],f32([1,1,1,1])), zeroScalar=device.upload([],f32([0]));
+  fail(()=>gpu.forward());
+  const input=device.upload([2,2,1],f32([-2,-0,1,2]));
+  gpu.setInputTensor(input);input.free();other.upload(f32([1,1,1,1]));
+  const forward=gpu.forward(), alien=other.forward(), prediction=forward.predictionTensor();
+  const half=device.upload([],f32([.5])), seed=prediction.mul(half);half.free();
+  fail(()=>gpu.backward(alien,seed));fail(()=>gpu.upload(f32([])));fail(()=>gpu.upload(f32([NaN,0,0,0])));
+  const wrong=seed.reshape([4]);fail(()=>gpu.backward(forward,wrong));fail(()=>gpu.setInputTensor(wrong));wrong.free();
+  same([gpu.inputGeneration.toString(),gpu.submittedForwards.toString(),gpu.submittedBackwards.toString()],["1","1","0"]);
+  const result=gpu.backward(forward,seed);
+  same(await read(result.inputGradientTensor()),[0,0,2,4]);same(await read(result.parameterGradientTensor(0)),[5]);
+  same([result.inputGeneration.toString(),result.submittedForward.toString(),result.submittedBackward.toString(),result.parameterCount],["1","1","1",1]);
+  for(const index of [-1,1,.5,NaN,Infinity,"0",true])fail(()=>result.parameterGradientTensor(index));
+  const zero=zeroScalar.broadcastTo([2,2,1]), empty=gpu.backward(forward,zero);
+  same(await read(empty.parameterGradientTensor(0)),[0]);empty.free();
+  const max=device.upload([],f32([3.4028234663852886e38])), two=device.upload([],f32([2]));
+  const huge=one.mul(max), poisoned=huge.mul(two);huge.free();max.free();two.free();
+  const bad=gpu.backward(forward,poisoned), recovered=gpu.backward(forward,one);
+  same(await read(recovered.parameterGradientTensor(0)),[3]);
+  await rejected(bad.inputGradientTensor());await rejected(bad.parameterGradientTensor(0));
+  same(await read(forward.predictionTensor()),[0,0,2,4]);
+  gpu.setInputTensor(poisoned);fail(()=>gpu.backward(forward,seed));
+  const invalid=gpu.forward(), invalidGrad=gpu.backward(invalid,zero);
+  gpu.upload(f32([1,1,1,1]));const fresh=gpu.forward(), good=gpu.backward(fresh,one);
+  same(await read(good.parameterGradientTensor(0)),[4]);
+  const another=gpu.forward();fail(()=>gpu.backward(fresh,one));another.free();
+  gpu.free();other.free();device.free();
+  await rejected(invalid.predictionTensor());await rejected(invalidGrad.inputGradientTensor());await rejected(invalidGrad.parameterGradientTensor(0));
+  same(await read(prediction),[0,0,2,4]);same(await read(result.parameterGradientTensor(0)),[5]);
+  for(const h of [source,plan,one,zeroScalar,forward,alien,seed,result,zero,poisoned,bad,recovered,invalid,invalidGrad,fresh,good])h.free();
+  report.status="passed";report.exact_gain_gradient=5;report.identity_recovery_ownership="passed";
+}catch(error){report.error=String(error.stack||error);}
+element.textContent=JSON.stringify(report);element.dataset.status=report.status;
+</script>

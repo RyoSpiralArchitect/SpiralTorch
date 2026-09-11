@@ -24,6 +24,8 @@ use st_nn::{
 };
 use st_tensor::{NdLayout, Tensor};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+#[path = "resident_graph_training/autograd.rs"]
+mod autograd;
 #[path = "resident_graph_training/fusion.rs"]
 mod fusion;
 macro_rules! readback {
@@ -312,6 +314,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         "build_manifest":serde_json::from_str::<Value>(st_core::build_manifest_json())?,"primitive_checks":primitive_checks,
         "adapter":format!("{:?}",runtime.adapter_info()),"cases":cases,"guards":guards,
         "workspace_reuse":workspace_reuse,"pointwise_fusion":fusion::run(runtime.clone()).await?,
+        "autograd":autograd::run(runtime.clone()).await?,
         "scope":"Sequential with owned gains; mean-MSE plain SGD; no intermediate host readbacks; not a throughput claim"}),
     )
 }

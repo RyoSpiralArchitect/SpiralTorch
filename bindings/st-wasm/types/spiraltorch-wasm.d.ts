@@ -24,6 +24,8 @@ declare module "spiraltorch-wasm" {
         /** Requires webgpu; the plan may be freed while the returned promise runs. */
         compileWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentInference>;
         compileGraphWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphInference>;
+        /** Frozen parameters, exact arbitrary-cotangent VJPs; no loss or optimizer. */
+        compileGraphAutogradWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphAutograd>;
         /** Mean-MSE, VJP and plain SGD use the same Rust core as native training. */
         compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentTraining>;
         /** Explicit Rust policy: "exact" or "module_compatible". Requires webgpu. */
@@ -81,6 +83,40 @@ declare module "spiraltorch-wasm" {
         dispatch(): bigint;
         outputTensor(): WgpuTensor;
         snapshot(): GraphInferenceSnapshot;
+        free(): void;
+    }
+    export class ResidentGraphAutograd {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly inputGeneration: bigint;
+        readonly submittedForwards: bigint;
+        readonly submittedBackwards: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        tensorDevice(): WgpuTensorDevice;
+        upload(data: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        forward(): GraphForward;
+        backward(forward: GraphForward, cotangent: WgpuTensor): GraphGradients;
+        free(): void;
+    }
+    export class GraphForward {
+        private constructor();
+        readonly inputGeneration: bigint;
+        readonly submittedForward: bigint;
+        predictionTensor(): WgpuTensor;
+        free(): void;
+    }
+    export class GraphGradients {
+        private constructor();
+        readonly inputGeneration: bigint;
+        readonly submittedForward: bigint;
+        readonly submittedBackward: bigint;
+        readonly parameterCount: number;
+        inputGradientTensor(): WgpuTensor;
+        parameterGradientTensor(index: number): WgpuTensor;
         free(): void;
     }
     export class GraphInferenceSnapshot {

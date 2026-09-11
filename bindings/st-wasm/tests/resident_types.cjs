@@ -122,6 +122,14 @@ function checkNnContract(types, label) {
     assert.match(graphState, new RegExp(method+"\\(\\): Float32Array"));
   assert.match(graphState, /toPlan\(\): InferencePlan/);
   assert.match(plan, /compileGraphWebGpu\([^\n]*\): Promise<ResidentGraphInference>/);
+  assert.match(plan, /compileGraphAutogradWebGpu\([^\n]*\): Promise<ResidentGraphAutograd>/);
+  const autograd=get("ResidentGraphAutograd"), token=get("GraphForward"), gradients=get("GraphGradients");
+  assert.match(autograd, /forward\(\): GraphForward/);
+  assert.match(autograd, /backward\(forward: GraphForward, cotangent: WgpuTensor\): GraphGradients/);
+  assert.match(autograd, /readonly submittedBackwards: bigint/);
+  assert.match(token, /predictionTensor\(\): WgpuTensor/);
+  assert.match(gradients, /inputGradientTensor\(\): WgpuTensor/);
+  assert.match(gradients, /parameterGradientTensor\(index: number\): WgpuTensor/);
   const forward=get("ResidentGraphInference"), forwardSnapshot=get("GraphInferenceSnapshot"),
     tensor=get("WgpuTensor"), tensorDevice=get("WgpuTensorDevice"), tensorSnapshot=get("WgpuTensorSnapshot");
   assert.match(forward, /setInputTensor\(input: WgpuTensor\): void/);
