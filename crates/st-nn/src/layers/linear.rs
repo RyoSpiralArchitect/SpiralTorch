@@ -42,6 +42,8 @@ fn relabel_non_finite<T>(result: PureResult<T>, label: &'static str) -> PureResu
 pub struct Linear {
     weight: Parameter,
     bias: Parameter,
+    #[cfg(feature = "wgpu")]
+    resident: crate::resident::ResidentForwardCache,
 }
 
 impl Linear {
@@ -64,6 +66,8 @@ impl Linear {
         Ok(Self {
             weight: Parameter::new(format!("{name}::weight"), weights),
             bias: Parameter::new(format!("{name}::bias"), bias),
+            #[cfg(feature = "wgpu")]
+            resident: Default::default(),
         })
     }
 
@@ -84,6 +88,23 @@ impl Linear {
 }
 
 impl Module for Linear {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        self.resident.forward(self.inference_ops()?, input)
+    }
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        Some(self.resident.stats())
+    }
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.resident.clear();
+    }
+
     fn resident_parameter_bindings(
         &self,
     ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
@@ -100,8 +121,8 @@ impl Module for Linear {
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
         self.validate_parameters()?;
         Ok(vec![crate::resident::InferenceOp::Linear {
-            weight: self.weight.value().snapshot(),
-            bias: self.bias.value().snapshot(),
+            weight: self.weight.value().clone(),
+            bias: self.bias.value().clone(),
         }])
     }
 

@@ -131,6 +131,15 @@ impl Relu {
 }
 
 impl Module for Relu {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        crate::resident::unary_forward(input, st_kernel_contracts::elementwise::ElementwiseOp::Relu)
+    }
+
     fn resident_parameter_bindings(
         &self,
     ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>

@@ -77,6 +77,8 @@ fn emit_scaler_meta(
 pub struct Scaler {
     gain: Parameter,
     baseline: Tensor,
+    #[cfg(feature = "wgpu")]
+    resident: crate::resident::ResidentForwardCache,
 }
 
 impl Scaler {
@@ -110,6 +112,8 @@ impl Scaler {
         Ok(Self {
             gain: Parameter::new(format!("{name}::gain"), gain),
             baseline,
+            #[cfg(feature = "wgpu")]
+            resident: Default::default(),
         })
     }
 
@@ -235,6 +239,23 @@ impl Scaler {
 }
 
 impl Module for Scaler {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        self.resident.forward(self.inference_ops()?, input)
+    }
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        Some(self.resident.stats())
+    }
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.resident.clear();
+    }
+
     fn resident_parameter_bindings(
         &self,
     ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>

@@ -1,6 +1,5 @@
 //! Python transports existing Rust NN plans and owning GPU snapshots.
 
-#[cfg(feature = "wgpu")]
 use crate::tensor::PyTensor;
 #[cfg(feature = "wgpu")]
 use pyo3::{exceptions::PyRuntimeError, types::PyDict};
@@ -17,6 +16,65 @@ mod forward;
 mod graph;
 mod learner;
 mod training;
+
+/// Input type selects an explicit host or resident route. Never upload or read
+/// back implicitly, and never reinterpret an unsupported module as CPU work.
+pub(crate) fn forward_argument(
+    module: &dyn st_nn::Module,
+    input: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let py = input.py();
+    if let Ok(input) = input.extract::<PyRef<'_, PyTensor>>() {
+        let output = module
+            .forward(&input.inner)
+            .map_err(crate::tensor::tensor_err_to_py)?;
+        return Ok(Py::new(py, PyTensor::from_tensor(output))?.into_any());
+    }
+    #[cfg(feature = "wgpu")]
+    if let Ok(input) = input.extract::<PyRef<'_, crate::wgpu_tensor::PyWgpuTensor>>() {
+        let inner = module.forward_resident(&input.inner).map_err(plan_error)?;
+        return Ok(Py::new(py, crate::wgpu_tensor::PyWgpuTensor { inner })?.into_any());
+    }
+    Err(PyTypeError::new_err(
+        "expected Tensor or WgpuTensor; no implicit device transfer",
+    ))
+}
+
+pub(crate) fn cache_info(module: &dyn st_nn::Module, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    #[cfg(feature = "wgpu")]
+    {
+        let stats = module
+            .resident_forward_stats()
+            .ok_or_else(|| PyValueError::new_err("module has no resident cache"))?;
+        let info = PyDict::new(py);
+        info.set_item("compilations", stats.compilations)?;
+        info.set_item("cache_hits", stats.cache_hits)?;
+        info.set_item("submitted_forwards", stats.submitted_forwards)?;
+        Ok(info.into_any().unbind())
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let _ = (module, py);
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "requires the wgpu feature",
+        ))
+    }
+}
+
+pub(crate) fn clear_cache(module: &dyn st_nn::Module) -> PyResult<()> {
+    #[cfg(feature = "wgpu")]
+    {
+        module.clear_resident_forward_cache();
+        Ok(())
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let _ = module;
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "requires the wgpu feature",
+        ))
+    }
+}
 
 fn plan_error(error: InferenceError) -> PyErr {
     #[cfg(feature = "wgpu")]

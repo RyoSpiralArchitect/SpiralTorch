@@ -9,9 +9,31 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Original Rust NN Module. Requires webgpu; inputs/outputs stay resident. */
+    export class Sequential {
+        constructor();
+        addLinear(name: string, input_dim: number, output_dim: number): void;
+        addScaler(name: string, gain: Float32Array): void;
+        addGelu(): void;
+        addRelu(): void;
+        forward(input: WgpuTensor): WgpuTensor;
+        inferencePlan(shape: number[]): InferencePlan;
+        residentCacheInfo(): ResidentForwardStats;
+        clearResidentCache(): void;
+        free(): void;
+    }
+    /** Host cache/submission counts, not GPU completion receipts. */
+    export class ResidentForwardStats {
+        private constructor();
+        readonly compilations: bigint;
+        readonly cacheHits: bigint;
+        readonly submittedForwards: bigint;
+        free(): void;
+    }
     /** Rust-owned immutable NN parameter plan, available with nn or webgpu. */
     export class InferencePlan {
         private constructor();
+        applyParametersTo(module: Sequential, updated: InferencePlan, optimizer_state?: string | null): number;
         static fromJson(payload: string, max_bytes?: number | null): InferencePlan;
         toJson(): string;
         /** New checked Rust plan; parameter IDs stay fixed, stage IDs may change. */

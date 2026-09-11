@@ -54,6 +54,14 @@ function checkNnContract(types, label) {
     return declaration;
   };
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
+  const module = get("Sequential", true), cache = get("ResidentForwardStats");
+  assert.match(module, /forward\(input: WgpuTensor\): WgpuTensor/);
+  assert.match(module, /inferencePlan\(shape: (?:Array<any>|number\[\])\): InferencePlan/);
+  assert.match(module, /residentCacheInfo\(\): ResidentForwardStats/);
+  assert.match(module, /clearResidentCache\(\): void/);
+  assert.match(plan, /applyParametersTo\(module: Sequential, updated: InferencePlan, optimizer_state\?: string(?: \| null)?\): number/);
+  for (const name of ["compilations", "cacheHits", "submittedForwards"])
+    assert.match(cache, new RegExp("readonly " + name + ": bigint"));
   assert.match(plan, /static fromJson\(payload: string, max_bytes\?: number(?: \| null)?\): InferencePlan/);
   assert.match(plan, /fusePointwise\(\): InferencePlan/);
   assert.match(plan, /compileWebGpu\([^\n]*\): Promise<ResidentInference>/);

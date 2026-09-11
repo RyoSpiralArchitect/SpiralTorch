@@ -115,6 +115,11 @@ CPU-only wheels support plan transport but reject GPU compilation rather
 than silently falling back. See the [resident NN guide](../../docs/resident_nn_inference.md)
 for browser use, validation, and the retained PyTorch comparison boundaries.
 
+The [original model can now accept `WgpuTensor` directly](../../docs/module_resident_forward.md):
+`y = model(x_gpu)` caches the same Rust graph, follows parameter updates, and
+returns an owning GPU tensor. Host `Tensor` inputs keep the existing behavior.
+No automatic CPU fallback or per-layer host readback is introduced.
+
 ## Rust-owned protocol catalog
 
 The admission-certified catalog is generated and replayed by `st-core`; Python

@@ -20,12 +20,16 @@ mod forward;
 pub use autograd::{WasmGraphForward, WasmGraphGradients, WasmResidentGraphAutograd};
 mod graph;
 mod learner;
+#[cfg(feature = "webgpu")]
+mod module;
 pub use forward::{WasmGraphInferenceSnapshot, WasmResidentGraphInference};
 pub use graph::{
     WasmGraphTrainingParametersSnapshot, WasmGraphTrainingSnapshot, WasmGraphTrainingState,
     WasmResidentGraphTraining,
 };
 pub use learner::{WasmGraphGradientBatch, WasmGraphUpdateSnapshot, WasmResidentGraphLearner};
+#[cfg(feature = "webgpu")]
+pub use module::{WasmResidentForwardStats, WasmSequential};
 mod training;
 pub use training::{
     WasmResidentTraining, WasmTrainingLossSnapshot, WasmTrainingParametersSnapshot,
@@ -79,6 +83,31 @@ pub struct WasmInferencePlan {
 
 #[wasm_bindgen(js_class = InferencePlan)]
 impl WasmInferencePlan {
+    /// Checked handoff to the original browser-owned Rust Module.
+    #[cfg(feature = "webgpu")]
+    #[wasm_bindgen(js_name = applyParametersTo)]
+    pub fn apply_parameters_to(
+        &self,
+        module: &mut WasmSequential,
+        updated: &WasmInferencePlan,
+        optimizer_state: Option<JsString>,
+    ) -> Result<usize, JsValue> {
+        let policy = optimizer_state
+            .map(|s| {
+                s.as_string()
+                    .ok_or_else(|| js_error("optimizer_state must be a string"))
+            })
+            .transpose()?
+            .unwrap_or_else(|| "reject".into());
+        self.inner
+            .apply_parameters_to(
+                &mut module.inner,
+                &updated.inner,
+                policy.parse().map_err(js_error)?,
+            )
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = fromJson)]
     pub fn from_json(
         payload: JsString,

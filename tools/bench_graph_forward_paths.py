@@ -166,7 +166,26 @@ def eager(torch, plan, x, parameters):
     return current
 
 
-def run_case(case, st, torch, devices):
+def original_module(case, st):
+    """Rebuild the admitted fixture using real high-level Rust layers."""
+    net = st.nn.Sequential()
+    width = case["shape"][-1]
+    for i in range(case["depth"]):
+        gain, weight, bias = case["plan"]["parameters"][3*i:3*i+3]
+        net.add(st.nn.Scaler.from_gain(f"scale{i}", st.Tensor(1,width,gain["values"])))
+        linear = st.nn.Linear(f"linear{i}", width, width)
+        linear.load_state_dict([(f"linear{i}::weight", st.Tensor(width,width,weight["values"])),
+                                (f"linear{i}::bias", st.Tensor(1,width,bias["values"]))])
+        net.add(linear)
+        net.add(st.nn.Gelu())
+        net.add(st.nn.Relu())
+    frozen = json.loads(net.inference_plan(case["shape"]).to_json())
+    if frozen != case["plan"]:
+        raise ValueError("original Module differs from the admitted plan")
+    return net
+
+
+def run_case(case, st, torch, devices, include_module=False):
     plan = st.nn.InferencePlan.from_json(json.dumps(case["plan"]))
     graphs = dict(scalar=plan.compile_graph_wgpu(),
                   register=plan.compile_graph_wgpu(kernel="register_2x2", accumulation="compensated"))
@@ -176,6 +195,14 @@ def run_case(case, st, torch, devices):
                          for p in case["plan"]["parameters"]]) for device in devices}
     routes = [f"python_{kernel}_{cadence}" for kernel in graphs for cadence in ("h2h", "burst")]
     routes += [f"torch_{device}_{cadence}" for device in devices for cadence in ("h2h", "burst")]
+    module, module_input, cold_ms = None, None, None
+    if include_module:
+        module = original_module(case, st)
+        module_input = st.WgpuTensorDevice.create().upload(case["shape"], case["input"])
+        start = perf_counter()
+        close(module(module_input).snapshot().read_values(), case["reference"])
+        cold_ms = (perf_counter()-start)*1000
+        routes += ["module_resident_d2h", "module_resident_burst"]
     samples, last_outputs = [], {}
     for block in range(WARMUP + SAMPLES):
         offset = (block + case["seed"]) % len(routes)
@@ -196,6 +223,11 @@ def run_case(case, st, torch, devices):
                 output = graph.snapshot().read_values()
                 elapsed = (perf_counter()-start)*1000
                 if graph.submitted_dispatches-before != forwards: raise ValueError("dispatch count differs")
+            elif family == "module":
+                start = perf_counter()
+                for _ in range(forwards): value = module(module_input)
+                output = value.snapshot().read_values()
+                elapsed = (perf_counter()-start)*1000
             else:
                 x, parameters = contexts[variant]
                 if variant == "mps": torch.mps.synchronize()
@@ -211,6 +243,12 @@ def run_case(case, st, torch, devices):
                                     elapsed_ms=elapsed, max_abs_error=maximum))
     result = dict(seed=case["seed"], shape=case["shape"], depth=case["depth"], routes=routes,
                   samples=samples, last_outputs=last_outputs, adapter=graphs["scalar"].adapter_info())
+    if include_module:
+        expected = 1 + (WARMUP+SAMPLES)*(1+BURST)
+        stats = module.resident_cache_info()
+        if stats != dict(compilations=1, cache_hits=expected-1, submitted_forwards=expected):
+            raise ValueError("original Module did not reuse exactly one graph")
+        result.update(module_cold_ms=cold_ms, module_cache=stats)
     validate_samples(result, routes)
     result["summary"] = summarize(samples)
     return result
@@ -221,9 +259,14 @@ def main():
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--native-library", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--include-module", action="store_true",
+                        help="Add ordinary model(WgpuTensor) routes; keep the legacy v1 benchmark unchanged by default")
     args = parser.parse_args()
     report = dict(schema="spiraltorch.graph_forward_paths.v1", status="error", cases=[],
                   boundary="Three warmups, nine retained rotated blocks. H2H includes input transfer and host-list output. Burst keeps fixed input device-resident for eight independent forwards and includes one final host-list read. Setup excluded; numerical checks outside timing. Torch eager addmm/bias/tanh-GELU, no compile; native controls measured separately. macOS GPU contention UNKNOWN; no fastest-Torch claim.")
+    if args.include_module:
+        report["schema"] = "spiraltorch.module_forward_paths.v1"
+        report["boundary"] += " Module routes use the same original Rust NN model; d2h keeps input resident and reads one output, burst performs eight independent forwards and reads the last output. Per-call weight bit checks and owning GPU input/output copies are included; this is not zero-copy. Cold compilation is recorded separately. d2h is not interchangeable with h2h."
     paths = [args.fixture.resolve(strict=True), args.native_library.resolve(strict=True)]
     identities = {str(path): digest(path) for path in paths}
     with args.output.open("x") as output:
@@ -244,7 +287,7 @@ def main():
             match_adapter(document["adapter"], "mps", admission["name"])
             with torch.inference_mode():
                 for case in cases:
-                    result = run_case(case, st, torch, ["cpu", "mps"])
+                    result = run_case(case, st, torch, ["cpu", "mps"], args.include_module)
                     match_adapter(result["adapter"], "mps", admission["name"])
                     report["cases"].append(result)
                     print(json.dumps({k:result[k] for k in ("shape", "seed", "depth", "summary")}), flush=True)

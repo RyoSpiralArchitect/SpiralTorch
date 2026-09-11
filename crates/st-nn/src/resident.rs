@@ -13,12 +13,19 @@ use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
 mod graph;
+#[cfg(feature = "wgpu")]
+mod module_forward;
 mod module_update;
 mod portable;
+#[cfg(feature = "wgpu")]
+pub(crate) use module_forward::unary_forward;
+#[cfg(feature = "wgpu")]
+pub use module_forward::{ResidentForwardCache, ResidentForwardStats};
 pub use module_update::{ModuleOptimizerStatePolicy, ResidentParameterBinding};
 pub use portable::{DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, INFERENCE_PLAN_SCHEMA};
 
 /// Modules must emit operations equivalent to their ordinary forward semantics.
+/// Descriptors may share live COW/foreign values; InferencePlan freezes them.
 #[derive(Clone, Debug)]
 pub enum InferenceOp {
     Linear { weight: Tensor, bias: Tensor },
@@ -27,8 +34,27 @@ pub enum InferenceOp {
     Scale { gain: Tensor },
 }
 
+impl InferenceOp {
+    #[cfg(feature = "wgpu")]
+    pub(crate) fn snapshot(&self) -> Self {
+        match self {
+            Self::Linear { weight, bias } => Self::Linear {
+                weight: weight.snapshot(),
+                bias: bias.snapshot(),
+            },
+            Self::Scale { gain } => Self::Scale {
+                gain: gain.snapshot(),
+            },
+            Self::Gelu => Self::Gelu,
+            Self::Relu => Self::Relu,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum InferenceError {
+    #[error("resident Module forwarding cannot bypass a committed tensor execution plan")]
+    ResidentForwardPolicy,
     #[error("resident module update rejected: {0}")]
     ModuleUpdate(&'static str),
     #[error("module has no resident inference lowering: {0}")]

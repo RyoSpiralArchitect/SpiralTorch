@@ -1406,12 +1406,16 @@ impl PyLinear {
         crate::nn_resident::plan_for(self.inner()?, input_shape)
     }
 
-    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
-        let output = self
-            .inner()?
-            .forward(&input.inner)
-            .map_err(tensor_err_to_py)?;
-        Ok(PyTensor::from_tensor(output))
+    pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::forward_argument(self.inner()?, input)
+    }
+
+    pub fn resident_cache_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::cache_info(self.inner()?, py)
+    }
+
+    pub fn clear_resident_cache(&self) -> PyResult<()> {
+        crate::nn_resident::clear_cache(self.inner()?)
     }
 
     pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
@@ -1526,7 +1530,7 @@ impl PyLinear {
     }
 
     #[pyo3(signature = (x))]
-    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+    pub fn __call__(&self, x: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         self.forward(x)
     }
 }
@@ -3066,9 +3070,8 @@ impl PyRelu {
         Self { inner: Relu::new() }
     }
 
-    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
-        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
-        Ok(PyTensor::from_tensor(output))
+    pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::forward_argument(&self.inner, input)
     }
 
     pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
@@ -3080,7 +3083,7 @@ impl PyRelu {
     }
 
     #[pyo3(signature = (x))]
-    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+    pub fn __call__(&self, x: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         self.forward(x)
     }
 }
@@ -3099,9 +3102,8 @@ impl PyGelu {
         Self { inner: Gelu::new() }
     }
 
-    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
-        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
-        Ok(PyTensor::from_tensor(output))
+    pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::forward_argument(&self.inner, input)
     }
 
     pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
@@ -3113,7 +3115,7 @@ impl PyGelu {
     }
 
     #[pyo3(signature = (x))]
-    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+    pub fn __call__(&self, x: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         self.forward(x)
     }
 }
@@ -4058,9 +4060,16 @@ impl PySequential {
         ))
     }
 
-    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
-        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
-        Ok(PyTensor::from_tensor(output))
+    pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::forward_argument(&self.inner, input)
+    }
+
+    pub fn resident_cache_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::cache_info(&self.inner, py)
+    }
+
+    pub fn clear_resident_cache(&self) -> PyResult<()> {
+        crate::nn_resident::clear_cache(&self.inner)
     }
 
     pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
@@ -4162,7 +4171,7 @@ impl PySequential {
     }
 
     #[pyo3(signature = (x))]
-    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+    pub fn __call__(&self, x: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         self.forward(x)
     }
 }
@@ -7904,12 +7913,16 @@ impl PyScaler {
         Ok(Self { inner: Some(inner) })
     }
 
-    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
-        let output = self
-            .inner()?
-            .forward(&input.inner)
-            .map_err(tensor_err_to_py)?;
-        Ok(PyTensor::from_tensor(output))
+    pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::forward_argument(self.inner()?, input)
+    }
+
+    pub fn resident_cache_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        crate::nn_resident::cache_info(self.inner()?, py)
+    }
+
+    pub fn clear_resident_cache(&self) -> PyResult<()> {
+        crate::nn_resident::clear_cache(self.inner()?)
     }
 
     pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
@@ -7921,7 +7934,7 @@ impl PyScaler {
     }
 
     #[pyo3(signature = (x))]
-    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+    pub fn __call__(&self, x: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         self.forward(x)
     }
 

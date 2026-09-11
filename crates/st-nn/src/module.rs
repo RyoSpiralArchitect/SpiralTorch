@@ -737,6 +737,27 @@ fn parameter_value_fingerprint(name: &str, value: &Tensor) -> String {
 /// High-level module trait inspired by PyTorch's `nn.Module` but expressed in
 /// pure Rust so it can be used from WebGPU, HIP, or CPU flows alike.
 pub trait Module {
+    /// An explicit GPU-input/GPU-output forward on the original Module. Unknown
+    /// modules reject instead of reading back or running their CPU implementation.
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        _input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        Err(crate::resident::InferenceError::UnsupportedModule(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        None
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {}
+
     /// Explicit parameter ownership in inference-lowering slot order. Every
     /// parameter must appear once, with its graph role and a unique name. The
     /// immutable/mutable visitors must expose these same actual parameters.
@@ -750,8 +771,8 @@ pub trait Module {
         ))
     }
 
-    /// Explicit, snapshot-based inference lowering. Unknown modules cannot
-    /// silently execute on CPU inside a resident GPU plan.
+    /// Explicit inference descriptors. Plans freeze their values; descriptors
+    /// may share live parameters. Unknown modules never silently run on CPU.
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {

@@ -1,0 +1,84 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Original Rust NN Module resident forwarding</title>
+<pre id="result" data-status="running">Loading</pre>
+<script type="module">
+import init, * as st from "./module/spiraltorch_wasm.js";
+const report={schema:"spiraltorch.module_resident_forward.v1",status:"error",cases:[]};
+let assertions=0;
+function check(ok,why){assertions++;if(!ok)throw Error(why);}
+function rejects(call){let failed=false;try{call();}catch{failed=true;}check(failed,"invalid call accepted");}
+function close(a,b){check(a.length===b.length && [...a].every((v,i)=>Number.isFinite(v)&&Math.abs(v-b[i])<2e-5),"values differ");}
+const f32=v=>new Float32Array(v),owned=new Set(),keep=v=>(owned.add(v),v);
+function free(v){owned.delete(v);v.free();}
+async function read(t){const snap=keep(t.snapshot());const pending=snap.readValues();free(snap);return [...await pending];}
+function stats(m){const s=keep(m.residentCacheInfo());const v={compilations:String(s.compilations),cache_hits:String(s.cacheHits),submitted_forwards:String(s.submittedForwards)};free(s);return v;}
+try{
+  await init();
+  check(!!navigator.gpu,"WebGPU required, no CPU fallback");
+  const d=keep(await st.WgpuTensorDevice.create());report.adapter=d.adapterInfo();
+  check(report.adapter.device_type!=="Cpu","CPU adapter is not GPU evidence");
+  for(const width of [3,7,16]){
+    const m=keep(new st.Sequential());
+    m.addLinear("up",width,width+1);m.addGelu();
+    m.addScaler("gain",f32(Array(width+1).fill(1.125)));m.addRelu();
+    m.addLinear("down",width+1,width);
+    // Bounded recurrent fixture; unconstrained initial weights can explode when
+    // fed back twenty times. Keep that negative run, rather than hide its flags.
+    const initial=keep(m.inferencePlan([3,2,width])),seed=JSON.parse(initial.toJson());
+    for(const p of seed.parameters)p.values=p.values.map((_,i)=>p.role==="weight"
+      ? (Math.floor(i/p.shape[1])===i%p.shape[1] ? .875 : 0)
+      : p.role==="bias" ? (i%3-1)/64 : .9);
+    const fixed=keep(st.InferencePlan.fromJson(JSON.stringify(seed)));
+    check(initial.applyParametersTo(m,fixed)===5,"fixture handoff");
+    free(initial);free(fixed);
+    const plan=keep(m.inferencePlan([3,2,width]));
+    const raw=JSON.parse(plan.toJson());
+    const physical=Array.from({length:6*width},(_,i)=>(i%23-7)/16);
+    const source=keep(d.upload([2,3,width],f32(physical)));
+    const input=keep(source.permute([1,0,2])),logical=await read(input);
+    let current=input,first;
+    for(let i=0;i<20;i++){
+      const next=keep(m.forward(current));
+      if(i===0)first=next;
+      if(current!==input && current!==first)free(current);
+      current=next;
+    }
+    const cache=stats(m);
+    check(JSON.stringify(cache)===JSON.stringify({compilations:"1",cache_hits:"19",submitted_forwards:"20"}),"cache counts");
+    const training=keep(await plan.compileGraphTrainingWebGpu("exact"));
+    training.uploadBatch(f32(logical),new Float32Array(logical.length));
+    for(let i=0;i<4;i++){training.step(.01);const loss=keep(training.lossSnapshot());check(Number.isFinite(await loss.read()),"invalid training loss");free(loss);}
+    const snapshot=keep(training.parameterSnapshot()),updated=keep(await snapshot.readPlan());
+    check(plan.applyParametersTo(m,updated)===5,"parameter handoff count");
+    const trained=keep(m.forward(input));
+    check(stats(m).compilations==="2","handoff did not rebuild");
+    rejects(()=>plan.applyParametersTo(m,updated));
+    const changedPlan=keep(m.inferencePlan([3,2,width]));
+    const changed=JSON.parse(changedPlan.toJson());free(changedPlan);
+    const trainedValues=await read(trained);
+    m.clearResidentCache();
+    const afterClear=keep(m.forward(input));check(stats(m).compilations==="3","clear did not rebuild");
+    close(await read(afterClear),trainedValues);
+    free(m);free(training);free(plan);free(updated);free(snapshot);free(source);
+    report.cases.push({shape:[3,2,width],plan:raw,input:logical,repetitions:20,
+      first:await read(first),final:await read(current),updated_plan:changed,trained:trainedValues,cache});
+  }
+  const m=keep(new st.Sequential());
+  for(const bad of [-1,1.5,true,"3",NaN,Infinity,4294967296])rejects(()=>m.addLinear("bad",bad,3));
+  for(const bad of [[],new Float64Array([1]),{},null])rejects(()=>m.addScaler("bad",bad));
+  m.addScaler("zero",f32([0.]));m.addRelu();
+  const huge=keep(d.upload([1],f32([3.4028234663852886e38])));
+  const invalid=keep(huge.mul(huge)),out=keep(m.forward(invalid));
+  let failed=false;try{await read(out);}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"invalid input got masked");
+  const good=keep(d.upload([1],f32([1.])));close(await read(keep(m.forward(good))),[0.]);
+  check(stats(m).compilations==="1","valid recovery rebuilt");
+  report.status="passed";
+}catch(e){report.error=String(e.stack||e);}
+finally{for(const v of owned)v.free();}
+report.assertions=assertions;
+const result=document.querySelector("#result");
+result.textContent=JSON.stringify(report);result.dataset.status=report.status;
+</script>

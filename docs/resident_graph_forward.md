@@ -1,5 +1,8 @@
 # Mixed NN Graphs Without A Training Tape
 
+For the same graph cached behind the **original model**, rather than an explicitly
+compiled plan, see [Module resident forwarding](module_resident_forward.md).
+
 `InferencePlan::compile_graph_wgpu` connects existing Rust `Linear`, `Gelu`,
 `Relu`, `Scaler` and nested `Sequential` modules to a forward-only resident
 executor. It accepts both v1 dense plans and v2 mixed plans, including
