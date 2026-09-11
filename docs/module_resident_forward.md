@@ -111,3 +111,7 @@ The module d2h route excludes input upload; compare it separately from h2h.
 The fixed-input burst routes each perform eight independent forwards and one
 terminal host read. Per-call parameter comparison and GPU copies are timed;
 cold compilation is recorded separately.
+
+The [source-bound first record](../benchmarks/results/2026-09-12-module-resident-forward/README.md)
+includes the small-model slowdown as well as the deeper-model wins, CPU-only
+build checks, independent Torch replay and the rejected exploratory attempts.
