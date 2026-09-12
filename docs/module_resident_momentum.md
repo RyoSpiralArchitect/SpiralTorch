@@ -90,3 +90,13 @@ adaptation. Parameter snapshots/handoff are still weight-only; momentum
 snapshots are observations, not a restorable optimizer checkpoint. Dropping a
 learner loses its live optimizer state. Full optimizer resume remains separate.
 f32 rounding, performance, generalization and CUDA require their own evidence.
+
+## Verified Execution
+
+The [source-bound native/browser run](../benchmarks/results/2026-09-12-module-resident-momentum/README.md)
+passed 69 verification stages and 24 independent PyTorch CPU/MPS EMA replays
+(38,472 tensor/scalar comparisons). This Python example also ran unchanged;
+weight handoff reproduced the resident output exactly. The small learning
+fixtures lowered loss, but all EMA runs finished worse than their clip-only
+controls at 32 updates. These results establish correctness, not an optimizer
+quality or performance advantage.
