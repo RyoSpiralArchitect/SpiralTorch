@@ -104,3 +104,12 @@ accumulators, spectral learning-rate adaptation or optimizer state with SGD.
 Parameter handoff to an ordinary Module remains explicit and weight-only.
 CPU-only clients cannot compile a GPU learner. Unsupported routes never
 silently fall back. No CUDA or speed advantage is implied by this connection.
+
+## Verified Execution
+
+The [source-bound learning record](../benchmarks/results/2026-09-12-module-resident-microbatch/README.md)
+includes six cases per native/browser route, each with 95 changing microbatches
+and 32 updates, plus independent PyTorch CPU/MPS replay. Public Python/WASM
+clients verify weighted means/sums, stale-state rejection and recovery; the
+Python example above also ran unchanged. Small synthetic-data loss reductions
+are reported separately from any future quality or performance experiment.
