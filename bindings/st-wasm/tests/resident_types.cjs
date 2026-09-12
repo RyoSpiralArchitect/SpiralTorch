@@ -47,16 +47,17 @@ function checkRankContract(types, label) {
 
 const shipped = fs.readFileSync(path.join(__dirname, "../types/spiraltorch-wasm.d.ts"), "utf8");
 function checkNnContract(types, label) {
-  const get = (name, constructible = false) => {
+  const get = (name, constructible = false, constructor = /^\s+constructor\(\);$/m) => {
     const declaration = types.match(new RegExp("^( *)export class " + name + " \\{[\\s\\S]*?^\\1\\}", "m"))?.[0];
     assert.ok(declaration, label + " must export " + name);
-    assert.match(declaration, constructible ? /^\s+constructor\(\);$/m : /private constructor\(\)/);
+    assert.match(declaration, constructible ? constructor : /private constructor\(\)/);
     return declaration;
   };
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
   const module = get("Sequential", true), cache = get("ResidentForwardStats");
   const mse = get("MeanSquaredError", true), objective = get("ResidentLoss");
-  const ce = get("CrossEntropyWithLogits", true);
+  const ce = get("CrossEntropyWithLogits", true,
+    /^\s+constructor\(reduction\?: string \| null, ignore_index\?: bigint \| null, label_smoothing\?: number \| null\);$/m);
   assert.match(ce, /evaluateResident\(prediction: WgpuTensor, target: WgpuTensor\): ResidentLoss/);
   assert.match(ce, /ignore_index\?: bigint \| null/);
   assert.match(mse, /evaluateResident\(prediction: WgpuTensor, target: WgpuTensor\): ResidentLoss/);
