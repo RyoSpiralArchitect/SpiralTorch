@@ -86,3 +86,13 @@ This connects a real high-level Loss to GPU learning, not generic
 `ModuleTrainer::train_epoch` migration. Hypergrad, band replay, distributed
 accumulators and trainer policies are not silently replaced by plain SGD.
 No throughput improvement or fastest-PyTorch claim follows from this API alone.
+
+## Verified Fixture
+
+The [source-bound native/browser run](../benchmarks/results/2026-09-12-module-resident-loss/README.md)
+checks six 64-update trajectories through ordinary Modules and this Loss,
+seven scalar/N-D/view/reduction probes, Python/WASM public-client updates,
+failure/recovery and CPU-only compatibility. Independent eager PyTorch
+CPU/MPS replay covers 36,920 tensor/scalar comparisons for the new Loss path.
+These deterministic small-model results verify the execution connection, not
+LLM quality, generalization or a performance advantage.
