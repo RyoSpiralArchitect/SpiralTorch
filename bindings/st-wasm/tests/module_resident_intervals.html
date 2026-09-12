@@ -10,13 +10,17 @@ import {protocol, routes, routeOrder, completedReads, clockProbe} from "./module
 
 const result = document.querySelector("#result");
 const terminalCapture = new URLSearchParams(location.search).get("terminal_capture") === "1";
+const sameTerminalApi = new URLSearchParams(location.search).get("baseline_terminal") === "1";
+const usesTerminal = version => terminalCapture && (sameTerminalApi || version === "candidate");
 const report = {schema: terminalCapture ? "spiraltorch.module_terminal_intervals.v1" : "spiraltorch.module_completed_intervals.v1", status: "error",
   protocol, routes, cases: [],
   boundary: "Fixed 4 matrices, 9 shape/seed cases, 2 warmup and 9 retained intervals per route. Each interval contains 256 independent fixed-input forwards, each followed by a completed host read and output release. One outer clock, no per-call clocks; typed outputs retained until interval end and then all checked. Setup/upload/cold compilation and numerical comparison excluded. Same page, separate frozen WASM/device contexts; alternating context creation order and rotated routes. No trimming, retry, final-read-only burst, GPU timestamp, physical browser GPU or exclusive-host claim."};
 window.moduleIntervalReport = report;
 if (terminalCapture) {
-  report.module_apis = {baseline:"forward_then_snapshot", candidate:"forwardSnapshot"};
-  report.boundary += " Candidate uses an explicit single-submission forwardSnapshot; baseline uses forward then snapshot. Host wrapper/capture costs are included; this is not isolated GPU submission timing.";
+  report.module_apis = {baseline:sameTerminalApi ? "forwardSnapshot" : "forward_then_snapshot", candidate:"forwardSnapshot"};
+  report.boundary += sameTerminalApi ? " Both versions use forwardSnapshot; the frozen WASM packages determine submission scheduling."
+    : " Candidate uses forwardSnapshot; baseline uses forward then snapshot.";
+  report.boundary += " Host wrapper/capture costs are included; this is not isolated GPU submission timing.";
 }
 const owned = new Set(), keep = value => (owned.add(value), value);
 const free = value => {owned.delete(value); value.free();};
@@ -70,6 +74,7 @@ async function context(st, c, terminal) {
   return {model, graph, device, input, adapter};
 }
 try {
+  check(!sameTerminalApi || terminalCapture, "baseline terminal mode requires terminal capture");
   check(!!navigator.gpu, "WebGPU required; no CPU fallback");
   await initBaseline(); await initCandidate();
   report.clock = clockProbe();
@@ -83,7 +88,7 @@ try {
     const cases = matrix % 2 ? [...fixture.cases].reverse() : fixture.cases;
     for (const c of cases) {
       const ctx = {};
-      for (const version of setup_order) ctx[version] = await context({baseline, candidate}[version], c, terminalCapture && version === "candidate");
+      for (const version of setup_order) ctx[version] = await context({baseline, candidate}[version], c, usesTerminal(version));
       const row = {matrix, shape: c.shape, depth: c.depth, seed: c.seed, setup_order,
         samples: [], last_outputs: {}, adapters: {}, cache: {}, scalar_dispatches: {},
         warmup_completed_reads: {}, warmup_max_abs_error: {}};
@@ -92,7 +97,7 @@ try {
         for (const route of order) {
           const [version, family] = route.split("_"), v = ctx[version];
           const before = family === "module" ? BigInt(cacheInfo(v.model).submitted_forwards) : v.graph.submittedDispatches;
-          const measured = await completedReads(family === "module" ? terminalCapture && version === "candidate" ? {
+          const measured = await completedReads(family === "module" ? usesTerminal(version) ? {
             forward: () => v.model.forwardSnapshot(v.input), read: snapshot => snapshot.readValues(), release: snapshot => snapshot.free(),
           } : {
             forward: () => v.model.forward(v.input), read: readTensor, release: output => output.free(),

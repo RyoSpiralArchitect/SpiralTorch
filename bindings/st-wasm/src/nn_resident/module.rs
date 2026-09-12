@@ -81,7 +81,7 @@ impl WasmSequential {
         })
     }
 
-    /// Submit the forward and terminal capture together; reading remains explicit.
+    /// Submit the forward, then capture its output; reading remains explicit.
     #[wasm_bindgen(js_name = forwardSnapshot)]
     pub fn forward_snapshot(
         &self,

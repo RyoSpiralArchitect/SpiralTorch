@@ -1410,7 +1410,7 @@ impl PyLinear {
         crate::nn_resident::forward_argument(self.inner()?, input)
     }
 
-    /// Submit forward and capture together; read the returned snapshot explicitly.
+    /// Submit forward, then capture its output; read the snapshot explicitly.
     pub fn forward_snapshot(
         &self,
         input: &Bound<'_, PyAny>,
@@ -3082,7 +3082,7 @@ impl PyRelu {
         crate::nn_resident::forward_argument(&self.inner, input)
     }
 
-    /// Submit forward and capture together; read the returned snapshot explicitly.
+    /// Submit forward, then capture its output; read the snapshot explicitly.
     pub fn forward_snapshot(
         &self,
         input: &Bound<'_, PyAny>,
@@ -3122,7 +3122,7 @@ impl PyGelu {
         crate::nn_resident::forward_argument(&self.inner, input)
     }
 
-    /// Submit forward and capture together; read the returned snapshot explicitly.
+    /// Submit forward, then capture its output; read the snapshot explicitly.
     pub fn forward_snapshot(
         &self,
         input: &Bound<'_, PyAny>,
@@ -4088,7 +4088,7 @@ impl PySequential {
         crate::nn_resident::forward_argument(&self.inner, input)
     }
 
-    /// Submit forward and capture together; read the returned snapshot explicitly.
+    /// Submit forward, then capture its output; read the snapshot explicitly.
     pub fn forward_snapshot(
         &self,
         input: &Bound<'_, PyAny>,
@@ -7949,7 +7949,7 @@ impl PyScaler {
         crate::nn_resident::forward_argument(self.inner()?, input)
     }
 
-    /// Submit forward and capture together; read the returned snapshot explicitly.
+    /// Submit forward, then capture its output; read the snapshot explicitly.
     pub fn forward_snapshot(
         &self,
         input: &Bound<'_, PyAny>,

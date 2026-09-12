@@ -43,6 +43,25 @@ def fixture():
 
 
 class Intervals(unittest.TestCase):
+    def test_same_terminal_api_requires_explicit_fixture_and_both_api_labels(self):
+        document, native = fixture()
+        document.update(schema="spiraltorch.module_terminal_intervals.v1",
+                        fixture_request="nn-module-terminal-matched-intervals",
+                        module_apis=dict(baseline="forwardSnapshot", candidate="forwardSnapshot"))
+        self.assertEqual(validation.validate(document, native, terminal_capture=True,
+                                            same_terminal_api=True)["checked_forwards_including_warmup"], 405504)
+        with self.assertRaises(ValueError): validation.validate(document, native)
+        with self.assertRaises(ValueError): validation.validate(document, native, same_terminal_api=True)
+        with self.assertRaises(ValueError): validation.validate(document, native, terminal_capture=True)
+        for mutate in (
+            lambda d: d.__setitem__("fixture_request", "nn-module-terminal-intervals"),
+            lambda d: d["module_apis"].__setitem__("baseline", "forward_then_snapshot"),
+            lambda d: d["module_apis"].__setitem__("candidate", "forward_then_snapshot"),
+        ):
+            bad = copy.deepcopy(document); mutate(bad)
+            with self.assertRaises(ValueError):
+                validation.validate(bad, native, terminal_capture=True, same_terminal_api=True)
+
     def test_terminal_mode_requires_distinct_api_and_schema_boundaries(self):
         document, native = fixture()
         with self.assertRaises(ValueError): validation.validate(document,native,terminal_capture=True)

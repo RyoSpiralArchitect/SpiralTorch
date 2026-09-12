@@ -279,7 +279,7 @@ def main():
         report["boundary"] += " Module routes use the same original Rust NN model; d2h keeps input resident and reads one output, burst performs eight independent forwards and reads the last output. Per-call weight bit checks and the resident I/O implementation of the hashed native artifact are included. No host transfer occurs between resident forwards. Cold compilation is recorded separately. d2h is not interchangeable with h2h."
     if args.terminal_module:
         report.update(schema="spiraltorch.module_terminal_forward_paths.v1", module_api="forward_snapshot")
-        report["boundary"] += " Terminal forward and snapshot copy share one submission; only the last forward in each burst uses this API. Host wrapper differences are included; not isolated GPU submission timing."
+        report["boundary"] += " Only the last forward in each burst uses the terminal API. The frozen native library determines submission scheduling. Host wrapper differences are included; not isolated GPU submission timing."
     paths = [args.fixture.resolve(strict=True), args.native_library.resolve(strict=True)]
     identities = {str(path): digest(path) for path in paths}
     with args.output.open("x") as output:

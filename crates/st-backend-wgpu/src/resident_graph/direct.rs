@@ -63,6 +63,16 @@ impl ResidentGraph {
         })
     }
 
+    /// Submit the graph first, then capture its owning output version.
+    /// Reading after later forwards or graph destruction never re-reads the
+    /// current output. This preserves the ordinary forward scheduling.
+    pub fn forward_tensor_snapshot(
+        &mut self,
+        input: &ResidentTensor,
+    ) -> Result<TensorReadback, GraphInferenceError> {
+        Ok(self.forward_tensor(input)?.snapshot()?)
+    }
+
     /// Read resident input directly and write the last stage into an owning
     /// output version. Only completely unobserved output storage is recycled,
     /// within a four-slot / 32 MiB per-graph output-data budget. Busy/oversized
@@ -73,27 +83,6 @@ impl ResidentGraph {
         &mut self,
         input: &ResidentTensor,
     ) -> Result<ResidentTensor, GraphInferenceError> {
-        self.forward_with(input, |output, _| Ok(output.clone()))
-    }
-
-    /// Explicit terminal observation: packing, graph, guard and snapshot copy
-    /// share one submission. The owning snapshot can be read after further
-    /// forwards or graph destruction; it never re-reads the current output.
-    pub fn forward_tensor_snapshot(
-        &mut self,
-        input: &ResidentTensor,
-    ) -> Result<TensorReadback, GraphInferenceError> {
-        self.forward_with(input, |output, encoder| Ok(output.snapshot_into(encoder)?))
-    }
-
-    fn forward_with<T>(
-        &mut self,
-        input: &ResidentTensor,
-        capture: impl FnOnce(
-            &ResidentTensor,
-            &mut wgpu::CommandEncoder,
-        ) -> Result<T, GraphInferenceError>,
-    ) -> Result<T, GraphInferenceError> {
         input.require_context(self.device.runtime().context())?;
         if input.layout().shape() != self.input_layout().shape() {
             return Err(GraphInferenceError::InputShape);
@@ -141,18 +130,18 @@ impl ResidentGraph {
             slot.last.as_ref(),
             Some((self.guard_capture.as_ref().unwrap(), &slot.guard)),
         );
-        let result = capture(&slot.tensor, &mut encoder)?;
         context.queue().submit(Some(encoder.finish()));
+        let output = slot.tensor.clone();
         self.generation = generation;
         self.submitted_dispatches = dispatch;
         self.output_generation = Some(generation);
         self.input_source = Some(packed);
         self.input_direct = true;
-        self.resident_output = Some(slot.tensor.clone());
+        self.resident_output = Some(output.clone());
         if self.output_slots.len() < retention_limit(self.output_layout().len()) {
             self.output_slots.push(slot);
         }
-        Ok(result)
+        Ok(output)
     }
 }
 

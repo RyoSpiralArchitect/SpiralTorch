@@ -39,9 +39,10 @@ input's device and returns `WgpuTensor`. Supported modules are `Linear`,
 Unsupported layers reject before executing their host implementation.
 
 When the next consumer is the host, `model.forward_snapshot(x)` returns a
-`WgpuTensorSnapshot` directly. Packing, NN execution, the error guard and terminal
-copy share one queue submission; `capture.read_values()` explicitly waits and
-consumes it. This is not an implicit read inside `model(x)`:
+`WgpuTensorSnapshot` directly. Packing, NN execution and the error guard are
+submitted first; the terminal copy is prepared and submitted separately.
+`capture.read_values()` explicitly waits and consumes it. This is not an
+implicit read inside `model(x)`:
 
 ```python
 capture = model.forward_snapshot(x)
@@ -182,11 +183,18 @@ their existing separate pool.
 Terminal forwarding uses that same fresh staging and exclusive lease, not either
 rejected cache prototype. Delayed reads survive later forwards, weight changes,
 cache clear and module destruction. Empty Sequential captures its input and keeps
-its NN execution counters at zero. Snapshotting a strided Tensor now packs and
-copies within one submission too; the normal contiguous snapshot route still
-does one copy submission. The explicit terminal API includes host-wrapper savings
-as well as GPU command scheduling changes, so endpoint timings do not isolate
-either cost. It does not add a backward tape or change ModuleTrainer routing.
+its NN execution counters at zero. Strided Tensor snapshots preserve the original
+pack-then-copy submissions; contiguous snapshots need only the copy submission.
+The explicit terminal API changes host-wrapper costs, so endpoint timings do not
+isolate GPU queue cost. It does not add a backward tape or change ModuleTrainer
+routing.
+
+Combining the forward and terminal copy into one submission was implemented and
+tested, but regressed every retained browser pair by about 2-7% at the per-shape
+median. The [rejected prototype and complete measurements](../benchmarks/results/2026-09-12-module-terminal-capture/README.md)
+are preserved. The current implementation keeps the explicit API but delegates
+to the original forward and snapshot paths; fewer submissions are not assumed
+to be faster.
 
 One-slot and two-alternating-slot Tensor staging caches were implemented and
 tested, but neither is enabled in the selected runtime. Both passed correctness
@@ -225,6 +233,14 @@ endpoint is the median of 12 case-median candidate/baseline ratios per shape;
 pooled totals, explicit-dispatch control drift and all slow intervals are retained
 separately. Observed clock granularity is reported, not treated as an uncertainty
 bound. The earlier single-call and burst measurements remain separate evidence.
+
+`nn-module-terminal-intervals` compares the terminal API against ordinary
+forward-then-snapshot. For a same-API comparison between frozen implementations,
+use `nn-module-terminal-matched-intervals` and validate with both
+`--terminal-capture --same-terminal-api`. Both packages must export
+`forwardSnapshot`; the validator rejects mismatched API labels or fixtures.
+This separates the API choice from the source-version comparison, without
+claiming to isolate driver or GPU-only costs.
 
 The [source-bound first record](../benchmarks/results/2026-09-12-module-resident-forward/README.md)
 includes the small-model slowdown as well as the deeper-model wins, CPU-only

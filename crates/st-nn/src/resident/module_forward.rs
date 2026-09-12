@@ -160,6 +160,19 @@ impl ResidentForwardCache {
         self.0.borrow_mut().current = None;
     }
 
+    /// Terminal capture using the same parameters, cache and guard semantics.
+    /// An empty sequence captures the input without counting an NN forward.
+    pub fn snapshot(
+        &self,
+        operations: Vec<InferenceOp>,
+        input: &ResidentTensor,
+    ) -> Result<TensorReadback, InferenceError> {
+        Ok(self
+            .forward(operations, input)?
+            .snapshot()
+            .map_err(GraphInferenceError::from)?)
+    }
+
     /// Submit checked descriptors on the input device, reusing an exact matching
     /// graph. Unknown/invalid operations fail; no implicit host readback occurs.
     pub fn forward(
@@ -171,31 +184,6 @@ impl ResidentForwardCache {
         if operations.is_empty() {
             return Ok(input.clone());
         }
-        self.with_graph(operations, input, |graph| graph.forward_tensor(input))
-    }
-
-    /// Terminal capture using the same parameters, cache and guard semantics.
-    /// An empty sequence captures the input without counting an NN forward.
-    pub fn snapshot(
-        &self,
-        operations: Vec<InferenceOp>,
-        input: &ResidentTensor,
-    ) -> Result<TensorReadback, InferenceError> {
-        require_uncommitted_route()?;
-        if operations.is_empty() {
-            return Ok(input.snapshot().map_err(GraphInferenceError::from)?);
-        }
-        self.with_graph(operations, input, |graph| {
-            graph.forward_tensor_snapshot(input)
-        })
-    }
-
-    fn with_graph<T>(
-        &self,
-        operations: Vec<InferenceOp>,
-        input: &ResidentTensor,
-        submit: impl FnOnce(&mut ResidentGraph) -> Result<T, GraphInferenceError>,
-    ) -> Result<T, InferenceError> {
         let layout = NdLayout::contiguous(input.layout().shape())?;
         let mut state = self.0.borrow_mut();
         let reuse = state.current.as_mut().is_some_and(|cached| {
@@ -231,7 +219,7 @@ impl ResidentForwardCache {
             state.stats.compilations = compilations;
         }
         let cached = state.current.as_mut().unwrap();
-        let output = submit(&mut cached.graph)?;
+        let output = cached.graph.forward_tensor(input)?;
         state.stats.submitted_forwards = submissions;
         Ok(output)
     }

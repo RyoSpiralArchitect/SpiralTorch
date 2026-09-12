@@ -785,8 +785,8 @@ pub trait Module {
         ))
     }
 
-    /// Explicit terminal forward. Implementations combine execution and capture
-    /// in one submission, without changing ordinary GPU-output forwarding.
+    /// Explicit terminal forward. Implementations submit ordinary GPU execution
+    /// first, then capture the output; reading the returned snapshot is explicit.
     /// Unknown modules reject rather than emulate this through hidden readback.
     #[cfg(feature = "wgpu")]
     fn forward_resident_snapshot(
