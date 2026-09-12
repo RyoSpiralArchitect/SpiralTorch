@@ -1,0 +1,41 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_kernel_contracts-275110b51e9b85e8)
+
+running 28 tests
+test classification::tests::transport_never_rounds_ignore_ids_or_saturates_i64 ... ok
+test classification::tests::coefficients_keep_tiny_smoothing_and_shapes_keep_sample_axes ... ok
+test compaction::tests::output_validation_rejects_invalid_counts_and_padding ... ok
+test compaction::tests::reference_compaction_preserves_zero_sized_row_shapes ... ok
+test compaction::tests::reference_compaction_validates_exact_input_storage ... ok
+test compaction::tests::reference_compaction_is_stable_inclusive_and_zero_padded ... ok
+test compaction::tests::shape_contract_distinguishes_noop_and_active_work ... ok
+test compaction::tests::shape_contract_rejects_invalid_dimensions_bounds_and_addressing ... ok
+test elementwise::tests::finite_policy_includes_intermediates_and_signed_zero_copy ... ok
+test compaction::tests::tile_count_is_exact_at_boundaries_and_cannot_overflow ... ok
+test gradient_clip::tests::finite_wide_norms_and_underflowing_scale_remain_nonzero ... ok
+test gradient_clip::tests::validates_and_preserves_noop_boundaries ... ok
+test graph::tests::client_names_are_canonical_and_policy_is_explicit ... ok
+test graph::tests::fusion_keeps_forward_and_adjoint_overflow_checks_before_masking ... ok
+test graph::tests::fusion_preserves_residual_and_resource_boundaries ... ok
+test layout::tests::broadcasting_uses_zero_strides_and_preserves_storage_bounds ... ok
+test layout::tests::invalid_views_and_singleton_axes ... ok
+test layout::tests::scalar_empty_and_overflow ... ok
+test momentum::tests::ema_is_zero_initialized_and_checks_masked_inputs ... ok
+test layout::tests::views_preserve_storage_coordinates ... ok
+test graph::tests::graph_owns_all_parameters_and_validates_before_allocation ... ok
+test pointwise::tests::bounds_operands_and_fixed_domain_are_explicit ... ok
+test pointwise::tests::client_names_and_execution_policies_are_closed ... ok
+test graph::tests::fusion_rebases_rhs_and_preserves_parameter_ids_and_reverse_chain ... ok
+test pointwise::tests::reverse_chain_accumulates_original_input_residuals_and_checks_zero_seeds ... ok
+test rank::tests::direct_and_two_stage_have_different_wide_row_support ... ok
+test rank::tests::padded_scratch_overflow_is_rejected_before_allocation ... ok
+test pointwise::tests::broadcast_adjoint_partitions_each_logical_contribution_once ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests st_kernel_contracts
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

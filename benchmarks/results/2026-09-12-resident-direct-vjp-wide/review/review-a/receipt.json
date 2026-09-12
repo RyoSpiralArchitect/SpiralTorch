@@ -1,0 +1,89 @@
+{
+  "status": "error",
+  "source": {
+    "commit": "dadc66a023d127e59309b99823e8d1ea970cac53",
+    "tree": "843ba4f74e82899d4b3cdbfce547438a3c8a7448"
+  },
+  "pid": 72223,
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 2.7112440830023843,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "origin/main...HEAD"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07725108400336467,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-kernel-contracts"
+      ],
+      "exit_code": 0,
+      "seconds": 6.53741233299661,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "contracts-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-kernel-contracts",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 0.6506938750026166,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "backend-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 101,
+      "seconds": 3.4933258750024834,
+      "gpu_opt_in": false
+    }
+  ],
+  "products": {},
+  "error": "RuntimeError('backend-clippy')",
+  "seconds": 13.632118917004846
+}

@@ -1,0 +1,314 @@
+{
+  "schema": "spiraltorch.local_raw_inventory.v1",
+  "root": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a",
+  "records": [
+    {
+      "path": "a-clipped_topos_ema-browser.json",
+      "bytes": 367834145,
+      "sha256": "dca8a7c1d06a07e305e69d299afdc0af5948beb8d4206926160d060b4fafd7e3"
+    },
+    {
+      "path": "a-clipped_topos_ema-browser.json.cases.jsonl",
+      "bytes": 367832399,
+      "sha256": "eef95b86a5b2e3397cd31d81cc8f1b99b51231e48e972708984312c1ad0557ee"
+    },
+    {
+      "path": "a-clipped_topos_ema-browser.json.progress.jsonl",
+      "bytes": 213621,
+      "sha256": "9d4595513ffa132e9ddd6f64c316e76d5f58548cbc0eff9e9c43fdec6bcf6ef4"
+    },
+    {
+      "path": "a-clipped_topos_ema-browser.log",
+      "bytes": 2568,
+      "sha256": "b23911389af2beefce40880a4877b2f65dc071a68e6000a4706b45c43ba102d9"
+    },
+    {
+      "path": "a-clipped_topos_ema-native.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "a-clipped_topos_ema-native.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "a-clipped_topos_ema-native.json",
+      "bytes": 1204905316,
+      "sha256": "f4e02b06556fae387ebad4bd84b81199d11b1e7d8813aeb0c7fedc67c92b9a4b"
+    },
+    {
+      "path": "a-clipped_topos_ema-native.log",
+      "bytes": 3230,
+      "sha256": "80a7a749e1b13dc07db8e393ca1d6a086467077afd5526596796cb5553fd6bfa"
+    },
+    {
+      "path": "a-clipped_topos_ema-validate.log",
+      "bytes": 48,
+      "sha256": "a66ec04d75165bee4a7cace0facee9c46d9bbad65813fc7fd3d8ce2e9691cf14"
+    },
+    {
+      "path": "a-clipped_topos_ema-validation.json",
+      "bytes": 39979,
+      "sha256": "e4e6cbd4fc0cf6f5a755a77fbdf879f5809c61d561f6dde79bfedb36b38e23c7"
+    },
+    {
+      "path": "a-plain-browser.json",
+      "bytes": 304612869,
+      "sha256": "21ba6c7f671bd887b9afe40209d106aefebb2a12dfeba2971e9f768791c4e03c"
+    },
+    {
+      "path": "a-plain-browser.json.cases.jsonl",
+      "bytes": 304611279,
+      "sha256": "ad0267baee110070264bf6259b996c9f45d240d6711b60b38b2d172408373200"
+    },
+    {
+      "path": "a-plain-browser.json.progress.jsonl",
+      "bytes": 178859,
+      "sha256": "7f88a838a50f2cb51b14fb1211c3d9f038e28ed3b931687d602cb636f0772a6b"
+    },
+    {
+      "path": "a-plain-browser.log",
+      "bytes": 1848,
+      "sha256": "fd5a2e092f850e51392bf5bc3f8b75c089dfa9a2e1ec9a23bf147bf9cab46eea"
+    },
+    {
+      "path": "a-plain-native.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "a-plain-native.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "a-plain-native.json",
+      "bytes": 969001799,
+      "sha256": "63e1581134f03cd7fdfb70937a4bdf43a397e7aa4bdf4aba08dddcd9f73609ce"
+    },
+    {
+      "path": "a-plain-native.log",
+      "bytes": 2862,
+      "sha256": "2c21f27368a7ddb71f5a9bcbc42ce6edb388181c71a46e00fe7a1356157875af"
+    },
+    {
+      "path": "a-plain-validate.log",
+      "bytes": 48,
+      "sha256": "a66ec04d75165bee4a7cace0facee9c46d9bbad65813fc7fd3d8ce2e9691cf14"
+    },
+    {
+      "path": "a-plain-validation.json",
+      "bytes": 39564,
+      "sha256": "e9124c2349d73643c66c94a799aff622a8a8d09090ff4d0d161c5da16c9cb0f8"
+    },
+    {
+      "path": "a-topos_ema-browser.json",
+      "bytes": 370509291,
+      "sha256": "bc30e9d680ff71fca7d36900bf8c2820ebf729f526bfe9f179c2059957a2bac0"
+    },
+    {
+      "path": "a-topos_ema-browser.json.cases.jsonl",
+      "bytes": 370507561,
+      "sha256": "3cf406713ba8c75ce15dda782bafe882201118a956db1c1408f1d88e899d1df2"
+    },
+    {
+      "path": "a-topos_ema-browser.json.progress.jsonl",
+      "bytes": 204863,
+      "sha256": "a7b2b64a68488ce975066a6ac83e1dc08bffc0f02471439c972ff0772f27051c"
+    },
+    {
+      "path": "a-topos_ema-browser.log",
+      "bytes": 2424,
+      "sha256": "3e5d7fbccdd75735eb35fc43864f940e95bde57f2ff9dd0551988ffee593cbad"
+    },
+    {
+      "path": "a-topos_ema-native.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "a-topos_ema-native.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "a-topos_ema-native.json",
+      "bytes": 1208409164,
+      "sha256": "b6777ed006c4fc835e94350510411bf5a8c97aeb8ee7ad2de84efcfa939ac97c"
+    },
+    {
+      "path": "a-topos_ema-native.log",
+      "bytes": 3157,
+      "sha256": "ed5dd2c0b5bf3d1b781f156bb025b74ce82d1e7df59c8ecaa2a1eed329480a16"
+    },
+    {
+      "path": "a-topos_ema-validate.log",
+      "bytes": 48,
+      "sha256": "a66ec04d75165bee4a7cace0facee9c46d9bbad65813fc7fd3d8ce2e9691cf14"
+    },
+    {
+      "path": "a-topos_ema-validation.json",
+      "bytes": 39840,
+      "sha256": "f4d595e6f569f7ca2788dbfb1cc27dadf96e750bc7946d4d3639ac6a259ddf2a"
+    },
+    {
+      "path": "b-clipped_topos_ema-browser.json",
+      "bytes": 367834141,
+      "sha256": "2f246ecd66f585eac8c0218744706e2bb7796a80afa258de80a8cd050da4961a"
+    },
+    {
+      "path": "b-clipped_topos_ema-browser.json.cases.jsonl",
+      "bytes": 367832395,
+      "sha256": "241c758e1dcf6c14bda172401b4a80be77ff4f2123c23ad8fdb3171bfa399351"
+    },
+    {
+      "path": "b-clipped_topos_ema-browser.json.progress.jsonl",
+      "bytes": 213862,
+      "sha256": "8cc57782b1e3cb9daedff3e625a3bd4a4d0c9e186e38d19713ff03dd97de4ecf"
+    },
+    {
+      "path": "b-clipped_topos_ema-browser.log",
+      "bytes": 2568,
+      "sha256": "b23911389af2beefce40880a4877b2f65dc071a68e6000a4706b45c43ba102d9"
+    },
+    {
+      "path": "b-clipped_topos_ema-native.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "b-clipped_topos_ema-native.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "b-clipped_topos_ema-native.json",
+      "bytes": 1204905282,
+      "sha256": "9feede6bf666fba1e5d3dc12d9cd37a16ebd86f937b6dee96fb8559042a58596"
+    },
+    {
+      "path": "b-clipped_topos_ema-native.log",
+      "bytes": 3222,
+      "sha256": "a68b458f86dad2ae590b6a6ddacd7be3f35e2b0ac0992adfa8842c88f3b5638a"
+    },
+    {
+      "path": "b-clipped_topos_ema-validate.log",
+      "bytes": 48,
+      "sha256": "a66ec04d75165bee4a7cace0facee9c46d9bbad65813fc7fd3d8ce2e9691cf14"
+    },
+    {
+      "path": "b-clipped_topos_ema-validation.json",
+      "bytes": 39965,
+      "sha256": "ec6e65eb55def8110577aabc3ec0d6bf2bc06ca25232b42af98fad856ac4df49"
+    },
+    {
+      "path": "b-plain-browser.json",
+      "bytes": 304612580,
+      "sha256": "21072f2829f37455f410364b292d5b34db4018ed94bdb8fb260d5f801715f88a"
+    },
+    {
+      "path": "b-plain-browser.json.cases.jsonl",
+      "bytes": 304610990,
+      "sha256": "267b891956e64323c96a5c7f08180ea328589081b4621ee29559f0c64fa7b1ff"
+    },
+    {
+      "path": "b-plain-browser.json.progress.jsonl",
+      "bytes": 178704,
+      "sha256": "d96cb3e4c93437b2a419df4838ab4aac443a25436424a64229e436e4d39da5f9"
+    },
+    {
+      "path": "b-plain-browser.log",
+      "bytes": 1848,
+      "sha256": "fd5a2e092f850e51392bf5bc3f8b75c089dfa9a2e1ec9a23bf147bf9cab46eea"
+    },
+    {
+      "path": "b-plain-native.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "b-plain-native.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "b-plain-native.json",
+      "bytes": 969001733,
+      "sha256": "5fd9ddce89ddbeff698c66227fbc82839cc6db1debcc1d7a04ad1a29a9fe370e"
+    },
+    {
+      "path": "b-plain-native.log",
+      "bytes": 2854,
+      "sha256": "2dab0d90a9d59a4ecffb8a21b0c1c5b54f85b2137b7ffd97b36655a1f1e35aed"
+    },
+    {
+      "path": "b-plain-validate.log",
+      "bytes": 48,
+      "sha256": "a66ec04d75165bee4a7cace0facee9c46d9bbad65813fc7fd3d8ce2e9691cf14"
+    },
+    {
+      "path": "b-plain-validation.json",
+      "bytes": 39494,
+      "sha256": "9ecf1dd63cf086410d19de294bfd3303c83414462d1641fd2b4c4972a263b314"
+    },
+    {
+      "path": "b-topos_ema-browser.json",
+      "bytes": 370509285,
+      "sha256": "fa5e542586222dc8bd1fd39ea0bb2e291e9a5139234714ef2d01930a8bbd4e0a"
+    },
+    {
+      "path": "b-topos_ema-browser.json.cases.jsonl",
+      "bytes": 370507555,
+      "sha256": "9312fb56c00ea7d61328c0e9e1a11e76c87cd00afdacfe97e78394c0e1361b7e"
+    },
+    {
+      "path": "b-topos_ema-browser.json.progress.jsonl",
+      "bytes": 204775,
+      "sha256": "b6c3f19f419a6f52cda5349abd823c75526f8fd2b594d5998ed28392a7409870"
+    },
+    {
+      "path": "b-topos_ema-browser.log",
+      "bytes": 2424,
+      "sha256": "3e5d7fbccdd75735eb35fc43864f940e95bde57f2ff9dd0551988ffee593cbad"
+    },
+    {
+      "path": "b-topos_ema-native.baseline.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "b-topos_ema-native.candidate.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "b-topos_ema-native.json",
+      "bytes": 1208409166,
+      "sha256": "b58c246b0309b2c9f7a20c1d6d6d5728233a2a4f04a58be6fe7612551e22ed4d"
+    },
+    {
+      "path": "b-topos_ema-native.log",
+      "bytes": 3154,
+      "sha256": "cff82f9d1eb66221c5c0a78ff4191853191e8627185b9b9912a7024a763e2182"
+    },
+    {
+      "path": "b-topos_ema-validate.log",
+      "bytes": 48,
+      "sha256": "a66ec04d75165bee4a7cace0facee9c46d9bbad65813fc7fd3d8ce2e9691cf14"
+    },
+    {
+      "path": "b-topos_ema-validation.json",
+      "bytes": 39817,
+      "sha256": "5f8aaedcba5880365b40772973c5eb0a6971bd4bac7e30842eebacb386af476d"
+    },
+    {
+      "path": "receipt.json",
+      "bytes": 28869,
+      "sha256": "f3edfb01bf8b43f27f88d2ce32a324680c038fe88e2b90cf9b3b4b67bbf5bd72"
+    }
+  ],
+  "bytes": 10937941609,
+  "published_raw_tensor_payloads": false,
+  "boundary": "Full terminal measurement originals remain local; hashes are not raw payload publication."
+}

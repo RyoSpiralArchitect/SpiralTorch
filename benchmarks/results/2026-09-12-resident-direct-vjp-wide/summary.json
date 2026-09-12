@@ -1,0 +1,5915 @@
+{
+  "schema": "spiraltorch.resident_direct_vjp_wide.results.v1",
+  "status": "passed",
+  "harness_source": {
+    "commit": "d0a64825fcee6dcfc956b76478e5b92615974cf0",
+    "tree": "15176de8a907dce39d8c5b8434d93c9554ec8992"
+  },
+  "workers": {
+    "baseline": {
+      "commit": "5fddb415bfbb0f64366db6d45b7675db17a16f61",
+      "tree": "1bcb92ea916ee0d63ef2b10732e8b4d771bcab6b"
+    },
+    "candidate": {
+      "commit": "23542255c9a988d476a4f60a6a9ba416973897d5",
+      "tree": "37fc6575357e6932876156382d0582c1b0aa381b"
+    }
+  },
+  "steps": 18,
+  "seconds": 1220.023219415998,
+  "optimizer_recipes": 54,
+  "retained_intervals": 4320,
+  "browser_intervals_revalidated": 2160,
+  "rows": [
+    {
+      "run": "a",
+      "mode": "plain",
+      "cadence": "immediate",
+      "native": {
+        "min": 0.9327304124834721,
+        "max": 1.1457016338479624,
+        "median_case_ratio": 1.0269713815099109,
+        "geomean": 1.02051943735097,
+        "candidate_faster": 7,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.2605628062002496,
+          0.5580219876554159
+        ]
+      },
+      "browser": {
+        "min": 0.9846860645442791,
+        "max": 1.0480769231974716,
+        "median_case_ratio": 1.0156657962859832,
+        "geomean": 1.018818769997075,
+        "candidate_faster": 8
+      }
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "cadence": "deferred",
+      "native": {
+        "min": 0.9896758640302908,
+        "max": 1.051923795352986,
+        "median_case_ratio": 1.0223225466424999,
+        "geomean": 1.0202131473793974,
+        "candidate_faster": 7,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.15785555585650898,
+          0.5764105310009218
+        ]
+      },
+      "browser": {
+        "min": 1.011678832182049,
+        "max": 1.0483870967445144,
+        "median_case_ratio": 1.0308219177566635,
+        "geomean": 1.0281653076717132,
+        "candidate_faster": 9
+      }
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "cadence": "immediate",
+      "native": {
+        "min": 1.0002784398446347,
+        "max": 1.056289196301568,
+        "median_case_ratio": 1.0458295245353033,
+        "geomean": 1.035278735087772,
+        "candidate_faster": 9,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.33707529782689644,
+          0.6237971668710492
+        ]
+      },
+      "browser": {
+        "min": 0.9913899138629552,
+        "max": 1.053921568627451,
+        "median_case_ratio": 1.0272314674308938,
+        "geomean": 1.0213239645024887,
+        "candidate_faster": 7
+      }
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "cadence": "deferred",
+      "native": {
+        "min": 0.9816055019625143,
+        "max": 1.128421017479467,
+        "median_case_ratio": 1.0220240836949843,
+        "geomean": 1.0364925986652547,
+        "candidate_faster": 5,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.3119981584329114,
+          0.6159960668912364
+        ]
+      },
+      "browser": {
+        "min": 1.0056737588441118,
+        "max": 1.051470588462888,
+        "median_case_ratio": 1.0287292817844211,
+        "geomean": 1.0268672451592984,
+        "candidate_faster": 9
+      }
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "cadence": "immediate",
+      "native": {
+        "min": 0.9889985614064044,
+        "max": 1.0849282895111207,
+        "median_case_ratio": 1.0181774187035997,
+        "geomean": 1.0239981538663405,
+        "candidate_faster": 8,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.5364810979454743,
+          0.7309460567331845
+        ]
+      },
+      "browser": {
+        "min": 1.0174358974677964,
+        "max": 1.0653846155054854,
+        "median_case_ratio": 1.0369181382392618,
+        "geomean": 1.0381184441665927,
+        "candidate_faster": 9
+      }
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "cadence": "deferred",
+      "native": {
+        "min": 1.008197207489341,
+        "max": 1.0324664420081724,
+        "median_case_ratio": 1.014912846634206,
+        "geomean": 1.0161163105298097,
+        "candidate_faster": 9,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.5073942720856832,
+          0.7789894020091281
+        ]
+      },
+      "browser": {
+        "min": 0.9619565216791622,
+        "max": 1.099431818300278,
+        "median_case_ratio": 1.0371681417511627,
+        "geomean": 1.035677304160484,
+        "candidate_faster": 8
+      }
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "cadence": "immediate",
+      "native": {
+        "min": 0.9792286443131576,
+        "max": 1.060863072746226,
+        "median_case_ratio": 1.0352171607935816,
+        "geomean": 1.0278941369344354,
+        "candidate_faster": 7,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.3482159829695242,
+          0.6005614663259503
+        ]
+      },
+      "browser": {
+        "min": 0.9710327456289303,
+        "max": 1.0548172758258372,
+        "median_case_ratio": 1.017616580341764,
+        "geomean": 1.0152070807873266,
+        "candidate_faster": 7
+      }
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "cadence": "deferred",
+      "native": {
+        "min": 0.9865810012661345,
+        "max": 1.1062647861321615,
+        "median_case_ratio": 1.0330749696708637,
+        "geomean": 1.0464019566725058,
+        "candidate_faster": 8,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.2863678772609567,
+          0.5952956720473945
+        ]
+      },
+      "browser": {
+        "min": 0.9914163089913747,
+        "max": 1.0520446097514025,
+        "median_case_ratio": 1.0246636770811648,
+        "geomean": 1.0220891641926195,
+        "candidate_faster": 7
+      }
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "cadence": "immediate",
+      "native": {
+        "min": 0.9667704515887275,
+        "max": 1.108681672225773,
+        "median_case_ratio": 1.0183878574651606,
+        "geomean": 1.0226872816981154,
+        "candidate_faster": 5,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.42355022286879423,
+          0.6340720438829286
+        ]
+      },
+      "browser": {
+        "min": 0.9691738593414964,
+        "max": 1.065967016466466,
+        "median_case_ratio": 1.0220820189427677,
+        "geomean": 1.0211918853135522,
+        "candidate_faster": 7
+      }
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "cadence": "deferred",
+      "native": {
+        "min": 0.9488204042270374,
+        "max": 1.1343707863115375,
+        "median_case_ratio": 1.022336445564823,
+        "geomean": 1.0224848867490155,
+        "candidate_faster": 5,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.3050004268960112,
+          0.6185484981056419
+        ]
+      },
+      "browser": {
+        "min": 1.012261580361419,
+        "max": 1.0418181817639958,
+        "median_case_ratio": 1.0273381294749624,
+        "geomean": 1.0291905021747036,
+        "candidate_faster": 9
+      }
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "cadence": "immediate",
+      "native": {
+        "min": 0.9857374722885668,
+        "max": 1.0676832503701152,
+        "median_case_ratio": 1.0148887984818487,
+        "geomean": 1.020915244737593,
+        "candidate_faster": 8,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.5345807323542631,
+          0.7516139284010676
+        ]
+      },
+      "browser": {
+        "min": 0.9590361446860325,
+        "max": 1.054574638942586,
+        "median_case_ratio": 1.0247422681813958,
+        "geomean": 1.0233609001288595,
+        "candidate_faster": 8
+      }
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "cadence": "deferred",
+      "native": {
+        "min": 0.9761535184455477,
+        "max": 1.0921237672585058,
+        "median_case_ratio": 1.0312939742229992,
+        "geomean": 1.0264871447103718,
+        "candidate_faster": 6,
+        "torch_faster": 9,
+        "torch_over_candidate_range": [
+          0.5044984913217356,
+          0.7791463065120506
+        ]
+      },
+      "browser": {
+        "min": 0.9863201095399322,
+        "max": 1.0478723403412111,
+        "median_case_ratio": 1.0288888888226615,
+        "geomean": 1.0231076852083059,
+        "candidate_faster": 7
+      }
+    }
+  ],
+  "timings": [
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 44.427645499999926,
+              "min_ms": 42.0519589999999,
+              "max_ms": 47.897125000000415,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.35297899999989,
+              "min_ms": 42.87266700000009,
+              "max_ms": 45.792666999999994,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.74993750001886,
+              "min_ms": 24.247790999652352,
+              "max_ms": 29.264874996442813,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.001683460765962,
+          "torch_over_candidate": 0.5580219876554159
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.629187499999716,
+              "min_ms": 37.0590000000002,
+              "max_ms": 41.16270799999984,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 38.02172899999914,
+              "min_ms": 37.59470800000008,
+              "max_ms": 41.77466600000025,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 21.91612500246265,
+              "min_ms": 21.134542002982926,
+              "max_ms": 22.443958994699642,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9896758640302908,
+          "torch_over_candidate": 0.5764105310009218
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 67.59999999776483,
+              "min_ms": 63.79999999701977,
+              "max_ms": 81.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 66.75,
+              "min_ms": 62.900000005960464,
+              "max_ms": 69.20000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.012734082363518
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 59.94999999925494,
+              "min_ms": 57.80000000447035,
+              "max_ms": 65.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 57.850000001490116,
+              "min_ms": 53.5,
+              "max_ms": 58.399999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.036300777834239
+        }
+      },
+      "max_abs_error": 2.9802322387695312e-08
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 73.25652049999917,
+              "min_ms": 65.45779099999982,
+              "max_ms": 161.9539590000004,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 63.94031249999989,
+              "min_ms": 60.01562499999909,
+              "max_ms": 154.45795799999905,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.089875002682675,
+              "min_ms": 24.855666000803467,
+              "max_ms": 67.29866699606646,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.1457016338479624,
+          "torch_over_candidate": 0.4549535944586246
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 144.7627500000035,
+              "min_ms": 131.655084,
+              "max_ms": 158.04516699999658,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 137.61714549999942,
+              "min_ms": 117.57654199999888,
+              "max_ms": 150.2185419999987,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.781479002034757,
+              "min_ms": 25.25758300180314,
+              "max_ms": 33.442208004998975,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.051923795352986,
+          "torch_over_candidate": 0.18734205616868332
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 111.55000000074506,
+              "min_ms": 108.60000000149012,
+              "max_ms": 122.30000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 107.15000000223517,
+              "min_ms": 100.60000000149012,
+              "max_ms": 109.60000000149012,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.041063929056632
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 103.99999999627471,
+              "min_ms": 97.89999999850988,
+              "max_ms": 114.29999999701977,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 99.19999999925494,
+              "min_ms": 97,
+              "max_ms": 105.89999999850988,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0483870967445144
+        }
+      },
+      "max_abs_error": 2.8870999813079834e-08
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 127.28141700000015,
+              "min_ms": 100.58599999999933,
+              "max_ms": 133.73249999999825,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 126.61070850000033,
+              "min_ms": 114.56204200000138,
+              "max_ms": 132.98975000000064,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 32.99004150176188,
+              "min_ms": 28.295125004660804,
+              "max_ms": 42.88762500073062,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0052974073674015,
+          "torch_over_candidate": 0.2605628062002496
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 108.33683349999956,
+              "min_ms": 96.8874580000047,
+              "max_ms": 114.61270900000818,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 106.59045799999876,
+              "min_ms": 102.33329100000265,
+              "max_ms": 107.38375000000815,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 16.82589599658968,
+              "min_ms": 15.42199999676086,
+              "max_ms": 24.084707998554222,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0163839759465225,
+          "torch_over_candidate": 0.15785555585650898
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 40.70000000298023,
+              "min_ms": 39.80000000447035,
+              "max_ms": 46,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 40.19999999552965,
+              "min_ms": 39.20000000298023,
+              "max_ms": 41.79999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0124378111319945
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 34.650000002235174,
+              "min_ms": 34.399999998509884,
+              "max_ms": 35.19999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 34.25,
+              "min_ms": 33.80000000447035,
+              "max_ms": 35.29999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.011678832182049
+        }
+      },
+      "max_abs_error": 9.313225746154785e-10
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 116.95252100000653,
+              "min_ms": 90.18020800000522,
+              "max_ms": 132.28170799999498,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 125.3872709999996,
+              "min_ms": 110.73404200000368,
+              "max_ms": 131.57974999999715,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 65.573999996559,
+              "min_ms": 52.474166004685685,
+              "max_ms": 66.68237499980023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9327304124834721,
+          "torch_over_candidate": 0.5229717456452115
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 105.75462499999412,
+              "min_ms": 84.66012500000215,
+              "max_ms": 114.66275000000314,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 101.8881665000008,
+              "min_ms": 83.05541699999594,
+              "max_ms": 110.23541699999623,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.941187501099193,
+              "min_ms": 24.14608399703866,
+              "max_ms": 26.86225000070408,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0379480623983286,
+          "torch_over_candidate": 0.2447898353446079
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.70000000298023,
+              "min_ms": 31.80000000447035,
+              "max_ms": 47.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 31.199999999254942,
+              "min_ms": 30.700000002980232,
+              "max_ms": 33.30000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0480769231974716
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.200000002980232,
+              "min_ms": 27.899999998509884,
+              "max_ms": 28.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.199999999254942,
+              "min_ms": 26.899999998509884,
+              "max_ms": 27.700000002980232,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0367647060203191
+        }
+      },
+      "max_abs_error": 3.91155481338501e-08
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 164.17802099999608,
+              "min_ms": 132.1716249999954,
+              "max_ms": 200.88270800000464,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 159.86620849999963,
+              "min_ms": 138.40012500000012,
+              "max_ms": 209.4577919999938,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 59.321999997337116,
+              "min_ms": 55.87816700426629,
+              "max_ms": 66.0989999960293,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0269713815099109,
+          "torch_over_candidate": 0.37107278989066195
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 121.4707914999999,
+              "min_ms": 117.8875840000037,
+              "max_ms": 134.19433299999946,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 121.95266649999758,
+              "min_ms": 114.90874999999505,
+              "max_ms": 125.56229100000928,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 26.360313000623137,
+              "min_ms": 24.90787499846192,
+              "max_ms": 32.354374998249114,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9960486718837125,
+          "torch_over_candidate": 0.21615200189676592
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 50.00000000372529,
+              "min_ms": 49,
+              "max_ms": 51.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.600000001490116,
+              "min_ms": 48,
+              "max_ms": 62.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0288065844072478
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 44.95000000298023,
+              "min_ms": 44.69999999552965,
+              "max_ms": 45.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.850000001490116,
+              "min_ms": 43.70000000298023,
+              "max_ms": 44.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0250855188472687
+        }
+      },
+      "max_abs_error": 6.332993507385254e-08
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 111.15141650000442,
+              "min_ms": 97.73104199999943,
+              "max_ms": 122.7752499999915,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 111.64395850000437,
+              "min_ms": 99.6100829999923,
+              "max_ms": 132.90837499999907,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 33.453083498898195,
+              "min_ms": 30.779041000641882,
+              "max_ms": 34.248374999151565,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9955882789663004,
+          "torch_over_candidate": 0.29964078619531287
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 95.6394580000051,
+              "min_ms": 89.3839580000058,
+              "max_ms": 116.8489159999881,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 92.11543700000038,
+              "min_ms": 89.50945900000806,
+              "max_ms": 114.04316700001073,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 16.666291499859653,
+              "min_ms": 15.508292002778035,
+              "max_ms": 17.817083004047163,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0382565736512188,
+          "torch_over_candidate": 0.18092832257702457
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 39.399999998509884,
+              "min_ms": 39,
+              "max_ms": 40.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 39.05000000074506,
+              "min_ms": 38.399999998509884,
+              "max_ms": 40.20000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.008962868060388
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 34.69999999925494,
+              "min_ms": 34.20000000298023,
+              "max_ms": 35.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 33.94999999925494,
+              "min_ms": 33.899999998509884,
+              "max_ms": 34.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0220913107515894
+        }
+      },
+      "max_abs_error": 2.1420419216156006e-08
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 110.92112500000803,
+              "min_ms": 94.62020800000755,
+              "max_ms": 124.72875000000931,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 107.57537499999307,
+              "min_ms": 93.8094160000037,
+              "max_ms": 115.37079200001608,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 51.093999500153586,
+              "min_ms": 49.493874998006504,
+              "max_ms": 66.523875000712,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0311014486355745,
+          "torch_over_candidate": 0.4749599943310156
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 102.00158350000856,
+              "min_ms": 91.3009999999922,
+              "max_ms": 115.04887499999313,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 99.24047950000386,
+              "min_ms": 93.8872080000001,
+              "max_ms": 115.1107909999846,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 32.554771001741756,
+              "min_ms": 24.95933300087927,
+              "max_ms": 83.44045899866614,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.027822356501256,
+          "torch_over_candidate": 0.3280392352572268
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.150000002235174,
+              "min_ms": 31.700000002980232,
+              "max_ms": 49.399999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 32.649999994784594,
+              "min_ms": 31.19999999552965,
+              "max_ms": 33.69999999552965,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9846860645442791
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.150000002235174,
+              "min_ms": 27.799999997019768,
+              "max_ms": 28.900000005960464,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.299999997019768,
+              "min_ms": 26.899999998509884,
+              "max_ms": 27.899999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0311355313299706
+        }
+      },
+      "max_abs_error": 1.1641532182693481e-09
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 133.5819580000025,
+              "min_ms": 129.4471249999915,
+              "max_ms": 141.50904099999752,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 129.64583349999884,
+              "min_ms": 124.96983299999556,
+              "max_ms": 133.55808400000387,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 46.796187500149244,
+              "min_ms": 41.67629100265913,
+              "max_ms": 57.7506670015282,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0303605938867575,
+          "torch_over_candidate": 0.36095404099623196
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 120.20195849999436,
+              "min_ms": 115.87254199998279,
+              "max_ms": 125.54133300000103,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 117.57733300000109,
+              "min_ms": 112.36066699998628,
+              "max_ms": 121.52958299999591,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.620020500355167,
+              "min_ms": 24.323291996552143,
+              "max_ms": 32.254416997602675,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0223225466424999,
+          "torch_over_candidate": 0.21789931653199626
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 50.05000000447035,
+              "min_ms": 49.099999994039536,
+              "max_ms": 53,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 49.149999998509884,
+              "min_ms": 48.20000000298023,
+              "max_ms": 61,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0183112920852035
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.149999998509884,
+              "min_ms": 44.899999998509884,
+              "max_ms": 45.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.80000000074506,
+              "min_ms": 43.599999994039536,
+              "max_ms": 44.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0308219177566635
+        }
+      },
+      "max_abs_error": 3.073364496231079e-08
+    },
+    {
+      "run": "a",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 106.71472949999588,
+              "min_ms": 98.81554199999664,
+              "max_ms": 109.92954199999804,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 103.899708500001,
+              "min_ms": 96.95308300000033,
+              "max_ms": 114.20808299999044,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 32.031854003435,
+              "min_ms": 31.041250003909227,
+              "max_ms": 40.66720899572829,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0270936371298371,
+          "torch_over_candidate": 0.308295898668808
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 93.35122950000368,
+              "min_ms": 91.73500000000058,
+              "max_ms": 124.35620800001197,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 93.04729199998837,
+              "min_ms": 91.29999999998836,
+              "max_ms": 105.81537500000559,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 16.317124998749932,
+              "min_ms": 14.148125002975576,
+              "max_ms": 18.592041997180786,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0032664841016043,
+          "torch_over_candidate": 0.1753637816644032
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.899999998509884,
+              "min_ms": 38.5,
+              "max_ms": 39.900000005960464,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 38.30000000074506,
+              "min_ms": 38,
+              "max_ms": 39.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0156657962859832
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 34.349999997764826,
+              "min_ms": 34.100000001490116,
+              "max_ms": 34.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 33.94999999925494,
+              "min_ms": 33.69999999552965,
+              "max_ms": 34.29999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0117820323569562
+        }
+      },
+      "max_abs_error": 2.2351741790771484e-08
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.5009584999998,
+              "min_ms": 46.78300000000013,
+              "max_ms": 55.182625000000144,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.822688000000085,
+              "min_ms": 47.09608299999991,
+              "max_ms": 51.044124999999894,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.392395499395207,
+              "min_ms": 27.60770799795864,
+              "max_ms": 30.582083003537264,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0350936045251098,
+          "torch_over_candidate": 0.5937013724405278
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.4637915000003,
+              "min_ms": 40.339082999999846,
+              "max_ms": 45.40299999999934,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 41.52720849999969,
+              "min_ms": 40.57466699999986,
+              "max_ms": 47.69812499999989,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.03168750263285,
+              "min_ms": 24.523291998775676,
+              "max_ms": 27.785915997810662,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.998472880737953,
+          "torch_over_candidate": 0.6027779956033654
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 34.05000000074506,
+              "min_ms": 32.399999998509884,
+              "max_ms": 43.70000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 32.900000002235174,
+              "min_ms": 31.5,
+              "max_ms": 36.399999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0349544072471657
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.600000001490116,
+              "min_ms": 28.200000002980232,
+              "max_ms": 28.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.19999999552965,
+              "min_ms": 27,
+              "max_ms": 27.30000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.051470588462888
+        }
+      },
+      "max_abs_error": 2.0489096641540527e-08
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 72.06139549999989,
+              "min_ms": 70.12700000000041,
+              "max_ms": 77.34725000000071,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 68.65314550000039,
+              "min_ms": 64.87300000000141,
+              "max_ms": 94.41424999999981,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.907021002552938,
+              "min_ms": 30.751375001273118,
+              "max_ms": 38.179916999069974,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0496444842428885,
+          "torch_over_candidate": 0.4647568697715789
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 64.80097900000146,
+              "min_ms": 60.617291999999,
+              "max_ms": 68.11183299999902,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 63.20483299999978,
+              "min_ms": 60.326624999997875,
+              "max_ms": 71.42683300000135,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 26.711499500379432,
+              "min_ms": 24.714749997656327,
+              "max_ms": 34.32420900207944,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0252535435067391,
+          "torch_over_candidate": 0.4226179903106385
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.99999999627471,
+              "min_ms": 49.5,
+              "max_ms": 57,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 49.149999998509884,
+              "min_ms": 48.100000001490116,
+              "max_ms": 50.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0172939979204598
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.25000000372529,
+              "min_ms": 45.099999994039536,
+              "max_ms": 45.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.099999994039536,
+              "min_ms": 43.79999999701977,
+              "max_ms": 44.19999999552965,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0260770977288252
+        }
+      },
+      "max_abs_error": 9.313225746154785e-10
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 56.899812499998006,
+              "min_ms": 52.384916000002704,
+              "max_ms": 72.02987500000381,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.867646000000605,
+              "min_ms": 49.96574999999939,
+              "max_ms": 58.87779199999932,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 22.582041499845218,
+              "min_ms": 18.34650000091642,
+              "max_ms": 27.609665994532406,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.056289196301568,
+          "torch_over_candidate": 0.4192134458566273
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 51.634728499997436,
+              "min_ms": 46.955458000004,
+              "max_ms": 55.77825000000303,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 46.70106250000026,
+              "min_ms": 43.994958999996015,
+              "max_ms": 50.58783300000141,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 14.57064549686038,
+              "min_ms": 13.255915997433476,
+              "max_ms": 17.802624999603722,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.105643549330321,
+          "torch_over_candidate": 0.3119981584329114
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 42.0,
+              "min_ms": 41,
+              "max_ms": 45.19999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.350000001490116,
+              "min_ms": 39.79999999701977,
+              "max_ms": 45.29999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9917355371551877
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 36.150000002235174,
+              "min_ms": 35.400000005960464,
+              "max_ms": 37.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 35.75000000372529,
+              "min_ms": 34.5,
+              "max_ms": 37.099999994039536,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0111888111459637
+        }
+      },
+      "max_abs_error": 7.450580596923828e-09
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 51.08397949999562,
+              "min_ms": 46.49700000000303,
+              "max_ms": 55.10874999999942,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.48893749999843,
+              "min_ms": 46.42262499999924,
+              "max_ms": 52.176458000009006,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.718811994825955,
+              "min_ms": 28.277375000470784,
+              "max_ms": 32.770207995781675,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0535182277400341,
+          "torch_over_candidate": 0.6128988079977401
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.03916699999536,
+              "min_ms": 40.39970799999719,
+              "max_ms": 42.554874999994354,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 41.808208000002196,
+              "min_ms": 40.38879199999792,
+              "max_ms": 50.18374999999651,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.961750001239125,
+              "min_ms": 23.879416003182996,
+              "max_ms": 25.581708003301173,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9816055019625143,
+          "torch_over_candidate": 0.5970538130033656
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 33.94999999552965,
+              "min_ms": 32.600000001490116,
+              "max_ms": 47.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 33.04999999701977,
+              "min_ms": 31.600000001490116,
+              "max_ms": 34.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0272314674308938
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 29.5,
+              "min_ms": 29.299999997019768,
+              "max_ms": 30.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 28.549999997019768,
+              "min_ms": 27.80000000447035,
+              "max_ms": 30.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0332749563250228
+        }
+      },
+      "max_abs_error": 2.1420419216156006e-08
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 69.29210450000028,
+              "min_ms": 67.38816699999734,
+              "max_ms": 73.57679200000712,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 67.27081199999884,
+              "min_ms": 65.29787500000384,
+              "max_ms": 68.94712499999878,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 30.652458503027447,
+              "min_ms": 29.524624995246995,
+              "max_ms": 34.89879100379767,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0300470953138112,
+          "torch_over_candidate": 0.4556576261191551
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 62.851458000001,
+              "min_ms": 61.06270799999038,
+              "max_ms": 67.18812500000058,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 61.497041999999055,
+              "min_ms": 59.40274999999383,
+              "max_ms": 71.7389589999948,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.48079199914355,
+              "min_ms": 24.72562500042841,
+              "max_ms": 31.21995799301658,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0220240836949843,
+          "torch_over_candidate": 0.4143417499518747
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 53.75,
+              "min_ms": 50.30000000447035,
+              "max_ms": 67.79999999701977,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 51.0,
+              "min_ms": 49.80000000447035,
+              "max_ms": 70.20000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.053921568627451
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.55000000074506,
+              "min_ms": 46.19999999552965,
+              "max_ms": 48.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.25,
+              "min_ms": 44.79999999701977,
+              "max_ms": 46.399999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0287292817844211
+        }
+      },
+      "max_abs_error": 7.916241884231567e-08
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 55.299458499997854,
+              "min_ms": 52.760542000003625,
+              "max_ms": 59.71362500000396,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 55.203604000005726,
+              "min_ms": 52.284082999998645,
+              "max_ms": 60.23883399999613,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 19.347395998920547,
+              "min_ms": 17.503458002465777,
+              "max_ms": 26.080166004248895,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.001736381196998,
+          "torch_over_candidate": 0.3504734219693073
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 51.12577049999527,
+              "min_ms": 45.48945899998944,
+              "max_ms": 55.17050000000745,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.3073540000114,
+              "min_ms": 44.60054199998558,
+              "max_ms": 50.34654199999932,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 14.23033349783509,
+              "min_ms": 13.922041995101608,
+              "max_ms": 15.300875005777925,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.128421017479467,
+          "torch_over_candidate": 0.3140844088540573
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 40.30000000074506,
+              "min_ms": 39.399999998509884,
+              "max_ms": 57.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 40.650000002235174,
+              "min_ms": 39.899999998509884,
+              "max_ms": 41.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9913899138629552
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.69999999925494,
+              "min_ms": 35.399999998509884,
+              "max_ms": 36.19999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 35.25,
+              "min_ms": 34.600000001490116,
+              "max_ms": 35.899999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0127659574256722
+        }
+      },
+      "max_abs_error": 9.313225746154785e-09
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.007833500014385,
+              "min_ms": 47.284583000000566,
+              "max_ms": 52.886415999993915,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 46.860250499994436,
+              "min_ms": 44.96079099999042,
+              "max_ms": 51.10449999998673,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.2312915007642,
+              "min_ms": 28.473833997850306,
+              "max_ms": 32.16058300313307,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0458295245353033,
+          "torch_over_candidate": 0.6237971668710492
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.412312499996915,
+              "min_ms": 40.2194169999857,
+              "max_ms": 45.33283300000767,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 41.53804200000013,
+              "min_ms": 40.72524999998859,
+              "max_ms": 43.6392909999995,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.58727049836307,
+              "min_ms": 24.044167003012262,
+              "max_ms": 28.307957996730693,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9969731481324224,
+          "torch_over_candidate": 0.6159960668912364
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.25,
+              "min_ms": 32.399999998509884,
+              "max_ms": 48.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 33.69999999925494,
+              "min_ms": 31.100000001490116,
+              "max_ms": 34.30000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0459940653050246
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.800000000745058,
+              "min_ms": 28.099999994039536,
+              "max_ms": 29.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.75,
+              "min_ms": 27.200000002980232,
+              "max_ms": 28.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0378378378646869
+        }
+      },
+      "max_abs_error": 4.6566128730773926e-09
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 71.36039549999987,
+              "min_ms": 66.05774999999267,
+              "max_ms": 74.0173339999892,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 68.16802099999768,
+              "min_ms": 66.5129159999924,
+              "max_ms": 71.32754199998453,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.95237499999348,
+              "min_ms": 28.719832997012418,
+              "max_ms": 79.66908299567876,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0468309693192106,
+          "torch_over_candidate": 0.43939041445833527
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 62.505291500005114,
+              "min_ms": 60.49783399999433,
+              "max_ms": 70.7949999999837,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 63.51081300000078,
+              "min_ms": 59.70699999999488,
+              "max_ms": 70.19241699999839,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.694020998344058,
+              "min_ms": 24.70591600285843,
+              "max_ms": 31.221124998410232,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9841677117249994,
+          "torch_over_candidate": 0.40456136183209845
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 51.649999998509884,
+              "min_ms": 50.100000001490116,
+              "max_ms": 55.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 50.20000000298023,
+              "min_ms": 49.19999999552965,
+              "max_ms": 53.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0288844620606288
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.5,
+              "min_ms": 45.70000000298023,
+              "max_ms": 48.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.899999998509884,
+              "min_ms": 44.69999999552965,
+              "max_ms": 45.69999999552965,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0356347439096485
+        }
+      },
+      "max_abs_error": 4.190951585769653e-08
+    },
+    {
+      "run": "a",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 53.962041500009946,
+              "min_ms": 50.9565830000065,
+              "max_ms": 59.16387500001292,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.94702050000342,
+              "min_ms": 50.3756669999857,
+              "max_ms": 55.71020800000406,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 18.18420800191234,
+              "min_ms": 17.37562499329215,
+              "max_ms": 26.54012499988312,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0002784398446347,
+          "torch_over_candidate": 0.33707529782689644
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 50.771624999993946,
+              "min_ms": 48.3633330000157,
+              "max_ms": 54.34333400000469,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 46.2306244999927,
+              "min_ms": 43.758875000014086,
+              "max_ms": 51.22500000000582,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 14.68470849795267,
+              "min_ms": 14.158833997498732,
+              "max_ms": 20.38166599959368,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.098224943943856,
+          "torch_over_candidate": 0.31764027972313
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 39.849999997764826,
+              "min_ms": 39.29999999701977,
+              "max_ms": 57.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 39.75000000372529,
+              "min_ms": 38.70000000298023,
+              "max_ms": 40.20000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0025157231202557
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.44999999925494,
+              "min_ms": 35.19999999552965,
+              "max_ms": 35.70000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 35.25,
+              "min_ms": 34.399999998509884,
+              "max_ms": 36,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0056737588441118
+        }
+      },
+      "max_abs_error": 2.7008354663848877e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 52.4343130000002,
+              "min_ms": 45.20079200000009,
+              "max_ms": 56.810667000000194,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.329750000000104,
+              "min_ms": 42.41533300000037,
+              "max_ms": 64.93529200000012,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 34.42772899870761,
+              "min_ms": 31.5310000005411,
+              "max_ms": 37.68929099896923,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0849282895111207,
+          "torch_over_candidate": 0.7123506535561954
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.905583000000206,
+              "min_ms": 36.74241699999948,
+              "max_ms": 42.351958000000195,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.50131250000004,
+              "min_ms": 35.35149999999976,
+              "max_ms": 42.71625000000131,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.21312499893247,
+              "min_ms": 28.666500002145767,
+              "max_ms": 34.89108399662655,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0107801693607434,
+          "torch_over_candidate": 0.7789894020091281
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.649999998509884,
+              "min_ms": 32,
+              "max_ms": 41.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 31.149999998509884,
+              "min_ms": 30.799999997019768,
+              "max_ms": 35.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.048154093100217
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 29.30000000447035,
+              "min_ms": 29.19999999552965,
+              "max_ms": 29.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 28.25,
+              "min_ms": 28.099999994039536,
+              "max_ms": 28.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0371681417511627
+        }
+      },
+      "max_abs_error": 1.955777406692505e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 63.70716649999849,
+              "min_ms": 62.81104199999936,
+              "max_ms": 72.09650000000147,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.7735004999995,
+              "min_ms": 61.904875000000175,
+              "max_ms": 64.94229099999939,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 33.72527049941709,
+              "min_ms": 33.41966700099874,
+              "max_ms": 42.25050000241026,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0148735691424282,
+          "torch_over_candidate": 0.5372533032376833
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.45710400000098,
+              "min_ms": 57.842375000000175,
+              "max_ms": 59.3325420000001,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 57.553978500000085,
+              "min_ms": 57.077707999997074,
+              "max_ms": 58.02087500000198,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.42324999862467,
+              "min_ms": 30.357415998878423,
+              "max_ms": 40.380750004260335,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0156917996555337,
+          "torch_over_candidate": 0.5459787631992221
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.900000002235174,
+              "min_ms": 49.19999999552965,
+              "max_ms": 50.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.80000000447035,
+              "min_ms": 48.5,
+              "max_ms": 56.899999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0225409835586898
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.599999997764826,
+              "min_ms": 46.099999994039536,
+              "max_ms": 47.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.350000001490116,
+              "min_ms": 45,
+              "max_ms": 45.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.027563395727313
+        }
+      },
+      "max_abs_error": 2.1420419216156006e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 54.23193799999899,
+              "min_ms": 48.97416700000031,
+              "max_ms": 56.66258300000118,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 52.772478999999294,
+              "min_ms": 49.38983300000109,
+              "max_ms": 54.517415999998775,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.459312499762746,
+              "min_ms": 24.04779099742882,
+              "max_ms": 34.405415994115174,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0276556839408608,
+          "torch_over_candidate": 0.5392832218430202
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 47.85804149999785,
+              "min_ms": 44.362999999997555,
+              "max_ms": 49.845375000004424,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.15043749999677,
+              "min_ms": 43.30949999999939,
+              "max_ms": 49.371666999999434,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 27.834312997583766,
+              "min_ms": 21.4223340008175,
+              "max_ms": 31.802209006855264,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.015007368701534,
+          "torch_over_candidate": 0.5903298987964994
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 40.69999999925494,
+              "min_ms": 38.600000001490116,
+              "max_ms": 42.30000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 39.600000001490116,
+              "min_ms": 38.19999999552965,
+              "max_ms": 41.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0277777777202888
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.399999998509884,
+              "min_ms": 35.100000001490116,
+              "max_ms": 42.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.80000000074506,
+              "min_ms": 34.69999999552965,
+              "max_ms": 42.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9619565216791622
+        }
+      },
+      "max_abs_error": 2.0489096641540527e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.05083350000132,
+              "min_ms": 42.99437500000204,
+              "max_ms": 48.80075000000943,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.46727049999754,
+              "min_ms": 43.000584000001254,
+              "max_ms": 46.43254199999501,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.82747900063987,
+              "min_ms": 30.88604200456757,
+              "max_ms": 40.298583000549115,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0131234274881749,
+          "torch_over_candidate": 0.7157506778078864
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.27885349999997,
+              "min_ms": 36.70324999999866,
+              "max_ms": 44.51445799999783,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.9676249999975,
+              "min_ms": 36.7042089999959,
+              "max_ms": 45.2609999999986,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.12737500082585,
+              "min_ms": 28.581417005625553,
+              "max_ms": 34.08454199961852,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.008197207489341,
+          "torch_over_candidate": 0.767163471532069
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.30000000074506,
+              "min_ms": 32.19999999552965,
+              "max_ms": 32.399999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 31.149999994784594,
+              "min_ms": 30.600000001490116,
+              "max_ms": 31.80000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0369181382392618
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 29.300000000745058,
+              "min_ms": 29.19999999552965,
+              "max_ms": 29.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 28.100000001490116,
+              "min_ms": 28,
+              "max_ms": 28.399999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0427046263057405
+        }
+      },
+      "max_abs_error": 8.381903171539307e-09
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 64.11070799999652,
+              "min_ms": 62.97104099999706,
+              "max_ms": 67.4902080000029,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.96614600000248,
+              "min_ms": 62.43883299999288,
+              "max_ms": 63.57191700000112,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 33.80312499939464,
+              "min_ms": 33.17666699877009,
+              "max_ms": 40.95420799421845,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0181774187035997,
+          "torch_over_candidate": 0.5368460219781167
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.856416499998886,
+              "min_ms": 57.93912499999715,
+              "max_ms": 59.392457999994804,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 57.005646000001434,
+              "min_ms": 56.63987500000076,
+              "max_ms": 57.57537499999307,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.250437499693362,
+              "min_ms": 30.48395900259493,
+              "max_ms": 39.21983300097054,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0324664420081724,
+          "torch_over_candidate": 0.5481989889158098
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.599999997764826,
+              "min_ms": 49.29999999701977,
+              "max_ms": 50.30000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.74999999627471,
+              "min_ms": 48.30000000447035,
+              "max_ms": 49.20000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0174358974677964
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.19999999925494,
+              "min_ms": 46.099999994039536,
+              "max_ms": 46.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.20000000298023,
+              "min_ms": 44.899999998509884,
+              "max_ms": 45.80000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.022123893721433
+        }
+      },
+      "max_abs_error": 7.543712854385376e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 53.78783349999867,
+              "min_ms": 49.05025000000023,
+              "max_ms": 54.83675000000949,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 52.30320800000118,
+              "min_ms": 49.58849999999802,
+              "max_ms": 54.7288750000007,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.79770799720427,
+              "min_ms": 24.19137499964563,
+              "max_ms": 33.48379100498278,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0283849797510978,
+          "torch_over_candidate": 0.5697109056332377
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.45006250000006,
+              "min_ms": 46.60233399999561,
+              "max_ms": 54.177332999999635,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.99010400000407,
+              "min_ms": 43.7336670000077,
+              "max_ms": 49.91937499999767,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.446145999623695,
+              "min_ms": 21.622666004986968,
+              "max_ms": 33.96500000235392,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0095844447429403,
+          "torch_over_candidate": 0.5927502470013669
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 40.79999999701977,
+              "min_ms": 38.600000001490116,
+              "max_ms": 63.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 38.55000000074506,
+              "min_ms": 38.19999999552965,
+              "max_ms": 41.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0583657586571005
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.649999998509884,
+              "min_ms": 35.399999998509884,
+              "max_ms": 45,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 35.650000002235174,
+              "min_ms": 34.79999999701977,
+              "max_ms": 38.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0561009816591673
+        }
+      },
+      "max_abs_error": 1.6763806343078613e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 44.97135399999388,
+              "min_ms": 43.06600000000617,
+              "max_ms": 45.96166700001049,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.63600050000241,
+              "min_ms": 42.59945800001151,
+              "max_ms": 50.10837499999616,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.89556249708403,
+              "min_ms": 31.33745800005272,
+              "max_ms": 38.262207999650855,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0306021057083679,
+          "torch_over_candidate": 0.7309460567331845
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.88347950000025,
+              "min_ms": 36.93816700000025,
+              "max_ms": 43.0617920000077,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.51366650000273,
+              "min_ms": 36.95079100001021,
+              "max_ms": 42.91520800002036,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.866166499938117,
+              "min_ms": 28.49525000056019,
+              "max_ms": 35.97320900007617,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0098580873185907,
+          "torch_over_candidate": 0.7694840092459643
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.5,
+              "min_ms": 32.100000001490116,
+              "max_ms": 32.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 31.100000001490116,
+              "min_ms": 30.799999997019768,
+              "max_ms": 31.399999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0450160771203474
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 29.599999994039536,
+              "min_ms": 29.299999997019768,
+              "max_ms": 29.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 28.30000000447035,
+              "min_ms": 27.900000005960464,
+              "max_ms": 28.80000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0459363953838812
+        }
+      },
+      "max_abs_error": 2.0489096641540527e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 63.436249999998836,
+              "min_ms": 62.963916999986395,
+              "max_ms": 70.1364590000012,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.695125000005646,
+              "min_ms": 62.28070800000569,
+              "max_ms": 63.43658400001004,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 33.634749495831784,
+              "min_ms": 33.15012500388548,
+              "max_ms": 38.766167002904695,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0118210945427275,
+          "torch_over_candidate": 0.5364810979454743
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 59.035208499990404,
+              "min_ms": 58.353249999985565,
+              "max_ms": 61.24016699999629,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 57.38010449999274,
+              "min_ms": 56.884665999998106,
+              "max_ms": 59.780750000005355,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.142979001742788,
+              "min_ms": 30.201000001397915,
+              "max_ms": 39.921707997564226,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0288445623168545,
+          "torch_over_candidate": 0.5427487327379602
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.80000000074506,
+              "min_ms": 49.5,
+              "max_ms": 50.399999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.69999999925494,
+              "min_ms": 48.29999999701977,
+              "max_ms": 49.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0225872690247833
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.75,
+              "min_ms": 46.399999998509884,
+              "max_ms": 47.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.24999999627471,
+              "min_ms": 44.80000000447035,
+              "max_ms": 45.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.033149171355774
+        }
+      },
+      "max_abs_error": 3.073364496231079e-08
+    },
+    {
+      "run": "a",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 52.647937500005355,
+              "min_ms": 50.52395799999067,
+              "max_ms": 54.23779100000684,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.23358349999762,
+              "min_ms": 48.73895800000173,
+              "max_ms": 54.78933299999335,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.657708499144064,
+              "min_ms": 24.943625001469627,
+              "max_ms": 36.72516699589323,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9889985614064044,
+          "torch_over_candidate": 0.5571240286528032
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.328041500004474,
+              "min_ms": 44.17075000000477,
+              "max_ms": 49.96570800000336,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.60322900000028,
+              "min_ms": 44.2283749999915,
+              "max_ms": 49.93008300001384,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.660999999468913,
+              "min_ms": 21.81258299970068,
+              "max_ms": 30.62741699977778,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.014912846634206,
+          "torch_over_candidate": 0.5073942720856832
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.55000000074506,
+              "min_ms": 38.400000005960464,
+              "max_ms": 42.399999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 38.99999999627471,
+              "min_ms": 38.29999999701977,
+              "max_ms": 44.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0653846155054854
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.69999999925494,
+              "min_ms": 35.30000000447035,
+              "max_ms": 43,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 35.19999999552965,
+              "min_ms": 35,
+              "max_ms": 42.79999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.099431818300278
+        }
+      },
+      "max_abs_error": 1.0244548320770264e-08
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 43.806874999999934,
+              "min_ms": 39.99345799999992,
+              "max_ms": 50.34379100000001,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.3218545000002,
+              "min_ms": 40.17854199999965,
+              "max_ms": 48.04604100000006,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.416874996153638,
+              "min_ms": 23.96237499488052,
+              "max_ms": 30.293292002170347,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0350887388453105,
+          "torch_over_candidate": 0.6005614663259503
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 40.74760399999968,
+              "min_ms": 35.53337499999998,
+              "max_ms": 46.6574999999998,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.83350000000064,
+              "min_ms": 36.19641700000011,
+              "max_ms": 40.7980409999991,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 21.372666997194756,
+              "min_ms": 21.160750002309214,
+              "max_ms": 24.12420899781864,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.1062647861321615,
+          "torch_over_candidate": 0.5802507770696346
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 31.75,
+              "min_ms": 31.30000000447035,
+              "max_ms": 35.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.099999997764826,
+              "min_ms": 29.899999998509884,
+              "max_ms": 34,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0548172758258372
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.449999999254942,
+              "min_ms": 27.799999997019768,
+              "max_ms": 28.700000002980232,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.299999997019768,
+              "min_ms": 26.69999999552965,
+              "max_ms": 27.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0421245422110152
+        }
+      },
+      "max_abs_error": 2.9802322387695312e-08
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 63.91687550000097,
+              "min_ms": 61.22366599999987,
+              "max_ms": 67.72554200000013,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 61.15420849999964,
+              "min_ms": 59.81775000000107,
+              "max_ms": 67.04608300000109,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.955812496249564,
+              "min_ms": 25.45195899438113,
+              "max_ms": 31.250166000972968,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0451754191210134,
+          "torch_over_candidate": 0.42443215492274283
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.11145849999957,
+              "min_ms": 57.36691599999904,
+              "max_ms": 61.00508400000035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.83714599999894,
+              "min_ms": 55.497166999999536,
+              "max_ms": 59.163542000000234,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 22.475124500488164,
+              "min_ms": 22.11308400001144,
+              "max_ms": 24.45224999974016,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0224204167464823,
+          "torch_over_candidate": 0.39543020862603806
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.69999999925494,
+              "min_ms": 48.29999999701977,
+              "max_ms": 56,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.649999998509884,
+              "min_ms": 47.100000001490116,
+              "max_ms": 48.19999999552965,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0220356768263985
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.69999999552965,
+              "min_ms": 45.29999999701977,
+              "max_ms": 46.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.599999997764826,
+              "min_ms": 44.29999999701977,
+              "max_ms": 44.69999999552965,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0246636770811648
+        }
+      },
+      "max_abs_error": 2.8870999813079834e-08
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 53.18579149999823,
+              "min_ms": 50.59737500000483,
+              "max_ms": 54.663125000002765,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 51.37645849999899,
+              "min_ms": 49.53554200000144,
+              "max_ms": 55.449249999997846,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 17.890103998070117,
+              "min_ms": 14.8990000016056,
+              "max_ms": 24.889250002161134,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0352171607935816,
+          "torch_over_candidate": 0.3482159829695242
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.096937499996784,
+              "min_ms": 42.59437500000058,
+              "max_ms": 51.347875000003114,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 46.16027099999883,
+              "min_ms": 42.64833300000464,
+              "max_ms": 49.83337499999834,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 13.969438001367962,
+              "min_ms": 12.830624997150153,
+              "max_ms": 21.996041999955196,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0419552671169978,
+          "torch_over_candidate": 0.3026290292223006
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.55000000074506,
+              "min_ms": 37.5,
+              "max_ms": 45.29999999701977,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 39.69999999925494,
+              "min_ms": 37.5,
+              "max_ms": 44.399999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9710327456289303
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 34.600000001490116,
+              "min_ms": 34.30000000447035,
+              "max_ms": 39.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 34.850000001490116,
+              "min_ms": 33.80000000447035,
+              "max_ms": 37.79999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9928263988525305
+        }
+      },
+      "max_abs_error": 9.313225746154785e-10
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.87202100000104,
+              "min_ms": 39.33941699999923,
+              "max_ms": 55.17316600000413,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.76020849999804,
+              "min_ms": 39.43291600000157,
+              "max_ms": 47.67425000000003,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.656271005573217,
+              "min_ms": 24.929457998950966,
+              "max_ms": 32.430749997729436,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9792286443131576,
+          "torch_over_candidate": 0.6000034121810793
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 36.442000000002736,
+              "min_ms": 35.212416999995185,
+              "max_ms": 43.153582999999344,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.93766649999816,
+              "min_ms": 36.14779200000339,
+              "max_ms": 41.3059160000048,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 21.988833002978936,
+              "min_ms": 21.278374995745253,
+              "max_ms": 23.052916003507562,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9865810012661345,
+          "torch_over_candidate": 0.5952956720473945
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 31.449999999254942,
+              "min_ms": 31.100000001490116,
+              "max_ms": 31.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.299999997019768,
+              "min_ms": 29.799999997019768,
+              "max_ms": 30.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.037953795457039
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.5,
+              "min_ms": 28.399999998509884,
+              "max_ms": 28.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.349999997764826,
+              "min_ms": 27.100000001490116,
+              "max_ms": 29.200000002980232,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0420475320778486
+        }
+      },
+      "max_abs_error": 3.91155481338501e-08
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 66.65754150000066,
+              "min_ms": 63.06900000000314,
+              "max_ms": 70.73337500000343,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.83331299999554,
+              "min_ms": 60.084333000006154,
+              "max_ms": 73.92750000000524,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 25.954791501135333,
+              "min_ms": 25.23770900006639,
+              "max_ms": 31.823833000089508,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.060863072746226,
+          "torch_over_candidate": 0.41307373846636375
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.18895799999882,
+              "min_ms": 57.61041700000351,
+              "max_ms": 64.8676670000059,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.691813000001275,
+              "min_ms": 55.601833000000624,
+              "max_ms": 62.3147089999984,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 22.363291496731108,
+              "min_ms": 21.887000002607238,
+              "max_ms": 22.927582998818252,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0264084868832386,
+          "torch_over_candidate": 0.39447127042366076
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.649999994784594,
+              "min_ms": 48.100000001490116,
+              "max_ms": 49.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.05000000074506,
+              "min_ms": 47.30000000447035,
+              "max_ms": 67.20000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0124869925916802
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.29999999701977,
+              "min_ms": 45,
+              "max_ms": 45.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.100000001490116,
+              "min_ms": 43.600000001490116,
+              "max_ms": 44.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0272108842514536
+        }
+      },
+      "max_abs_error": 6.332993507385254e-08
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 51.28979149999941,
+              "min_ms": 48.56199999999808,
+              "max_ms": 56.21295799999643,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 51.9809165000006,
+              "min_ms": 49.571499999998196,
+              "max_ms": 52.64050000000134,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 21.064916501927655,
+              "min_ms": 15.128583007026464,
+              "max_ms": 22.393958999600727,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9867042552048657,
+          "torch_over_candidate": 0.4052432684969572
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 47.374979500000336,
+              "min_ms": 45.46454199999425,
+              "max_ms": 49.25187499999447,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.37708300000304,
+              "min_ms": 42.93129100000078,
+              "max_ms": 50.5849589999998,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 12.826166501326952,
+              "min_ms": 12.332999998761807,
+              "max_ms": 14.125708003120963,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0921660983980186,
+          "torch_over_candidate": 0.29568992689817464
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.849999997764826,
+              "min_ms": 37.80000000447035,
+              "max_ms": 40.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 38.69999999925494,
+              "min_ms": 36.79999999701977,
+              "max_ms": 57,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0038759689538184
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 34.350000001490116,
+              "min_ms": 34.100000001490116,
+              "max_ms": 34.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 34.150000002235174,
+              "min_ms": 33.69999999552965,
+              "max_ms": 34.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0058565153511523
+        }
+      },
+      "max_abs_error": 2.1420419216156006e-08
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 50.49668700000257,
+              "min_ms": 44.427042000002984,
+              "max_ms": 59.22075000000041,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.26122950000354,
+              "min_ms": 43.85820899999817,
+              "max_ms": 67.03429100000358,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 27.1452919987496,
+              "min_ms": 26.49770800053375,
+              "max_ms": 33.30270800506696,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.046319945081359,
+          "torch_over_candidate": 0.5624658194575753
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 40.07627099999809,
+              "min_ms": 36.11979199999041,
+              "max_ms": 40.92200000000594,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 38.793187499999476,
+              "min_ms": 36.42408299999079,
+              "max_ms": 43.52008299999579,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 22.785250501328846,
+              "min_ms": 22.008707994245924,
+              "max_ms": 25.09937500144588,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0330749696708637,
+          "torch_over_candidate": 0.5873518514385845
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 33.05000000074506,
+              "min_ms": 32.29999999701977,
+              "max_ms": 49,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 33.150000002235174,
+              "min_ms": 30.799999997019768,
+              "max_ms": 49.900000005960464,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9969834087033673
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.300000000745058,
+              "min_ms": 27.399999998509884,
+              "max_ms": 30.200000002980232,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 26.899999998509884,
+              "min_ms": 26.600000001490116,
+              "max_ms": 28.799999997019768,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0520446097514025
+        }
+      },
+      "max_abs_error": 1.1641532182693481e-09
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 68.55177099999855,
+              "min_ms": 64.62941699998919,
+              "max_ms": 73.67162500000268,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 65.22577099999762,
+              "min_ms": 61.51687499998661,
+              "max_ms": 69.88354100000288,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.284416497626808,
+              "min_ms": 26.26366700133076,
+              "max_ms": 32.66299999813782,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0509921147578472,
+          "torch_over_candidate": 0.4336386686426112
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.40543749999779,
+              "min_ms": 57.02212500000314,
+              "max_ms": 62.914417000007234,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.59370799999306,
+              "min_ms": 55.787541999990935,
+              "max_ms": 58.09366699999373,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 22.432583496993175,
+              "min_ms": 22.029250001651235,
+              "max_ms": 23.627374997886363,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0320129138738348,
+          "torch_over_candidate": 0.3963794614234488
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.100000001490116,
+              "min_ms": 48.19999999552965,
+              "max_ms": 51.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.25,
+              "min_ms": 47.29999999701977,
+              "max_ms": 68.29999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.017616580341764
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.5,
+              "min_ms": 44.899999998509884,
+              "max_ms": 46,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.5,
+              "min_ms": 44.29999999701977,
+              "max_ms": 44.899999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0224719101123596
+        }
+      },
+      "max_abs_error": 3.073364496231079e-08
+    },
+    {
+      "run": "b",
+      "mode": "plain",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 51.156354000006104,
+              "min_ms": 48.30266699999629,
+              "max_ms": 53.33308399999805,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 50.414646000012,
+              "min_ms": 48.17620800000441,
+              "max_ms": 55.600459000008414,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 18.793416500557214,
+              "min_ms": 14.99133299512323,
+              "max_ms": 24.53487500315532,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.01471215328962,
+          "torch_over_candidate": 0.37277692082877545
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.19933299999684,
+              "min_ms": 43.574457999988226,
+              "max_ms": 57.701791999992565,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.52977100000862,
+              "min_ms": 42.9910830000008,
+              "max_ms": 55.021916999990935,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 12.751895996188978,
+              "min_ms": 12.13941600144608,
+              "max_ms": 15.678874995501246,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0824069362491784,
+          "torch_over_candidate": 0.2863678772609567
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.899999998509884,
+              "min_ms": 37.19999999552965,
+              "max_ms": 46.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 38.05000000074506,
+              "min_ms": 37,
+              "max_ms": 41.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0223390275360889
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 34.649999998509884,
+              "min_ms": 34.20000000298023,
+              "max_ms": 35.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 34.94999999925494,
+              "min_ms": 34.20000000298023,
+              "max_ms": 45.20000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9914163089913747
+        }
+      },
+      "max_abs_error": 2.2351741790771484e-08
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 42.67233299999987,
+              "min_ms": 41.06225000000006,
+              "max_ms": 48.65129100000013,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.01470850000004,
+              "min_ms": 40.97629199999983,
+              "max_ms": 49.327749999999924,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 27.12539599451702,
+              "min_ms": 25.75562499987427,
+              "max_ms": 33.585333003429696,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.99204050168095,
+          "torch_over_candidate": 0.6306074582492404
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.45058349999999,
+              "min_ms": 35.77887499999997,
+              "max_ms": 44.000042000000576,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.69291700000031,
+              "min_ms": 35.773708000000624,
+              "max_ms": 41.36645799999951,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 22.502083498693537,
+              "min_ms": 21.83770800183993,
+              "max_ms": 24.023124999075662,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9935708478067561,
+          "torch_over_candidate": 0.5969844015705484
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.100000001490116,
+              "min_ms": 31.5,
+              "max_ms": 40.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.599999997764826,
+              "min_ms": 30.299999997019768,
+              "max_ms": 35.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0490196079684595
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.649999998509884,
+              "min_ms": 28.200000002980232,
+              "max_ms": 28.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.5,
+              "min_ms": 27,
+              "max_ms": 27.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0418181817639958
+        }
+      },
+      "max_abs_error": 2.0489096641540527e-08
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 62.2593539999998,
+              "min_ms": 61.47295800000211,
+              "max_ms": 66.39779200000066,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 61.13520849999895,
+              "min_ms": 60.565958000002865,
+              "max_ms": 62.84166600000026,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 27.527583501068875,
+              "min_ms": 26.709124998888,
+              "max_ms": 33.23879100207705,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0183878574651606,
+          "torch_over_candidate": 0.4502738140014579
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 59.25816649999797,
+              "min_ms": 57.69262499999968,
+              "max_ms": 68.38504099999955,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 59.85466649999944,
+              "min_ms": 56.36995800000295,
+              "max_ms": 63.46879199999967,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.201395997806685,
+              "min_ms": 23.372457995719742,
+              "max_ms": 29.43629200308351,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9900341939086491,
+          "torch_over_candidate": 0.40433599271339876
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.400000002235174,
+              "min_ms": 48.30000000447035,
+              "max_ms": 57.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.899999998509884,
+              "min_ms": 47.399999998509884,
+              "max_ms": 48.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0313152401622536
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.5,
+              "min_ms": 45.29999999701977,
+              "max_ms": 46.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.349999997764826,
+              "min_ms": 43.79999999701977,
+              "max_ms": 45.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.02593010151732
+        }
+      },
+      "max_abs_error": 9.313225746154785e-10
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.81768750000265,
+              "min_ms": 52.44979200000307,
+              "max_ms": 72.1729579999992,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.051916500000516,
+              "min_ms": 50.54395799999838,
+              "max_ms": 54.431917000001704,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.083562500891276,
+              "min_ms": 17.034625001542736,
+              "max_ms": 27.631625001959037,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.108681672225773,
+          "torch_over_candidate": 0.4539621580097119
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.51008300000285,
+              "min_ms": 42.84862499999508,
+              "max_ms": 51.025125000000116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.01243700000305,
+              "min_ms": 42.80279200000223,
+              "max_ms": 49.372166000001016,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 13.728812500630738,
+              "min_ms": 12.288541998714209,
+              "max_ms": 15.268625000317115,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0777039910102972,
+          "torch_over_candidate": 0.3050004268960112
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 39.05000000074506,
+              "min_ms": 38.19999999552965,
+              "max_ms": 41.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 40.05000000074506,
+              "min_ms": 37.19999999552965,
+              "max_ms": 44.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9750312109867316
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.19999999925494,
+              "min_ms": 34.70000000298023,
+              "max_ms": 38.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.80000000074506,
+              "min_ms": 34,
+              "max_ms": 43,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.038043478219607
+        }
+      },
+      "max_abs_error": 7.450580596923828e-09
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 47.4367085000049,
+              "min_ms": 39.65216700000019,
+              "max_ms": 51.32616699999926,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.73760400000174,
+              "min_ms": 42.24975000000268,
+              "max_ms": 49.646333999997296,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.150041500339285,
+              "min_ms": 27.06779099389678,
+              "max_ms": 33.94824999850243,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9733081769880031,
+          "torch_over_candidate": 0.5775836149093065
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 42.32097900000008,
+              "min_ms": 41.71283299999777,
+              "max_ms": 44.018583999997645,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.62647899999865,
+              "min_ms": 41.69087500000023,
+              "max_ms": 44.304041999996116,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.409958499541972,
+              "min_ms": 23.081290994014125,
+              "max_ms": 23.98008300224319,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9928330932517653,
+          "torch_over_candidate": 0.5491881818233852
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 31.599999997764826,
+              "min_ms": 31.5,
+              "max_ms": 32,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.25,
+              "min_ms": 30,
+              "max_ms": 30.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0446280990996637
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.649999998509884,
+              "min_ms": 28.399999998509884,
+              "max_ms": 28.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.550000000745058,
+              "min_ms": 27.5,
+              "max_ms": 27.80000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.039927404636482
+        }
+      },
+      "max_abs_error": 2.1420419216156006e-08
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 64.8541665000048,
+              "min_ms": 61.7961670000077,
+              "max_ms": 71.17724999999336,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 65.83643749999828,
+              "min_ms": 60.74104100000113,
+              "max_ms": 70.39704199999687,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.4783335015818,
+              "min_ms": 27.027791998989414,
+              "max_ms": 34.020874998532236,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9850801313483356,
+          "torch_over_candidate": 0.47812935658285916
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.08056249999572,
+              "min_ms": 57.67945799999143,
+              "max_ms": 58.57725000000937,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.61689599999954,
+              "min_ms": 55.61450000000332,
+              "max_ms": 57.14233399999648,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.036229500779882,
+              "min_ms": 23.30745799554279,
+              "max_ms": 24.450124998111278,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0258521148880397,
+          "torch_over_candidate": 0.42454163330995887
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.600000001490116,
+              "min_ms": 48.29999999701977,
+              "max_ms": 49.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.55000000074506,
+              "min_ms": 47.30000000447035,
+              "max_ms": 48.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0220820189427677
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.350000001490116,
+              "min_ms": 45,
+              "max_ms": 46.70000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.29999999701977,
+              "min_ms": 44,
+              "max_ms": 45,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0237020317052141
+        }
+      },
+      "max_abs_error": 7.916241884231567e-08
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 52.048000499999034,
+              "min_ms": 49.79908299999806,
+              "max_ms": 53.355374999999185,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.83697899999606,
+              "min_ms": 49.685542000006535,
+              "max_ms": 56.887084000009054,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.03872899938142,
+              "min_ms": 17.413082998245955,
+              "max_ms": 23.949666996486485,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9667704515887275,
+          "torch_over_candidate": 0.42793502583759585
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.030541499996616,
+              "min_ms": 43.06608299999789,
+              "max_ms": 48.89650000000256,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.4594994999934,
+              "min_ms": 43.035957999993116,
+              "max_ms": 51.11433300000499,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 14.720562496222556,
+              "min_ms": 12.75379099388374,
+              "max_ms": 16.83795799908694,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9488204042270374,
+          "torch_over_candidate": 0.3101710437596293
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 39.29999999701977,
+              "min_ms": 38.399999998509884,
+              "max_ms": 42.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 40.55000000074506,
+              "min_ms": 37.29999999701977,
+              "max_ms": 41.69999999552965,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9691738593414964
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.69999999925494,
+              "min_ms": 34.5,
+              "max_ms": 39.399999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 34.75,
+              "min_ms": 34.29999999701977,
+              "max_ms": 39.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0273381294749624
+        }
+      },
+      "max_abs_error": 9.313225746154785e-09
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.09764599999471,
+              "min_ms": 42.22262500000943,
+              "max_ms": 49.88324999999895,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.17912499999511,
+              "min_ms": 40.25695800001267,
+              "max_ms": 48.470624999987194,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 26.74460399794043,
+              "min_ms": 26.109041995368898,
+              "max_ms": 33.683458001178224,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0691934932268021,
+          "torch_over_candidate": 0.6340720438829286
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.859936999993806,
+              "min_ms": 35.69487500000105,
+              "max_ms": 48.664457999999286,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.79483349998918,
+              "min_ms": 36.04595800000243,
+              "max_ms": 41.37145799999416,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.37793749757111,
+              "min_ms": 22.514791002322454,
+              "max_ms": 24.15308399940841,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0281811930724587,
+          "torch_over_candidate": 0.6185484981056419
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.55000000074506,
+              "min_ms": 31.399999998509884,
+              "max_ms": 43.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 33.350000001490116,
+              "min_ms": 30.100000001490116,
+              "max_ms": 37,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.065967016466466
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.350000001490116,
+              "min_ms": 27.700000002980232,
+              "max_ms": 30.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.849999997764826,
+              "min_ms": 26.700000002980232,
+              "max_ms": 31.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.017953321499656
+        }
+      },
+      "max_abs_error": 4.6566128730773926e-09
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 67.05664550000074,
+              "min_ms": 61.60329199998523,
+              "max_ms": 82.48208299999533,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.15289549999579,
+              "min_ms": 61.06575000000885,
+              "max_ms": 66.73737499999697,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.044124999723863,
+              "min_ms": 26.783082998008467,
+              "max_ms": 34.42329200333916,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0788981745831179,
+          "torch_over_candidate": 0.45121188279515895
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 57.88933300001372,
+              "min_ms": 57.2833329999994,
+              "max_ms": 60.821415999991586,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.624541999997746,
+              "min_ms": 56.255082999996375,
+              "max_ms": 62.27049999999872,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.78366700213519,
+              "min_ms": 23.030625001410954,
+              "max_ms": 25.936041995009873,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.022336445564823,
+          "torch_over_candidate": 0.42002400658951267
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.649999998509884,
+              "min_ms": 48.70000000298023,
+              "max_ms": 51.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.650000002235174,
+              "min_ms": 47.70000000298023,
+              "max_ms": 49.80000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0205549845062438
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.850000001490116,
+              "min_ms": 45.29999999701977,
+              "max_ms": 48.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.25,
+              "min_ms": 43.899999998509884,
+              "max_ms": 44.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0361581921240703
+        }
+      },
+      "max_abs_error": 4.190951585769653e-08
+    },
+    {
+      "run": "b",
+      "mode": "topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 52.54377050000039,
+              "min_ms": 49.669332999998005,
+              "max_ms": 54.89300000001094,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 51.42414599999756,
+              "min_ms": 48.04179099999601,
+              "max_ms": 54.77254200000607,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 21.78070849913638,
+              "min_ms": 16.961084002105054,
+              "max_ms": 23.49987500201678,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0217723498996538,
+          "torch_over_candidate": 0.42355022286879423
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 50.529624999995576,
+              "min_ms": 47.29179100001056,
+              "max_ms": 52.10466599998472,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.544187500010594,
+              "min_ms": 43.0807080000086,
+              "max_ms": 50.99437500000931,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 13.854166500095744,
+              "min_ms": 13.025207997998223,
+              "max_ms": 18.564415993751027,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.1343707863115375,
+          "torch_over_candidate": 0.31102074765854576
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.75,
+              "min_ms": 38.900000005960464,
+              "max_ms": 44.70000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 41.05000000074506,
+              "min_ms": 37.70000000298023,
+              "max_ms": 45.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0170523751337939
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.149999998509884,
+              "min_ms": 34.69999999552965,
+              "max_ms": 41.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.69999999925494,
+              "min_ms": 34.30000000447035,
+              "max_ms": 38.400000005960464,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.012261580361419
+        }
+      },
+      "max_abs_error": 2.7008354663848877e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 42.93258349999985,
+              "min_ms": 40.690791999999874,
+              "max_ms": 46.50687499999981,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.75725,
+              "min_ms": 41.19108300000016,
+              "max_ms": 48.598916000000145,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.599395497323712,
+              "min_ms": 31.281124996894505,
+              "max_ms": 40.672041999641806,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0041006729852797,
+          "torch_over_candidate": 0.7390418115599977
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.232375000000275,
+              "min_ms": 36.41829200000029,
+              "max_ms": 41.12012500000037,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.40306250000003,
+              "min_ms": 36.920083000000886,
+              "max_ms": 41.38458299999911,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.142457999114413,
+              "min_ms": 28.560667000419926,
+              "max_ms": 36.227666001650505,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9954365367809185,
+          "torch_over_candidate": 0.7791463065120506
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.850000001490116,
+              "min_ms": 32.30000000447035,
+              "max_ms": 41.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 31.149999998509884,
+              "min_ms": 30.899999998509884,
+              "max_ms": 35,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.054574638942586
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 29.650000002235174,
+              "min_ms": 29.399999998509884,
+              "max_ms": 29.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 28.300000000745058,
+              "min_ms": 27.899999998509884,
+              "max_ms": 28.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0477031802634125
+        }
+      },
+      "max_abs_error": 1.955777406692505e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 63.807270499999504,
+              "min_ms": 63.09637500000099,
+              "max_ms": 64.24708400000054,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.9025834999984,
+              "min_ms": 61.72174999999879,
+              "max_ms": 64.29020800000035,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 33.95129150158027,
+              "min_ms": 33.17895800137194,
+              "max_ms": 41.525125001498964,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0143823504483107,
+          "torch_over_candidate": 0.5397439916212843
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 59.01129200000105,
+              "min_ms": 58.11412500000006,
+              "max_ms": 63.457790999998906,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 57.04264599999988,
+              "min_ms": 56.67241599999761,
+              "max_ms": 57.743500000000495,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.065499999385793,
+              "min_ms": 30.621375000919215,
+              "max_ms": 43.03983400313882,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0345118282206118,
+          "torch_over_candidate": 0.5446013145916453
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.75000000372529,
+              "min_ms": 49.399999998509884,
+              "max_ms": 53.79999999701977,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.94999999925494,
+              "min_ms": 48.399999998509884,
+              "max_ms": 50,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0163432074460168
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.850000001490116,
+              "min_ms": 46.5,
+              "max_ms": 47.399999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.45000000298023,
+              "min_ms": 45.30000000447035,
+              "max_ms": 45.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.030803080273225
+        }
+      },
+      "max_abs_error": 2.1420419216156006e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 51.687229499999376,
+              "min_ms": 47.998875000001135,
+              "max_ms": 55.24445800000103,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 50.92895850000241,
+              "min_ms": 48.419624999994994,
+              "max_ms": 56.77145799999926,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.233354001917178,
+              "min_ms": 25.39950000209501,
+              "max_ms": 34.68479200091679,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0148887984818487,
+          "torch_over_candidate": 0.5740025883685761
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 47.64408299999923,
+              "min_ms": 43.61362499999814,
+              "max_ms": 49.12237499999901,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.83714600000167,
+              "min_ms": 43.73262500000055,
+              "max_ms": 49.63491700000304,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.12477100349497,
+              "min_ms": 21.667374996468425,
+              "max_ms": 32.36366599594476,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0394208007627153,
+          "torch_over_candidate": 0.5044984913217356
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 39.80000000447035,
+              "min_ms": 39.100000001490116,
+              "max_ms": 42.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 41.5,
+              "min_ms": 38.099999994039536,
+              "max_ms": 68.89999999850988,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9590361446860325
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 36.05000000074506,
+              "min_ms": 35.399999998509884,
+              "max_ms": 40.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.54999999701977,
+              "min_ms": 34.80000000447035,
+              "max_ms": 39.399999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9863201095399322
+        }
+      },
+      "max_abs_error": 2.0489096641540527e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 44.77747950000048,
+              "min_ms": 40.665875000006054,
+              "max_ms": 47.36079199999949,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.14743699999599,
+              "min_ms": 41.41437500000029,
+              "max_ms": 46.26412500000151,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.759083496581297,
+              "min_ms": 31.464917003177106,
+              "max_ms": 38.896583995665424,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.037778431659907,
+          "torch_over_candidate": 0.7360595600750109
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.222271500002535,
+              "min_ms": 36.47295799999847,
+              "max_ms": 41.44691700000112,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.75399999999718,
+              "min_ms": 35.87012500000128,
+              "max_ms": 42.919624999994994,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.99156249986845,
+              "min_ms": 28.88383299432462,
+              "max_ms": 36.547916002746206,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9859159691689706,
+          "torch_over_candidate": 0.7679070429589081
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.29999999701977,
+              "min_ms": 31.899999998509884,
+              "max_ms": 32.30000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.900000002235174,
+              "min_ms": 30.799999997019768,
+              "max_ms": 31.200000002980232,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.045307443193635
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 29.550000000745058,
+              "min_ms": 29.19999999552965,
+              "max_ms": 29.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 28.200000002980232,
+              "min_ms": 28,
+              "max_ms": 28.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0478723403412111
+        }
+      },
+      "max_abs_error": 8.381903171539307e-09
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 64.16766600000119,
+              "min_ms": 63.33995800000412,
+              "max_ms": 67.5950840000005,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.872771499998635,
+              "min_ms": 61.826750000000175,
+              "max_ms": 64.28591599999345,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 34.20606250074343,
+              "min_ms": 32.989541003189515,
+              "max_ms": 43.224084001849405,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0205954735111777,
+          "torch_over_candidate": 0.544052086215798
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.89008299999841,
+              "min_ms": 58.51799999999639,
+              "max_ms": 65.34316699999908,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 57.37677049999911,
+              "min_ms": 56.71129199999268,
+              "max_ms": 57.75620799999888,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.209687993396074,
+              "min_ms": 30.591125003411435,
+              "max_ms": 38.29637500166427,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0263750031033783,
+          "torch_over_candidate": 0.5439429183870946
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.5,
+              "min_ms": 49.30000000447035,
+              "max_ms": 49.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.44999999925494,
+              "min_ms": 48.100000001490116,
+              "max_ms": 49.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0216718266410982
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.29999999701977,
+              "min_ms": 46,
+              "max_ms": 46.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.0,
+              "min_ms": 44.79999999701977,
+              "max_ms": 45.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0288888888226615
+        }
+      },
+      "max_abs_error": 7.543712854385376e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 53.21479150000232,
+              "min_ms": 50.79858399999648,
+              "max_ms": 55.495709000002535,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.98475050000343,
+              "min_ms": 48.47374999999738,
+              "max_ms": 56.60175000000163,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.253312502987683,
+              "min_ms": 24.234666001575533,
+              "max_ms": 37.48866699606879,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9857374722885668,
+          "torch_over_candidate": 0.5418810355154985
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.39866649999749,
+              "min_ms": 46.4931249999936,
+              "max_ms": 50.28491699999722,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.55233399999997,
+              "min_ms": 43.62675000001036,
+              "max_ms": 50.58300000001327,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.820395498769358,
+              "min_ms": 23.101457998564,
+              "max_ms": 35.40562499983935,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0624848882605558,
+          "torch_over_candidate": 0.632687569834937
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.05000000074506,
+              "min_ms": 38.399999998509884,
+              "max_ms": 61,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 40.30000000074506,
+              "min_ms": 38.29999999701977,
+              "max_ms": 45.899999998509884,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0186104218358842
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.399999998509884,
+              "min_ms": 35.19999999552965,
+              "max_ms": 43.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 35.55000000447035,
+              "min_ms": 34.600000001490116,
+              "max_ms": 42.29999999701977,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9957805905501659
+        }
+      },
+      "max_abs_error": 1.6763806343078613e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.49068750000879,
+              "min_ms": 43.61683300000732,
+              "max_ms": 49.49483300000429,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.543520500010345,
+              "min_ms": 41.744625000006636,
+              "max_ms": 47.20833400000993,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 32.72791649942519,
+              "min_ms": 31.647999996494036,
+              "max_ms": 38.09191699838266,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0676832503701152,
+          "torch_over_candidate": 0.7516139284010676
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.029021499998635,
+              "min_ms": 36.145083999988856,
+              "max_ms": 40.80487500000163,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.93360450000182,
+              "min_ms": 36.20729200000642,
+              "max_ms": 45.25895799999125,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.801791500882246,
+              "min_ms": 28.417082998203114,
+              "max_ms": 32.4244590010494,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9761535184455477,
+          "torch_over_candidate": 0.7592685135123625
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.30000000447035,
+              "min_ms": 31.80000000447035,
+              "max_ms": 32.70000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.900000005960464,
+              "min_ms": 30.400000005960464,
+              "max_ms": 31.700000002980232,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0453074433087324
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 29.099999997764826,
+              "min_ms": 28.600000001490116,
+              "max_ms": 29.700000002980232,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 28.050000000745058,
+              "min_ms": 27.599999994039536,
+              "max_ms": 28.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0374331549729725
+        }
+      },
+      "max_abs_error": 2.0489096641540527e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 63.83066649999091,
+              "min_ms": 63.01499999999942,
+              "max_ms": 67.088957999993,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 63.12462450000021,
+              "min_ms": 61.85512500000186,
+              "max_ms": 67.90274999999383,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 33.745207994797966,
+              "min_ms": 33.24212499865098,
+              "max_ms": 41.78716699971119,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.011184890295715,
+          "torch_over_candidate": 0.5345807323542631
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.75335449999693,
+              "min_ms": 58.148334000012255,
+              "max_ms": 59.49470900000597,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.97052049999911,
+              "min_ms": 56.53991699998733,
+              "max_ms": 57.20395799999824,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 30.836978996376274,
+              "min_ms": 30.580958002246916,
+              "max_ms": 37.49199999583652,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0312939742229992,
+          "torch_over_candidate": 0.5412795727638956
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.70000000298023,
+              "min_ms": 49.29999999701977,
+              "max_ms": 50.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.49999999627471,
+              "min_ms": 47.899999998509884,
+              "max_ms": 49.599999994039536,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0247422681813958
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 46.55000000074506,
+              "min_ms": 45.70000000298023,
+              "max_ms": 47.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.349999997764826,
+              "min_ms": 44.899999998509884,
+              "max_ms": 47,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0264608600449696
+        }
+      },
+      "max_abs_error": 3.073364496231079e-08
+    },
+    {
+      "run": "b",
+      "mode": "clipped_topos_ema",
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 52.90987499999028,
+              "min_ms": 48.563750000001164,
+              "max_ms": 54.792041000007885,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 51.170478999993065,
+              "min_ms": 48.393249999993714,
+              "max_ms": 55.55266699999629,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 29.633708498295164,
+              "min_ms": 24.436083003820386,
+              "max_ms": 37.10641599900555,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0339921774036442,
+          "torch_over_candidate": 0.5791172777237278
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 50.941021000006,
+              "min_ms": 44.88683400001901,
+              "max_ms": 56.5284999999858,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 46.64400000000023,
+              "min_ms": 44.04829099999915,
+              "max_ms": 54.85266600000614,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 27.417937501013512,
+              "min_ms": 23.6102499984554,
+              "max_ms": 31.78012500575278,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0921237672585058,
+          "torch_over_candidate": 0.587812741210303
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 40.75,
+              "min_ms": 39.100000001490116,
+              "max_ms": 42.19999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 39.649999998509884,
+              "min_ms": 38.600000001490116,
+              "max_ms": 42.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0277427490928488
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.19999999925494,
+              "min_ms": 35,
+              "max_ms": 36,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 34.899999998509884,
+              "min_ms": 34.69999999552965,
+              "max_ms": 35.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0085959885603972
+        }
+      },
+      "max_abs_error": 1.0244548320770264e-08
+    }
+  ],
+  "max_abs_error": 7.916241884231567e-08,
+  "products": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/receipt.json": "bf3cabb2a2aa640ff0676273450f4fbcf3e2a2e1a89db017ec38d374c7537abe",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/resident_training_bench": "7fd5fedea70bb66ef9c4be43e9212b688b8b59db6d1ab416669f126f49b2107b",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/wasm/spiraltorch_wasm.d.ts": "6c74e4ebcc1ad461e763787b82a742fff8c3d03c04879a32dddf6292d40ff829",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/wasm/spiraltorch_wasm.js": "efd10006d105f910e3a0701b7abc8b68ad87544b7d96c01be0389d49a451d961",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/wasm/spiraltorch_wasm_bg.wasm.d.ts": "b8f827c650e9ba6ee1828918fb2e91ce32c9ebdb8b2fb9d6cc2ccf977b383da3",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/wasm/spiraltorch_wasm_bg.wasm": "dc5dbc9cd726cf38fc7d659563e1949b9693c61347a5041faddb782344fbb4d7",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/wasm/snippets/st-nn-f975d31addace2e2/inline0.js": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/receipt.json": "2a329a88b790377b1e09c5a2cca38c427454efe1507187573bb33371b777e6bf",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/resident_training_bench": "bbd8f62848746dae9724866cda8dbe268d42d8b5dec36ee0df0285981827b9b7",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/wasm/spiraltorch_wasm.d.ts": "ea030c33feaa2de5fe8776629fb8a9b4c081c354f043a145623b2fb75430f80c",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/wasm/spiraltorch_wasm.js": "6473915f5611902cfa10ee82ddc1765e340f171e925a4763ed8ba401b341d53c",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/wasm/spiraltorch_wasm_bg.wasm.d.ts": "25ac8791cd7e829dd9ee0d108c85246f5f487caecf0c710a1150f04e5c002bf9",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/wasm/spiraltorch_wasm_bg.wasm": "da71a5abc931b7a1c66072ebae2fe5954b1ff2170890597bbf201b40e4cd75fb",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/wasm/snippets/st-nn-f975d31addace2e2/inline0.js": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/verified-a/receipt.json": "39a7fc63769f72d8200cbfd76f4143d292fc469511b3a489ca59135c7c9daa2d",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/measurement-a/receipt.json": "c8e0f407162232e02f90fff565320d77318b4092ccfc0520f0f349b7a3cb9482",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/measurement-b/receipt.json": "07911f22c3a7bd73d52b67ea7537fd9477ad344dd641f38b453a59fe92571b50",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-plain-native.json": "63e1581134f03cd7fdfb70937a4bdf43a397e7aa4bdf4aba08dddcd9f73609ce",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-plain-browser.json": "21ba6c7f671bd887b9afe40209d106aefebb2a12dfeba2971e9f768791c4e03c",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-plain-validation.json": "e9124c2349d73643c66c94a799aff622a8a8d09090ff4d0d161c5da16c9cb0f8",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-topos_ema-native.json": "b6777ed006c4fc835e94350510411bf5a8c97aeb8ee7ad2de84efcfa939ac97c",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-topos_ema-browser.json": "bc30e9d680ff71fca7d36900bf8c2820ebf729f526bfe9f179c2059957a2bac0",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-topos_ema-validation.json": "f4d595e6f569f7ca2788dbfb1cc27dadf96e750bc7946d4d3639ac6a259ddf2a",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-clipped_topos_ema-native.json": "f4e02b06556fae387ebad4bd84b81199d11b1e7d8813aeb0c7fedc67c92b9a4b",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-clipped_topos_ema-browser.json": "dca8a7c1d06a07e305e69d299afdc0af5948beb8d4206926160d060b4fafd7e3",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/a-clipped_topos_ema-validation.json": "e4e6cbd4fc0cf6f5a755a77fbdf879f5809c61d561f6dde79bfedb36b38e23c7",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-clipped_topos_ema-native.json": "9feede6bf666fba1e5d3dc12d9cd37a16ebd86f937b6dee96fb8559042a58596",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-clipped_topos_ema-browser.json": "2f246ecd66f585eac8c0218744706e2bb7796a80afa258de80a8cd050da4961a",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-clipped_topos_ema-validation.json": "ec6e65eb55def8110577aabc3ec0d6bf2bc06ca25232b42af98fad856ac4df49",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-topos_ema-native.json": "b58c246b0309b2c9f7a20c1d6d6d5728233a2a4f04a58be6fe7612551e22ed4d",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-topos_ema-browser.json": "fa5e542586222dc8bd1fd39ea0bb2e291e9a5139234714ef2d01930a8bbd4e0a",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-topos_ema-validation.json": "5f8aaedcba5880365b40772973c5eb0a6971bd4bac7e30842eebacb386af476d",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-plain-native.json": "5fd9ddce89ddbeff698c66227fbc82839cc6db1debcc1d7a04ad1a29a9fe370e",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-plain-browser.json": "21072f2829f37455f410364b292d5b34db4018ed94bdb8fb260d5f801715f88a",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-plain-validation.json": "9ecf1dd63cf086410d19de294bfd3303c83414462d1641fd2b4c4972a263b314"
+  },
+  "unchanged_helpers": {
+    "tools/bench_resident_training_vs_torch.py": "45be113f6d2779134d405e0083b8702a25716d6dac42ab4836a04e9bfd0dd3f2",
+    "tools/bench_resident_training_browser.cjs": "4564665e7f4f0f40edd2b899a9725f4fe11176d3ec5cb0b233f8507e0aa1323c",
+    "tools/validate_resident_training_bench.py": "b62a81b598dfca13404f6a1c6f5ecffeaaa919b367d87838dc76b22b793b1b87",
+    "tools/resident_learner_bench_reference.py": "672e372682d16e51ef9ed58b99ab02776acb4f1823700a1969159b1e2314f9a6",
+    "bindings/st-wasm/tests/resident_training_bench.html": "0785f701724beb892eea8107030b3da064a6eccf74430f15ac84e5ffdf8b4abc",
+    "crates/st-nn/examples/support/resident_training_bench.rs": "4b0b214c9333fde679d797c5bb38bea96793403fadafcc8a3318934d1b67b7e6",
+    "crates/st-nn/examples/support/resident_learner_bench.rs": "f420495cd3173eab11bfa889f96ee26452ebcd9f4bce8194f71874b710d0436c"
+  },
+  "boundary": "Unchanged wide recipes: [4,64,64]/depth8, [2,128,128]/depth8, [2,64,256]/depth4; seeds 17/29/43, two warmups/eight retained intervals, eight updates each, immediate/deferred acceptance. Two full runs, reversed optimizer order only; all numerical results and timings retained. Native Metal and browser WebGPU versus eager Torch MPS, no CPU fallback. This is a separate size stratum, not a replacement for earlier mixed/slower standard results. Host exclusivity UNKNOWN; owned GPU work serial. No phase attribution, fastest-Torch or FT-quality claim.",
+  "publication": "results_validation_and_hashes_only",
+  "raw_payloads": "retained locally; absent from Git",
+  "review_source": {
+    "commit": "8d2bd26ad292961acb7deb25d4276cadbe2c3d9c",
+    "tree": "cc06b512a6b3bf76c261e86eb77be0da9c36d0e6"
+  },
+  "review_steps": 32,
+  "raw_inventory_sha256": "195d6962849dbebe3e95b9645687a47b70f8d089255c59100396796736fb84a1"
+}

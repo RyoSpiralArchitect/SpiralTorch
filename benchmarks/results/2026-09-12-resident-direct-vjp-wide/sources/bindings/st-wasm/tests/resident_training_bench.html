@@ -1,0 +1,144 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident training pass encoding A/B</title>
+<pre id="result" data-status="running">Loading isolated benchmark modules</pre>
+<script type="module">
+import initA, {TrainingBenchmark as A} from "/baseline/spiraltorch_wasm.js";
+import initB, {TrainingBenchmark as B} from "/candidate/spiraltorch_wasm.js";
+const element=document.querySelector("#result");
+const workload=new URL(location.href).searchParams.get("workload")??"dense";
+const learner=workload==="learner", graph=workload==="graph"||learner;
+const matrix=new URL(location.href).searchParams.get("matrix")??"standard";
+const optimization=new URL(location.href).searchParams.get("optimization")??"none";
+const fusion=optimization==="fuse-pointwise";
+const seedFusion=optimization==="fuse-learner-seeds";
+const optimizer=new URL(location.href).searchParams.get("optimizer")??"none";
+const learnerOptimizer=optimizer==="none"?null:optimizer;
+const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
+  workload,matrix,pointwise_fusion:fusion,learner_seed_fusion:seedFusion,learner_optimizer:learnerOptimizer,
+  boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
+if(learner)report.boundary="paired rotating Rust weighted-learning workloads; quadratic/quartic cotangents and exact VJPs; all update receipts read; no timed loss observations; 2 warmups+8 samples; no cross-framework timing ratio";
+if(learnerOptimizer)report.boundary+="; zero-initialized Topos EMA damping 0.5, optional norm limit 1/1024; history observed outside timing";
+async function progress(value) {
+  element.textContent=JSON.stringify(value);
+  await globalThis.recordTrainingProgress(value);
+}
+function require(value,message) { if(!value) throw Error(message); }
+function close(a,b) {
+  require(a.length===b.length,"length differs");
+  let maximum=0;
+  a.forEach((x,i)=>{
+    if(learner&&Array.isArray(x)){maximum=Math.max(maximum,close(x,b[i]));return;}
+    require(Number.isFinite(x)&&Number.isFinite(b[i])&&Math.abs(x-b[i])<=1e-5+1e-4*Math.abs(b[i]),"numeric state differs");
+    maximum=Math.max(maximum,Math.abs(x-b[i]));
+  });
+  return maximum;
+}
+function compare(a,b) {
+  let maximum=close([a.loss],[b.loss]);
+  if(learner){
+    for(const key of ["prediction","input_gradients","parameters","raw_gradients"])maximum=Math.max(maximum,close(a[key],b[key]));
+    require(("momentum" in a)===Boolean(learnerOptimizer)&&("momentum" in b)===Boolean(learnerOptimizer),"missing/unexpected history");
+    if(learnerOptimizer)maximum=Math.max(maximum,close(a.momentum,b.momentum));
+    return maximum;
+  }
+  for(const key of ["prediction","input_gradient"]) maximum=Math.max(maximum,close(a[key],b[key]));
+  if(graph) {
+    for(const key of ["parameters","raw_gradients","effective_gradients"]) {
+      require(a[key].length===b[key].length,"parameter count differs");
+      a[key].forEach((p,i)=>{maximum=Math.max(maximum,close(p,b[key][i]));});
+    }
+    return maximum;
+  }
+  for(const key of ["parameters","parameter_gradients"]) {
+    require(a[key].length===b[key].length,"stage count differs");
+    a[key].forEach((p,i)=>{ for(const name of ["weights","bias"]) maximum=Math.max(maximum,close(p[name],b[key][i][name])); });
+  }
+  return maximum;
+}
+try {
+  require(["standard","wide"].includes(matrix)&&(matrix!=="wide"||graph),"invalid workload matrix");
+  require(["none","fuse-pointwise","fuse-learner-seeds"].includes(optimization)&&(!fusion||(graph&&!learner))&&(!seedFusion||learner),"invalid optimization");
+  require(["none","topos_ema","clipped_topos_ema"].includes(optimizer)&&(!learnerOptimizer||learner),"invalid learner optimizer");
+  await progress({stage:"initialize_modules"});
+  await initA(); await initB();
+  const adapter=await navigator.gpu.requestAdapter();
+  const info=adapter?.info;
+  report.adapter_probe={vendor:info?.vendor??null,architecture:info?.architecture??null,
+    description:info?.description??null,isFallbackAdapter:info?.isFallbackAdapter??adapter?.isFallbackAdapter??null,
+    boundary:"separate navigator adapter observation; not the Rust workspaces' device receipt"};
+  const shapes=matrix==="wide"?[[[4,64,64],8],[[2,128,128],8],[[2,64,256],4]]:
+    graph?[[[2,16,32],2],[[2,129,32],4],[[4,32,64],8]]:[[[2,16,32],2],[[4,16,64],8],[[4,32,128],16]];
+  for(const seed of [17,29,43]) for(const [shape,depth] of shapes) {
+    const config={shape,depth,seed,steps:8,...(graph?{graph:true}:{}),...(learnerOptimizer?{learner_optimizer:learnerOptimizer}:{})};
+    await progress({stage:"create_workspaces",config});
+    const workers={};
+    try {
+    workers.baseline=await A.create(JSON.stringify(config));
+    workers.candidate=await B.create(JSON.stringify({...config,...(fusion?{fuse_pointwise:true}:{}),...(seedFusion?{fuse_learner_seeds:true}:{})}));
+    const fixtures=Object.fromEntries(Object.entries(workers).map(([k,v])=>[k,JSON.parse(v.fixture())]));
+    for(const key of [...(fusion?[]:seedFusion?["plan_json"]:["config","plan_json"]),"input","target","learning_rate","kernel","accumulation","adapter"])
+      require(JSON.stringify(fixtures.baseline[key])===JSON.stringify(fixtures.candidate[key]),"paired fixture differs: "+key);
+    if(fusion) {
+      require(fixtures.candidate.source_plan_json===fixtures.baseline.plan_json,"fusion source plan differs");
+      const {fuse_pointwise: selected,...candidateConfig}=fixtures.candidate.config;
+      const referenceConfig=fixtures.baseline.config;
+      require(Object.keys(candidateConfig).length===Object.keys(referenceConfig).length&&
+        Object.keys(referenceConfig).every(key=>JSON.stringify(referenceConfig[key])===JSON.stringify(candidateConfig[key])),
+        "fusion recipe differs");
+      require(selected===true,"fusion was not selected");
+    }
+    if(seedFusion) {
+      const {fuse_learner_seeds:selected,...candidateConfig}=fixtures.candidate.config;
+      require(selected===true&&JSON.stringify(candidateConfig)===JSON.stringify(fixtures.baseline.config),"seed fusion recipe differs");
+    }
+    const row={config,fixture:fixtures.baseline,candidate_build_manifest:fixtures.candidate.build_manifest,
+      ...(fusion||seedFusion?{candidate_fixture:fixtures.candidate}:{}),
+      captures:{},fingerprints:{},samples:[]};
+      for(const cadence of ["immediate","deferred"]) {
+        const captures={};
+        for(let block=0;block<10;block++) {
+          const order=(block+seed)%2===0 ? ["baseline","candidate"] : ["candidate","baseline"];
+          const sample={cadence,block,warmup:block<2,order,times_ms:{},fused_learner_seeds:{},learner_optimizers:{}};
+          row.samples.push(sample);
+          for(const lane of order) {
+            await progress({stage:"sample_started",config,cadence,block,lane});
+            const value=JSON.parse(await workers[lane][learner?"learn":"sample"](JSON.stringify(cadence),!captures[lane]));
+            require(value.status==="passed"&&value.steps===8&&value.cadence===cadence&&value.losses.length===(learner?0:8)&&
+              Number.isFinite(value.elapsed_ms)&&value.elapsed_ms>0,"sample identity/timing differs");
+            require((value.learner??false)===learner,"wrong learner workload");
+            require((value.fused_learner_seeds??false)===(seedFusion&&lane==="candidate"),"wrong seed execution");
+            require((value.learner_optimizer??null)===learnerOptimizer&&
+              (value.momentum_damping??null)===(learnerOptimizer?0.5:null)&&
+              (value.grad_clip_max_norm??null)===(learnerOptimizer==="clipped_topos_ema"?1/1024:null),"wrong optimizer execution");
+            sample.learner_optimizers[lane]=value.learner_optimizer??null;
+            sample.fused_learner_seeds[lane]=value.fused_learner_seeds??false;
+            if(learner)require(value.completed_updates===8&&value.acceptance==="guarded_receipts"&&
+              JSON.stringify(value.accepted_updates)==="[2,3,4,5,6,7,8,9]"&&
+              Number.isFinite(value.initial_loss)&&Number.isFinite(value.final_loss),"missing update acceptance");
+            row.fingerprints[lane]??=value.state_sha256;
+            require(row.fingerprints[lane]===value.state_sha256,"reset trajectory is nondeterministic");
+            captures[lane]??=value;
+            close(value.losses,captures[lane].losses);
+            sample.times_ms[lane]=value.elapsed_ms;
+            await progress({stage:"sample_finished",config,cadence,block,lane,
+              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256,fused_learner_seeds:value.fused_learner_seeds??false,learner_optimizer:value.learner_optimizer??null});
+          }
+        }
+        row.captures[cadence+"_baseline"]=captures.baseline;
+        row.captures[cadence+"_candidate"]=captures.candidate;
+        close(captures.baseline.losses,captures.candidate.losses);
+        compare(captures.baseline.state,captures.candidate.state);
+      }
+      // Transfer completed cases outside timing instead of one enormous final DOM value.
+      await globalThis.recordTrainingCase(JSON.stringify(row));
+      report.cases.push({config,status:"passed"});
+      await progress({stage:"case_finished",config});
+    } finally { workers.baseline?.free(); workers.candidate?.free(); }
+  }
+  report.status="passed";
+} catch(error) { report.error=String(error.stack||error); }
+element.textContent=JSON.stringify(report);
+element.dataset.status=report.status;
+</script>
