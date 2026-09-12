@@ -234,3 +234,11 @@ baseline for the three fixed sizes. Browser burst medians are unchanged; the
 small browser single-call metric is unresolved across coarse-clock statistics,
 not a browser speedup claim. Multi-workgroup guard and output-lifetime tests pass
 in the Rust, Python and browser clients.
+
+The [sustained completed-read follow-up](../benchmarks/results/2026-09-12-module-completed-intervals/README.md)
+times 256 calls per interval while still completing a read after every call.
+The same frozen guard candidate/baseline pair is approximately unchanged in
+the browser: 0.9984/0.9990/0.9985x primary ratios, with individual regressions and
+different pooled-total ratios retained. All 405,504 warmup/measured reads passed
+numerical checks. This longer-interval workload does not replace the earlier
+isolated-call observations or establish a browser speedup.
