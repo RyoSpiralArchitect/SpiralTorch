@@ -58,7 +58,7 @@ pub struct GraphParameter {
     pub values: Vec<f32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GraphStage {
     Linear {
         weight: usize,
@@ -216,6 +216,54 @@ impl GraphDefinition {
     pub fn parameter_owners(&self) -> &[usize] {
         &self.owners
     }
+
+    /// Return a new graph with adjacent, composable pointwise stages joined.
+    /// Parameter IDs, values, roles and operation order are unchanged. Stage IDs
+    /// (including diagnostics and parameter owners) refer to the returned graph.
+    ///
+    /// A later rhs=0 references that stage's original activation, not this
+    /// chain's input, so it is a hard boundary. Input/step budgets also leave a
+    /// boundary intact; this never splits or downgrades an existing stage.
+    pub fn fuse_pointwise(&self, max_inputs: usize) -> Result<Self, GraphError> {
+        if !(1..=16).contains(&max_inputs) {
+            return Err(PointwiseError::Budget.into());
+        }
+        let mut stages: Vec<GraphStage> = Vec::with_capacity(self.stages.len());
+        for stage in &self.stages {
+            if let (
+                Some(GraphStage::Pointwise {
+                    chain: left,
+                    parameters: left_ids,
+                }),
+                GraphStage::Pointwise {
+                    chain: right,
+                    parameters: right_ids,
+                },
+            ) = (stages.last_mut(), stage)
+            {
+                let offset = left_ids.len();
+                let inputs = left.input_count() + right.input_count() - 1;
+                if inputs <= max_inputs
+                    && left.steps().len() + right.steps().len() <= 256
+                    && right.steps().iter().all(|step| step.rhs != Some(0))
+                {
+                    let mut steps = left.steps().to_vec();
+                    steps.extend(right.steps().iter().map(|step| {
+                        crate::pointwise::PointwiseStep {
+                            op: step.op,
+                            rhs: step.rhs.map(|slot| slot + offset),
+                        }
+                    }));
+                    *left = PointwiseChain::new(inputs, steps)?;
+                    left_ids.extend_from_slice(right_ids);
+                    continue;
+                }
+            }
+            stages.push(stage.clone());
+        }
+        Self::new(self.input_layout().clone(), stages, self.parameters.clone())
+    }
+
     pub fn with_values(&self, values: Vec<Vec<f32>>) -> Result<Self, GraphError> {
         if values.len() != self.parameters.len() {
             return Err(GraphError::Ownership);
@@ -238,6 +286,146 @@ impl GraphDefinition {
 mod tests {
     use super::*;
     use crate::{elementwise::ElementwiseOp, pointwise::PointwiseStep};
+
+    fn pointwise(ids: Vec<usize>, steps: &[(ElementwiseOp, Option<usize>)]) -> GraphStage {
+        GraphStage::Pointwise {
+            chain: PointwiseChain::new(
+                ids.len() + 1,
+                steps
+                    .iter()
+                    .map(|&(op, rhs)| PointwiseStep { op, rhs })
+                    .collect(),
+            )
+            .unwrap(),
+            parameters: ids,
+        }
+    }
+
+    fn graph(stages: Vec<GraphStage>, gains: &[f32]) -> GraphDefinition {
+        GraphDefinition::new(
+            NdLayout::contiguous(&[2, 3, 1]).unwrap(),
+            stages,
+            gains
+                .iter()
+                .map(|&value| GraphParameter {
+                    role: ParameterRole::Gain,
+                    shape: vec![1],
+                    values: vec![value],
+                })
+                .collect(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fusion_rebases_rhs_and_preserves_parameter_ids_and_reverse_chain() {
+        use ElementwiseOp::{Add, Multiply, Relu};
+        let source = graph(
+            vec![
+                pointwise(
+                    vec![1],
+                    &[(Multiply, Some(1)), (Add, Some(0)), (Relu, None)],
+                ),
+                pointwise(vec![0], &[(Multiply, Some(1)), (Add, Some(1))]),
+            ],
+            &[0.75, -0.25],
+        );
+        let fused = source.fuse_pointwise(3).unwrap();
+        assert_eq!(source.stages().len(), 2);
+        assert_eq!(fused.stages().len(), 1);
+        assert_eq!(source.parameter_owners(), &[1, 0]);
+        assert_eq!(fused.parameter_owners(), &[0, 0]);
+        for (a, b) in source.parameters().iter().zip(fused.parameters()) {
+            assert_eq!((a.role, &a.shape, &a.values), (b.role, &b.shape, &b.values));
+        }
+        let GraphStage::Pointwise { chain, parameters } = &fused.stages()[0] else {
+            panic!()
+        };
+        assert_eq!(parameters, &[1, 0]);
+        assert_eq!(chain.steps()[3].rhs, Some(2));
+        assert_eq!(chain.steps()[4].rhs, Some(2));
+        let GraphStage::Pointwise { chain: left, .. } = &source.stages()[0] else {
+            panic!()
+        };
+        let GraphStage::Pointwise { chain: right, .. } = &source.stages()[1] else {
+            panic!()
+        };
+        for x in [-3_f32, -1e-10, -0., 0., 1e-10, 2., 11.] {
+            let intermediate = (x * -0.25 + x).max(0.);
+            for cotangent in [-2., 0., 0.375] {
+                let rhs = right.vjp_scalar(&[intermediate, 0.75], cotangent).unwrap();
+                let lhs = left.vjp_scalar(&[x, -0.25], rhs[0]).unwrap();
+                assert_eq!(
+                    chain.vjp_scalar(&[x, -0.25, 0.75], cotangent).unwrap(),
+                    vec![lhs[0], lhs[1], rhs[1]]
+                );
+            }
+        }
+        let again = fused.fuse_pointwise(3).unwrap();
+        let GraphStage::Pointwise { chain: again, .. } = &again.stages()[0] else {
+            panic!()
+        };
+        assert_eq!(chain.steps(), again.steps());
+    }
+
+    #[test]
+    fn fusion_preserves_residual_and_resource_boundaries() {
+        use ElementwiseOp::{Add, Multiply, Relu};
+        let source = graph(
+            vec![
+                pointwise(vec![0], &[(Multiply, Some(1))]),
+                pointwise(vec![], &[(Add, Some(0)), (Relu, None)]),
+                pointwise(vec![1], &[(Multiply, Some(1))]),
+                pointwise(vec![2], &[(Multiply, Some(1))]),
+            ],
+            &[2., 3., 4.],
+        );
+        let fused = source.fuse_pointwise(2).unwrap();
+        assert_eq!(fused.stages().len(), 3);
+        let GraphStage::Pointwise { chain, parameters } = &fused.stages()[1] else {
+            panic!()
+        };
+        assert_eq!(parameters, &[1]);
+        assert_eq!(chain.steps().len(), 3);
+        assert_eq!(chain.steps()[0].rhs, Some(0));
+        assert!(source.fuse_pointwise(0).is_err());
+        assert!(source.fuse_pointwise(17).is_err());
+        let long = graph(
+            vec![
+                pointwise(vec![], &vec![(Relu, None); 256]),
+                pointwise(vec![], &[(Relu, None)]),
+            ],
+            &[],
+        );
+        assert_eq!(long.fuse_pointwise(3).unwrap().stages().len(), 2);
+    }
+
+    #[test]
+    fn fusion_keeps_forward_and_adjoint_overflow_checks_before_masking() {
+        use ElementwiseOp::{Multiply, Relu};
+        for (x, gains, cotangent) in [(-2., vec![f32::MAX], 1.), (0., vec![0., f32::MAX], 2.)] {
+            let mut stages: Vec<_> = gains
+                .iter()
+                .enumerate()
+                .map(|(id, _)| pointwise(vec![id], &[(Multiply, Some(1))]))
+                .collect();
+            if x != 0. {
+                stages.push(pointwise(vec![], &[(Relu, None)]));
+            }
+            // A zero gain can mask an overflowing adjoint; neither forward nor
+            // reverse intermediates may lose their original finite checks.
+            let fused = graph(stages, &gains).fuse_pointwise(3).unwrap();
+            let GraphStage::Pointwise { chain, .. } = &fused.stages()[0] else {
+                panic!()
+            };
+            let inputs: Vec<_> = std::iter::once(x).chain(gains).collect();
+            assert!(matches!(
+                chain.vjp_scalar(&inputs, cotangent),
+                Err(PointwiseError::NonFinite)
+            ));
+        }
+    }
+
     #[test]
     fn client_names_are_canonical_and_policy_is_explicit() {
         for policy in [

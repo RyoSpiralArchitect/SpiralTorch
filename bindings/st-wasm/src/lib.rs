@@ -57,6 +57,10 @@ pub use nn_resident::*;
 mod wgpu_resident;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
 pub use wgpu_resident::*;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+mod wgpu_tensor;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+pub use wgpu_tensor::*;
 
 pub use api_llm_policy::*;
 pub use autograd::*;

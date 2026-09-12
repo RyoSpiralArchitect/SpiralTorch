@@ -6481,6 +6481,18 @@ def _install_ecosystem_helpers() -> None:
 
 def _install_nn_helpers() -> None:
     nn_module = _ensure_submodule("nn")
+    native_nn = _resolve_rs_attr("nn")
+    if native_nn is not None:
+        # A fresh forwarding module has no export list until an attribute is
+        # accessed. Use the native declaration without forcing eager wrapping.
+        exports = set(getattr(nn_module, "__all__", ()))
+        exports.update(
+            name for name in getattr(native_nn, "__all__", ())
+            if isinstance(name, str)
+            and not name.startswith("_")
+            and _safe_getattr(native_nn, name, None) is not None
+        )
+        nn_module.__all__ = sorted(exports)
 
     @_contextlib.contextmanager
     def eval_mode(module: _Any):
@@ -7021,6 +7033,11 @@ _mirror_into_module(
     "wgpu",
     {
         "WgpuMatmul": ("wgpu.WgpuMatmul",),
+        "WgpuTensorDevice": ("wgpu.WgpuTensorDevice",),
+        "WgpuTensor": ("wgpu.WgpuTensor",),
+        "WgpuTensorSnapshot": ("wgpu.WgpuTensorSnapshot",),
+        "WgpuPointwiseInputs": ("wgpu.WgpuPointwiseInputs",),
+        "WgpuPointwisePlan": ("wgpu.WgpuPointwisePlan",),
         "WgpuRank": ("wgpu.WgpuRank",),
         "wgpu_kernel_reports_available": ("wgpu.wgpu_kernel_reports_available",),
         "wgpu_kernel_catalog": ("wgpu.wgpu_kernel_catalog",),
@@ -8884,7 +8901,7 @@ _CORE_EXPORTS = [
     "kv_json_set_options","kv_redis_set_json","kv_redis_get_json",
     "kv_redis_set_choice","kv_redis_get_choice","kv_redis_push_choice",
     "kv_redis_lrange_choice",
-    "WgpuMatmul","WgpuRank","wgpu_kernel_reports_available","wgpu_kernel_catalog","wgpu_kernel_descriptor",
+    "WgpuMatmul","WgpuRank","WgpuTensorDevice","WgpuTensor","WgpuTensorSnapshot","WgpuPointwiseInputs","WgpuPointwisePlan","wgpu_kernel_reports_available","wgpu_kernel_catalog","wgpu_kernel_descriptor",
     "wgpu_rank_kernel_report","wgpu_kernel_report_from_rank_plan",
     "wgpu_softmax_kernel_report",
     "token_scale_stack","token_coherence_levels",

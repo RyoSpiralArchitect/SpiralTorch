@@ -11,15 +11,21 @@ async function main() {
   if (!moduleDir || !executablePath || !outputPath) {
     throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-pair-lanes-matched|rank-prefix-matched|rank-count-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean|nn|nn-training|nd-tensor|nn-clients|nn-clients-cpu|nn-training-clients|nn-training-clients-cpu] [BASELINE_MODULE_DIR]");
   }
-  if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu"].includes(fixture)) throw Error("unknown fixture");
+if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu", "nn-fusion-clients", "nn-autograd-clients", "nn-learner-clients", "pointwise-clients", "nn-module-handoff", "nn-module-forward", "nn-module-matched", "nn-module-intervals", "nn-module-terminal-intervals", "nn-module-terminal-matched-intervals", "nn-loss-clients", "nn-classification-clients", "nn-microbatch-clients"].includes(fixture)) throw Error("unknown fixture");
   const nnClientFixture = fixture === "nn-clients" || fixture === "nn-clients-cpu";
   const trainingClientFixture = fixture === "nn-training-clients" || fixture === "nn-training-clients-cpu";
   const graphClientFixture = fixture === "nn-graph-clients" || fixture === "nn-graph-clients-cpu";
   const matched=fixture === "rank-matched" || fixture === "rank-pruning-matched" || fixture === "rank-pair-lanes-matched" || fixture === "rank-prefix-matched" || fixture === "rank-count-matched";
-  if(matched !== Boolean(baselineDir)) throw Error("matched rank fixtures require BASELINE_MODULE_DIR; other fixtures must omit it");
+  const sameTerminalApi=fixture === "nn-module-terminal-matched-intervals";
+  const terminalIntervals=fixture === "nn-module-terminal-intervals" || sameTerminalApi;
+  const moduleIntervals=fixture === "nn-module-intervals" || terminalIntervals;
+  const moduleMatched=fixture === "nn-module-matched" || moduleIntervals;
+  if((matched || moduleMatched) !== Boolean(baselineDir)) throw Error("matched fixtures require BASELINE_MODULE_DIR; other fixtures must omit it");
   const rankFixture = fixture === "rank" || fixture === "rank-active-lanes" || fixture === "rank-tournament";
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
+  let profileFd, profileRows=0, profileBytes=0;
+  const profileHash=crypto.createHash("sha256");
   let metadata = {}, pageErrors = [], consoleMessages = [];
   try {
     const files = new Map([
@@ -28,8 +34,36 @@ async function main() {
       ["/module/spiraltorch_wasm_bg.wasm", [path.join(moduleDir,"spiraltorch_wasm_bg.wasm"), "application/wasm"]],
     ]);
     const moduleRoot = path.resolve(moduleDir);
+    if(moduleMatched) {
+      files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/", moduleIntervals ? "module_resident_intervals.html" : "module_resident_matched.html"), "text/html"]);
+      files.set("/fixture.json", [path.join(moduleRoot, "forward-bench-fixture.json"), "application/json"]);
+    }
+    if(moduleIntervals) files.set("/module_resident_intervals.mjs", [path.join(__dirname,
+      "../bindings/st-wasm/tests/module_resident_intervals.mjs"), "text/javascript"]);
+    if(fixture === "nn-module-forward") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/module_resident_forward.html"), "text/html"]);
     if(fixture === "nn-training") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_training.html"), "text/html"]);
     if(fixture === "nn-graph-training") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_training.html"), "text/html"]);
+    if(fixture === "nn-fusion-clients") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_pointwise_fusion_clients.html"), "text/html"]);
+    if(fixture === "nn-autograd-clients") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_autograd_clients.html"), "text/html"]);
+    if(fixture === "nn-learner-clients") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_learner_clients.html"), "text/html"]);
+    if(fixture === "pointwise-clients") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_pointwise_clients.html"), "text/html"]);
+    if(fixture === "nn-loss-clients") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_loss_clients.html"), "text/html"]);
+    if(fixture === "nn-classification-clients") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_classification_clients.html"), "text/html"]);
+    if(fixture === "nn-microbatch-clients") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_microbatch_clients.html"), "text/html"]);
+    if(fixture === "nn-module-handoff") {
+      files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_module_handoff.html"), "text/html"]);
+      files.set("/fixture.json", [path.join(moduleRoot, "handoff-fixture.json"), "application/json"]);
+    }
+    if(fixture === "nn-graph-training-profile") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_training_profile.html"), "text/html"]);
+    if(fixture === "nn-graph-forward") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_forward.html"), "text/html"]);
+    if(fixture === "nn-forward-clients") {
+      files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_forward_clients.html"), "text/html"]);
+      files.set("/fixture.json", [path.join(moduleRoot, "forward-fixture.json"), "application/json"]);
+    }
+    if(fixture === "nn-forward-bench") {
+      files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_forward_bench.html"), "text/html"]);
+      files.set("/fixture.json", [path.join(moduleRoot, "forward-bench-fixture.json"), "application/json"]);
+    }
     if(fixture === "nd-tensor") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_nd_tensor.html"), "text/html"]);
     if(nnClientFixture) files.set("/fixture.json", [path.join(moduleRoot,"nn-fixture.json"), "application/json"]);
     if(trainingClientFixture) {
@@ -81,11 +115,23 @@ async function main() {
     browser = await chromium.launch({executablePath,headless:true,args:["--enable-unsafe-webgpu"]});
     metadata.browser_version = browser.version();
     page = await browser.newPage();
+    if(fixture === "nn-graph-training-profile" || moduleIntervals) {
+      profileFd=fs.openSync(outputPath+".cases.jsonl","wx");
+      await page.exposeFunction(moduleIntervals ? "publishModuleInterval" : "publishResidentProfile",raw=>{
+        if(typeof raw !== "string" || Buffer.byteLength(raw)>64*1024*1024)
+          throw Error("profile state capture exceeds its per-case budget");
+        const data=Buffer.from(raw+"\n");
+        fs.writeFileSync(profileFd,data);
+        profileHash.update(data); profileBytes+=data.length; profileRows++;
+        return {line:profileRows,sha256:crypto.createHash("sha256").update(raw).digest("hex")};
+      });
+    }
     page.on("console", message=>{ if(consoleMessages.length<100) consoleMessages.push({type:message.type(),text:message.text()}); });
     let rejectPageError;
     const fatal = new Promise((_,reject)=>{ rejectPageError=reject; });
     fatal.catch(()=>{});
     page.on("pageerror", error=>{ pageErrors.push(String(error)); rejectPageError(error); });
+    page.on("crash",()=>{ const error=Error("owned test browser page crashed");pageErrors.push(String(error));rejectPageError(error); });
     page.on("response", response=>{
       if(response.status() >= 400 && /^\/(module|baseline)\//.test(new URL(response.url()).pathname)) {
         const error = Error("generated module asset failed: "+response.status()+" "+response.url());
@@ -93,6 +139,8 @@ async function main() {
       }
     });
     const params = new URLSearchParams();
+    if(terminalIntervals) params.set("terminal_capture","1");
+    if(sameTerminalApi) params.set("baseline_terminal","1");
     if(fixture === "nn-clients-cpu" || fixture === "nn-training-clients-cpu" || fixture === "nn-graph-clients-cpu") params.set("cpu_only","1");
     if(tiles) params.set("tiles",tiles);
     if(kernels) params.set("kernels",kernels);
@@ -105,11 +153,17 @@ async function main() {
     if(fixture === "rank-prefix-matched") params.set("suite","prefix");
     if(fixture === "rank-count-matched") params.set("suite","count-bounds");
     const query = "?"+params.toString();
-    await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
-    await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:fixture === "rank-prefix-matched" || fixture === "rank-count-matched" ? 600000 : 300000})]);
-    report = JSON.parse(await page.locator("#result").textContent());
+    await page.goto(`http://127.0.0.1:${server.address().port}/${query}`, {waitUntil: moduleIntervals ? "commit" : "load"});
+    await Promise.race([fatal, page.locator("#result:not([data-status='running'])").waitFor({timeout:moduleIntervals ? 1800000 : fixture === "rank-prefix-matched" || fixture === "rank-count-matched" ? 600000 : 300000})]);
+    report = moduleIntervals ? await page.evaluate(()=>window.moduleIntervalReport)
+      : fixture === "nn-graph-training-profile" ? await page.evaluate(()=>window.residentProfileReport)
+      : JSON.parse(await page.locator("#result").textContent());
+    if(fixture === "nn-graph-training-profile" && (!report || report.cases?.length !== profileRows || profileRows !== 21))
+      throw Error("incomplete streamed profiling matrix");
+    if(moduleIntervals && (!report || report.cases?.length !== profileRows || profileRows !== 36))
+      throw Error("incomplete streamed completed-read matrix");
     if(pageErrors.length) report.status="error";
-    if(fixture === "rank-profile" && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
+    if((fixture === "rank-profile" || fixture === "nn-graph-training-profile") && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
       report.status="error";
       report.error="uncaptured WebGPU timestamp validation/allocation failure";
     }
@@ -119,6 +173,11 @@ async function main() {
   } finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));
+    if(profileFd !== undefined) {
+      fs.closeSync(profileFd);
+      metadata[moduleIntervals ? "interval_state_artifacts" : "profile_state_artifacts"]={path:path.basename(outputPath)+".cases.jsonl",
+        rows:profileRows,bytes:profileBytes,sha256:profileHash.digest("hex")};
+    }
     Object.assign(report,metadata,{page_errors:pageErrors,console_messages:consoleMessages});
     fs.writeFileSync(fd,JSON.stringify(report,null,2)+"\n");
     fs.closeSync(fd);

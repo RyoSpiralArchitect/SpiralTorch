@@ -109,3 +109,56 @@ fn resident_views_broadcasts_chains_and_failures_on_real_gpu() {
     }
     assert!(device.upload(&[1], &[f32::NAN]).is_err());
 }
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn tensor_snapshots_preserve_versions_and_guards_on_real_gpu() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        runtime::ensure_default_runtime_blocking("tensor.snapshot.versions").unwrap();
+    let device = TensorDevice::new(runtime).unwrap();
+    let root = device.upload(&[2, 2], &[1., 2., 3., 4.]).unwrap();
+    let first = root.snapshot().unwrap();
+    assert_eq!(first.read().unwrap(), [1., 2., 3., 4.]);
+    let second = root.snapshot().unwrap();
+    assert_eq!(second.read().unwrap(), [1., 2., 3., 4.]);
+    let held = root.snapshot().unwrap();
+    let held_id = held.staging.buffer().global_id();
+    let other = device.clone().upload(&[4], &[9.; 4]).unwrap();
+    let different = other.snapshot().unwrap();
+    assert_ne!(different.staging.buffer().global_id(), held_id);
+    assert_eq!(different.read().unwrap(), [9.; 4]);
+    assert_eq!(held.read().unwrap(), [1., 2., 3., 4.]);
+    let old = root.permute(&[1, 0]).unwrap().snapshot().unwrap();
+    for length in [0, 1, 4, 9, 4, 1, 0] {
+        let current = device.upload(&[length], &vec![17.; length]).unwrap();
+        drop(current.snapshot().unwrap());
+        assert_eq!(
+            current.snapshot().unwrap().read().unwrap(),
+            vec![17.; length]
+        );
+    }
+    let bad = device
+        .upload(&[4], &[-f32::MAX; 4])
+        .unwrap()
+        .mul(&device.upload(&[], &[2.]).unwrap())
+        .unwrap()
+        .relu()
+        .unwrap();
+    let invalid = bad.snapshot().unwrap();
+    assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
+    assert!(matches!(invalid.read(), Err(TensorError::NonFinite)));
+    assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
+    let invalid = bad.snapshot().unwrap();
+    assert!(matches!(invalid.read(), Err(TensorError::NonFinite)));
+    assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
+    let cleared = root.snapshot().unwrap();
+    assert_eq!(cleared.read().unwrap(), [1., 2., 3., 4.]);
+    drop(device);
+    drop(root);
+    drop(other);
+    drop(bad);
+    assert_eq!(old.read().unwrap(), [1., 3., 2., 4.]);
+}

@@ -11,6 +11,8 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct Sequential {
     layers: Vec<Box<dyn Module>>,
+    #[cfg(feature = "wgpu")]
+    resident: crate::resident::ResidentForwardCache,
 }
 
 impl core::fmt::Debug for Sequential {
@@ -22,7 +24,11 @@ impl core::fmt::Debug for Sequential {
 impl Sequential {
     /// Creates an empty container.
     pub fn new() -> Self {
-        Self { layers: Vec::new() }
+        Self {
+            layers: Vec::new(),
+            #[cfg(feature = "wgpu")]
+            resident: Default::default(),
+        }
     }
 
     /// Appends a new layer to the sequence.
@@ -65,14 +71,60 @@ impl Sequential {
 }
 
 impl Module for Sequential {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        self.resident.forward(self.inference_ops()?, input)
+    }
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        self.resident.snapshot(self.inference_ops()?, input)
+    }
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        Some(self.resident.stats())
+    }
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.resident.clear();
+    }
+
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        let mut bindings = Vec::new();
+        for layer in &self.layers {
+            bindings.extend(layer.resident_parameter_bindings()?);
+        }
+        Ok(bindings)
+    }
+
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
-        let mut operations = Vec::new();
+        crate::resident::collect_inference_ops(self, self.layers.len())
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        let start = operations.len();
         for layer in &self.layers {
-            operations.extend(layer.inference_ops()?);
+            if let Err(error) = layer.append_inference_ops(operations) {
+                operations.truncate(start);
+                return Err(error);
+            }
         }
-        Ok(operations)
+        Ok(())
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {

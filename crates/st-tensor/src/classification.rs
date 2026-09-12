@@ -5,6 +5,7 @@
 //! Inputs and results are f32; CPU row normalization and reductions use f64.
 
 use crate::{emit_tensor_op, emit_tensor_op_meta, Layout, PureResult, Tensor, TensorError};
+use st_kernel_contracts::classification::{decode_class_index, ClassReduction, CrossEntropySpec};
 use std::str::FromStr;
 
 /// Reduction over non-ignored samples, not over classes.
@@ -62,12 +63,23 @@ impl Default for CrossEntropyConfig {
 
 impl CrossEntropyConfig {
     pub fn validate(self) -> PureResult<()> {
-        if !self.label_smoothing.is_finite() || !(0.0..=1.0).contains(&self.label_smoothing) {
-            return Err(TensorError::InvalidValue {
-                label: "label_smoothing must be finite and between zero and one",
-            });
-        }
-        Ok(())
+        self.kernel_spec().map(|_| ())
+    }
+
+    /// Same validated configuration consumed by resident classification kernels.
+    pub fn kernel_spec(self) -> PureResult<CrossEntropySpec> {
+        CrossEntropySpec::new(
+            match self.reduction {
+                LossReduction::None => ClassReduction::None,
+                LossReduction::Sum => ClassReduction::Sum,
+                LossReduction::Mean => ClassReduction::Mean,
+            },
+            self.ignore_index,
+            self.label_smoothing,
+        )
+        .map_err(|_| TensorError::InvalidValue {
+            label: "label_smoothing must be finite and between zero and one",
+        })
     }
 
     pub fn output_shape(self, rows: usize) -> (usize, usize) {
@@ -92,15 +104,9 @@ pub fn class_indices_from_tensor(target: &Tensor) -> PureResult<Vec<i64>> {
         .data()
         .iter()
         .map(|&value| {
-            let wide = f64::from(value);
-            // i64::MAX rounds up in f64, so the upper bound is exclusive.
-            if wide.fract() != 0.0 || wide < i64::MIN as f64 || wide >= -(i64::MIN as f64) {
-                Err(TensorError::InvalidValue {
-                    label: "class index target must be an integer representable as i64",
-                })
-            } else {
-                Ok(value as i64)
-            }
+            decode_class_index(value).map_err(|_| TensorError::InvalidValue {
+                label: "class index target must be an integer representable as i64",
+            })
         })
         .collect()
 }

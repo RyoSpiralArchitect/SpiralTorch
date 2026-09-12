@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident training pass diagnostics</title>
+<pre id="result" data-status="running">Checking profiled and ordinary SGD trajectories</pre>
+<script type="module">
+import init, {TrainingBenchmark} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+const cases = [];
+try {
+  if (!navigator.gpu) throw Error("WebGPU unavailable; no CPU/timer fallback");
+  if (typeof window.publishResidentProfile !== "function")
+    throw Error("Use test_resident_browser.cjs to stream owning state captures");
+  await init();
+  const matrix = [[[2,16,32],2],[[2,129,32],4],[[4,32,64],8],
+                  [[4,64,64],8],[[2,128,128],8],[[2,64,256],4]];
+  for (const [shape,depth] of matrix) for (const seed of [17,29,43]) {
+    const config = {shape,depth,seed,steps:8,graph:true};
+    const bench = await TrainingBenchmark.create(JSON.stringify(config));
+    try {
+      const policies = shape.join(",")==="2,16,32" ? ["exact","module_compatible"] : ["exact"];
+      for (const policy of policies) {
+        const raw = await bench.profile(policy);
+        const report = JSON.parse(raw);
+        if (report.status !== "passed" || report.profiles?.length !== 12 ||
+            report.profiles.filter(p=>!p.warmup).length !== 9 ||
+            Object.values(report.guards).some(v=>v!==true))
+          throw Error("Incomplete profile fixture");
+        report.state_artifact = await window.publishResidentProfile(raw);
+        delete report.final_profile_state;
+        delete report.final_private_control_state;
+        delete report.final_ordinary_state;
+        cases.push(report);
+      }
+    } finally { bench.free(); }
+  }
+  const probe = await TrainingBenchmark.create(JSON.stringify({shape:[2,16,32],depth:2,seed:17,steps:8,graph:true}));
+  const originalDone = GPUQueue.prototype.onSubmittedWorkDone;
+  let completionRejection = false;
+  try {
+    // Only this isolated negative fixture replaces the browser callback.
+    GPUQueue.prototype.onSubmittedWorkDone = () => Promise.reject(new Error("injected completion rejection"));
+    try { await probe.profile("exact"); }
+    catch (error) { completionRejection = String(error).includes("submission callback disconnected"); }
+  } finally {
+    GPUQueue.prototype.onSubmittedWorkDone = originalDone;
+    probe.free();
+  }
+  if (!completionRejection) throw Error("Rejected completion was admitted or hung");
+  window.residentProfileReport = {status:"passed",cases,completion_rejection:completionRejection,
+    physical_gpu:"UNKNOWN",gpu_contention:"UNKNOWN",
+    boundary:"Private timestamp-enabled devices; unchanged compute-pass grouping; zero/quantized intervals retained. Not end-to-end timing."};
+  result.textContent = "Passed " + cases.length + " profiling conditions; full states streamed separately.";
+  result.dataset.status = "passed";
+} catch (error) {
+  window.residentProfileReport = {status:"error",error:String(error.stack||error),cases};
+  result.textContent = window.residentProfileReport.error;
+  result.dataset.status = "error";
+}
+</script>

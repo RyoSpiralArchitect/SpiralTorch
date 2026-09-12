@@ -20,6 +20,7 @@ assert.throws(() => InferencePlan.fromJson({length:0}));
 assert.throws(() => InferencePlan.fromJson(JSON.stringify({...record, input_shape:[4294967295,2]})));
 assert.throws(() => InferencePlan.fromJson(payload.replace("1,0,0,1", "1e100,0,0,1")));
 assert.throws(() => plan.compileWebGpu(), /webgpu/);
+assert.throws(() => plan.compileGraphWebGpu(), /webgpu/);
 plan.free();
 assert.equal(restored.toJson(), canonical);
 restored.free();
@@ -31,6 +32,7 @@ const richJson = rich.toJson(), richRestored = InferencePlan.fromJson(richJson);
 assert.equal(richRestored.toJson(), richJson);
 assert.throws(() => rich.compileWebGpu(), /webgpu/);
 assert.throws(() => rich.compileTrainingWebGpu(), /webgpu/);
+assert.throws(() => rich.compileGraphWebGpu(), /webgpu/);
 for(const policy of ["exact","module_compatible"]) assert.throws(() => rich.compileGraphTrainingWebGpu(policy), /webgpu/);
 for(const policy of [undefined,null,true,1,"","auto","EXACT"," exact","module-compatible"])
   assert.throws(() => rich.compileGraphTrainingWebGpu(policy), /gradient_policy/);

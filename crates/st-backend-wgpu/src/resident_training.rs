@@ -23,6 +23,12 @@ pub use readback::{
 #[derive(Debug, Error)]
 pub enum TrainingError {
     #[error(transparent)]
+    Momentum(#[from] st_kernel_contracts::momentum::MomentumError),
+    #[error("enable momentum before resetting or observing its state")]
+    MissingMomentum,
+    #[error(transparent)]
+    GradientClip(#[from] st_kernel_contracts::gradient_clip::GradientClipError),
+    #[error(transparent)]
     Graph(#[from] st_kernel_contracts::graph::GraphError),
     #[error(transparent)]
     Tensor(#[from] TensorError),
@@ -36,8 +42,24 @@ pub enum TrainingError {
     LearningRate,
     #[error("upload a complete input/target batch before stepping")]
     MissingBatch,
+    #[error("upload an input before forwarding the autograd graph")]
+    MissingInput,
     #[error("step the current batch before requesting training results")]
     StaleStep,
+    #[error("forward the current input before backward; the token must belong to this workspace and its latest forward")]
+    StaleForward,
+    #[error("gradient terms must contain 1..=256 same-forward contributions with finite weights")]
+    GradientTerms,
+    #[error("gradient weight must be finite")]
+    GradientWeight,
+    #[error("accumulator and gradients must belong to this learner's current parameter state")]
+    AccumulatorState,
+    #[error("accumulate a gradient before observing or updating from the accumulator")]
+    EmptyAccumulator,
+    #[error("submit an SGD update before requesting its receipt")]
+    MissingUpdate,
+    #[error("read the pending profile before reusing the private profiler; an abandoned or invalid profile requires a new workspace")]
+    PendingProfile,
     #[error("training counter or snapshot size exhausted")]
     Overflow,
     #[error(
@@ -59,7 +81,7 @@ struct Spec {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct Params {
+pub(crate) struct Params {
     rows: u32,
     cols: u32,
     len: u32,
@@ -68,6 +90,21 @@ struct Params {
     gelu: u32,
     groups_x: u32,
     partials: u32,
+}
+
+impl Params {
+    pub(crate) fn standalone_mse(len: u32, groups_x: u32, partials: u32) -> Self {
+        Self {
+            rows: 0,
+            cols: 0,
+            len,
+            stage: 0,
+            stages: 0,
+            gelu: 0,
+            groups_x,
+            partials,
+        }
+    }
 }
 
 struct Pass {
@@ -216,7 +253,7 @@ pub struct ResidentDenseTraining {
     runtime: WgpuRuntime,
 }
 
-fn training_scalar_source() -> String {
+pub(crate) fn training_scalar_source() -> String {
     [
         include_str!("shaders/gelu_derivative.wgsl"),
         include_str!("shaders/dense_training.wgsl"),

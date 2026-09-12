@@ -15,11 +15,28 @@ use st_backend_wgpu::{
 #[cfg(feature = "webgpu")]
 use wasm_bindgen_futures::future_to_promise;
 
+mod autograd;
+mod forward;
+pub use autograd::{WasmGraphForward, WasmGraphGradients, WasmResidentGraphAutograd};
 mod graph;
+mod learner;
+#[cfg(feature = "webgpu")]
+mod loss;
+#[cfg(feature = "webgpu")]
+pub use loss::{WasmCrossEntropyWithLogits, WasmMeanSquaredError, WasmResidentLoss};
+#[cfg(feature = "webgpu")]
+mod module;
+pub use forward::{WasmGraphInferenceSnapshot, WasmResidentGraphInference};
 pub use graph::{
     WasmGraphTrainingParametersSnapshot, WasmGraphTrainingSnapshot, WasmGraphTrainingState,
     WasmResidentGraphTraining,
 };
+pub use learner::{
+    WasmGraphGradientAccumulator, WasmGraphGradientBatch, WasmGraphUpdateSnapshot,
+    WasmResidentGraphLearner,
+};
+#[cfg(feature = "webgpu")]
+pub use module::{WasmResidentForwardStats, WasmSequential};
 mod training;
 pub use training::{
     WasmResidentTraining, WasmTrainingLossSnapshot, WasmTrainingParametersSnapshot,
@@ -73,6 +90,31 @@ pub struct WasmInferencePlan {
 
 #[wasm_bindgen(js_class = InferencePlan)]
 impl WasmInferencePlan {
+    /// Checked handoff to the original browser-owned Rust Module.
+    #[cfg(feature = "webgpu")]
+    #[wasm_bindgen(js_name = applyParametersTo)]
+    pub fn apply_parameters_to(
+        &self,
+        module: &mut WasmSequential,
+        updated: &WasmInferencePlan,
+        optimizer_state: Option<JsString>,
+    ) -> Result<usize, JsValue> {
+        let policy = optimizer_state
+            .map(|s| {
+                s.as_string()
+                    .ok_or_else(|| js_error("optimizer_state must be a string"))
+            })
+            .transpose()?
+            .unwrap_or_else(|| "reject".into());
+        self.inner
+            .apply_parameters_to(
+                &mut module.inner,
+                &updated.inner,
+                policy.parse().map_err(js_error)?,
+            )
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = fromJson)]
     pub fn from_json(
         payload: JsString,
@@ -100,6 +142,14 @@ impl WasmInferencePlan {
     #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<String, JsValue> {
         self.inner.to_json().map_err(js_error)
+    }
+
+    /// Return a new Rust-fused plan; parameter IDs stay fixed, stage IDs may change.
+    #[wasm_bindgen(js_name = fusePointwise)]
+    pub fn fuse_pointwise(&self) -> Result<WasmInferencePlan, JsValue> {
+        Ok(Self {
+            inner: self.inner.fuse_pointwise().map_err(js_error)?,
+        })
     }
 
     #[wasm_bindgen(getter, js_name = inputShape)]
@@ -183,6 +233,46 @@ impl WasmInferencePlan {
         }
     }
 
+    #[wasm_bindgen(js_name = compileGraphWebGpu, unchecked_return_type = "Promise<ResidentGraphInference>")]
+    pub fn compile_graph_webgpu(
+        &self,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        #[cfg(feature = "webgpu")]
+        {
+            forward::compile(&self.inner, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident graph inference requires the webgpu build feature",
+            ))
+        }
+    }
+
+    #[wasm_bindgen(js_name = compileGraphAutogradWebGpu, unchecked_return_type = "Promise<ResidentGraphAutograd>")]
+    pub fn compile_graph_autograd_webgpu(
+        &self,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        #[cfg(feature = "webgpu")]
+        {
+            autograd::compile(&self.inner, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident graph autograd requires the webgpu build feature",
+            ))
+        }
+    }
+
     #[wasm_bindgen(js_name = compileGraphTrainingWebGpu, unchecked_return_type = "Promise<ResidentGraphTraining>")]
     pub fn compile_graph_training_webgpu(
         &self,
@@ -208,6 +298,32 @@ impl WasmInferencePlan {
             ))
         }
     }
+
+    #[wasm_bindgen(js_name=compileGraphLearnerWebGpu,unchecked_return_type="Promise<ResidentGraphLearner>")]
+    pub fn compile_graph_learner_webgpu(
+        &self,
+        gradient_policy: JsString,
+        tile_mnk: Option<Array>,
+        kernel: Option<JsString>,
+        accumulation: Option<JsString>,
+    ) -> Result<Promise, JsValue> {
+        let policy = gradient_policy
+            .as_string()
+            .ok_or_else(|| js_error("gradient_policy must be a string"))?
+            .parse::<st_nn::resident::GraphGradientPolicy>()
+            .map_err(js_error)?;
+        #[cfg(feature = "webgpu")]
+        {
+            learner::compile(&self.inner, policy, tile_mnk, kernel, accumulation)
+        }
+        #[cfg(not(feature = "webgpu"))]
+        {
+            let _ = (policy, tile_mnk, kernel, accumulation);
+            Err(js_error(
+                "resident graph learning requires the webgpu build feature",
+            ))
+        }
+    }
 }
 
 #[cfg(feature = "webgpu")]
@@ -227,6 +343,25 @@ pub struct WasmResidentInference {
 #[cfg(feature = "webgpu")]
 #[wasm_bindgen(js_class = ResidentInference)]
 impl WasmResidentInference {
+    #[wasm_bindgen(js_name = setInputTensor)]
+    pub fn set_input_tensor(
+        &mut self,
+        input: &crate::wgpu_tensor::WasmWgpuTensor,
+    ) -> Result<(), JsValue> {
+        self.inner.set_input_tensor(&input.inner).map_err(js_error)
+    }
+    #[wasm_bindgen(js_name = tensorSnapshot)]
+    pub fn tensor_snapshot(
+        &self,
+        device: &crate::wgpu_tensor::WasmWgpuTensorDevice,
+    ) -> Result<crate::wgpu_tensor::WasmWgpuTensor, JsValue> {
+        Ok(crate::wgpu_tensor::WasmWgpuTensor {
+            inner: self
+                .inner
+                .tensor_snapshot(&device.inner)
+                .map_err(js_error)?,
+        })
+    }
     #[wasm_bindgen(getter, js_name = inputShape)]
     pub fn input_shape(&self) -> Vec<u32> {
         self.inner

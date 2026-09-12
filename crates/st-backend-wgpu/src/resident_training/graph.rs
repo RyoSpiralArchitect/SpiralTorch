@@ -14,11 +14,20 @@ pub use st_kernel_contracts::graph::{
 
 mod snapshot;
 pub use snapshot::{GraphParameterReadback, GraphState, GraphStateReadback};
+mod autograd;
+pub use autograd::{
+    GraphForward, GraphGradientAccumulator, GraphGradientBatch, GraphGradients,
+    GraphUpdateReadback, ResidentGraphAutograd, ResidentGraphLearner,
+};
+mod profile;
+use crate::runtime::timestamps::PassTimestampCursor;
+pub use profile::{GraphGpuProfile, GraphProfileReadback, ProfiledGraphTraining};
 
 enum Node {
     Linear {
         forward: Pass,
         backward: Vec<Pass>,
+        delta: wgpu::Buffer,
     },
     Pointwise {
         plan: Box<PointwiseVjpPlan>,
@@ -26,6 +35,24 @@ enum Node {
         forward: wgpu::BindGroup,
         parameters: Vec<usize>,
     },
+}
+
+// Retain the existing binding resources so an owning VJP can replace only the
+// public destinations, without preparing another tape or different kernels.
+struct BackwardResources {
+    matrix_layout: wgpu::BindGroupLayout,
+    element_layout: wgpu::BindGroupLayout,
+    unused_read: wgpu::Buffer,
+    unused_out: wgpu::Buffer,
+    unused_aux: wgpu::Buffer,
+    tile: MatmulTile,
+}
+
+#[derive(Clone, Copy)]
+enum Preparation {
+    Autograd,
+    Learner(GraphGradientPolicy),
+    MseSgd(GraphGradientPolicy),
 }
 
 /// A mutable execution of a validated graph, with immutable terminal snapshots.
@@ -38,7 +65,9 @@ pub struct ResidentGraphTraining {
     parameters: Vec<wgpu::Buffer>,
     raw_gradients: Vec<wgpu::Buffer>,
     effective_gradients: Vec<wgpu::Buffer>,
+    candidates: Vec<wgpu::Buffer>,
     nodes: Vec<Node>,
+    backward_resources: BackwardResources,
     loss_passes: Vec<Pass>,
     update_passes: Vec<Pass>,
     target: wgpu::Buffer,
@@ -62,6 +91,16 @@ fn scalar_source() -> String {
     .concat()
 }
 
+fn forward_dispatches_per_pass(backend: wgpu::Backend, count: usize) -> usize {
+    // Browser immediate timings were flat and deferred reads sometimes regressed.
+    // Keep its old schedule; native Metal benefits in both observation cadences.
+    if backend == wgpu::Backend::Metal {
+        count.max(1)
+    } else {
+        1
+    }
+}
+
 impl ResidentGraphTraining {
     pub fn new(
         runtime: WgpuRuntime,
@@ -71,6 +110,31 @@ impl ResidentGraphTraining {
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<Self, TrainingError> {
+        Self::prepare(
+            runtime,
+            definition,
+            Preparation::MseSgd(policy),
+            tile,
+            kernel,
+            accumulation,
+        )
+    }
+
+    // Reuse the same kernels; loss and optimizer preparation are independent.
+    fn prepare(
+        runtime: WgpuRuntime,
+        definition: GraphDefinition,
+        mode: Preparation,
+        tile: MatmulTile,
+        kernel: MatmulKernel,
+        accumulation: MatmulAccumulation,
+    ) -> Result<Self, TrainingError> {
+        let training = !matches!(mode, Preparation::Autograd);
+        let mse = matches!(mode, Preparation::MseSgd(_));
+        let policy = match mode {
+            Preparation::Autograd => GraphGradientPolicy::Exact,
+            Preparation::Learner(policy) | Preparation::MseSgd(policy) => policy,
+        };
         let context = runtime.context();
         let gpu = context.device();
         let limits = gpu.limits();
@@ -131,11 +195,30 @@ impl ResidentGraphTraining {
                 .collect::<Result<Vec<_>, _>>()
         };
         let raw_gradients = parameter_buffers("graph.raw_gradient")?;
-        let effective_gradients = parameter_buffers("graph.effective_gradient")?;
-        let candidates = parameter_buffers("graph.candidate")?;
-        let target = empty("graph.target", definition.output_layout().len())?;
+        let effective_gradients = if training {
+            parameter_buffers("graph.effective_gradient")?
+        } else {
+            Vec::new()
+        };
+        let candidates = if training {
+            parameter_buffers("graph.candidate")?
+        } else {
+            Vec::new()
+        };
+        let target = empty(
+            "graph.target",
+            if mse {
+                definition.output_layout().len()
+            } else {
+                1
+            },
+        )?;
         let loss = empty("graph.loss", 1)?;
-        let partial_count = definition.output_layout().len().div_ceil(256);
+        let partial_count = if mse {
+            definition.output_layout().len().div_ceil(256)
+        } else {
+            1
+        };
         let partials = empty("graph.loss_partials", partial_count)?;
         let validation = runtime::empty_buffer::<u32>(gpu, "graph.validation", count + 4, storage)?;
         let pointwise_flags =
@@ -228,8 +311,6 @@ impl ResidentGraphTraining {
         };
         let delta_pipeline = pipeline("delta");
         let bias_pipeline = pipeline("bias_gradient");
-        let prepare = pipeline("prepare_parameter");
-        let commit = pipeline("commit_sgd");
         let element = |pipeline: &Shared<wgpu::ComputePipeline>,
                        mut p: Params,
                        ops: [&wgpu::Buffer; 6],
@@ -376,7 +457,11 @@ impl ResidentGraphTraining {
                             },
                         )?,
                     ];
-                    Node::Linear { forward, backward }
+                    Node::Linear {
+                        forward,
+                        backward,
+                        delta,
+                    }
                 }
                 GraphStage::Pointwise {
                     chain,
@@ -423,82 +508,90 @@ impl ResidentGraphTraining {
             });
         }
         let loss_params = params(count, 0, definition.output_layout().len(), false);
-        let loss_passes = vec![
-            element(
-                &pipeline("mse_partials"),
+        let loss_passes = if mse {
+            vec![
+                element(
+                    &pipeline("mse_partials"),
+                    loss_params,
+                    [
+                        activations.last().unwrap(),
+                        &target,
+                        &unused_read,
+                        &unused_read,
+                        gradients.last().unwrap(),
+                        &partials,
+                    ],
+                    false,
+                )?,
+                element(
+                    &pipeline("mse_reduce"),
+                    loss_params,
+                    [
+                        &partials,
+                        &unused_read,
+                        &unused_read,
+                        &unused_read,
+                        &unused_out,
+                        &loss,
+                    ],
+                    true,
+                )?,
+            ]
+        } else {
+            Vec::new()
+        };
+        let mut update_passes = Vec::new();
+        if training {
+            let prepare = pipeline("prepare_parameter");
+            let commit = pipeline("commit_sgd");
+            for (id, p) in definition.parameters().iter().enumerate() {
+                update_passes.push(element(
+                    &prepare,
+                    params(
+                        definition.parameter_owners()[id],
+                        0,
+                        p.values.len(),
+                        p.role == ParameterRole::Gain,
+                    ),
+                    [
+                        &parameters[id],
+                        &unused_read,
+                        &raw_gradients[id],
+                        &unused_read,
+                        &candidates[id],
+                        &effective_gradients[id],
+                    ],
+                    false,
+                )?);
+            }
+            update_passes.push(element(
+                &pipeline("decide_sgd"),
                 loss_params,
                 [
-                    activations.last().unwrap(),
-                    &target,
                     &unused_read,
-                    &unused_read,
-                    gradients.last().unwrap(),
-                    &partials,
-                ],
-                false,
-            )?,
-            element(
-                &pipeline("mse_reduce"),
-                loss_params,
-                [
-                    &partials,
                     &unused_read,
                     &unused_read,
                     &unused_read,
                     &unused_out,
-                    &loss,
-                ],
-                true,
-            )?,
-        ];
-        let mut update_passes = Vec::new();
-        for (id, p) in definition.parameters().iter().enumerate() {
-            update_passes.push(element(
-                &prepare,
-                params(
-                    definition.parameter_owners()[id],
-                    0,
-                    p.values.len(),
-                    p.role == ParameterRole::Gain,
-                ),
-                [
-                    &parameters[id],
-                    &unused_read,
-                    &raw_gradients[id],
-                    &unused_read,
-                    &candidates[id],
-                    &effective_gradients[id],
-                ],
-                false,
-            )?);
-        }
-        update_passes.push(element(
-            &pipeline("decide_sgd"),
-            loss_params,
-            [
-                &unused_read,
-                &unused_read,
-                &unused_read,
-                &unused_read,
-                &unused_out,
-                &unused_aux,
-            ],
-            true,
-        )?);
-        for (id, p) in definition.parameters().iter().enumerate() {
-            update_passes.push(element(
-                &commit,
-                params(definition.parameter_owners()[id], 0, p.values.len(), false),
-                [
-                    &candidates[id],
-                    &unused_read,
-                    &unused_read,
-                    &unused_read,
-                    &parameters[id],
                     &unused_aux,
                 ],
-                false,
+                true,
             )?);
+            for (id, p) in definition.parameters().iter().enumerate() {
+                update_passes.push(element(
+                    &commit,
+                    params(definition.parameter_owners()[id], 0, p.values.len(), false),
+                    [
+                        &candidates[id],
+                        &unused_read,
+                        &unused_read,
+                        &unused_read,
+                        &parameters[id],
+                        &unused_aux,
+                    ],
+                    false,
+                )?);
+            }
         }
         let loss_pool = runtime::ReadbackPool::new::<u32>(context.clone(), count + 5)?;
         Ok(Self {
@@ -509,7 +602,16 @@ impl ResidentGraphTraining {
             parameters,
             raw_gradients,
             effective_gradients,
+            candidates,
             nodes,
+            backward_resources: BackwardResources {
+                matrix_layout,
+                element_layout,
+                unused_read,
+                unused_out,
+                unused_aux,
+                tile,
+            },
             loss_passes,
             update_passes,
             target,
@@ -623,14 +725,19 @@ impl ResidentGraphTraining {
         Ok(())
     }
 
-    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, passes: &[Pass]) {
+    fn encode_passes(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        passes: &[Pass],
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
         for chunk in passes.chunks(dispatches_per_pass(
             self.adapter_info().backend,
             passes.len(),
         )) {
             let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("graph.training"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             for pass in chunk {
                 pass.encode(&mut compute);
@@ -641,21 +748,45 @@ impl ResidentGraphTraining {
     /// One submission, no readback: forward -> MSE -> all VJPs -> prepare/vote/commit.
     /// An enqueued attempt is not an accepted step until a guarded snapshot is read.
     pub fn step(&mut self, rate: f32) -> Result<u64, TrainingError> {
+        let attempt = self.next_attempt(rate)?;
+        self.write_rate(rate);
+        let context = self.device.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        self.encode_step(&mut encoder, &mut Default::default());
+        context.queue().submit(Some(encoder.finish()));
+        self.mark_step(attempt);
+        Ok(attempt)
+    }
+
+    fn next_attempt(&self, rate: f32) -> Result<u64, TrainingError> {
         if !rate.is_finite() || rate < 0. {
             return Err(TrainingError::LearningRate);
         }
         if self.batch_generation == 0 {
             return Err(TrainingError::MissingBatch);
         }
-        let attempt = self
-            .submitted_steps
+        self.submitted_steps
             .checked_add(1)
-            .ok_or(TrainingError::Overflow)?;
+            .ok_or(TrainingError::Overflow)
+    }
+
+    fn mark_step(&mut self, attempt: u64) {
+        self.submitted_steps = attempt;
+        self.last_step = Some(attempt);
+    }
+
+    fn write_rate(&self, rate: f32) {
         let context = self.device.runtime().context();
         context
             .queue()
             .write_buffer(&self.step_config, 0, bytemuck::bytes_of(&rate));
-        let mut encoder = context.device().create_command_encoder(&Default::default());
+    }
+
+    fn encode_step(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
         encoder.clear_buffer(&self.validation, 0, None);
         encoder.clear_buffer(&self.pointwise_flags, 0, None);
         let n = self.nodes.len();
@@ -669,20 +800,53 @@ impl ResidentGraphTraining {
             );
             encoder.copy_buffer_to_buffer(target.flags(), 0, &self.validation, n as u64 * 4, 4);
         }
-        for node in &self.nodes {
-            match node {
-                Node::Linear { forward, .. } => {
-                    self.encode_passes(&mut encoder, std::slice::from_ref(forward))
-                }
-                Node::Pointwise { plan, forward, .. } => {
-                    plan.forward().encode_bound(&mut encoder, forward);
+        self.encode_forward(encoder, timestamps);
+        self.encode_passes(encoder, &self.loss_passes, timestamps);
+        self.encode_backward(encoder, timestamps);
+        encoder.copy_buffer_to_buffer(
+            &self.pointwise_flags,
+            0,
+            &self.validation,
+            (n + 2) as u64 * 4,
+            4,
+        );
+        self.encode_passes(encoder, &self.update_passes, timestamps);
+    }
+
+    fn encode_forward(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
+        // Forward has no intervening copies. Keep the loss/VJP/decision phases
+        // separate: their copies and prepare/vote/commit ordering are unchanged.
+        for nodes in self.nodes.chunks(forward_dispatches_per_pass(
+            self.adapter_info().backend,
+            self.nodes.len(),
+        )) {
+            let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("graph.training.forward"),
+                timestamp_writes: timestamps.next(),
+            });
+            for node in nodes {
+                match node {
+                    Node::Linear { forward, .. } => forward.encode(&mut compute),
+                    Node::Pointwise { plan, forward, .. } => {
+                        plan.forward().encode_in_pass(&mut compute, forward);
+                    }
                 }
             }
         }
-        self.encode_passes(&mut encoder, &self.loss_passes);
+    }
+
+    fn encode_backward(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
         for (i, node) in self.nodes.iter().enumerate().rev() {
             match node {
-                Node::Linear { backward, .. } => self.encode_passes(&mut encoder, backward),
+                Node::Linear { backward, .. } => self.encode_passes(encoder, backward, timestamps),
                 Node::Pointwise {
                     plan,
                     parameters,
@@ -691,22 +855,10 @@ impl ResidentGraphTraining {
                 } => {
                     let gradients = std::iter::once(&self.gradients[i])
                         .chain(parameters.iter().map(|&id| &self.raw_gradients[id]));
-                    plan.encode_prepared(&mut encoder, workspace, gradients);
+                    plan.encode_prepared_with_timestamps(encoder, workspace, gradients, timestamps);
                 }
             }
         }
-        encoder.copy_buffer_to_buffer(
-            &self.pointwise_flags,
-            0,
-            &self.validation,
-            (n + 2) as u64 * 4,
-            4,
-        );
-        self.encode_passes(&mut encoder, &self.update_passes);
-        context.queue().submit(Some(encoder.finish()));
-        self.submitted_steps = attempt;
-        self.last_step = Some(attempt);
-        Ok(attempt)
     }
 
     pub fn loss_snapshot(&self) -> Result<StepReadback, TrainingError> {
@@ -777,6 +929,26 @@ impl ResidentGraphTraining {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn forward_pass_batching_preserves_browser_and_unmeasured_backends() {
+        use super::forward_dispatches_per_pass;
+        for count in [0, 1, 24, 4096] {
+            assert_eq!(
+                forward_dispatches_per_pass(wgpu::Backend::Metal, count),
+                count.max(1)
+            );
+            for backend in [
+                wgpu::Backend::BrowserWebGpu,
+                wgpu::Backend::Empty,
+                wgpu::Backend::Vulkan,
+                wgpu::Backend::Dx12,
+                wgpu::Backend::Gl,
+            ] {
+                assert_eq!(forward_dispatches_per_pass(backend, count), 1);
+            }
+        }
+    }
+
     #[test]
     fn graph_parameter_shader_validates() {
         let module = naga::front::wgsl::parse_str(&super::scalar_source()).unwrap();

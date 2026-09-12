@@ -166,16 +166,172 @@ pub(crate) fn dense_pipeline(
     })
 }
 
+/// Shared forward-only kernel. Both dense chains and mixed graphs bind their
+/// persistent activation buffers here; neither needs a backward tape.
+pub(crate) struct DenseKernel {
+    layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::ComputePipeline,
+    tile: MatmulTile,
+}
+
+pub(crate) struct DenseDispatch {
+    binding: wgpu::BindGroup,
+    uniform: runtime::Shared<wgpu::Buffer>,
+    groups: [u32; 2],
+}
+
+impl DenseKernel {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        tile: MatmulTile,
+        kernel: MatmulKernel,
+        accumulation: MatmulAccumulation,
+    ) -> Result<Self, DenseError> {
+        let limits = device.limits();
+        if limits.max_storage_buffers_per_shader_stage < 7 || limits.max_bindings_per_bind_group < 8
+        {
+            return Err(MatmulError::DeviceLimit("checked dense bindings").into());
+        }
+        let layout = dense_layout(device, false);
+        let source = checked_dense_matmul_source(tile.dimensions(), kernel, accumulation)
+            .map_err(|_| MatmulError::UnsupportedKernelTile)?;
+        let pipeline = dense_pipeline(device, &layout, source);
+        Ok(Self {
+            layout,
+            pipeline,
+            tile,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn bind(
+        &self,
+        device: &wgpu::Device,
+        shape: MatmulShape,
+        input: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+        weight: &wgpu::Buffer,
+        bias: &wgpu::Buffer,
+        unused: &wgpu::Buffer,
+        validation: &wgpu::Buffer,
+        stage: u32,
+        gelu: bool,
+    ) -> Result<DenseDispatch, DenseError> {
+        let (rows, inner, cols) = shape.dimensions();
+        let params = Uniforms {
+            rows: rows as u32,
+            cols: cols as u32,
+            inner: inner as u32,
+            flags: 1 | if gelu { 4 } else { 0 },
+            output_scale: 1.0,
+            validation_index: stage,
+            padding: [0; 2],
+        };
+        let uniform = runtime::Shared::new(runtime::upload_slice(
+            device,
+            "dense.params",
+            &[params],
+            wgpu::BufferUsages::UNIFORM,
+        )?);
+        let binding = self.bind_resources(
+            device, input, output, weight, bias, unused, validation, &uniform,
+        );
+        let [tm, tn, _] = self.tile.dimensions();
+        Ok(DenseDispatch {
+            binding,
+            uniform,
+            groups: [(cols as u32).div_ceil(tn), (rows as u32).div_ceil(tm)],
+        })
+    }
+
+    /// Same validated dimensions/parameters; only the private boundary buffers
+    /// change. Reuse the template's uniform rather than re-uploading it per call.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rebind(
+        &self,
+        device: &wgpu::Device,
+        template: &DenseDispatch,
+        input: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+        weight: &wgpu::Buffer,
+        bias: &wgpu::Buffer,
+        unused: &wgpu::Buffer,
+        validation: &wgpu::Buffer,
+    ) -> DenseDispatch {
+        DenseDispatch {
+            binding: self.bind_resources(
+                device,
+                input,
+                output,
+                weight,
+                bias,
+                unused,
+                validation,
+                &template.uniform,
+            ),
+            uniform: template.uniform.clone(),
+            groups: template.groups,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_resources(
+        &self,
+        device: &wgpu::Device,
+        input: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+        weight: &wgpu::Buffer,
+        bias: &wgpu::Buffer,
+        unused: &wgpu::Buffer,
+        validation: &wgpu::Buffer,
+        uniform: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        let resources = [
+            input, weight, output, bias, unused, unused, uniform, validation,
+        ];
+        let entries: Vec<_> = resources
+            .iter()
+            .enumerate()
+            .map(|(binding, buffer)| wgpu::BindGroupEntry {
+                binding: binding as u32,
+                resource: buffer.as_entire_binding(),
+            })
+            .collect();
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("dense.stage"),
+            layout: &self.layout,
+            entries: &entries,
+        })
+    }
+
+    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, dispatch: &DenseDispatch) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("dense.stage.pass"),
+            timestamp_writes: None,
+        });
+        self.encode_in_pass(&mut pass, dispatch);
+    }
+
+    pub(crate) fn encode_in_pass<'a>(
+        &'a self,
+        pass: &mut wgpu::ComputePass<'a>,
+        dispatch: &'a DenseDispatch,
+    ) {
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &dispatch.binding, &[]);
+        pass.dispatch_workgroups(dispatch.groups[0], dispatch.groups[1], 1);
+    }
+}
+
 pub struct ResidentDense {
     buffers: Vec<wgpu::Buffer>,
     validation: wgpu::Buffer,
-    bindings: Vec<wgpu::BindGroup>,
-    pipeline: wgpu::ComputePipeline,
+    bindings: Vec<DenseDispatch>,
+    kernel: DenseKernel,
     readbacks: runtime::ReadbackPool,
     input_layout: NdLayout,
     output_layout: NdLayout,
     shapes: Vec<MatmulShape>,
-    tile: MatmulTile,
     generation: u64,
     input_ready: bool,
     output_generation: Option<u64>,
@@ -202,7 +358,6 @@ impl ResidentDense {
         }
         let (shapes, output_layout) =
             validate_layers(&limits, &input_layout, layers, tile, kernel)?;
-        let rows = shapes[0].dimensions().0;
         let snapshot_len = output_layout
             .len()
             .checked_add(layers.len())
@@ -230,69 +385,35 @@ impl ResidentDense {
             layers.len(),
             storage | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         )?;
-        let layout = dense_layout(device, false);
-        let source = checked_dense_matmul_source(tile.dimensions(), kernel, accumulation)
-            .map_err(|_| MatmulError::UnsupportedKernelTile)?;
-        let pipeline = dense_pipeline(device, &layout, source);
+        let kernel = DenseKernel::new(device, tile, kernel, accumulation)?;
         let dummy = runtime::upload_slice(device, "dense.unused", &[0.0f32], storage)?;
         let mut bindings = Vec::with_capacity(layers.len());
         for (i, layer) in layers.iter().enumerate() {
             let weights = runtime::upload_slice(device, "dense.weights", &layer.weights, storage)?;
             let bias = runtime::upload_slice(device, "dense.bias", &layer.bias, storage)?;
-            let params = Uniforms {
-                rows: rows as u32,
-                cols: layer.cols as u32,
-                inner: layer.inner as u32,
-                flags: 1 | if layer.activation == DenseActivation::Gelu {
-                    4
-                } else {
-                    0
-                },
-                output_scale: 1.0,
-                validation_index: i as u32,
-                padding: [0; 2],
-            };
-            let uniform = runtime::upload_slice(
-                device,
-                "dense.params",
-                &[params],
-                wgpu::BufferUsages::UNIFORM,
-            )?;
             // The producer output IS the consumer input, not a device-to-device copy.
-            let resources = [
+            bindings.push(kernel.bind(
+                device,
+                shapes[i],
                 &buffers[i],
-                &weights,
                 &buffers[i + 1],
+                &weights,
                 &bias,
                 &dummy,
-                &dummy,
-                &uniform,
                 &validation,
-            ];
-            let entries: Vec<_> = resources
-                .iter()
-                .enumerate()
-                .map(|(binding, buffer)| wgpu::BindGroupEntry {
-                    binding: binding as u32,
-                    resource: buffer.as_entire_binding(),
-                })
-                .collect();
-            bindings.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("dense.stage"),
-                layout: &layout,
-                entries: &entries,
-            }));
+                i as u32,
+                layer.activation == DenseActivation::Gelu,
+            )?);
         }
         Ok(Self {
             buffers,
             validation,
             bindings,
-            pipeline,
+            kernel,
             readbacks,
             input_layout,
             output_layout,
             shapes,
-            tile,
             generation: 0,
             input_ready: false,
             output_generation: None,
@@ -383,16 +504,8 @@ impl ResidentDense {
         if let Some(input) = &self.input_source {
             encoder.copy_buffer_to_buffer(input.flags(), 0, &self.validation, 0, 4);
         }
-        let [tm, tn, _] = self.tile.dimensions();
-        for (shape, binding) in self.shapes.iter().zip(&self.bindings) {
-            let (rows, _, cols) = shape.dimensions();
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("dense.stage.pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, binding, &[]);
-            pass.dispatch_workgroups((cols as u32).div_ceil(tn), (rows as u32).div_ceil(tm), 1);
+        for binding in &self.bindings {
+            self.kernel.encode(&mut encoder, binding);
         }
         context.queue().submit(Some(encoder.finish()));
         self.output_generation = Some(self.generation);

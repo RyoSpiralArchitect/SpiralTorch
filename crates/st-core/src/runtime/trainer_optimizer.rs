@@ -90,7 +90,12 @@ impl TrainerOptimizerConfig {
             validate_positive_finite("real_learning_rate", value)?;
         }
         if let Some(value) = self.grad_clip_max_norm {
-            validate_positive_finite("grad_clip_max_norm", value)?;
+            st_kernel_contracts::gradient_clip::GlobalNormClip::new(value).map_err(|_| {
+                TrainerOptimizerConfigError::InvalidPositiveFinite {
+                    field: "grad_clip_max_norm",
+                    value,
+                }
+            })?;
         }
         Ok(())
     }

@@ -8,6 +8,8 @@ For shape-preserving GPU batching and fusion on this storage, see
 not a replacement device router or an automatic change to ordinary
 `Module::forward`. The same resident data can now enter and leave an existing
 `InferencePlan` without intermediate CPU tensor readback.
+The original model also accepts these handles through explicit
+[`Module::forward_resident` / Python `model(WgpuTensor)`](module_resident_forward.md).
 
 ```text
 Tensor / NdTensor -> explicit upload -> immutable GPU storage

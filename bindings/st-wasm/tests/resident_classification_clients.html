@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Shared Rust classification loss</title>
+<pre id="result" data-status="running">Classification learning</pre>
+<script type="module">
+import init,{CrossEntropyWithLogits,Sequential,WgpuTensorDevice} from "./module/spiraltorch_wasm.js";
+const report={schema:"spiraltorch.resident_classification_clients.v1",status:"error",cases:[]};
+const owned=new Set(), keep=x=>(owned.add(x),x), free=x=>{owned.delete(x);x.free();};
+const f32=x=>new Float32Array(x), check=(ok,s)=>{if(!ok)throw Error(s);};
+const near=(a,b)=>check(a.length===b.length&&a.every((v,i)=>Number.isFinite(v)&&Math.abs(v-b[i])<=2e-5+2e-4*Math.abs(b[i])),"values differ");
+const reject=async f=>{let caught=false;try{await f();}catch{caught=true;}check(caught,"invalid accepted");};
+async function read(t){const s=t.snapshot();try{return Array.from(await s.readValues());}finally{s.free();}}
+async function checkpoint(l){const s=l.parameterSnapshot();try{return keep(await s.readPlan());}finally{s.free();}}
+try {
+ await init();
+ for(const [policy,scale] of [["exact",1],["module_compatible",.25]]) for(const reduction of ["none","sum","mean"]) {
+  const model=keep(new Sequential());model.addScaler("logits",f32([0,0]));
+  const baseline=keep(model.inferencePlan([2,2,2])), learner=keep(await baseline.compileGraphLearnerWebGpu(policy));
+  report.adapter=learner.adapterInfo();check(report.adapter.backend==="BrowserWebGpu"&&report.adapter.device_type!=="Cpu","WebGPU required");
+  const device=keep(learner.tensorDevice()), x=keep(device.upload([2,2,2],f32(Array(8).fill(1))));
+  const target=keep(device.upload([2,2],f32([0,-100,0,0]))), objective=keep(new CrossEntropyWithLogits(reduction,-100n,.1));
+  learner.setInputTensor(x);
+  const held=[], expected=[0,0], rate=reduction==="mean"?.1:.1/3;
+  for(let i=0;i<32;i++){
+   const f=learner.forward(),p=f.predictionTensor(),pair=keep(objective.evaluateResident(p,target));
+   const seed=pair.predictionGradientTensor(),g=learner.backward(f,seed);learner.sgd(g,rate);
+   const probability=1/(1+Math.exp(expected[1]-expected[0]));
+   const loss=-.95*Math.log(probability)-.05*Math.log1p(-probability);
+   held.push([pair,keep(learner.updateSnapshot()),loss]);
+   expected[0]-=.1*scale*(probability-.95);expected[1]-=.1*scale*(1-probability-.05);
+   for(const h of [f,p,seed,g])h.free();
+  }
+  const before=await checkpoint(learner),f=learner.forward(),p=f.predictionTensor();
+  const invalid=device.upload([2,2],f32([0,.5,0,0])),bad=objective.evaluateResident(p,invalid),seed=bad.predictionGradientTensor(),g=learner.backward(f,seed);
+  learner.sgd(g,0);const rejected=keep(learner.updateSnapshot());await reject(()=>rejected.read());
+  check((await checkpoint(learner)).toJson()===before.toJson(),"invalid loss changed parameters");
+  for(const h of [f,p,invalid,bad,seed,g])h.free();
+  const fresh=learner.forward(),prediction=fresh.predictionTensor(),pair=objective.evaluateResident(prediction,target),goodSeed=pair.predictionGradientTensor(),good=learner.backward(fresh,goodSeed);
+  learner.sgd(good,0);const recovery=keep(learner.updateSnapshot());check(await recovery.read()===34n,"recovery differs");
+  const updated=await checkpoint(learner);check(baseline.applyParametersTo(model,updated)===1,"handoff differs");
+  const output=keep(model.forward(x));near(await read(output),Array.from({length:8},(_,i)=>expected[i%2]));
+  const value=pair.lossTensor(), final=(await read(value)).reduce((a,b)=>a+b,0)/(reduction==="mean"?1:3);check(final<Math.log(2),"classification did not learn");
+  for(const h of [fresh,prediction,pair,goodSeed,good,value])h.free();
+  free(learner);free(model);free(device);free(objective);
+  for(let i=0;i<held.length;i++){
+   const [pair,receipt,loss]=held[i],v=pair.lossTensor();check(await receipt.read()===BigInt(i+1),"retained receipt differs");
+   near(await read(v),reduction==="none"?[loss,0,loss,loss]:[loss*(reduction==="mean"?1:3)]);v.free();free(pair);free(receipt);
+  }
+  report.cases.push({policy,reduction,updates:32,rejected_update:33,recovered_update:34,final_loss:final});
+ }
+ const d=keep(await WgpuTensorDevice.create()),huge=keep(d.upload([1,2],f32([3.402823466e38,-3.402823466e38])));
+ for(const [id,label] of [[16777217n,16777216],[9223372036854775807n,2**63]]){
+  const c=keep(new CrossEntropyWithLogits("sum",id)),y=keep(d.upload([1],f32([label]))),pair=keep(c.evaluateResident(huge,y));
+  for(const t of [keep(pair.lossTensor()),keep(pair.predictionGradientTensor())])await reject(()=>read(t));
+ }
+ await reject(()=>new CrossEntropyWithLogits("invalid"));await reject(()=>new CrossEntropyWithLogits("mean",-100n,NaN));
+ for(const id of [2n**64n-100n,-(2n**63n)-1n,-100])await reject(()=>new CrossEntropyWithLogits("mean",id));
+ report.exact_ignore_transport=true;report.status="passed";
+}catch(error){report.error=String(error.stack||error);}
+finally{for(const h of owned)h.free();owned.clear();}
+const element=document.querySelector("#result");element.textContent=JSON.stringify(report);element.dataset.status=report.status;
+</script>

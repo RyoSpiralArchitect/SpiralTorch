@@ -52,6 +52,47 @@ tensors with the **whole transaction's guard**, even if a later gain fails.
 
 ## Compatibility
 
+For custom losses and repeated band/cotangent replay, use the separate
+[loss-independent resident autograd compiler](resident_graph_autograd.md).
+It shares forward/VJP kernels but does not run MSE, normalize gain gradients,
+accumulate, or update parameters.
+
+### Opt-In Pointwise Fusion
+
+`plan.fuse_pointwise()?` (Rust), `plan.fuse_pointwise()` (Python), and
+`plan.fusePointwise()` (WASM) return a **new** portable plan. For example,
+`Scaler -> ReLU -> Scaler` becomes one checked pointwise forward dispatch and
+one fused VJP contribution dispatch, followed by the same deterministic gain
+reductions. Intermediate activation buffers/copies and separate VJP passes are
+removed. There is no intermediate host readback in either resident route.
+
+The transform lives in Rust, not in either client's math. It preserves operation
+order, parameter IDs/roles/values, N-D shapes and both gradient policies. It
+retains finite checks for each forward/adjoint intermediate and the all-or-none
+update. Stage numbering and parameter **owner stages** refer to the new fused
+plan. The original plan, imported JSON and source Module stay untouched.
+
+Fusion stops at Linear, a later stage's explicit `rhs=0` residual, 256 steps, or
+more than three inputs (activation plus two parameters). This input budget fits
+the portable training binding floor; existing larger stages are not split.
+Direct Rust `GraphDefinition::fuse_pointwise(max_inputs)` allows an explicit
+budget of 1..=16; actual device limits still apply. Dense-only legacy plans keep
+their original representation and specialized fast path.
+
+Compile the returned plan with the existing forward or training compiler:
+
+```python
+optimized = model.inference_plan([2, 5, 4]).fuse_pointwise()
+graph = optimized.compile_graph_training_wgpu(gradient_policy="exact")
+```
+
+This is an explicit optimization, not a new default or a universal speed claim.
+The training A/B harness accepts `--graph --fuse-pointwise`; the browser harness
+accepts `graph standard fuse-pointwise` (or `wide`). Both retain original and
+executed plans. Validation checks the ordered operations and operand identities
+and compares losses, gradients and updated parameters against unfused/eager
+Torch trajectories before interpreting timing.
+
 The specialized `compile_wgpu` / `compile_training_wgpu` Linear/GELU fast paths
 are unchanged. They reject rich graphs instead of silently dropping Scaler/ReLU.
 Legacy `parameter_snapshots()` exposes Linear weight/bias pairs only; use
@@ -71,10 +112,12 @@ requesting a device. CPU-only builds transport plans but explicitly reject GPU
 execution. Older published wheels may not have the graph client APIs.
 
 This does not change `pure::Tensor` storage, generic autograd, `ModuleTrainer` or
-GNN execution. General forward-only graph compilation and production resident
-N-D Tensor handles remain follow-up work. The clients upload a host batch once;
-intermediate values and subsequent training steps stay on the GPU. Rust's
-`upload_batch_tensors` interface above is not yet a Python/JavaScript API.
+GNN execution. [Forward-only graphs and resident N-D tensor handles](resident_graph_forward.md)
+are also available in Rust, Python and WASM. Python's `upload_batch_tensors` and
+JavaScript's `uploadBatchTensors` admit those same-device handles without host
+readback. The clients can also upload a host batch once; intermediate values and
+subsequent training steps stay on the GPU. Frozen plans do not follow live host
+model updates, and the resident optimizer does not modify the source Module.
 
 ## Python And Browser Clients
 
@@ -146,10 +189,26 @@ pool or shared mutable scratch on `PointwiseVjpPlan`: standalone `run()` calls s
 produce independent results. The graph retains the extra scratch until dropped.
 Command encoders, queue staging and requested snapshots can still allocate.
 
+On Metal, all mixed-graph forward dispatches share one compute pass. Loss,
+VJP/unbroadcast, validation-copy and prepare/vote/commit boundaries remain
+unchanged, as does specialized dense training. BrowserWebGpu retains its
+one-forward-dispatch-per-pass schedule: paired trials were essentially flat for
+immediate loss reads and could regress for deferred reads. Other backends also
+keep their old schedule until measured. This changes encoding only, not
+shader math, parameter ownership, intermediate checks or optimizer semantics.
+Validation includes masked overflow at each of eight alternating dense/gain
+positions, both gradient policies and zero/nonzero learning rates. Rejected
+captures retain their guards after recovery and graph drop; no parameter may
+partially commit.
+
 The shared `resident_training_bench` native/browser worker accepts `graph: true`
 in its configuration. `tools/bench_resident_training_vs_torch.py --graph` and the
 optional final `graph` argument of `tools/bench_resident_training_browser.cjs` run
 the same fixed nine mixed-graph workloads, including more than 256 reduction rows.
+Use `--matrix wide` and the browser runner's final `wide` argument for an additional
+fixed nine-case matrix: `[4,64,64]/8`, `[2,128,128]/8`, `[2,64,256]/4` (shape/depth),
+again seeds 17/29/43 and eight updates. The standard matrix is unchanged; neither
+matrix is an application-quality test or automatically labels a case compute-bound.
 Freeze a clean harness-only baseline and a clean optimized revision before building
 both products. The harness validates source identity and numerical trajectories,
 rotates lane order, and retains eight measured blocks after two warmups per cadence.
@@ -160,6 +219,70 @@ not a claim against the fastest available PyTorch configuration.
 
 See the [source-bound workspace comparison](../benchmarks/results/2026-09-10-resident-graph-workspace/README.md)
 for all measured cases, including regressions and the remaining PyTorch gap.
+The [forward-pass study](../benchmarks/results/2026-09-10-graph-training-forward-pass/README.md)
+retains both standard/wide matrices and the non-adopted browser trial.
+
+## Diagnostic Pass Profiling
+
+Rust's `InferencePlan::profile_graph_training_wgpu(policy, tile, kernel,
+accumulation).await` creates a **private timestamp-capable device** and returns
+`ProfiledGraphTraining`. This is an opt-in diagnostic workspace, not a replacement
+for the default runtime. Upload a host batch, call `step_profiled(rate)`, then
+`read()` (native) or `read_async().await` (WASM) on its owning receipt. The result's
+`report()` exposes the Rust-owned `spiraltorch.graph_training_gpu_profile.v1`
+schema. This API is not yet exposed by the production Python/WASM binding classes;
+the shared browser benchmark example calls the Rust API directly.
+
+Profiling calls the **same step encoder** as ordinary training. It neither splits
+nor fuses passes: Metal's forward is `forward_mixed`; `dense_backward` and
+`update` may contain multiple dispatches and are not isolated GEMM timings.
+Pointwise contribution and each unbroadcast pass remain distinct. Copies are
+untimed; phase sums exclude them, CPU encoding, uploads, query resolution and
+readback. GPU span includes inter-pass/copy gaps. Instrumentation can perturb
+execution, so use the separate end-to-end benchmark for performance decisions.
+Unsupported timestamp features are errors, never replaced with a CPU clock.
+Absolute ticks and counters are decimal strings; zero/quantized browser intervals
+are retained rather than discarded.
+Query resolution occurs only after the training submission completes, outside
+the recorded pass interval. This avoids unwritten final-pass samples observed
+with same-command-buffer resolution on native Metal. A raw `0/0` pair remains
+ambiguous: `timing_complete=false`, its phase total and GPU span are null, never
+a claim that the update cost was zero. Equal **nonzero** ticks remain valid
+quantized zero intervals. Browser full-state captures are streamed to a hash-bound
+`.cases.jsonl` artifact instead of materialized in the page's DOM.
+
+Until the profile is read and validated, new steps, uploads and snapshots fail
+with `PendingProfile`. A decoded numerical rejection proves rollback and permits
+an explicit new attempt. An abandoned/cancelled receipt or GPU/readback failure
+quarantines that workspace: construct a new one rather than silently retrying.
+An owning receipt remains readable after the profiler is dropped. No device or
+resident tensor handle escapes the private workspace.
+
+The shared native/browser benchmark's profiling fixture compares twelve
+sequential updates from identical weights on the profiled workspace, an
+uninstrumented timestamp-capable control, and an ordinary device. All losses and
+final predictions, gradients and parameters are compared; three samples are
+warmups and nine retained. It also checks pending/cancellation, rollback and
+recovery. These are diagnostic synthetic trajectories, not long-run training.
+
+After freezing a clean source and building the existing benchmark examples:
+
+```bash
+python -I tools/profile_resident_graph_training.py \
+  --binary /path/to/resident_training_bench --source SOURCE_SHA --output /tmp/new-profile.json
+node tools/test_resident_browser.cjs /path/to/bench-module /path/to/chromium \
+  /tmp/new-browser-profile.json '' '' '' '' nn-graph-training-profile
+```
+
+The matrix covers both standard/wide recipes at seeds 17/29/43 with exact VJPs,
+plus the smallest recipe with module-compatible gain scaling at all three seeds.
+The fixture rejects reported CPU adapters and checks adapter metadata equality;
+browser physical GPU identity and background contention still require independent
+evidence.
+
+See the [retained profiling and uninstrumented regression results](../benchmarks/results/2026-09-10-graph-training-gpu-profile/README.md).
+This includes the initial missing samples, browser collector crash and pinned
+WGPU completion stub, rather than treating those runs as successful timings.
 
 ## Reproduce
 

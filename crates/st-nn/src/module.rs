@@ -33,7 +33,7 @@ use st_core::runtime::trainer_optimizer::TrainerParameterOptimizerState;
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
     topos::OpenCartesianTopos, AmegaHypergrad, AmegaRealgrad, ComplexTensor, LanguageWaveEncoder,
-    PackedB, PureResult, Tensor, TensorError, Tile,
+    PackedB, PureResult, Tensor, TensorContentStamp, TensorError, Tile,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -46,8 +46,14 @@ pub struct Parameter {
     gradient: Option<Tensor>,
     hypergrad: Option<AmegaHypergrad>,
     realgrad: Option<AmegaRealgrad>,
-    packed_matmul: RefCell<Option<PackedB>>,
-    packed_matmul_transpose: RefCell<Option<PackedB>>,
+    packed_matmul: RefCell<Option<ParameterPack>>,
+    packed_matmul_transpose: RefCell<Option<ParameterPack>>,
+    finite_stamp: RefCell<Option<TensorContentStamp>>,
+}
+
+struct ParameterPack {
+    pack: PackedB,
+    stamp: TensorContentStamp,
 }
 
 pub(crate) struct PreparedParameterOptimizerState {
@@ -83,6 +89,7 @@ impl Parameter {
             realgrad: None,
             packed_matmul: RefCell::new(None),
             packed_matmul_transpose: RefCell::new(None),
+            finite_stamp: RefCell::new(None),
         }
     }
 
@@ -103,7 +110,7 @@ impl Parameter {
 
     /// Provides a mutable view into the underlying tensor value.
     pub fn value_mut(&mut self) -> &mut Tensor {
-        self.invalidate_matmul_pack();
+        self.invalidate_value_caches();
         &mut self.value
     }
 
@@ -180,7 +187,7 @@ impl Parameter {
         self.gradient = state.gradient;
         self.hypergrad = state.hypergrad;
         self.realgrad = state.realgrad;
-        self.invalidate_matmul_pack();
+        self.invalidate_value_caches();
     }
 
     /// Attaches a hypergrad tape to the parameter.
@@ -426,6 +433,7 @@ impl Parameter {
     /// the supplied fallback learning rate.
     pub fn apply_step(&mut self, fallback_lr: f32) -> PureResult<()> {
         Self::validate_fallback_lr(fallback_lr)?;
+        self.invalidate_value_caches();
         let mut applied = false;
         if let Some(tape) = self.hypergrad.as_mut() {
             let backend = current_tensor_util_backend_for_values(self.value.data().len());
@@ -448,7 +456,6 @@ impl Parameter {
                 }
             }
         }
-        self.invalidate_matmul_pack();
         Ok(())
     }
 
@@ -672,27 +679,55 @@ impl Parameter {
 
     /// Ensures a prepacked representation of the parameter is available for matmul.
     pub fn ensure_matmul_pack(&self) -> PureResult<PackedB> {
-        if let Some(existing) = self.packed_matmul.borrow().clone() {
-            return Ok(existing);
+        if let Some(existing) = self.packed_matmul.borrow().as_ref() {
+            if existing.stamp.matches(self.value()) {
+                return Ok(existing.pack.clone());
+            }
         }
         let pack = PackedB::from_tensor(self.value(), Tile::col_major())?;
-        *self.packed_matmul.borrow_mut() = Some(pack.clone());
+        *self.packed_matmul.borrow_mut() = self.value.content_stamp().map(|stamp| ParameterPack {
+            pack: pack.clone(),
+            stamp,
+        });
         Ok(pack)
     }
 
     /// Ensures a prepacked representation of the parameter transpose is available for matmul.
     pub fn ensure_matmul_transpose_pack(&self) -> PureResult<PackedB> {
-        if let Some(existing) = self.packed_matmul_transpose.borrow().clone() {
-            return Ok(existing);
+        if let Some(existing) = self.packed_matmul_transpose.borrow().as_ref() {
+            if existing.stamp.matches(self.value()) {
+                return Ok(existing.pack.clone());
+            }
         }
         let pack = PackedB::from_tensor_transpose(self.value(), Tile::col_major())?;
-        *self.packed_matmul_transpose.borrow_mut() = Some(pack.clone());
+        *self.packed_matmul_transpose.borrow_mut() =
+            self.value.content_stamp().map(|stamp| ParameterPack {
+                pack: pack.clone(),
+                stamp,
+            });
         Ok(pack)
     }
 
-    fn invalidate_matmul_pack(&self) {
+    pub(crate) fn validate_finite(&self, label: &'static str) -> PureResult<()> {
+        let mut cached = self.finite_stamp.borrow_mut();
+        if cached
+            .as_ref()
+            .is_some_and(|stamp| stamp.matches(&self.value))
+        {
+            return Ok(());
+        }
+        *cached = None;
+        if let Some(&value) = self.value.data().iter().find(|value| !value.is_finite()) {
+            return Err(TensorError::NonFiniteValue { label, value });
+        }
+        *cached = self.value.content_stamp();
+        Ok(())
+    }
+
+    fn invalidate_value_caches(&self) {
         self.packed_matmul.borrow_mut().take();
         self.packed_matmul_transpose.borrow_mut().take();
+        self.finite_stamp.borrow_mut().take();
     }
 
     /// Replaces the parameter value with the provided tensor.
@@ -700,6 +735,16 @@ impl Parameter {
         self.assert_shape(value)?;
         *self.value_mut() = value.clone();
         Ok(())
+    }
+
+    /// Commit an entirely prevalidated resident handoff, including pack invalidation.
+    pub(crate) fn commit_resident_value(&mut self, value: Tensor, reset_optimizer: bool) {
+        *self.value_mut() = value;
+        if reset_optimizer {
+            self.gradient = None;
+            self.hypergrad = None;
+            self.realgrad = None;
+        }
     }
 }
 
@@ -727,14 +772,75 @@ fn parameter_value_fingerprint(name: &str, value: &Tensor) -> String {
 /// High-level module trait inspired by PyTorch's `nn.Module` but expressed in
 /// pure Rust so it can be used from WebGPU, HIP, or CPU flows alike.
 pub trait Module {
-    /// Explicit, snapshot-based inference lowering. Unknown modules cannot
-    /// silently execute on CPU inside a resident GPU plan.
+    /// An explicit GPU-input/GPU-output forward on the original Module. Unknown
+    /// modules reject instead of reading back or running their CPU implementation.
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        _input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        Err(crate::resident::InferenceError::UnsupportedModule(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
+    /// Explicit terminal forward. Implementations submit ordinary GPU execution
+    /// first, then capture the output; reading the returned snapshot is explicit.
+    /// Unknown modules reject rather than emulate this through hidden readback.
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        _input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        Err(crate::resident::InferenceError::UnsupportedModule(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        None
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {}
+
+    /// Explicit parameter ownership in inference-lowering slot order. Every
+    /// parameter must appear once, with its graph role and a unique name. The
+    /// immutable/mutable visitors must expose these same actual parameters.
+    /// Opt in explicitly; inference support alone never guesses this mapping.
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        Err(crate::resident::InferenceError::UnsupportedModule(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
+    /// Explicit inference descriptors. Plans freeze their values; descriptors
+    /// may share live parameters. Unknown modules never silently run on CPU.
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
         Err(crate::resident::InferenceError::UnsupportedModule(
             std::any::type_name::<Self>(),
         ))
+    }
+
+    /// Append the same descriptors as `inference_ops`, without a temporary
+    /// vector per child. Optional companion optimization, not a second lowering.
+    /// Implementations must leave the existing prefix intact, including on error.
+    /// Callers discard the appended suffix on error. The default preserves
+    /// existing custom modules that implement only `inference_ops`.
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        operations.extend(self.inference_ops()?);
+        Ok(())
     }
 
     /// Runs a forward pass.
@@ -933,6 +1039,9 @@ pub trait Module {
         })
     }
 }
+
+#[cfg(test)]
+mod content_stamp_tests;
 
 #[cfg(test)]
 mod tests {

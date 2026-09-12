@@ -37,6 +37,10 @@ target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invokin
 
 ## Examples
 
+- [Original NN model forwarding](../../docs/module_resident_forward.md):
+  browser `Sequential` wraps the real Rust Module. `forward(WgpuTensor)` returns
+  a resident output, reuses the graph, and follows checked training weight handoffs.
+
 - [Resident graph training](../../docs/resident_graph_training.md#python-and-browser-clients):
   `InferencePlan.compileGraphTrainingWebGpu("exact")` executes mixed Scaler,
   Relu, Linear and Gelu graphs through the same Rust core as Python. Owning

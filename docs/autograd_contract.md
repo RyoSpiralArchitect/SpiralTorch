@@ -185,8 +185,10 @@ the caller's responsibility.
 - Direct Tensor backward methods take the original logits and a seed matching
   the loss output shape. Autograd owns labels/configuration and delegates these
   VJPs to the same kernels; clients do not implement another derivative.
-- These new kernels are explicitly CPU, not WGPU kernels or a claim of GPU
-  residency. `st-nn::CrossEntropyWithLogits` rejects strict WGPU execution.
+- These host Tensor/autograd kernels remain CPU implementations.
+  `st-nn::CrossEntropyWithLogits` rejects strict WGPU host Tensor execution;
+  its explicit [resident Loss method](module_resident_classification.md) accepts
+  GPU logits/labels and keeps the value and prediction cotangent on GPU.
   Allowed CPU fallbacks retain the requested WGPU route in adapter metadata.
 - Kernel notifications from reverse mode are deferred until the graph lock is
   released, including when validation fails. Completed kernel events are not

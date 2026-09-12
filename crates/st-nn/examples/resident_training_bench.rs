@@ -26,6 +26,17 @@ fn main() -> fixture::Result<()> {
             cadence: fixture::Cadence,
             capture: bool,
         },
+        Profile {
+            policy: String,
+        },
+        Learn {
+            cadence: fixture::Cadence,
+            capture: bool,
+        },
+        LearnHostProfile {
+            cadence: fixture::Cadence,
+            capture: bool,
+        },
     }
     let identity = json!({"schema":"spiraltorch.native_build_identity.v1",
         "build_fingerprint":st_core::build_fingerprint(),
@@ -57,6 +68,24 @@ fn main() -> fixture::Result<()> {
                     .as_ref()
                     .ok_or("initialize a graph first")?
                     .sample(cadence, capture, now),
+            )?,
+            Request::Profile { policy } => futures::executor::block_on(
+                benchmark
+                    .as_ref()
+                    .ok_or("initialize a graph first")?
+                    .profile(policy.parse()?),
+            )?,
+            Request::Learn { cadence, capture } => futures::executor::block_on(
+                benchmark
+                    .as_ref()
+                    .ok_or("initialize a graph first")?
+                    .learn(cadence, capture, now),
+            )?,
+            Request::LearnHostProfile { cadence, capture } => futures::executor::block_on(
+                benchmark
+                    .as_ref()
+                    .ok_or("initialize a graph first")?
+                    .learn_host_profile(cadence, capture, now),
             )?,
         };
         println!("{result}");

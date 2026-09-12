@@ -5,6 +5,96 @@ use st_kernel_contracts::{
 };
 
 impl InferencePlan {
+    /// Compile separate forward/VJP phases with explicit transactional SGD.
+    /// Custom objectives and weighted VJP terms stay resident; no ModuleTrainer
+    /// policy, automatic loss or implicit accumulation is substituted.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_learner_wgpu(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        policy: GraphGradientPolicy,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphLearner, InferenceError>
+    {
+        self.compile_graph_learner_wgpu_with_options(
+            runtime,
+            policy,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_learner_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        policy: GraphGradientPolicy,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphLearner, InferenceError>
+    {
+        Ok(
+            st_backend_wgpu::resident_training::graph::ResidentGraphLearner::new(
+                runtime,
+                self.graph_definition()?,
+                policy,
+                tile,
+                kernel,
+                accumulation,
+            )?,
+        )
+    }
+
+    /// Compile a frozen graph with separate forward and exact, arbitrary-seed
+    /// backward. No MSE, optimizer, ModuleTrainer policy or CPU fallback is added.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_autograd_wgpu(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphAutograd, InferenceError>
+    {
+        self.compile_graph_autograd_wgpu_with_options(
+            runtime,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_autograd_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ResidentGraphAutograd, InferenceError>
+    {
+        Ok(
+            st_backend_wgpu::resident_training::graph::ResidentGraphAutograd::new(
+                runtime,
+                self.graph_definition()?,
+                tile,
+                kernel,
+                accumulation,
+            )?,
+        )
+    }
+
+    /// Opt in to checked forward/VJP fusion without changing this frozen plan.
+    /// Up to three inputs fit the portable graph-training binding floor (eight
+    /// storage bindings including VJP scratch/guards). Noncomposable residuals
+    /// and resource budgets retain their stage boundary. No CPU fallback occurs.
+    /// Diagnostics on the returned plan use its fused stage numbering; parameter
+    /// IDs/roles/shapes and the explicit gradient policy keep their meaning.
+    pub fn fuse_pointwise(&self) -> Result<Self, InferenceError> {
+        match &self.graph {
+            Some(graph) => Self::from_graph_definition(graph.fuse_pointwise(3)?),
+            None => Ok(self.clone()),
+        }
+    }
+
     pub fn is_dense(&self) -> bool {
         self.graph.is_none()
     }
@@ -174,6 +264,38 @@ impl InferencePlan {
         Self::from_graph_definition(self.graph_definition()?.with_values(values)?)
     }
 
+    /// Forward-only compilation of either portable plan version, with resident
+    /// N-D input/output and no training tape or optimizer allocation.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_wgpu(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+    ) -> Result<st_backend_wgpu::resident_graph::ResidentGraph, InferenceError> {
+        self.compile_graph_wgpu_with_options(
+            runtime,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn compile_graph_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_graph::ResidentGraph, InferenceError> {
+        Ok(st_backend_wgpu::resident_graph::ResidentGraph::new(
+            runtime,
+            self.graph_definition()?,
+            tile,
+            kernel,
+            accumulation,
+        )?)
+    }
+
     /// Opt-in general graph training. Scaler policy must be chosen explicitly;
     /// ordinary Module::backward and the specialized dense path are unchanged.
     #[cfg(feature = "wgpu")]
@@ -213,6 +335,29 @@ impl InferencePlan {
             )?,
         )
     }
+
+    /// Diagnostic-only compilation on a private timestamp-capable device. Does
+    /// not replace the default runtime or change the ordinary training schedule.
+    #[cfg(feature = "wgpu")]
+    pub async fn profile_graph_training_wgpu(
+        &self,
+        policy: GraphGradientPolicy,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<st_backend_wgpu::resident_training::graph::ProfiledGraphTraining, InferenceError>
+    {
+        Ok(
+            st_backend_wgpu::resident_training::graph::ProfiledGraphTraining::request(
+                self.graph_definition()?,
+                policy,
+                tile,
+                kernel,
+                accumulation,
+            )
+            .await?,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -222,6 +367,51 @@ mod tests {
         layers::{Gelu, Relu, Scaler},
         Linear, Sequential,
     };
+    #[test]
+    fn pointwise_fusion_is_explicit_portable_and_keeps_dense_fast_path() {
+        let mut model = Sequential::new();
+        model.push(Scaler::new("first", 4).unwrap());
+        model.push(Relu::new());
+        model.push(Scaler::new("second", 4).unwrap());
+        model.push(Gelu::new());
+        model.push(Linear::new("linear", 4, 3).unwrap());
+        model.push(Gelu::new());
+        model.push(Relu::new());
+        model.push(Scaler::new("output", 3).unwrap());
+        let plan =
+            InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 5, 4]).unwrap()).unwrap();
+        let original = plan.to_json().unwrap();
+        let fused = plan.fuse_pointwise().unwrap();
+        assert_eq!((plan.stage_count(), fused.stage_count()), (7, 3));
+        assert_eq!(
+            fused.source_operation_count(),
+            plan.source_operation_count()
+        );
+        assert_eq!(plan.to_json().unwrap(), original);
+        let graph = fused.graph_definition().unwrap();
+        assert_eq!(graph.parameter_owners(), &[0, 0, 1, 1, 2]);
+        assert_eq!(fused.output_layout(), plan.output_layout());
+        let portable = fused.to_json().unwrap();
+        assert_eq!(
+            InferencePlan::from_json(&portable)
+                .unwrap()
+                .to_json()
+                .unwrap(),
+            portable
+        );
+        assert_eq!(fused.fuse_pointwise().unwrap().to_json().unwrap(), portable);
+        let dense = InferencePlan::from_module(
+            &Linear::new("dense", 4, 3).unwrap(),
+            NdLayout::contiguous(&[4]).unwrap(),
+        )
+        .unwrap();
+        assert!(dense.fuse_pointwise().unwrap().is_dense());
+        assert_eq!(
+            dense.fuse_pointwise().unwrap().to_json().unwrap(),
+            dense.to_json().unwrap()
+        );
+    }
+
     #[test]
     fn existing_scaler_relu_lower_with_owned_parameters_and_no_silent_dense_downgrade() {
         assert!(InferencePlan::from_module(

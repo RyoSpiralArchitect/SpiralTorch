@@ -47,14 +47,32 @@ function checkRankContract(types, label) {
 
 const shipped = fs.readFileSync(path.join(__dirname, "../types/spiraltorch-wasm.d.ts"), "utf8");
 function checkNnContract(types, label) {
-  const get = name => {
+  const get = (name, constructible = false, constructor = /^\s+constructor\(\);$/m) => {
     const declaration = types.match(new RegExp("^( *)export class " + name + " \\{[\\s\\S]*?^\\1\\}", "m"))?.[0];
     assert.ok(declaration, label + " must export " + name);
-    assert.match(declaration, /private constructor\(\)/);
+    assert.match(declaration, constructible ? constructor : /private constructor\(\)/);
     return declaration;
   };
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
+  const module = get("Sequential", true), cache = get("ResidentForwardStats");
+  const mse = get("MeanSquaredError", true), objective = get("ResidentLoss");
+  const ce = get("CrossEntropyWithLogits", true,
+    /^\s+constructor\(reduction\?: string \| null, ignore_index\?: bigint \| null, label_smoothing\?: number \| null\);$/m);
+  assert.match(ce, /evaluateResident\(prediction: WgpuTensor, target: WgpuTensor\): ResidentLoss/);
+  assert.match(ce, /ignore_index\?: bigint \| null/);
+  assert.match(mse, /evaluateResident\(prediction: WgpuTensor, target: WgpuTensor\): ResidentLoss/);
+  assert.match(objective, /lossTensor\(\): WgpuTensor/);
+  assert.match(objective, /predictionGradientTensor\(\): WgpuTensor/);
+  assert.match(module, /forwardSnapshot\(input: WgpuTensor\): WgpuTensorSnapshot/);
+  assert.match(module, /forward\(input: WgpuTensor\): WgpuTensor/);
+  assert.match(module, /inferencePlan\(shape: (?:Array<any>|number\[\])\): InferencePlan/);
+  assert.match(module, /residentCacheInfo\(\): ResidentForwardStats/);
+  assert.match(module, /clearResidentCache\(\): void/);
+  assert.match(plan, /applyParametersTo\(module: Sequential, updated: InferencePlan, optimizer_state\?: string(?: \| null)?\): number/);
+  for (const name of ["compilations", "cacheHits", "submittedForwards"])
+    assert.match(cache, new RegExp("readonly " + name + ": bigint"));
   assert.match(plan, /static fromJson\(payload: string, max_bytes\?: number(?: \| null)?\): InferencePlan/);
+  assert.match(plan, /fusePointwise\(\): InferencePlan/);
   assert.match(plan, /compileWebGpu\([^\n]*\): Promise<ResidentInference>/);
   for (const declaration of [plan, gpu]) {
     assert.match(declaration, /readonly inputShape: Uint32Array/);
@@ -120,6 +138,68 @@ function checkNnContract(types, label) {
   for(const method of ["predictionValues","inputGradientValues"])
     assert.match(graphState, new RegExp(method+"\\(\\): Float32Array"));
   assert.match(graphState, /toPlan\(\): InferencePlan/);
+  assert.match(plan, /compileGraphWebGpu\([^\n]*\): Promise<ResidentGraphInference>/);
+  assert.match(plan, /compileGraphAutogradWebGpu\([^\n]*\): Promise<ResidentGraphAutograd>/);
+  const autograd=get("ResidentGraphAutograd"), token=get("GraphForward"), gradients=get("GraphGradients");
+  assert.match(autograd, /forward\(\): GraphForward/);
+  assert.match(autograd, /backward\(forward: GraphForward, cotangent: WgpuTensor\): GraphGradients/);
+  assert.match(autograd, /readonly submittedBackwards: bigint/);
+  assert.match(token, /predictionTensor\(\): WgpuTensor/);
+  assert.match(gradients, /inputGradientTensor\(\): WgpuTensor/);
+  assert.match(gradients, /parameterGradientTensor\(index: number\): WgpuTensor/);
+  assert.match(plan, /compileGraphLearnerWebGpu\(gradient_policy: string[^\n]*\): Promise<ResidentGraphLearner>/);
+  const learner=get("ResidentGraphLearner"), batch=get("GraphGradientBatch", true), update=get("GraphUpdateSnapshot");
+  assert.match(learner, /backward\(forward: GraphForward, cotangent: WgpuTensor\): GraphGradients/);
+  assert.match(learner, /sgdWeighted\(batch: GraphGradientBatch, rate: number\): bigint/);
+  assert.match(learner, /readonly gradClipMaxNorm: number \| undefined/);
+  assert.match(learner, /setGradClipMaxNorm\(max_norm: number\): void/);
+  assert.match(learner, /clearGradClip\(\): void/);
+  assert.match(learner, /readonly momentumDamping: number \| undefined/);
+  assert.match(learner, /setMomentumDamping\(damping: number\): void/);
+  assert.match(learner, /clearMomentum\(\): void/);
+  assert.match(learner, /resetMomentum\(\): void/);
+  assert.match(learner, /momentumTensors\(\): WgpuTensor\[\]/);
+  const accumulator = get("GraphGradientAccumulator");
+  assert.match(learner, /gradientAccumulator\(\): GraphGradientAccumulator/);
+  assert.match(learner, /zeroAccumulator\(accumulator: GraphGradientAccumulator\): void/);
+  assert.match(learner, /accumulate\(accumulator: GraphGradientAccumulator, gradients: GraphGradients, weight: number\): bigint/);
+  assert.match(learner, /sgdAccumulated\(accumulator: GraphGradientAccumulator, rate: number\): bigint/);
+  assert.match(accumulator, /readonly length: bigint/);
+  assert.match(accumulator, /readonly parameterGeneration: bigint/);
+  assert.match(accumulator, /parameterGradientTensors\(\): WgpuTensor\[\]/);
+  assert.match(learner, /sgd\(gradients: GraphGradients, rate: number\): bigint/);
+  assert.match(learner, /readonly submittedUpdates: bigint/);
+  assert.match(learner, /updateSnapshot\(\): GraphUpdateSnapshot/);
+  assert.match(batch, /constructor\(\)/);
+  assert.match(batch, /add\(gradients: GraphGradients, weight: number\): void/);
+  assert.match(batch, /readonly length: number/);
+  assert.match(update, /read\(\): Promise<bigint>/);
+  for (const name of ["inputGeneration", "submittedForward", "submittedUpdate"])
+    assert.match(update, new RegExp("readonly "+name+": bigint"));
+  const forward=get("ResidentGraphInference"), forwardSnapshot=get("GraphInferenceSnapshot"),
+    tensor=get("WgpuTensor"), tensorDevice=get("WgpuTensorDevice"), tensorSnapshot=get("WgpuTensorSnapshot");
+  assert.match(forward, /setInputTensor\(input: WgpuTensor\): void/);
+  assert.match(forward, /forwardTensor\(input: WgpuTensor\): WgpuTensor/);
+  assert.match(forward, /forwardTensorSnapshot\(input: WgpuTensor\): WgpuTensorSnapshot/);
+  assert.match(forward, /outputTensor\(\): WgpuTensor/);
+  assert.match(forward, /tensorDevice\(\): WgpuTensorDevice/);
+  assert.match(forward, /snapshot\(\): GraphInferenceSnapshot/);
+  assert.match(forward, /readonly submittedDispatches: bigint/);
+  assert.match(forwardSnapshot, /readonly submittedDispatch: bigint/);
+  for (const value of [forwardSnapshot,tensorSnapshot]) assert.match(value, /readValues\(\): Promise<Float32Array>/);
+  assert.match(tensorDevice, /create\(\): Promise<WgpuTensorDevice>/);
+  assert.match(tensorDevice, /upload\(shape: number\[\], data: Float32Array\): WgpuTensor/);
+  assert.match(get("WgpuPointwiseInputs", true), /compile\(steps: string\): WgpuPointwisePlan/);
+  assert.match(get("WgpuPointwiseInputs", true), /set\(slot: number, tensor: WgpuTensor\): void/);
+  assert.match(get("WgpuPointwisePlan"), /run\(inputs: WgpuPointwiseInputs, execution: string\): WgpuTensor/);
+  assert.match(tensor, /readonly strides: Uint32Array/);
+  assert.match(tensor, /narrow\(axis: number, start: number, length: number\): WgpuTensor/);
+  assert.match(tensor, /snapshot\(\): WgpuTensorSnapshot/);
+  assert.match(gpu, /setInputTensor\(input: WgpuTensor\): void/);
+  assert.match(gpu, /tensorSnapshot\(device: WgpuTensorDevice\): WgpuTensor/);
+  assert.match(graph, /uploadBatchTensors\(input: WgpuTensor, target: WgpuTensor\): void/);
+  assert.match(graph, /predictionTensor\(\): WgpuTensor/);
+  assert.match(graph, /inputGradientTensor\(\): WgpuTensor/);
   console.log(label + " resident NN TypeScript contract passed");
 }
 

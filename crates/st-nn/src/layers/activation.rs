@@ -131,10 +131,45 @@ impl Relu {
 }
 
 impl Module for Relu {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        crate::resident::unary_forward(input, st_kernel_contracts::elementwise::ElementwiseOp::Relu)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        crate::resident::unary_snapshot(
+            input,
+            st_kernel_contracts::elementwise::ElementwiseOp::Relu,
+        )
+    }
+
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        Ok(vec![])
+    }
+
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
-        Ok(vec![crate::resident::InferenceOp::Relu])
+        crate::resident::collect_inference_ops(self, 1)
+    }
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        operations.push(crate::resident::InferenceOp::Relu);
+        Ok(())
     }
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();

@@ -1,6 +1,5 @@
 //! Python transports existing Rust NN plans and owning GPU snapshots.
 
-#[cfg(feature = "wgpu")]
 use crate::tensor::PyTensor;
 #[cfg(feature = "wgpu")]
 use pyo3::{exceptions::PyRuntimeError, types::PyDict};
@@ -12,14 +11,108 @@ use pyo3::{
 use st_nn::resident::{InferenceError, InferencePlan, DEFAULT_MAX_PLAN_JSON_BYTES};
 use st_tensor::NdLayout;
 
+mod autograd;
+mod forward;
 mod graph;
+mod learner;
+mod loss;
+pub(crate) use loss::{evaluate_loss, PyResidentLoss};
 mod training;
+
+/// Input type selects an explicit host or resident route. Never upload or read
+/// back implicitly, and never reinterpret an unsupported module as CPU work.
+pub(crate) fn forward_argument(
+    module: &dyn st_nn::Module,
+    input: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let py = input.py();
+    if let Ok(input) = input.extract::<PyRef<'_, PyTensor>>() {
+        let output = module
+            .forward(&input.inner)
+            .map_err(crate::tensor::tensor_err_to_py)?;
+        return Ok(Py::new(py, PyTensor::from_tensor(output))?.into_any());
+    }
+    #[cfg(feature = "wgpu")]
+    if let Ok(input) = input.extract::<PyRef<'_, crate::wgpu_tensor::PyWgpuTensor>>() {
+        let inner = module.forward_resident(&input.inner).map_err(plan_error)?;
+        return Ok(Py::new(py, crate::wgpu_tensor::PyWgpuTensor { inner })?.into_any());
+    }
+    Err(PyTypeError::new_err(
+        "expected Tensor or WgpuTensor; no implicit device transfer",
+    ))
+}
+
+/// Explicit terminal capture; never accepts a host tensor or uploads implicitly.
+pub(crate) fn snapshot_argument(
+    module: &dyn st_nn::Module,
+    input: &Bound<'_, PyAny>,
+) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+    #[cfg(feature = "wgpu")]
+    {
+        let input = input
+            .extract::<PyRef<'_, crate::wgpu_tensor::PyWgpuTensor>>()
+            .map_err(|_| {
+                PyTypeError::new_err("expected WgpuTensor; no implicit device transfer")
+            })?;
+        let inner = module
+            .forward_resident_snapshot(&input.inner)
+            .map_err(plan_error)?;
+        Ok(crate::wgpu_tensor::PyWgpuTensorSnapshot::from_readback(
+            inner,
+        ))
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let _ = (module, input);
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "requires the wgpu feature",
+        ))
+    }
+}
+
+pub(crate) fn cache_info(module: &dyn st_nn::Module, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    #[cfg(feature = "wgpu")]
+    {
+        let stats = module
+            .resident_forward_stats()
+            .ok_or_else(|| PyValueError::new_err("module has no resident cache"))?;
+        let info = PyDict::new(py);
+        info.set_item("compilations", stats.compilations)?;
+        info.set_item("cache_hits", stats.cache_hits)?;
+        info.set_item("submitted_forwards", stats.submitted_forwards)?;
+        Ok(info.into_any().unbind())
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let _ = (module, py);
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "requires the wgpu feature",
+        ))
+    }
+}
+
+pub(crate) fn clear_cache(module: &dyn st_nn::Module) -> PyResult<()> {
+    #[cfg(feature = "wgpu")]
+    {
+        module.clear_resident_forward_cache();
+        Ok(())
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let _ = module;
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "requires the wgpu feature",
+        ))
+    }
+}
 
 fn plan_error(error: InferenceError) -> PyErr {
     #[cfg(feature = "wgpu")]
     match error {
         InferenceError::Gpu(error) => return gpu_error(error),
         InferenceError::Training(error) => return training::training_error(error),
+        InferenceError::GraphGpu(error) => return forward::error(error),
+        InferenceError::ResidentTensor(error) => return crate::wgpu_tensor::error(error),
         _ => {}
     }
     PyValueError::new_err(error.to_string())
@@ -104,6 +197,23 @@ pub(crate) struct PyInferencePlan {
 
 #[pymethods]
 impl PyInferencePlan {
+    /// Explicitly hand learned weights back to the baseline-matching source model.
+    #[pyo3(signature = (module, updated, *, optimizer_state="reject"))]
+    fn apply_parameters_to(
+        &self,
+        module: &Bound<'_, pyo3::types::PyAny>,
+        updated: &PyInferencePlan,
+        optimizer_state: &str,
+    ) -> PyResult<usize> {
+        let policy = optimizer_state.parse().map_err(plan_error)?;
+        crate::nn::with_module_mut(module, |model| {
+            Ok(self
+                .inner
+                .apply_parameters_to(model, &updated.inner, policy))
+        })?
+        .map_err(plan_error)
+    }
+
     #[staticmethod]
     #[pyo3(signature = (payload, *, max_bytes=DEFAULT_MAX_PLAN_JSON_BYTES))]
     fn from_json(payload: &str, max_bytes: usize) -> PyResult<Self> {
@@ -114,6 +224,13 @@ impl PyInferencePlan {
 
     fn to_json(&self) -> PyResult<String> {
         self.inner.to_json().map_err(plan_error)
+    }
+
+    /// Return a new Rust-fused plan; parameter IDs stay fixed, stage IDs may change.
+    fn fuse_pointwise(&self) -> PyResult<Self> {
+        Ok(Self {
+            inner: self.inner.fuse_pointwise().map_err(plan_error)?,
+        })
     }
 
     #[getter]
@@ -183,6 +300,47 @@ impl PyInferencePlan {
         training::compile(&self.inner, py, tile_mnk, kernel, accumulation)
     }
 
+    #[pyo3(signature = (*, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_graph_autograd_wgpu(
+        &self,
+        py: Python<'_>,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<autograd::PyResidentGraphAutograd> {
+        autograd::compile(&self.inner, py, tile_mnk, kernel, accumulation)
+    }
+
+    #[pyo3(signature = (*, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_graph_wgpu(
+        &self,
+        py: Python<'_>,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<forward::PyResidentGraphInference> {
+        forward::compile(&self.inner, py, tile_mnk, kernel, accumulation)
+    }
+
+    #[pyo3(signature = (*, gradient_policy, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
+    fn compile_graph_learner_wgpu(
+        &self,
+        py: Python<'_>,
+        gradient_policy: &str,
+        tile_mnk: Option<&Bound<'_, PyAny>>,
+        kernel: &str,
+        accumulation: &str,
+    ) -> PyResult<learner::PyResidentGraphLearner> {
+        learner::compile(
+            &self.inner,
+            py,
+            gradient_policy,
+            tile_mnk,
+            kernel,
+            accumulation,
+        )
+    }
+
     #[pyo3(signature = (*, gradient_policy, tile_mnk=None, kernel="scalar", accumulation="sequential"))]
     fn compile_graph_training_wgpu(
         &self,
@@ -223,6 +381,25 @@ fn gpu_error(error: st_backend_wgpu::resident_dense::DenseError) -> PyErr {
 #[cfg(feature = "wgpu")]
 #[pymethods]
 impl PyResidentInference {
+    fn set_input_tensor(
+        &mut self,
+        py: Python<'_>,
+        input: &crate::wgpu_tensor::PyWgpuTensor,
+    ) -> PyResult<()> {
+        py.detach(|| self.inner.set_input_tensor(&input.inner))
+            .map_err(gpu_error)
+    }
+    fn tensor_snapshot(
+        &self,
+        py: Python<'_>,
+        device: &crate::wgpu_tensor::PyWgpuTensorDevice,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        Ok(crate::wgpu_tensor::PyWgpuTensor {
+            inner: py
+                .detach(|| self.inner.tensor_snapshot(&device.inner))
+                .map_err(gpu_error)?,
+        })
+    }
     #[getter]
     fn input_shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.inner.input_layout().shape().iter().copied())
@@ -349,5 +526,9 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyInferenceSnapshot>()?;
     training::register(module)?;
     graph::register(module)?;
+    forward::register(module)?;
+    autograd::register(module)?;
+    learner::register(module)?;
+    loss::register(module)?;
     Ok(())
 }

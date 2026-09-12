@@ -37,6 +37,50 @@ class GraphSurface(unittest.TestCase):
         self.assertEqual(payload["parameters"], [dict(role="gain", shape=[1], values=[2.])])
         self.assertEqual(st.nn.InferencePlan.from_json(plan.to_json()).to_json(), plan.to_json())
 
+    def test_fusion_is_rust_owned_explicit_and_round_trips(self):
+        model = st.nn.Sequential()
+        model.add(st.nn.Scaler.from_gain("scale", st.Tensor(1, 1, [-2.])))
+        model.add(st.nn.Relu())
+        model.add(st.nn.Scaler.from_gain("next", st.Tensor(1, 1, [.5])))
+        source = model.inference_plan([2, 3, 1])
+        original = source.to_json()
+        fused = source.fuse_pointwise()
+        self.assertEqual((source.stage_count, fused.stage_count), (3, 1))
+        self.assertEqual(fused.source_operation_count, 3)
+        self.assertEqual(source.to_json(), original)
+        payload = json.loads(fused.to_json())
+        self.assertEqual(payload["parameters"], json.loads(original)["parameters"])
+        self.assertEqual(payload["stages"][0]["parameters"], [0, 1])
+        self.assertEqual(payload["stages"][0]["steps"][-1]["rhs"], 2)
+        self.assertEqual(st.nn.InferencePlan.from_json(fused.to_json()).fuse_pointwise().to_json(), fused.to_json())
+
+    @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
+    def test_fused_forward_and_training_use_the_same_plan(self):
+        model = st.nn.Sequential()
+        model.add(st.nn.Scaler.from_gain("scale", st.Tensor(1, 1, [-2.])))
+        model.add(st.nn.Relu())
+        model.add(st.nn.Scaler.from_gain("next", st.Tensor(1, 1, [.5])))
+        source = model.inference_plan([2, 2, 1])
+        for policy in ("exact", "module_compatible"):
+            states = []
+            for plan in (source, source.fuse_pointwise()):
+                forward = plan.compile_graph_wgpu()
+                forward.upload_values([-2., -0., 0., 2.])
+                forward.dispatch()
+                self.assertEqual(forward.snapshot().read_values(), [2., 0., 0., 0.])
+                gpu = plan.compile_graph_training_wgpu(gradient_policy=policy)
+                gpu.upload_batch_values([-2., -0., 0., 2.], [0.] * 4)
+                trajectory = []
+                for _ in range(4):
+                    gpu.step(.01)
+                    state = gpu.state_snapshot().read_state()
+                    trajectory.append([state.loss, state.prediction_values(), state.input_gradient_values(),
+                        [state.parameter_values(i) for i in range(2)],
+                        [state.parameter_gradient_values(i) for i in range(2)],
+                        [state.effective_gradient_values(i) for i in range(2)]])
+                states.append(trajectory)
+            self.assertEqual(states[0], states[1])
+
     def test_policy_is_required_canonical_and_cpu_execution_is_unavailable(self):
         plan = graph_plan()
         with self.assertRaises(TypeError): plan.compile_graph_training_wgpu()

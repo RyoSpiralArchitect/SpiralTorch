@@ -9,11 +9,36 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Original Rust NN Module. Requires webgpu; inputs/outputs stay resident. */
+    export class Sequential {
+        constructor();
+        addLinear(name: string, input_dim: number, output_dim: number): void;
+        addScaler(name: string, gain: Float32Array): void;
+        addGelu(): void;
+        addRelu(): void;
+        forward(input: WgpuTensor): WgpuTensor;
+        forwardSnapshot(input: WgpuTensor): WgpuTensorSnapshot;
+        inferencePlan(shape: number[]): InferencePlan;
+        residentCacheInfo(): ResidentForwardStats;
+        clearResidentCache(): void;
+        free(): void;
+    }
+    /** Host cache/submission counts, not GPU completion receipts. */
+    export class ResidentForwardStats {
+        private constructor();
+        readonly compilations: bigint;
+        readonly cacheHits: bigint;
+        readonly submittedForwards: bigint;
+        free(): void;
+    }
     /** Rust-owned immutable NN parameter plan, available with nn or webgpu. */
     export class InferencePlan {
         private constructor();
+        applyParametersTo(module: Sequential, updated: InferencePlan, optimizer_state?: string | null): number;
         static fromJson(payload: string, max_bytes?: number | null): InferencePlan;
         toJson(): string;
+        /** New checked Rust plan; parameter IDs stay fixed, stage IDs may change. */
+        fusePointwise(): InferencePlan;
         readonly inputShape: Uint32Array;
         readonly outputShape: Uint32Array;
         readonly stageCount: number;
@@ -21,10 +46,202 @@ declare module "spiraltorch-wasm" {
         readonly isDense: boolean;
         /** Requires webgpu; the plan may be freed while the returned promise runs. */
         compileWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentInference>;
+        compileGraphWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphInference>;
+        /** Frozen parameters, exact arbitrary-cotangent VJPs; no loss or optimizer. */
+        compileGraphAutogradWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphAutograd>;
+        /** Custom cotangents and weighted SGD; explicit Rust update policy. */
+        compileGraphLearnerWebGpu(gradient_policy: string, tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphLearner>;
         /** Mean-MSE, VJP and plain SGD use the same Rust core as native training. */
         compileTrainingWebGpu(tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentTraining>;
         /** Explicit Rust policy: "exact" or "module_compatible". Requires webgpu. */
         compileGraphTrainingWebGpu(gradient_policy: string, tile_mnk?: number[] | null, kernel?: string | null, accumulation?: string | null): Promise<ResidentGraphTraining>;
+        free(): void;
+    }
+
+    /** Immutable N-D GPU storage; available with webgpu, never host Tensor storage. */
+    export class WgpuTensorDevice {
+        private constructor();
+        static create(): Promise<WgpuTensorDevice>;
+        upload(shape: number[], data: Float32Array): WgpuTensor;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        free(): void;
+    }
+    export class WgpuPointwiseInputs {
+        constructor();
+        free(): void;
+        readonly length: number;
+        add(tensor: WgpuTensor): void;
+        set(slot: number, tensor: WgpuTensor): void;
+        compile(steps: string): WgpuPointwisePlan;
+    }
+
+    export class WgpuPointwisePlan {
+        private constructor();
+        free(): void;
+        run(inputs: WgpuPointwiseInputs, execution: string): WgpuTensor;
+    }
+
+    export class WgpuTensor {
+        private constructor();
+        readonly shape: Uint32Array;
+        readonly strides: Uint32Array;
+        readonly offset: number;
+        readonly numel: number;
+        readonly isContiguous: boolean;
+        device(): WgpuTensorDevice;
+        sharesStorageWith(other: WgpuTensor): boolean;
+        reshape(shape: number[]): WgpuTensor;
+        permute(axes: number[]): WgpuTensor;
+        narrow(axis: number, start: number, length: number): WgpuTensor;
+        broadcastTo(shape: number[]): WgpuTensor;
+        contiguous(): WgpuTensor;
+        add(rhs: WgpuTensor): WgpuTensor;
+        mul(rhs: WgpuTensor): WgpuTensor;
+        relu(): WgpuTensor;
+        gelu(): WgpuTensor;
+        snapshot(): WgpuTensorSnapshot;
+        free(): void;
+    }
+    export class WgpuTensorSnapshot {
+        private constructor();
+        readonly shape: Uint32Array;
+        readValues(): Promise<Float32Array>;
+        free(): void;
+    }
+    export class ResidentGraphInference {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly generation: bigint;
+        readonly submittedDispatches: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        tensorDevice(): WgpuTensorDevice;
+        upload(data: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        forwardTensor(input: WgpuTensor): WgpuTensor;
+        forwardTensorSnapshot(input: WgpuTensor): WgpuTensorSnapshot;
+        dispatch(): bigint;
+        outputTensor(): WgpuTensor;
+        snapshot(): GraphInferenceSnapshot;
+        free(): void;
+    }
+    export class ResidentGraphAutograd {
+        private constructor();
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly inputGeneration: bigint;
+        readonly submittedForwards: bigint;
+        readonly submittedBackwards: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        tensorDevice(): WgpuTensorDevice;
+        upload(data: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        forward(): GraphForward;
+        backward(forward: GraphForward, cotangent: WgpuTensor): GraphGradients;
+        free(): void;
+    }
+    export class ResidentGraphLearner {
+        private constructor();
+        readonly momentumDamping: number | undefined;
+        setMomentumDamping(damping: number): void;
+        clearMomentum(): void;
+        resetMomentum(): void;
+        momentumTensors(): WgpuTensor[];
+        readonly gradClipMaxNorm: number | undefined;
+        setGradClipMaxNorm(max_norm: number): void;
+        clearGradClip(): void;
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly stageCount: number;
+        readonly parameterCount: number;
+        readonly gradientPolicy: string;
+        readonly inputGeneration: bigint;
+        readonly submittedForwards: bigint;
+        readonly submittedBackwards: bigint;
+        readonly submittedUpdates: bigint;
+        adapterInfo(): { name: string; backend: string; device_type: string };
+        tensorDevice(): WgpuTensorDevice;
+        upload(input: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        forward(): GraphForward;
+        backward(forward: GraphForward, cotangent: WgpuTensor): GraphGradients;
+        /** Attempt number; acceptance requires reading an update snapshot. */
+        sgd(gradients: GraphGradients, rate: number): bigint;
+        sgdWeighted(batch: GraphGradientBatch, rate: number): bigint;
+        gradientAccumulator(): GraphGradientAccumulator;
+        zeroAccumulator(accumulator: GraphGradientAccumulator): void;
+        accumulate(accumulator: GraphGradientAccumulator, gradients: GraphGradients, weight: number): bigint;
+        sgdAccumulated(accumulator: GraphGradientAccumulator, rate: number): bigint;
+        parameterSnapshot(): GraphTrainingParametersSnapshot;
+        updateSnapshot(): GraphUpdateSnapshot;
+        free(): void;
+    }
+    export class GraphGradientBatch {
+        constructor();
+        readonly length: number;
+        add(gradients: GraphGradients, weight: number): void;
+        free(): void;
+    }
+    export class GraphGradientAccumulator {
+        private constructor();
+        readonly length: bigint;
+        readonly parameterGeneration: bigint;
+        parameterGradientTensors(): WgpuTensor[];
+        free(): void;
+    }
+    export class GraphUpdateSnapshot {
+        private constructor();
+        readonly inputGeneration: bigint;
+        readonly submittedForward: bigint;
+        readonly submittedUpdate: bigint;
+        read(): Promise<bigint>;
+        free(): void;
+    }
+    export class GraphForward {
+        private constructor();
+        readonly inputGeneration: bigint;
+        readonly submittedForward: bigint;
+        predictionTensor(): WgpuTensor;
+        free(): void;
+    }
+    export class MeanSquaredError {
+        constructor();
+        /** Joint whole-loss-guarded value and exact prediction cotangent; no host read. */
+        evaluateResident(prediction: WgpuTensor, target: WgpuTensor): ResidentLoss;
+        free(): void;
+    }
+    export class CrossEntropyWithLogits {
+        constructor(reduction?: string | null, ignore_index?: bigint | null, label_smoothing?: number | null);
+        /** Class-last integer-label loss. None reduction uses an all-ones loss seed. */
+        evaluateResident(prediction: WgpuTensor, target: WgpuTensor): ResidentLoss;
+        free(): void;
+    }
+    export class ResidentLoss {
+        private constructor();
+        lossTensor(): WgpuTensor;
+        predictionGradientTensor(): WgpuTensor;
+        free(): void;
+    }
+    export class GraphGradients {
+        private constructor();
+        readonly inputGeneration: bigint;
+        readonly submittedForward: bigint;
+        readonly submittedBackward: bigint;
+        readonly parameterCount: number;
+        inputGradientTensor(): WgpuTensor;
+        parameterGradientTensor(index: number): WgpuTensor;
+        free(): void;
+    }
+    export class GraphInferenceSnapshot {
+        private constructor();
+        readonly shape: Uint32Array;
+        readonly generation: bigint;
+        readonly submittedDispatch: bigint;
+        readValues(): Promise<Float32Array>;
         free(): void;
     }
 
@@ -39,6 +256,9 @@ declare module "spiraltorch-wasm" {
         readonly batchGeneration: bigint;
         adapterInfo(): { name: string; backend: string; device_type: string };
         uploadBatch(input: Float32Array, target: Float32Array): void;
+        uploadBatchTensors(input: WgpuTensor, target: WgpuTensor): void;
+        predictionTensor(): WgpuTensor;
+        inputGradientTensor(): WgpuTensor;
         /** Submitted attempt, not acceptance. Read its owning snapshot. */
         step(learning_rate: number): bigint;
         lossSnapshot(): TrainingLossSnapshot;
@@ -156,6 +376,8 @@ declare module "spiraltorch-wasm" {
         readonly generation: bigint;
         adapterInfo(): { name: string; backend: string; device_type: string };
         upload(values: Float32Array): void;
+        setInputTensor(input: WgpuTensor): void;
+        tensorSnapshot(device: WgpuTensorDevice): WgpuTensor;
         dispatch(): bigint;
         snapshot(): InferenceSnapshot;
         free(): void;

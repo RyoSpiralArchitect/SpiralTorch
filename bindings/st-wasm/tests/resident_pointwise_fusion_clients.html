@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Public Rust pointwise fusion clients</title>
+<pre id="result" data-status="running">Checking fused resident forward and training</pre>
+<script type="module">
+import init, {InferencePlan} from "./module/spiraltorch_wasm.js";
+const element=document.querySelector("#result");
+const report={status:"error",cases:[],schema:"spiraltorch.pointwise_fusion_clients.v1"};
+const same=(a,b)=>{if(JSON.stringify(a)!==JSON.stringify(b))throw Error("value or metadata differs");};
+const f32=v=>new Float32Array(v);
+function capture(state) {
+  const result={loss:state.loss,prediction:[...state.predictionValues()],dx:[...state.inputGradientValues()],
+    parameters:Array.from({length:state.parameterCount},(_,i)=>({values:[...state.parameterValues(i)],
+      raw:[...state.parameterGradientValues(i)],effective:[...state.effectiveGradientValues(i)]}))};
+  state.free();return result;
+}
+try {
+  await init();
+  const source=InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2,2,1],
+    parameters:[{role:"gain",shape:[1],values:[-2]},{role:"gain",shape:[1],values:[.5]}],stages:[
+      {kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1}]},
+      {kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]},
+      {kind:"pointwise",parameters:[1],steps:[{op:"multiply",rhs:1}]}]}));
+  const original=source.toJson(),fused=source.fusePointwise();
+  same([source.stageCount,fused.stageCount,fused.sourceOperationCount],[3,1,3]);
+  same(source.toJson(),original);
+  const portable=fused.toJson(), restored=InferencePlan.fromJson(portable), again=restored.fusePointwise();
+  same(again.toJson(),portable); again.free();restored.free();
+  same(JSON.parse(original).parameters,JSON.parse(portable).parameters);
+  for(const policy of ["exact","module_compatible"]) {
+    const trajectories=[];
+    for(const plan of [source,fused]) {
+      const forward=await plan.compileGraphWebGpu();
+      report.adapter=forward.adapterInfo();
+      if(report.adapter.device_type==="Cpu"||report.adapter.backend!=="BrowserWebGpu")throw Error("wrong backend");
+      forward.upload(f32([-2,-0,0,2]));forward.dispatch();
+      const output=forward.snapshot();forward.free();same([...await output.readValues()],[2,0,0,0]);output.free();
+      const gpu=await plan.compileGraphTrainingWebGpu(policy);
+      gpu.uploadBatch(f32([-2,-0,0,2]),f32([0,0,0,0]));
+      const snapshots=[];
+      for(let step=0;step<4;step++){gpu.step(.01);snapshots.push(gpu.stateSnapshot());}
+      gpu.free();
+      const states=[];
+      for(const snapshot of snapshots){const pending=snapshot.readState();snapshot.free();states.push(capture(await pending));}
+      same(states[0].parameters.map(p=>p.raw),[[-1],[4]]);
+      same(states[0].parameters.map(p=>p.effective),policy==="exact"?[[-1],[4]]:[[-.25],[1]]);
+      trajectories.push(states);
+    }
+    same(...trajectories);report.cases.push({policy,steps:4,states:trajectories[1]});
+  }
+  source.free();fused.free();report.status="passed";
+} catch(error){report.error=String(error.stack||error);}
+element.textContent=JSON.stringify(report);element.dataset.status=report.status;
+</script>
