@@ -1,0 +1,690 @@
+{
+  "schema": "spiraltorch.module_terminal_capture_record.v1",
+  "status": "passed",
+  "baseline_source": {
+    "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+    "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+  },
+  "candidate_source": {
+    "commit": "7626150d31fef4da440fedefff66c066514df48a",
+    "tree": "1a09b5aa71a4f06defdbc4dc386551799a09b23e"
+  },
+  "decision": "Reject single-submission terminal scheduling: browser Module medians regress 2-7% across all 36 case pairs. Retain this source/evidence; next isolate the same API with the original split submission order.",
+  "verification_steps": 56,
+  "verification_seconds": 550.6920992079977,
+  "measurement_steps": 16,
+  "measurement_seconds": 444.29868491699744,
+  "test_counts": {
+    "terminal-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "python-cpu-handoff.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 4
+    },
+    "interval-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 9
+    },
+    "python-graph_autograd.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "contracts.log": {
+      "rust_passed": 23,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 10
+    },
+    "admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "nn-cpu.log": {
+      "rust_passed": 707,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-pointwise.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "python-module_update.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "integration.log": {
+      "rust_passed": 6,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-cpu-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 2
+    },
+    "backend-serial.log": {
+      "rust_passed": 134,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-cpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-wgpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 35
+    },
+    "tensor-wgpu.log": {
+      "rust_passed": 497,
+      "rust_ignored": 1,
+      "python_ran": 0
+    },
+    "nn-serial.log": {
+      "rust_passed": 760,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "tensor-cpu.log": {
+      "rust_passed": 449,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-graph_learner.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "torch-reference-shapes.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    }
+  },
+  "browser_module_assertions": 224,
+  "tensor_snapshot_checks": {
+    "cancelled_pending_maps": 4,
+    "different_shapes_and_negative_zero": true,
+    "discard_and_reuse_cycles": 48,
+    "held_snapshots": 24,
+    "retained_guard_failures": 2,
+    "status": "passed",
+    "survives_tensor_device_drop": true,
+    "terminal_cancelled_pending_maps": 4,
+    "terminal_capture_survives_cache_clear_and_module_drop": true
+  },
+  "torch_correctness": {
+    "version": "2.12.1",
+    "cases": 120,
+    "comparisons": 17136,
+    "max_abs_error": 5.7220458984375e-06,
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "browser_intervals": {
+    "ordinary": {
+      "aggregates": [
+        {
+          "shape": [
+            2,
+            3,
+            7
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.007030543142442,
+            "min_ratio": 1.001564945250273,
+            "max_ratio": 1.0125984252085836,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.999481992032505
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0047022058918311,
+            "min_ratio": 1.0000000000581168,
+            "max_ratio": 1.0094191522413163,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0061030283773347
+          }
+        },
+        {
+          "shape": [
+            2,
+            8,
+            64
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0039062648683552,
+            "min_ratio": 1.0009765625145661,
+            "max_ratio": 1.015857284455042,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0063274689256243
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 0.9995155038867949,
+            "min_ratio": 0.9970902036784524,
+            "max_ratio": 1.0068226120784092,
+            "regressions": 5,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.9952107623366385
+          }
+        },
+        {
+          "shape": [
+            4,
+            8,
+            128
+          ],
+          "module": {
+            "median_of_case_median_ratios": 0.999499047269718,
+            "min_ratio": 0.9904761904836598,
+            "max_ratio": 1.0303188708872058,
+            "regressions": 6,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.9985728011352677
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0005103341672634,
+            "min_ratio": 0.9916142557574221,
+            "max_ratio": 1.0077041602465626,
+            "regressions": 6,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.9970288644654464
+          }
+        }
+      ],
+      "checked_forwards_including_warmup": 405504,
+      "checked_values_including_warmup": 697737216,
+      "max_abs_error": 2.384185791015625e-07,
+      "minimum_interval_ms": 58.30000000074506,
+      "clock_minimum_positive_delta_ms": 0.09999999776482582,
+      "minimum_interval_over_observed_clock_delta": 583.0000130385164,
+      "protocol": {
+        "matrices": 4,
+        "warmup": 2,
+        "samples": 9,
+        "forwards": 256
+      },
+      "module_apis": {
+        "baseline": "forward_then_snapshot",
+        "candidate": "forward_then_snapshot"
+      },
+      "browser_version": "152.0.7977.84",
+      "cross_origin_isolated": false,
+      "adapters": {
+        "baseline": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        },
+        "candidate": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        }
+      },
+      "validation_sha256": "2f9cb25396bacebb162d64800f7c6d0aff9acc87d5542539713773bc24021bc1",
+      "boundary": "Primary endpoint is median of 12 case-median candidate/baseline ratios per shape; all intervals retained. Pooled totals and explicit-dispatch controls remain separate. The clock probe describes observed granularity, not an uncertainty bound. This longer-interval completed-read workload does not replace the earlier single-call evidence or prove fastest-Torch/browser hardware performance."
+    },
+    "terminal": {
+      "aggregates": [
+        {
+          "shape": [
+            2,
+            3,
+            7
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0745092346077856,
+            "min_ratio": 1.0355987055515588,
+            "max_ratio": 1.0835962145247575,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0928609847246848
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.004713301914771,
+            "min_ratio": 0.9919354838709677,
+            "max_ratio": 1.0078492935636711,
+            "regressions": 8,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.9964198065566394
+          }
+        },
+        {
+          "shape": [
+            2,
+            8,
+            64
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0537912167620531,
+            "min_ratio": 1.0331061343939614,
+            "max_ratio": 1.060606060598336,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0587013268525944
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0039043445158686,
+            "min_ratio": 0.9990262901510495,
+            "max_ratio": 1.0089285714137226,
+            "regressions": 11,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0025218182306095
+          }
+        },
+        {
+          "shape": [
+            4,
+            8,
+            128
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0230085666738082,
+            "min_ratio": 1.0086075949329365,
+            "max_ratio": 1.0287588294615357,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0226600300947994
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0043393494882689,
+            "min_ratio": 0.9969574036624387,
+            "max_ratio": 1.011806981504163,
+            "regressions": 9,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0137635580455837
+          }
+        }
+      ],
+      "checked_forwards_including_warmup": 405504,
+      "checked_values_including_warmup": 697737216,
+      "max_abs_error": 2.384185791015625e-07,
+      "minimum_interval_ms": 58,
+      "clock_minimum_positive_delta_ms": 0.09999999776482582,
+      "minimum_interval_over_observed_clock_delta": 580.0000129640106,
+      "protocol": {
+        "matrices": 4,
+        "warmup": 2,
+        "samples": 9,
+        "forwards": 256
+      },
+      "module_apis": {
+        "baseline": "forward_then_snapshot",
+        "candidate": "forwardSnapshot"
+      },
+      "browser_version": "152.0.7977.84",
+      "cross_origin_isolated": false,
+      "adapters": {
+        "baseline": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        },
+        "candidate": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        }
+      },
+      "validation_sha256": "12342adc2e6951488ed6947e3bd7bb99fe709ea4c35463b81d032c24d593e71c",
+      "boundary": "Primary endpoint is median of 12 case-median candidate/baseline ratios per shape; all intervals retained. Pooled totals and explicit-dispatch controls remain separate. The clock probe describes observed granularity, not an uncertainty bound. This longer-interval completed-read workload does not replace the earlier single-call evidence or prove fastest-Torch/browser hardware performance. Explicit candidate forwardSnapshot versus baseline forward then snapshot, including host wrapper differences; not isolated GPU queue cost."
+    }
+  },
+  "native_terminal_aggregates": [
+    {
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "routes": {
+        "module_resident_d2h": {
+          "median_of_case_median_ratios": 1.0264596144426772,
+          "min_ratio": 0.6136536528123824,
+          "max_ratio": 1.2126552468650773,
+          "regressions": 10,
+          "total_cases": 12
+        },
+        "module_resident_burst": {
+          "median_of_case_median_ratios": 1.0080310997473856,
+          "min_ratio": 0.5977802196038351,
+          "max_ratio": 1.121520215583366,
+          "regressions": 8,
+          "total_cases": 12
+        },
+        "python_scalar_burst": {
+          "median_of_case_median_ratios": 1.001588234179364,
+          "min_ratio": 0.9307036235128306,
+          "max_ratio": 1.6400699854074614,
+          "regressions": 6,
+          "total_cases": 12
+        },
+        "torch_mps_burst": {
+          "median_of_case_median_ratios": 0.9946292289345329,
+          "min_ratio": 0.6798273081282762,
+          "max_ratio": 1.0736256946548635,
+          "regressions": 5,
+          "total_cases": 12
+        }
+      }
+    },
+    {
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "routes": {
+        "module_resident_d2h": {
+          "median_of_case_median_ratios": 0.988014128892378,
+          "min_ratio": 0.9618810411902312,
+          "max_ratio": 1.0019069009646018,
+          "regressions": 1,
+          "total_cases": 12
+        },
+        "module_resident_burst": {
+          "median_of_case_median_ratios": 0.9988488413871226,
+          "min_ratio": 0.9803897798465999,
+          "max_ratio": 1.01810846279344,
+          "regressions": 5,
+          "total_cases": 12
+        },
+        "python_scalar_burst": {
+          "median_of_case_median_ratios": 0.9981643734346606,
+          "min_ratio": 0.9816859266471571,
+          "max_ratio": 1.0224913406867076,
+          "regressions": 4,
+          "total_cases": 12
+        },
+        "torch_mps_burst": {
+          "median_of_case_median_ratios": 1.014827761934014,
+          "min_ratio": 0.9835714229917232,
+          "max_ratio": 1.0787843834618709,
+          "regressions": 8,
+          "total_cases": 12
+        }
+      }
+    },
+    {
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "routes": {
+        "module_resident_d2h": {
+          "median_of_case_median_ratios": 0.995305159672474,
+          "min_ratio": 0.9728102854387327,
+          "max_ratio": 1.0052972354590073,
+          "regressions": 1,
+          "total_cases": 12
+        },
+        "module_resident_burst": {
+          "median_of_case_median_ratios": 0.999504233563629,
+          "min_ratio": 0.986793206618735,
+          "max_ratio": 1.0041308625644227,
+          "regressions": 5,
+          "total_cases": 12
+        },
+        "python_scalar_burst": {
+          "median_of_case_median_ratios": 0.9997220310523768,
+          "min_ratio": 0.9917402853520131,
+          "max_ratio": 1.003052188983597,
+          "regressions": 6,
+          "total_cases": 12
+        },
+        "torch_mps_burst": {
+          "median_of_case_median_ratios": 0.9923414431233852,
+          "min_ratio": 0.9082754079085729,
+          "max_ratio": 1.044411775281613,
+          "regressions": 5,
+          "total_cases": 12
+        }
+      }
+    }
+  ],
+  "native_orders": [
+    [
+      "baseline",
+      "candidate"
+    ],
+    [
+      "candidate",
+      "baseline"
+    ],
+    [
+      "baseline",
+      "candidate"
+    ],
+    [
+      "candidate",
+      "baseline"
+    ]
+  ],
+  "interval_completed_reads": 811008,
+  "interval_compared_values": 1395474432,
+  "frozen_products_checked": 39,
+  "products": [
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-release.dylib",
+      "sha256": "c6544678b00afcecfe44839a85c32317c7ef7aea9cf505ac3bd3f582c4debff9"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "3d3c1eb619496d1c7458db917d57ffeaea9c05b7a91d132ec886825b4fb6c937"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "6b9c57a978ce857751a82a90a2596c04dc621a04411e6d01760a601a6d2efb8b"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "3663ecb040ee6b8af9dd22b5377f6b430a3c850f63f1f1c1b3f0a889d1809c73"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "6803b4786e4436cf4e5cf6d6077160125ea7ee54b0ac40719d82a6d56faa858c"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward",
+      "sha256": "b0669f7e4e77860cb32f3e5413dcb46c6df36e9acc24332336040b31d0269600"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_training",
+      "sha256": "124c6602f3bf55ea2e5cfd5a1dc189609c6da04bb3effdc4214923b459539515"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "3cc89c6d0bea8943ef6ce3368f8fc200e222819525c34d48888b7e210bdea3f5"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "76984253b45c5dbe28a59402e8a751dc2de3d8a66ffa5ff3946ec9f21341b1c3"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "2264079518fb70d52d64cf0227abea64e00389ff188cecd78ca743bedc56ba16"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "68231735b5a022d765056231c0966cdd7c67db1c17ac5d080a417ffb950e6cca"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "bc4d287e29b1d736795bd988340b2b951107609c8767d98364fceeabef37d83e"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-cpu.dylib",
+      "sha256": "6197378462134c8580e8107b144fdf5a8c7c057c63c8d1eb3f13cb71d2325835"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/python-release.dylib",
+      "sha256": "400ae0cd13e6fccd17ecfd334e0a74d4d07881eb3f8e4bf57e6ce471851966a2"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/spiraltorch_wasm.d.ts",
+      "sha256": "f507980842ff12e75bc37ae28b2136394009251470af8fe45a5fbc503ae7b703"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/spiraltorch_wasm.js",
+      "sha256": "52dc24364304a0246b93bf1613eb3b0fbfc47c9ea2e005268c994a3a167b5047"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "813346f691737c71c1f6dec200d10618a8ecd78216ac4f983409355903c752aa"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "ab44a8dc0417210b826c627a2301bbe84d11a4d42fd9f42b6f14b9c6f0fb2d60"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/resident_graph_forward",
+      "sha256": "42755fa9f43ef910a35482b33426842ec009216b61425ce78091f9b59986241d"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/resident_graph_training",
+      "sha256": "e16ce773141203ba04c1200d603554e18a2f1cd1ead22026da895fb2445a315a"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/resident_graph_forward_bench",
+      "sha256": "abb3d3760fe2e98d04cd216e81d2b75d2a4b373e0accf53c0fae2fa936c9aff9"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/resident_nd_tensor",
+      "sha256": "962a46503269ab7ee1770f932e24fd4fcf7d1094d6b1b993028638be5e66c5c7"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "89df8d7bd7171313ed60ec68c23abcba7e7355d71d5406abcc5d30d62983c400"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/correctness/spiraltorch_wasm.js",
+      "sha256": "f073fa5a7e29291ec4720c637b64efdb3b4f6c37b8c6cc5fda4115ce0f94be3a"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "55750afac8259757f11e76503283d99c0bab11fa8caf8c9d9bd0d90f3744da23"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "bdb5941d86fd7ba300df2090ef554e457af6029396254b84efbd69c166d4626d"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/nd/spiraltorch_wasm.d.ts",
+      "sha256": "f7b9259144e3e15010d01c82d63d902137646acf24e191744c4da0361a3f3cff"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/nd/spiraltorch_wasm.js",
+      "sha256": "b0fdfff6dd4891a96615d512ab69188f3ad0ece4915c3bbb6f18a81c80d9d348"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/nd/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "0f11e21fe76445f197f339ba28ffb6c548b66e79672d2d7da05edcb0860f22a5"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/nd/spiraltorch_wasm_bg.wasm",
+      "sha256": "9b211877477ee27da0c19ea8228182f6569fd067cd8842d8ed2bae0023d69b40"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/client/forward-bench-fixture.json",
+      "sha256": "8192fe87689010c3d23d6ae753314b8ec8c3b0cfe4596b7516b4eedd3ba4456a"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-terminal-capture-20260912/--launch/python-cpu.dylib",
+      "sha256": "2c9cb4eef1b6945dcfae331ae1065a3f150046dfdfdf2c85d0c465cca91e265a"
+    }
+  ],
+  "raw_records": 221,
+  "manifest_sha256": "81d5b55c627d4cb0d65757d3fa8d20e7ce16aef1f08586e59a481b5d71ca3940",
+  "verification_directory_note": "The run helper interpreted a lone --launch as the literal output name. That single original run and its paths are retained, not renamed or restarted.",
+  "boundary": "Explicit terminal API versus ordinary forward+snapshot, not a new automatic policy. Native Apple M4/Metal; eager Torch with no MPS CPU fallback. Browser physical GPU and host exclusivity UNKNOWN. No GPU kernel-time attribution, CUDA/Furnace, generic autograd migration, release, push or merge. All samples and ordinary-path controls retained."
+}
