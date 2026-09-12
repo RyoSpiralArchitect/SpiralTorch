@@ -3,6 +3,10 @@ use crate::{Gelu, Linear, ModuleTrainer, Relu, Scaler, Sequential};
 use st_backend_wgpu::{resident_tensor::TensorDevice, runtime};
 use st_core::backend::device_caps::DeviceCaps;
 
+thread_local! {
+    pub(super) static EXACT_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn device() -> Option<TensorDevice> {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
@@ -42,6 +46,10 @@ fn close(actual: &[f32], expected: &[f32]) {
 
 #[test]
 fn operation_cache_checks_bits_layout_program_and_foreign_values() {
+    let same_operations = |a: &[InferenceOp], b: &[InferenceOp]| {
+        let mut stamps: Vec<_> = a.iter().map(OperationStamp::capture).collect();
+        super::same_operations(a, b, &mut stamps)
+    };
     let value = Tensor::from_vec(1, 2, vec![0., 1.]).unwrap();
     let ops = vec![
         InferenceOp::Scale {
@@ -106,6 +114,103 @@ fn exact_comparison_preserves_bits_at_odd_lengths_and_nonfinite_payloads() {
             assert!(same_tensor(&frozen, &original));
         }
     }
+}
+
+#[test]
+fn stamps_skip_scans_refresh_equal_replacements_and_revoke_on_late_export() {
+    let mut current = vec![
+        InferenceOp::Scale {
+            gain: Tensor::from_vec(1, 3, vec![1., 2., 3.]).unwrap(),
+        },
+        InferenceOp::Gelu,
+    ];
+    let saved: Vec<_> = current.iter().map(InferenceOp::snapshot).collect();
+    let mut stamps: Vec<_> = current.iter().map(OperationStamp::capture).collect();
+    EXACT_COMPARISONS.with(|count| count.set(0));
+    for _ in 0..20 {
+        assert!(same_operations(&saved, &current, &mut stamps));
+    }
+    EXACT_COMPARISONS.with(|count| assert_eq!(count.get(), 0));
+    current[0] = InferenceOp::Scale {
+        gain: Tensor::from_vec(1, 3, vec![1., 2., 3.]).unwrap(),
+    };
+    assert!(same_operations(&saved, &current, &mut stamps));
+    EXACT_COMPARISONS.with(|count| assert_eq!(count.get(), 1));
+    assert!(same_operations(&saved, &current, &mut stamps));
+    EXACT_COMPARISONS.with(|count| assert_eq!(count.get(), 1));
+    let InferenceOp::Scale { gain } = &current[0] else {
+        panic!()
+    };
+    let managed = gain.to_dlpack().unwrap();
+    let pointer = unsafe { (*managed).dl_tensor.data.cast::<f32>() };
+    let _owner = unsafe { Tensor::from_dlpack(managed).unwrap() };
+    for _ in 0..2 {
+        assert!(same_operations(&saved, &current, &mut stamps));
+    }
+    EXACT_COMPARISONS.with(|count| assert_eq!(count.get(), 3));
+    unsafe {
+        *pointer.add(2) = 9.;
+    }
+    assert!(!same_operations(&saved, &current, &mut stamps));
+    assert!(!same_operations(&saved, &current, &mut []));
+    unsafe {
+        *pointer.add(2) = 3.;
+    }
+    assert!(same_operations(&saved, &current, &mut stamps));
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn native_cached_linear_detects_later_export_and_retains_original_output() {
+    let Some(device) = device() else { return };
+    let _cpu = cpu();
+    let model = Linear::new("late-export", 3, 5).unwrap();
+    let input = device.upload(&[2, 3, 3], &[0.25; 18]).unwrap();
+    let host = Tensor::from_vec(6, 3, vec![0.25; 18]).unwrap();
+    let original_expected = model.forward(&host).unwrap();
+    let original = model.forward_resident(&input).unwrap();
+    model.forward_resident(&input).unwrap();
+    let weights = model.weight().value().to_dlpack().unwrap();
+    let biases = model.bias().value().to_dlpack().unwrap();
+    let wp = unsafe { (*weights).dl_tensor.data.cast::<f32>() };
+    let bp = unsafe { (*biases).dl_tensor.data.cast::<f32>() };
+    let _weights = unsafe { Tensor::from_dlpack(weights).unwrap() };
+    let _biases = unsafe { Tensor::from_dlpack(biases).unwrap() };
+    model.forward_resident(&input).unwrap();
+    assert_eq!(model.resident_forward_stats().unwrap().compilations, 1);
+    unsafe {
+        *wp.add(14) += 0.125;
+    }
+    let changed = model.forward_resident(&input).unwrap();
+    let expected = model.forward(&host).unwrap();
+    assert_ne!(expected, original_expected);
+    close(
+        &changed.snapshot().unwrap().read().unwrap(),
+        expected.data(),
+    );
+    assert_eq!(model.resident_forward_stats().unwrap().compilations, 2);
+    unsafe {
+        *bp.add(4) = f32::NAN;
+    }
+    let before = model.resident_forward_stats();
+    assert!(model.forward_resident(&input).is_err());
+    assert!(model.forward(&host).is_err());
+    assert_eq!(model.resident_forward_stats(), before);
+    unsafe {
+        *bp.add(4) = 0.;
+    }
+    model
+        .forward_resident(&input)
+        .unwrap()
+        .snapshot()
+        .unwrap()
+        .read()
+        .unwrap();
+    assert_eq!(model.resident_forward_stats().unwrap().compilations, 2);
+    close(
+        &original.snapshot().unwrap().read().unwrap(),
+        original_expected.data(),
+    );
 }
 
 #[test]

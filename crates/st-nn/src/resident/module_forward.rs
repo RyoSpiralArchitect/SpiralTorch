@@ -4,6 +4,7 @@ use st_backend_wgpu::{
     resident_graph::{GraphInferenceError, ResidentGraph},
     resident_tensor::ResidentTensor,
 };
+use st_tensor::TensorContentStamp;
 use std::cell::RefCell;
 
 /// Host submission/cache diagnostics, not GPU completion or validation receipts.
@@ -16,7 +17,32 @@ pub struct ResidentForwardStats {
 
 struct Cached {
     operations: Vec<InferenceOp>,
+    stamps: Vec<OperationStamp>,
     graph: ResidentGraph,
+}
+
+enum OperationStamp {
+    Linear {
+        weight: Option<TensorContentStamp>,
+        bias: Option<TensorContentStamp>,
+    },
+    Scale(Option<TensorContentStamp>),
+    Gelu,
+    Relu,
+}
+
+impl OperationStamp {
+    fn capture(operation: &InferenceOp) -> Self {
+        match operation {
+            InferenceOp::Linear { weight, bias } => Self::Linear {
+                weight: weight.content_stamp(),
+                bias: bias.content_stamp(),
+            },
+            InferenceOp::Scale { gain } => Self::Scale(gain.content_stamp()),
+            InferenceOp::Gelu => Self::Gelu,
+            InferenceOp::Relu => Self::Relu,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -56,6 +82,8 @@ pub(crate) fn unary_forward(
 }
 
 fn same_tensor(a: &Tensor, b: &Tensor) -> bool {
+    #[cfg(test)]
+    tests::EXACT_COMPARISONS.with(|count| count.set(count.get() + 1));
     a.shape() == b.shape()
         && a.layout() == b.layout()
         && ((a.is_snapshot() && b.is_snapshot() && a.data().as_ptr() == b.data().as_ptr())
@@ -65,23 +93,50 @@ fn same_tensor(a: &Tensor, b: &Tensor) -> bool {
                 .all(|(a, b)| a.to_bits() == b.to_bits()))
 }
 
-fn same_operations(a: &[InferenceOp], b: &[InferenceOp]) -> bool {
+fn same_parameter(
+    frozen: &Tensor,
+    current: &Tensor,
+    stamp: &mut Option<TensorContentStamp>,
+) -> bool {
+    if stamp.as_ref().is_some_and(|stamp| stamp.matches(current)) {
+        return true;
+    }
+    *stamp = None;
+    if !same_tensor(frozen, current) {
+        return false;
+    }
+    // Equal-value replacement can acquire a fresh witness without recompiling.
+    *stamp = current.content_stamp();
+    true
+}
+
+fn same_operations(a: &[InferenceOp], b: &[InferenceOp], stamps: &mut [OperationStamp]) -> bool {
     a.len() == b.len()
-        && a.iter().zip(b).all(|(a, b)| match (a, b) {
-            (
-                InferenceOp::Linear {
-                    weight: aw,
-                    bias: ab,
-                },
-                InferenceOp::Linear {
-                    weight: bw,
-                    bias: bb,
-                },
-            ) => same_tensor(aw, bw) && same_tensor(ab, bb),
-            (InferenceOp::Scale { gain: a }, InferenceOp::Scale { gain: b }) => same_tensor(a, b),
-            (InferenceOp::Gelu, InferenceOp::Gelu) | (InferenceOp::Relu, InferenceOp::Relu) => true,
-            _ => false,
-        })
+        && a.len() == stamps.len()
+        && a.iter()
+            .zip(b)
+            .zip(stamps)
+            .all(|((a, b), stamp)| match (a, b, stamp) {
+                (
+                    InferenceOp::Linear {
+                        weight: aw,
+                        bias: ab,
+                    },
+                    InferenceOp::Linear {
+                        weight: bw,
+                        bias: bb,
+                    },
+                    OperationStamp::Linear { weight, bias },
+                ) => same_parameter(aw, bw, weight) && same_parameter(ab, bb, bias),
+                (
+                    InferenceOp::Scale { gain: a },
+                    InferenceOp::Scale { gain: b },
+                    OperationStamp::Scale(stamp),
+                ) => same_parameter(a, b, stamp),
+                (InferenceOp::Gelu, InferenceOp::Gelu, OperationStamp::Gelu)
+                | (InferenceOp::Relu, InferenceOp::Relu, OperationStamp::Relu) => true,
+                _ => false,
+            })
 }
 
 impl ResidentForwardCache {
@@ -108,7 +163,7 @@ impl ResidentForwardCache {
         }
         let layout = NdLayout::contiguous(input.layout().shape())?;
         let mut state = self.0.borrow_mut();
-        let reuse = state.current.as_ref().is_some_and(|cached| {
+        let reuse = state.current.as_mut().is_some_and(|cached| {
             cached.graph.input_layout() == &layout
                 && cached
                     .graph
@@ -116,7 +171,7 @@ impl ResidentForwardCache {
                     .runtime()
                     .context()
                     .shares_handles_with(input.device().runtime().context())
-                && same_operations(&cached.operations, &operations)
+                && same_operations(&cached.operations, &operations, &mut cached.stamps)
         });
         let increment = |value: u64| {
             value
@@ -128,13 +183,14 @@ impl ResidentForwardCache {
             state.stats.cache_hits = increment(state.stats.cache_hits)?;
         } else {
             let compilations = increment(state.stats.compilations)?;
-            // Freeze once on a miss. Mutable/foreign values are compared by bits
-            // on every reuse; pointer identity alone cannot detect producer writes.
+            // Freeze on a miss. Owned values use revocable weak witnesses;
+            // external values still require exact comparison on every reuse.
             let frozen: Vec<_> = operations.iter().map(InferenceOp::snapshot).collect();
             let plan = InferencePlan::from_operations(layout, frozen.clone())?;
             let graph = plan.compile_graph_wgpu(input.device().runtime().clone())?;
             state.current = Some(Cached {
                 operations: frozen,
+                stamps: operations.iter().map(OperationStamp::capture).collect(),
                 graph,
             });
             state.stats.compilations = compilations;

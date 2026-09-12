@@ -33,7 +33,7 @@ use st_core::runtime::trainer_optimizer::TrainerParameterOptimizerState;
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
     topos::OpenCartesianTopos, AmegaHypergrad, AmegaRealgrad, ComplexTensor, LanguageWaveEncoder,
-    PackedB, PureResult, Tensor, TensorError, Tile,
+    PackedB, PureResult, Tensor, TensorContentStamp, TensorError, Tile,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -46,8 +46,14 @@ pub struct Parameter {
     gradient: Option<Tensor>,
     hypergrad: Option<AmegaHypergrad>,
     realgrad: Option<AmegaRealgrad>,
-    packed_matmul: RefCell<Option<PackedB>>,
-    packed_matmul_transpose: RefCell<Option<PackedB>>,
+    packed_matmul: RefCell<Option<ParameterPack>>,
+    packed_matmul_transpose: RefCell<Option<ParameterPack>>,
+    finite_stamp: RefCell<Option<TensorContentStamp>>,
+}
+
+struct ParameterPack {
+    pack: PackedB,
+    stamp: TensorContentStamp,
 }
 
 pub(crate) struct PreparedParameterOptimizerState {
@@ -83,6 +89,7 @@ impl Parameter {
             realgrad: None,
             packed_matmul: RefCell::new(None),
             packed_matmul_transpose: RefCell::new(None),
+            finite_stamp: RefCell::new(None),
         }
     }
 
@@ -103,7 +110,7 @@ impl Parameter {
 
     /// Provides a mutable view into the underlying tensor value.
     pub fn value_mut(&mut self) -> &mut Tensor {
-        self.invalidate_matmul_pack();
+        self.invalidate_value_caches();
         &mut self.value
     }
 
@@ -180,7 +187,7 @@ impl Parameter {
         self.gradient = state.gradient;
         self.hypergrad = state.hypergrad;
         self.realgrad = state.realgrad;
-        self.invalidate_matmul_pack();
+        self.invalidate_value_caches();
     }
 
     /// Attaches a hypergrad tape to the parameter.
@@ -426,6 +433,7 @@ impl Parameter {
     /// the supplied fallback learning rate.
     pub fn apply_step(&mut self, fallback_lr: f32) -> PureResult<()> {
         Self::validate_fallback_lr(fallback_lr)?;
+        self.invalidate_value_caches();
         let mut applied = false;
         if let Some(tape) = self.hypergrad.as_mut() {
             let backend = current_tensor_util_backend_for_values(self.value.data().len());
@@ -448,7 +456,6 @@ impl Parameter {
                 }
             }
         }
-        self.invalidate_matmul_pack();
         Ok(())
     }
 
@@ -672,27 +679,55 @@ impl Parameter {
 
     /// Ensures a prepacked representation of the parameter is available for matmul.
     pub fn ensure_matmul_pack(&self) -> PureResult<PackedB> {
-        if let Some(existing) = self.packed_matmul.borrow().clone() {
-            return Ok(existing);
+        if let Some(existing) = self.packed_matmul.borrow().as_ref() {
+            if existing.stamp.matches(self.value()) {
+                return Ok(existing.pack.clone());
+            }
         }
         let pack = PackedB::from_tensor(self.value(), Tile::col_major())?;
-        *self.packed_matmul.borrow_mut() = Some(pack.clone());
+        *self.packed_matmul.borrow_mut() = self.value.content_stamp().map(|stamp| ParameterPack {
+            pack: pack.clone(),
+            stamp,
+        });
         Ok(pack)
     }
 
     /// Ensures a prepacked representation of the parameter transpose is available for matmul.
     pub fn ensure_matmul_transpose_pack(&self) -> PureResult<PackedB> {
-        if let Some(existing) = self.packed_matmul_transpose.borrow().clone() {
-            return Ok(existing);
+        if let Some(existing) = self.packed_matmul_transpose.borrow().as_ref() {
+            if existing.stamp.matches(self.value()) {
+                return Ok(existing.pack.clone());
+            }
         }
         let pack = PackedB::from_tensor_transpose(self.value(), Tile::col_major())?;
-        *self.packed_matmul_transpose.borrow_mut() = Some(pack.clone());
+        *self.packed_matmul_transpose.borrow_mut() =
+            self.value.content_stamp().map(|stamp| ParameterPack {
+                pack: pack.clone(),
+                stamp,
+            });
         Ok(pack)
     }
 
-    fn invalidate_matmul_pack(&self) {
+    pub(crate) fn validate_finite(&self, label: &'static str) -> PureResult<()> {
+        let mut cached = self.finite_stamp.borrow_mut();
+        if cached
+            .as_ref()
+            .is_some_and(|stamp| stamp.matches(&self.value))
+        {
+            return Ok(());
+        }
+        *cached = None;
+        if let Some(&value) = self.value.data().iter().find(|value| !value.is_finite()) {
+            return Err(TensorError::NonFiniteValue { label, value });
+        }
+        *cached = self.value.content_stamp();
+        Ok(())
+    }
+
+    fn invalidate_value_caches(&self) {
         self.packed_matmul.borrow_mut().take();
         self.packed_matmul_transpose.borrow_mut().take();
+        self.finite_stamp.borrow_mut().take();
     }
 
     /// Replaces the parameter value with the provided tensor.
@@ -990,6 +1025,9 @@ pub trait Module {
         })
     }
 }
+
+#[cfg(test)]
+mod content_stamp_tests;
 
 #[cfg(test)]
 mod tests {

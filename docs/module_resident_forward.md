@@ -87,19 +87,27 @@ optimizer-state resume.
 - Each parameterized Module holds one bounded, replaceable graph, not a cache
   growing with every shape. Shape, device/queue, operation sequence, layout or
   parameter-bit changes rebuild it. Identical values reuse it.
-- Mutable/foreign parameters are compared by bits on every call. This deliberately
-  includes externally shared DLPack writes; pointer identity is not sufficient.
-  Per-element bit comparison preserves raw bits without building temporary
-  bit arrays, but is still O(parameter values) CPU work, not a zero-cost claim. Signed
-  zero, shape and layout differences still invalidate the cache; Linear's finite
-  parameter validation remains enabled.
+- Unchanged native parameters use Rust-owned `TensorContentStamp` witnesses to
+  skip repeated finite/equality scans. These weak witnesses do not retain tensor
+  values or force a value-sized copy on mutation. A Rust mutation, different
+  shape/layout, or later shared writable DLPack export invalidates them.
+  Foreign storage is never trusted, including read-only imports. Externally
+  shared parameters still require exact bit comparison on every reuse, and
+  Linear still checks finite values. Copy-only exports do not revoke the source.
+  Equal-value replacement is checked once and may refresh a native witness
+  without graph recompilation. Signed zero changes remain significant.
+- CPU Parameter prepacking uses the same revocable witnesses. A writable export
+  made after pack creation cannot silently retain stale packed weights; untracked
+  sources are repacked. External writes must be serialized between Rust calls,
+  not concurrent with them. Witnesses are process-local change detectors, not
+  hashes, portable revisions, or authorization to mutate shared storage.
 - Built-in modules append descriptors to one shared vector rather than allocating
   a temporary vector per leaf. `Module::append_inference_ops` is an optional
   allocation-saving companion to `inference_ops`, with the same validation and
   descriptor semantics. Its default calls the existing custom module lowering;
   Sequential restores the caller's prefix if a child fails. Descriptor collection
-  still allocates its final vector and clones parameter handles; it is not a new
-  zero-copy parameter/versioning contract.
+  still allocates its final vector and clones parameter handles. Cold compilation
+  still snapshots and uploads weights; this is not globally zero-copy execution.
 - Cached graph forwards bind contiguous, offset-zero inputs directly and write
   the final stage directly into an owning output version. There are no full-sized
   input/output bridge copies on that path. Strided/offset views are packed only
@@ -140,7 +148,7 @@ For timing, `tools/bench_graph_forward_paths.py --include-module` adds ordinary
 `model(WgpuTensor)` calls to the existing matched fixture and PyTorch controls.
 The module d2h route excludes input upload; compare it separately from h2h.
 The fixed-input burst routes each perform eight independent forwards and one
-terminal host read. Per-call parameter comparison and resident I/O are timed;
+terminal host read. Per-call parameter validation/selection and resident I/O are timed;
 cold compilation is recorded separately.
 
 `nn-module-matched` in `tools/test_resident_browser.cjs` loads two frozen WASM

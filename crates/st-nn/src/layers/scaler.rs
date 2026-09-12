@@ -134,7 +134,7 @@ impl Scaler {
         if rows * cols == 0 {
             return Ok(None);
         }
-        validate_finite_tensor("scaler_gain", gain)?;
+        self.gain.validate_finite("scaler_gain")?;
         validate_finite_tensor("scaler_baseline", &self.baseline)?;
 
         let drift = gain
@@ -288,7 +288,7 @@ impl Module for Scaler {
             });
         }
         validate_finite_tensor("scaler_input", input)?;
-        validate_finite_tensor("scaler_gain", gain)?;
+        self.gain.validate_finite("scaler_gain")?;
         let broadcast_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let output = input.mul_row_with_backend(gain.data(), broadcast_backend)?;
         emit_scaler_meta(
@@ -320,8 +320,8 @@ impl Module for Scaler {
         }
         validate_finite_tensor("scaler_backward_input", input)?;
         validate_finite_tensor("scaler_backward_grad_output", grad_output)?;
+        self.gain.validate_finite("scaler_gain")?;
         let gain_values = self.gain.value().data().to_vec();
-        validate_finite_slice("scaler_gain", &gain_values)?;
         if rows == 0 {
             let output = Tensor::zeros(rows, cols)?;
             emit_scaler_meta("scaler_backward", rows, cols, true, None, None, None);

@@ -98,7 +98,8 @@ use std::f32::consts::PI;
 use std::ffi::c_void;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 /// Result alias used throughout the pure module.
 pub type PureResult<T> = Result<T, TensorError>;
@@ -917,21 +918,39 @@ enum TensorBacking {
     Foreign(ForeignTensor),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct TensorBuffer {
     backing: TensorBacking,
+    mutable_exported: AtomicBool,
+}
+
+impl Clone for TensorBuffer {
+    fn clone(&self) -> Self {
+        // An outer COW clone must not create separately tracked writable
+        // buffers sharing the same values. Tensor::clone still only clones Arc.
+        match &self.backing {
+            TensorBacking::Owned(values) => Self::from_aligned(aligned_from_slice(values)),
+            TensorBacking::Snapshot(values) => Self {
+                backing: TensorBacking::Snapshot(Arc::clone(values)),
+                mutable_exported: AtomicBool::new(false),
+            },
+            TensorBacking::Foreign(foreign) => Self::from_foreign(foreign.clone()),
+        }
+    }
 }
 
 impl TensorBuffer {
     fn from_aligned(data: AlignedVec) -> Self {
         Self {
             backing: TensorBacking::Owned(Arc::new(data)),
+            mutable_exported: AtomicBool::new(false),
         }
     }
 
     fn from_foreign(foreign: ForeignTensor) -> Self {
         Self {
             backing: TensorBacking::Foreign(foreign),
+            mutable_exported: AtomicBool::new(false),
         }
     }
 
@@ -949,9 +968,14 @@ impl TensorBuffer {
         if let TensorBacking::Foreign(foreign) = &self.backing {
             let owned = aligned_from_slice(foreign.as_slice());
             self.backing = TensorBacking::Owned(Arc::new(owned));
+            *self.mutable_exported.get_mut() = false;
         }
 
         if let TensorBacking::Owned(vec) = &mut self.backing {
+            if Arc::strong_count(vec) > 1 {
+                // Detach from packs, snapshots and live external producers.
+                *self.mutable_exported.get_mut() = false;
+            }
             Arc::make_mut(vec).as_mut_slice()
         } else {
             unreachable!()
@@ -978,6 +1002,45 @@ impl TensorBuffer {
             TensorBacking::Owned(vec) | TensorBacking::Snapshot(vec) => Some(Arc::clone(vec)),
             TensorBacking::Foreign(_) => None,
         }
+    }
+
+    fn content_is_tracked(&self) -> bool {
+        !matches!(self.backing, TensorBacking::Foreign(_))
+            && !self.mutable_exported.load(Ordering::Acquire)
+    }
+}
+
+/// Opaque, process-local evidence that a tensor has not changed.
+///
+/// This is not a hash or a serialized revision. It neither retains the values
+/// nor forces a value-sized COW copy. Rust mutation dissociates its weak owner;
+/// a later shared writable DLPack export revokes it. A non-match only means the
+/// caller must revalidate. Foreign storage is never tracked, even if read-only.
+/// External producer writes must be synchronized between Rust operations, as
+/// required by the DLPack import/export contract.
+#[derive(Clone)]
+pub struct TensorContentStamp {
+    storage: Weak<TensorBuffer>,
+    shape: (usize, usize),
+    layout: Layout,
+}
+
+impl TensorContentStamp {
+    /// Whether the same protected storage, shape and layout are still current.
+    pub fn matches(&self, tensor: &Tensor) -> bool {
+        self.shape == tensor.shape()
+            && self.layout == tensor.layout()
+            && self.storage.as_ptr() == Arc::as_ptr(&tensor.data)
+            && tensor.data.content_is_tracked()
+    }
+}
+
+impl fmt::Debug for TensorContentStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TensorContentStamp")
+            .field("shape", &self.shape)
+            .field("layout", &self.layout)
+            .finish_non_exhaustive()
     }
 }
 
@@ -1747,6 +1810,16 @@ impl Tensor {
         Arc::make_mut(&mut self.data).make_mut_slice()
     }
 
+    /// Capture a cheap change detector, or `None` for externally mutable data.
+    /// Inspect it with [`TensorContentStamp::matches`] before reusing any result.
+    pub fn content_stamp(&self) -> Option<TensorContentStamp> {
+        self.data.content_is_tracked().then(|| TensorContentStamp {
+            storage: Arc::downgrade(&self.data),
+            shape: self.shape(),
+            layout: self.layout(),
+        })
+    }
+
     /// Captures an isolated value that exports read-only storage through DLPack.
     ///
     /// Mutable or foreign storage is copied. Existing snapshots can be shared;
@@ -1773,6 +1846,7 @@ impl Tensor {
         };
         self.data = Arc::new(TensorBuffer {
             backing: TensorBacking::Snapshot(values),
+            mutable_exported: AtomicBool::new(false),
         });
         self
     }
@@ -1822,7 +1896,14 @@ impl Tensor {
     /// pass it directly to [`Self::from_managed_dlpack`] without using raw pointers.
     pub fn export_dlpack(&self, options: DlpackExportOptions) -> PureResult<ManagedTensor> {
         self.layout.expect_row_major("dlpack export")?;
-        dlpack::export_tensor(self.data.export_handle(), self.rows, self.cols, options)
+        let managed =
+            dlpack::export_tensor(self.data.export_handle(), self.rows, self.cols, options)?;
+        if options.copy != DlpackCopyPolicy::Always
+            && matches!(self.data.backing, TensorBacking::Owned(_))
+        {
+            self.data.mutable_exported.store(true, Ordering::Release);
+        }
+        Ok(managed)
     }
 
     /// Return a zero-copy view of the tensor with new row/column dimensions.
@@ -12082,6 +12163,9 @@ fn matmul_lhs_transpose_scaled_wgpu(
         },
     )
 }
+
+#[cfg(test)]
+mod content_stamp_tests;
 
 #[cfg(test)]
 mod tests {

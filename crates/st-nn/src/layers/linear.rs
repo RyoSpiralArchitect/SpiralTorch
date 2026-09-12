@@ -82,8 +82,8 @@ impl Linear {
     }
 
     fn validate_parameters(&self) -> PureResult<()> {
-        validate_finite_tensor("linear_weight", self.weight.value())?;
-        validate_finite_tensor("linear_bias", self.bias.value())
+        self.weight.validate_finite("linear_weight")?;
+        self.bias.validate_finite("linear_bias")
     }
 }
 

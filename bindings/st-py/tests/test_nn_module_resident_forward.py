@@ -1,5 +1,6 @@
 """One original NN model, explicit host/resident inputs, no hidden transfers."""
 import ast
+import ctypes as ct
 import gc
 import json
 import os
@@ -20,6 +21,18 @@ def model():
 
 def flat(t):
     return [v for row in t.tolist() for v in row]
+
+
+def mutable_legacy_export(tensor):
+    capsule = tensor.__dlpack__(max_version=None, copy=False)
+    pointer = ct.pythonapi.PyCapsule_GetPointer
+    pointer.argtypes = [ct.py_object, ct.c_char_p]
+    pointer.restype = ct.c_void_p
+    header = pointer(capsule, b"dltensor")
+    # Legacy DLManagedTensor starts with DLTensor, whose first member is data.
+    data = ct.cast(header, ct.POINTER(ct.c_void_p)).contents.value
+    rows, cols = tensor.shape()
+    return capsule, (ct.c_float * (rows * cols)).from_address(data)
 
 
 class Surface(unittest.TestCase):
@@ -56,6 +69,37 @@ class Gpu(unittest.TestCase):
         values = gpu.snapshot().read_values()
         self.assertEqual(len(values), len(host))
         for a, b in zip(values, host): self.assertAlmostEqual(a, b, delta=2e-5)
+
+    def test_late_dlpack_export_updates_cpu_pack_and_resident_graph(self):
+        net = st.nn.Linear("late", 3, 5)
+        host = st.Tensor(6, 3, [0.25]*18)
+        gpu = self.d.upload([2, 3, 3], [0.25]*18)
+        original_host = flat(net(host))
+        original = net(gpu)
+        self.close(net(gpu), original_host)
+        state = dict(net.state_dict())
+        weight = next(t for name, t in state.items() if name.endswith("::weight"))
+        bias = next(t for name, t in state.items() if name.endswith("::bias"))
+        weight_owner, weights = mutable_legacy_export(weight)
+        bias_owner, biases = mutable_legacy_export(bias)
+        self.close(net(gpu), original_host)
+        self.assertEqual(net.resident_cache_info()["compilations"], 1)
+        # Writes occur between calls, with live capsule owners, never concurrently.
+        weights[-1] += 0.125
+        changed_host = flat(net(host))
+        self.assertNotEqual(changed_host, original_host)
+        self.close(net(gpu), changed_host)
+        self.assertEqual(net.resident_cache_info()["compilations"], 2)
+        biases[-1] = float("nan")
+        before = net.resident_cache_info()
+        with self.assertRaises(ValueError): net(gpu)
+        with self.assertRaises(ValueError): net(host)
+        self.assertEqual(net.resident_cache_info(), before)
+        biases[-1] = 0.
+        self.close(net(gpu), changed_host)
+        self.assertEqual(net.resident_cache_info()["compilations"], 2)
+        self.close(original, original_host)
+        del weights, biases, weight_owner, bias_owner
 
     def test_late_pointwise_stage_guards_survive_masking_and_valid_reuse(self):
         for bad in [0, 7, 11]:
