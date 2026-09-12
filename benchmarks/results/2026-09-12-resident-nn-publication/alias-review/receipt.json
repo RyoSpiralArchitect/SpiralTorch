@@ -1,0 +1,46 @@
+{
+  "status": "passed",
+  "source": {
+    "commit": "cf8fee5698b76c8314853ea31e258cb1d1ccfdb7",
+    "tree": "5cfb4e1826f207e9bc8b75a3bca136bfc2dfd6b5"
+  },
+  "changes_since_full_review": [
+    "bindings/st-py/spiraltorch/__init__.pyi",
+    "tests/test_runtime_imports.py"
+  ],
+  "records": [
+    {
+      "path": "check_stub_alias_regression.py",
+      "bytes": 1333,
+      "sha256": "0a10a222d313fe1138d0e9e404be0ff27caf1aa67ee09259e22332d4bbf24807"
+    },
+    {
+      "path": "pointwise-stub-alias-regression.log",
+      "bytes": 2248,
+      "sha256": "1b1ec7408993869187a5eb7ad21329304ceaa0d3ab0f07a99d7d610e5166f1ff"
+    },
+    {
+      "path": "pointwise-stub-alias-before.log",
+      "bytes": 693,
+      "sha256": "cb67aa1540b0e8797e985c63e0d2d89e76d9b77e5620a904fdd194306264bad7"
+    },
+    {
+      "path": "pointwise-stub-alias-frozen-gpu.log",
+      "bytes": 120,
+      "sha256": "299411033a8813572e8419bbdc7112834f2f49858c9c5e484d37dccd74896bb0"
+    },
+    {
+      "path": "pointwise-stub-alias-frozen-cpu.log",
+      "bytes": 120,
+      "sha256": "a6efe371315444b2b5fe872f60b79c716efbc3a56fff11cb33c3202743e6e03b"
+    }
+  ],
+  "frozen_extensions": {
+    "python-gpu.dylib": "eb8392b85c8dcf545dcf8a0d8ab3bbc8907f31bbd466860a8e64e85c961a2c30",
+    "python-cpu.dylib": "8ae53eff1cfb47f02c9cbd81c11138954240dd5a64b6e7e8a66957c3a1bde37d"
+  },
+  "gpu_runtime_import_tests": 21,
+  "cpu_runtime_import_tests": 21,
+  "review_comment": "https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2101#discussion_r3996031751",
+  "boundary": "Type-stub/test changes only; no new GPU or numerical benchmark run. The first prototype before.log failed because its subprocess saw no native WGPU names; it is not the accepted regression. The accepted regression uses the exact old stub from Git and is independent of installed wheels."
+}

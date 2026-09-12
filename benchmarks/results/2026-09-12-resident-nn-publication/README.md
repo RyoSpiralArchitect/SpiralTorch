@@ -26,3 +26,11 @@ real-GPU NN CI opt-in, and fixed-width guard-test decoding. Exact test outcomes,
 failed attempts, source identities and limits are recorded in the wide package's
 `review` directory. GitHub CI/review completion and merge state belong to the PRs,
 not these earlier frozen benchmark receipts.
+
+The final `cf8fee56` review additionally fixes the WGPU facade and wildcard
+type exports. `alias-review/receipt.json` binds the deterministic before/after
+stub regression and both frozen-extension runtime-import suites (21 tests
+each). Only the shipped stub and its test changed after the full `8d2bd26a`
+review run. The first prototype's installed-extension-dependent failure is
+retained and explicitly excluded; the accepted AST regression uses the exact
+old Git stub without depending on an installed wheel.

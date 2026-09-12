@@ -1,0 +1,31 @@
+test_wgpu_stub_preserves_facade_and_wildcard_aliases (runtime_tests.RuntimeImportsTest.test_wgpu_stub_preserves_facade_and_wildcard_aliases) ... 
+  test_wgpu_stub_preserves_facade_and_wildcard_aliases (runtime_tests.RuntimeImportsTest.test_wgpu_stub_preserves_facade_and_wildcard_aliases) (name='WgpuPointwiseInputs') ... FAIL
+  test_wgpu_stub_preserves_facade_and_wildcard_aliases (runtime_tests.RuntimeImportsTest.test_wgpu_stub_preserves_facade_and_wildcard_aliases) (name='WgpuPointwisePlan') ... FAIL
+
+======================================================================
+FAIL: test_wgpu_stub_preserves_facade_and_wildcard_aliases (runtime_tests.RuntimeImportsTest.test_wgpu_stub_preserves_facade_and_wildcard_aliases) (name='WgpuPointwiseInputs')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 236, in test_wgpu_stub_preserves_facade_and_wildcard_aliases
+    self.assertEqual(aliases.get(name), f"type[{name}]")
+AssertionError: None != 'type[WgpuPointwiseInputs]'
+
+======================================================================
+FAIL: test_wgpu_stub_preserves_facade_and_wildcard_aliases (runtime_tests.RuntimeImportsTest.test_wgpu_stub_preserves_facade_and_wildcard_aliases) (name='WgpuPointwisePlan')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 236, in test_wgpu_stub_preserves_facade_and_wildcard_aliases
+    self.assertEqual(aliases.get(name), f"type[{name}]")
+AssertionError: None != 'type[WgpuPointwisePlan]'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.040s
+
+FAILED (failures=2)
+test_wgpu_stub_preserves_facade_and_wildcard_aliases (runtime_tests.RuntimeImportsTest.test_wgpu_stub_preserves_facade_and_wildcard_aliases) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.042s
+
+OK
+Expected two pre-fix alias failures reproduced; fixed stub passed.
