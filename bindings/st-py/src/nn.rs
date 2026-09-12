@@ -4324,6 +4324,14 @@ impl PyCrossEntropyWithLogits {
         })
     }
 
+    pub fn evaluate_resident(
+        &mut self,
+        prediction: &Bound<'_, PyAny>,
+        target: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::nn_resident::PyResidentLoss> {
+        crate::nn_resident::evaluate_loss(&mut self.inner, prediction, target)
+    }
+
     pub fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
         self.inner
             .forward(&prediction.inner, &target.inner)

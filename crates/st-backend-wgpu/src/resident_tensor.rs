@@ -9,6 +9,7 @@ use st_kernel_contracts::{
 use thiserror::Error;
 
 pub(crate) mod capture;
+pub mod classification;
 pub(crate) mod guard_capture;
 pub mod loss;
 pub mod pointwise;
@@ -18,6 +19,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    Classification(#[from] st_kernel_contracts::classification::ClassificationError),
     #[error(transparent)]
     Pointwise(#[from] st_kernel_contracts::pointwise::PointwiseError),
     #[error(transparent)]
@@ -48,6 +51,7 @@ struct Kernels {
     pipeline: wgpu::ComputePipeline,
     runtime: WgpuRuntime,
     mse: std::sync::OnceLock<loss::MseKernels>,
+    classification: std::sync::OnceLock<classification::ClassificationKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -185,6 +189,7 @@ impl TensorDevice {
             pipeline,
             runtime,
             mse: std::sync::OnceLock::new(),
+            classification: std::sync::OnceLock::new(),
         })))
     }
 

@@ -469,6 +469,11 @@ connects it to `ModuleTrainer`. The [classification contract](docs/autograd_cont
 explains the boundaries. `python examples/autograd_classification.py` runs a
 300-step, three-class learning fixture without NumPy or PyTorch.
 
+For GPU-resident class-last logits, the same loss exposes
+[`evaluate_resident(logits, labels)`](docs/module_resident_classification.md)
+across Rust, Python and WASM, connecting classification to resident VJP and
+explicit learner updates without intermediate CPU observations.
+
 Version 0.4.23 adds `st.AutogradSgd(parameters, learning_rate=0.1)`
 for plain Rust-owned CPU updates. Fetch `optimizer.parameters()` for each forward
 pass, call `loss.backward()`, then `optimizer.step()`. All parameters are replaced

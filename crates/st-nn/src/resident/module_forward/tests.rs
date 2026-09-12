@@ -97,7 +97,7 @@ fn terminal_forward_uses_the_original_model_and_shared_cache() {
     let host = Tensor::from_vec(6, 3, input.snapshot().unwrap().read().unwrap()).unwrap();
     assert!(matches!(
         crate::Loss::evaluate_resident(
-            &mut crate::CrossEntropyWithLogits::default(),
+            &mut crate::CategoricalCrossEntropy::default(),
             &input,
             &input
         ),
@@ -644,6 +644,10 @@ fn committed_tensor_plan_is_not_silently_bypassed() {
     let before = net.resident_forward_stats();
     let scope = crate::execution::push_backend_policy(policy);
     assert!(matches!(
+        crate::Loss::evaluate_resident(&mut crate::CrossEntropyWithLogits::default(), &x, &x),
+        Err(InferenceError::ResidentForwardPolicy)
+    ));
+    assert!(matches!(
         crate::Loss::evaluate_resident(&mut crate::MeanSquaredError::new(), &x, &x),
         Err(InferenceError::ResidentForwardPolicy)
     ));
@@ -668,6 +672,10 @@ fn committed_tensor_plan_is_not_silently_bypassed() {
     assert_eq!(net.resident_forward_stats(), before);
     let binding = st_tensor::execution::current_execution_plan_binding().unwrap();
     let nested = cpu();
+    assert!(matches!(
+        crate::Loss::evaluate_resident(&mut crate::CrossEntropyWithLogits::default(), &x, &x),
+        Err(InferenceError::ResidentForwardPolicy)
+    ));
     assert!(matches!(
         crate::Loss::evaluate_resident(&mut crate::MeanSquaredError::new(), &x, &x),
         Err(InferenceError::ResidentForwardPolicy)

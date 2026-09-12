@@ -195,6 +195,12 @@ declare module "spiraltorch-wasm" {
         evaluateResident(prediction: WgpuTensor, target: WgpuTensor): ResidentLoss;
         free(): void;
     }
+    export class CrossEntropyWithLogits {
+        constructor(reduction?: string | null, ignore_index?: bigint | null, label_smoothing?: number | null);
+        /** Class-last integer-label loss. None reduction uses an all-ones loss seed. */
+        evaluateResident(prediction: WgpuTensor, target: WgpuTensor): ResidentLoss;
+        free(): void;
+    }
     export class ResidentLoss {
         private constructor();
         lossTensor(): WgpuTensor;

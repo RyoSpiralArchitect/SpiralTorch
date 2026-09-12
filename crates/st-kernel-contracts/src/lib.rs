@@ -8,6 +8,7 @@
 //! deliberately contains no runtime routing, device discovery, telemetry,
 //! allocation, or foreign-function interfaces.
 
+pub mod classification;
 pub mod compaction;
 pub mod elementwise;
 pub mod graph;

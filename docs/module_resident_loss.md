@@ -1,5 +1,8 @@
 # Ordinary Losses In Resident Learning
 
+For integer-label classification and token logits, see
+[resident CrossEntropyWithLogits](module_resident_classification.md).
+
 The existing Rust `MeanSquaredError` can now return a loss and its exact
 prediction cotangent as owning GPU tensors. Python and WASM expose that same
 `Loss::evaluate_resident` contract; neither reconstructs the objective.

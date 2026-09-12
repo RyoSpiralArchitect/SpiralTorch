@@ -46,6 +46,7 @@ def replay(case, device, *, expected_steps=9):
     plan = case["plan"]
     assert plan["schema"] == "spiraltorch.nn.inference_plan.v2"
     vjp = "replays" in case
+    classification = "label_smoothing" in case
     if not vjp:
         assert case["policy"] in ("Exact", "ModuleCompatible")
     x = torch.tensor(case["input"], dtype=torch.float32, device=device).reshape(
@@ -91,10 +92,13 @@ def replay(case, device, *, expected_steps=9):
             for actual, reference in zip(raw, expected["raw_gradients"]):
                 check(actual, reference)
             continue
-        target = torch.tensor(
-            case["target"], dtype=torch.float32, device=device
-        ).reshape(current.shape)
-        objective = (current - target).square().mean()
+        if classification:
+            target = torch.tensor(case["target"], dtype=torch.long, device=device)
+            objective = torch.nn.functional.cross_entropy(current.reshape(-1, current.shape[-1]), target,
+                reduction=case["reduction"], ignore_index=case["ignore_index"], label_smoothing=case["label_smoothing"])
+        else:
+            target = torch.tensor(case["target"], dtype=torch.float32, device=device).reshape(current.shape)
+            objective = (current - target).square().mean()
         dx, *raw = torch.autograd.grad(objective, [x, *parameters])
         effective = [
             (
@@ -114,6 +118,11 @@ def replay(case, device, *, expected_steps=9):
                 if rate != 0:
                     p.sub_(rate * effective[i])
                 check(p, expected["parameters"][i])
+    if classification:
+        final = evaluate(plan, x, parameters)
+        check(final, case["final_prediction"])
+        check(torch.nn.functional.cross_entropy(final.reshape(-1, final.shape[-1]), target,
+            reduction=case["reduction"], ignore_index=case["ignore_index"], label_smoothing=case["label_smoothing"]), [case["final_loss"]])
     return {
         "device": device,
         "seed": case["seed"],
@@ -121,9 +130,63 @@ def replay(case, device, *, expected_steps=9):
         "policy": "Exact" if vjp else case["policy"],
         "arbitrary_cotangent": vjp,
         "weighted_learning": False,
+        "classification": classification,
         "comparisons": comparisons,
         "max_abs_error": maximum,
     }
+
+
+def admit_classification_probes(probes):
+    expected = [(name, reduction, smoothing) for name in ("nd", "uniform", "strided", "broadcast")
+                for reduction in ("none", "sum", "mean") for smoothing in (0., .2, 1.)]
+    expected += [("wide_mean","mean",0.), ("tiny_smoothing","mean",1e-40),
+                 ("tiny_tail","mean",0.), ("wide_vocab","mean",.2),
+                 ("single_class","mean",.2), ("empty_none","none",0.), ("empty_sum","sum",0.)]
+    assert [(p["name"],p["reduction"],p["label_smoothing"]) for p in probes] == expected
+    for probe in probes:
+        shape = probe["shape"]
+        assert shape and shape[-1] > 0 and all(isinstance(d,int) and d >= 0 for d in shape)
+        assert len(probe["prediction"]) == math.prod(shape)
+        assert len(probe["target"]) == math.prod(shape[:-1])
+    assert next(p for p in probes if p["name"] == "wide_vocab")["shape"] == [1,50257]
+
+
+def replay_classification_probe(case, device):
+    wide = case["name"] in ("wide_mean", "tiny_smoothing")
+    assert not wide or device == "cpu", "wide reference uses explicit CPU float64, not an MPS fallback"
+    dtype = torch.float64 if wide else torch.float32
+    classes = case["shape"][-1]
+    x = torch.tensor(case["prediction"], dtype=dtype, device=device).reshape(-1, classes).requires_grad_()
+    labels = torch.tensor(case["target"], dtype=torch.long, device=device)
+    objective = torch.nn.functional.cross_entropy(x, labels, reduction=case["reduction"],
+        label_smoothing=case["label_smoothing"], ignore_index=case["ignore_index"])
+    gradient, = torch.autograd.grad(objective.sum(), [x])
+    maximum = 0.
+    for actual, expected in [(objective, case["loss"]), (gradient, case["gradient"])]:
+        actual = actual.detach().to(device="cpu", dtype=torch.float32).reshape(-1)
+        expected = torch.tensor(expected, dtype=torch.float32)
+        assert torch.isfinite(actual).all() and torch.isfinite(expected).all()
+        torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-4)
+        maximum = max(maximum, float((actual-expected).abs().max()) if actual.numel() else 0.)
+    return dict(device=device, probe=case["name"], reduction=case["reduction"],
+        label_smoothing=case["label_smoothing"], classification=True, comparisons=2,
+        max_abs_error=maximum, reference_dtype=str(dtype))
+
+
+def classification_tail_gap(case, device):
+    # This fixture deliberately exceeds ordinary f32 log_softmax tail precision.
+    # Record the eager Torch result, but do not count a loose-atol zero as agreement.
+    assert case["prediction"] == [80., 0.] and case["target"] == [0.]
+    tail = math.exp(-80.)
+    for actual, reference in zip(case["loss"]+case["gradient"], [tail, -tail, tail], strict=True):
+        assert math.isfinite(actual) and abs(actual/reference-1) < 2e-5
+    x = torch.tensor([[80., 0.]], dtype=torch.float32, device=device, requires_grad=True)
+    value = torch.nn.functional.cross_entropy(x, torch.tensor([0], device=device))
+    gradient, = torch.autograd.grad(value, [x])
+    return dict(device=device, probe="tiny_tail", classification=True,
+        scope="analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+        spiraltorch_loss=case["loss"], spiraltorch_gradient=case["gradient"],
+        torch_loss=float(value.detach().cpu()), torch_gradient=gradient.detach().cpu().reshape(-1).tolist())
 
 
 def replay_loss_probe(case, device):
@@ -213,6 +276,7 @@ def main():
     parser.add_argument("inputs", nargs="+", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--require-resident-loss", action="store_true")
+    parser.add_argument("--require-classification", action="store_true")
     parser.add_argument(
         "--devices", nargs="+", choices=["cpu", "mps", "cuda"], default=["cpu", "mps"]
     )
@@ -223,6 +287,7 @@ def main():
         "torch": torch.__version__,
         "cases": [],
         "inputs": [],
+        "reference_gaps": [],
         "scope": "correctness only; eager Torch; no fallback",
     }
     with args.output.open("x", encoding="utf-8") as output:
@@ -246,6 +311,8 @@ def main():
                 assert fixture["status"] == "passed" and len(fixture["cases"]) == 6
                 if args.require_resident_loss:
                     assert fixture.get("resident_loss", {}).get("status") == "passed"
+                if args.require_classification:
+                    assert fixture.get("classification", {}).get("status") == "passed"
                 report["inputs"].append(
                     {
                         "path": str(path.resolve()),
@@ -253,6 +320,28 @@ def main():
                     }
                 )
                 for device in args.devices:
+                    classification = fixture.get("classification")
+                    if classification is not None:
+                        assert classification["status"] == "passed" and len(classification["cases"]) == 6
+                        admit_classification_probes(classification["probes"])
+                        assert [(c["seed"], c["policy"], c["label_smoothing"]) for c in classification["cases"]] == [
+                            (seed, policy, smoothing) for seed, smoothing in [(17,0.),(29,.2),(43,.5)]
+                            for policy in ("Exact","ModuleCompatible")]
+                        for case in classification["cases"]:
+                            assert case["observations_after_updates"] == 64 and case["module_parameters_applied"] == 7
+                            assert case["optimizer"] == "explicit_sgd_not_ModuleTrainer" and case["reduction"] == "mean"
+                            assert case["final_loss"] < case["steps"][0]["loss"]
+                            result = replay(case, device, expected_steps=64)
+                            result["input"] = str(path.resolve()); report["cases"].append(result)
+                        for probe in classification["probes"]:
+                            if probe["name"] == "tiny_tail":
+                                gap = classification_tail_gap(probe, device)
+                                gap["input"] = str(path.resolve()); report["reference_gaps"].append(gap)
+                                continue
+                            if device != "cpu" and probe["name"] in ("wide_mean", "tiny_smoothing"):
+                                continue
+                            result = replay_classification_probe(probe, device)
+                            result["input"] = str(path.resolve()); report["cases"].append(result)
                     resident_loss = fixture.get("resident_loss")
                     if resident_loss is not None:
                         assert resident_loss["status"] == "passed"

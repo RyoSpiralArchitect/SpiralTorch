@@ -6,8 +6,8 @@ use super::*;
 /// reading either tensor checks inputs, intermediate squares and the reduction.
 #[derive(Clone)]
 pub struct ResidentLoss {
-    value: ResidentTensor,
-    prediction_gradient: ResidentTensor,
+    pub(super) value: ResidentTensor,
+    pub(super) prediction_gradient: ResidentTensor,
 }
 
 impl ResidentLoss {

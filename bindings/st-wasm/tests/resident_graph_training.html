@@ -32,6 +32,10 @@ try {
       report.resident_loss?.probes?.length!==7||report.resident_loss.cases.some(c=>
         c.observations_after_updates!==64||c.module_parameters_applied!==7||c.steps.length!==64))
     throw Error("Missing ordinary Loss to resident VJP/SGD and module handoff");
+  if(report.classification?.status!=="passed"||report.classification?.cases?.length!==6||
+      report.classification?.probes?.length!==43||report.classification.cases.some(c=>
+        c.observations_after_updates!==64||c.module_parameters_applied!==7||c.steps.length!==64))
+    throw Error("Missing class-last CrossEntropy learning and numerical probes");
   if(capture.length!==1||capture[0].captured_vjps!==4||capture[0].observation!=="after_workspace_drop"||
       JSON.stringify(capture[0].input_shape)!=="[2,3,257]")
     throw Error("Missing detached VJP capture and shared-guard recovery checks");

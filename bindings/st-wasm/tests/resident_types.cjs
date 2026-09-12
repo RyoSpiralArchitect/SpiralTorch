@@ -56,6 +56,9 @@ function checkNnContract(types, label) {
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
   const module = get("Sequential", true), cache = get("ResidentForwardStats");
   const mse = get("MeanSquaredError", true), objective = get("ResidentLoss");
+  const ce = get("CrossEntropyWithLogits", true);
+  assert.match(ce, /evaluateResident\(prediction: WgpuTensor, target: WgpuTensor\): ResidentLoss/);
+  assert.match(ce, /ignore_index\?: bigint \| null/);
   assert.match(mse, /evaluateResident\(prediction: WgpuTensor, target: WgpuTensor\): ResidentLoss/);
   assert.match(objective, /lossTensor\(\): WgpuTensor/);
   assert.match(objective, /predictionGradientTensor\(\): WgpuTensor/);

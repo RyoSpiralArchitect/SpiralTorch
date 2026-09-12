@@ -26,6 +26,8 @@ use st_tensor::{NdLayout, Tensor};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 #[path = "resident_graph_training/autograd.rs"]
 mod autograd;
+#[path = "resident_graph_training/classification.rs"]
+mod classification;
 #[path = "resident_graph_training/fusion.rs"]
 mod fusion;
 #[path = "resident_graph_training/learning.rs"]
@@ -118,12 +120,31 @@ fn cpu_step(
     policy: GraphGradientPolicy,
     roles: &[ParameterRole],
 ) -> Result<Reference> {
+    cpu_step_with_loss(
+        model,
+        x,
+        y,
+        rate,
+        policy,
+        roles,
+        &mut MeanSquaredError::new(),
+    )
+}
+
+fn cpu_step_with_loss(
+    model: &mut Sequential,
+    x: &Tensor,
+    y: &Tensor,
+    rate: f32,
+    policy: GraphGradientPolicy,
+    roles: &[ParameterRole],
+    objective: &mut dyn Loss,
+) -> Result<Reference> {
     let _cpu = st_nn::push_backend_policy(st_nn::BackendPolicy::from_device_caps(
         st_core::backend::device_caps::DeviceCaps::cpu(),
     ));
     model.zero_accumulators()?;
     let output = model.forward(x)?;
-    let mut objective = MeanSquaredError::new();
     let loss = objective.forward(&output, y)?.data()[0];
     let seed = objective.backward(&output, y)?;
     let dx = model.backward(x, &seed)?;
@@ -321,6 +342,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         "autograd":autograd::run(runtime.clone()).await?,
         "learning":learning::run(runtime.clone()).await?,
         "resident_loss":resident_loss::run(runtime.clone()).await?,
+        "classification":classification::run(runtime.clone()).await?,
         "scope":"Sequential with owned gains; mean-MSE plain SGD; no intermediate host readbacks; not a throughput claim"}),
     )
 }
