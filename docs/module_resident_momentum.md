@@ -107,3 +107,9 @@ weight handoff reproduced the resident output exactly. The small learning
 fixtures lowered loss, but all EMA runs finished worse than their clip-only
 controls at 32 updates. These results establish correctness, not an optimizer
 quality or performance advantage.
+
+The later [preparation-fusion record](../benchmarks/results/2026-09-12-resident-momentum-fusion/README.md)
+rechecks the same regression suite and this example, and adds two complete
+native/browser/Torch timing matrices. Fewer GPU dispatches preserve numerical
+results, but timing improvements are small and conditional; slower cases are
+retained rather than hidden.

@@ -66,3 +66,12 @@ Use fresh outputs, serialize owned GPU work, retain all timings and failures,
 and keep numerical correctness distinct from performance. Readback costs and
 host contention must remain explicit; no CUDA, FT quality or generalization
 claim follows from dispatch-count reduction.
+
+## Recorded Results
+
+The [two complete paired runs](../benchmarks/results/2026-09-12-resident-momentum-fusion/README.md)
+retain all three modes, both cadences and slower observations. All terminal
+state comparisons passed. Deferred intervals often improved by a few percent,
+but immediate intervals included regressions and small-case scatter overlaps
+the unchanged SGD control. Eager Torch MPS remained faster in this benchmark.
+The dispatch reduction is established; a uniform performance win is not.
