@@ -212,7 +212,9 @@ jobs:
           cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
-        run: cargo test --locked -p st-nn --features wgpu --release --lib
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+        run: cargo test --locked -p st-nn --features wgpu --release --lib -- --test-threads=1
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
@@ -473,7 +475,16 @@ jobs:
           python -P bindings/st-py/tests/test_nn_resident_training.py
           python -P bindings/st-py/tests/test_nn_resident_graph_training.py
           python -P bindings/st-py/tests/test_nn_resident_graph_forward.py
+          python -P bindings/st-py/tests/test_nn_resident_exports.py
+          python -P bindings/st-py/tests/test_nn_resident_graph_autograd.py
+          python -P bindings/st-py/tests/test_nn_resident_graph_learner.py
+          python -P bindings/st-py/tests/test_nn_module_resident_forward.py
+          python -P bindings/st-py/tests/test_nn_resident_module_update.py
+          python -P bindings/st-py/tests/test_nn_resident_loss.py
+          python -P bindings/st-py/tests/test_nn_resident_classification.py
+          python -P bindings/st-py/tests/test_nn_resident_microbatch.py
           python -P bindings/st-py/tests/test_wgpu_tensor.py
+          python -P bindings/st-py/tests/test_wgpu_pointwise.py
           python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
         env:

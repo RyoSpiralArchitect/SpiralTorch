@@ -84,8 +84,10 @@ fn shared_guard_preserves_every_stage_and_queued_snapshot_across_reuse() {
                 )
                 .unwrap();
             let flags: Vec<_> = bytes[8..]
-                .chunks_exact(4)
-                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| u32::from_le_bytes(*b))
                 .collect();
             assert_eq!(flags.len(), 25);
             for (stage, &flag) in flags.iter().enumerate() {
@@ -162,8 +164,10 @@ fn indexed_pointwise_guard_keeps_other_words_and_inherits_empty_input_failures()
                     .read(context, std::time::Duration::from_secs(30), "guard.words")
                     .unwrap();
                 let actual: Vec<_> = bytes
-                    .chunks_exact(4)
-                    .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| u32::from_le_bytes(*b))
                     .collect();
                 expected[slot as usize] = crate::resident_tensor::INVALID_TENSOR_FLAG;
                 assert_eq!(

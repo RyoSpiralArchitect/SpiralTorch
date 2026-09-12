@@ -6481,6 +6481,18 @@ def _install_ecosystem_helpers() -> None:
 
 def _install_nn_helpers() -> None:
     nn_module = _ensure_submodule("nn")
+    native_nn = _resolve_rs_attr("nn")
+    if native_nn is not None:
+        # A fresh forwarding module has no export list until an attribute is
+        # accessed. Use the native declaration without forcing eager wrapping.
+        exports = set(getattr(nn_module, "__all__", ()))
+        exports.update(
+            name for name in getattr(native_nn, "__all__", ())
+            if isinstance(name, str)
+            and not name.startswith("_")
+            and _safe_getattr(native_nn, name, None) is not None
+        )
+        nn_module.__all__ = sorted(exports)
 
     @_contextlib.contextmanager
     def eval_mode(module: _Any):
