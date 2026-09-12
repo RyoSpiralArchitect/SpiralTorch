@@ -39,6 +39,8 @@ This illustrates API composition, not a useful dataset or an accuracy result.
 Parameter handoff is explicit and weight-only. The original Module is not
 silently synchronized after each update. Plain SGD is not a replacement for
 `ModuleTrainer` hypergrad, band replay, accumulation or optimizer-state policies.
+Update receipts are single-use: the example consumes each once; request a fresh
+snapshot for another observation.
 
 In Rust, import `st_nn::Loss` and call
 `CrossEntropyWithLogits::new(config)?.evaluate_resident(&logits, &labels)?`.
@@ -84,3 +86,13 @@ This is not a throughput claim. The existing host Tensor forward/backward and
 generic CPU autograd routes remain CPU implementations; strict host-WGPU
 requests still reject instead of secretly transferring. Resident execution is
 explicit and cannot bypass a committed tensor execution plan.
+
+## Verified Example
+
+The [source-bound learning record](../benchmarks/results/2026-09-12-module-resident-classification/README.md)
+includes six 64-update classification cases on each native/browser route, 43
+numerical probes per route, public Python/WASM update-reject-recover tests and
+independent PyTorch CPU/MPS comparisons. The Python block above also ran as-is
+against the frozen GPU library. Tiny-tail reference differences, extreme-value
+reference choices and failed development runs are retained separately; these
+small fixtures establish API/numerical behavior, not LLM quality or throughput.
