@@ -84,6 +84,13 @@ and reused. State snapshots allocate only when explicitly requested. With the
 option disabled, the previous SGD/clip path is unchanged; no momentum dispatch
 or host readback is added to it.
 
+Gradient normalization and optional clip scaling now feed the EMA candidate
+directly in one kernel per parameter. The intermediate effective-gradient
+buffer write/read is removed from this path, not from ordinary SGD's observable
+state. Norm reduction, global validation and whole-state commit remain separate.
+This saves one dispatch per parameter per update; it does not imply a measured
+end-to-end speedup. See [the matched benchmark protocol](resident_momentum_fusion.md).
+
 The shared transition connects an existing Topos primitive, not the full
 Topos RMS bias/clipping policy, ModuleTrainer's hypergrad tapes, or spectral
 adaptation. Parameter snapshots/handoff are still weight-only; momentum

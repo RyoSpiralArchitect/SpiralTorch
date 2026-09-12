@@ -5,17 +5,71 @@ use st_kernel_contracts::momentum::EMA_MOMENTUM_WGSL;
 
 pub(super) struct Momentum {
     values: Vec<wgpu::Buffer>,
+    next: Vec<wgpu::Buffer>,
     capture: Option<PreparedCapture>,
-    normalize: Vec<Pass>,
     prepare: Vec<Pass>,
+    clipped_prepare: Option<Vec<Pass>>,
     commit: Vec<Pass>,
     config: wgpu::Buffer,
+    layout: wgpu::BindGroupLayout,
+    prepare_pipeline: Shared<wgpu::ComputePipeline>,
+}
+
+fn parameter_params(g: &ResidentGraphTraining, id: usize) -> Params {
+    let p = &g.definition.parameters()[id];
+    Params {
+        rows: (g.input_layout().len() / g.input_layout().shape().last().unwrap()) as u32,
+        cols: 0,
+        len: p.values.len() as u32,
+        stage: g.definition.parameter_owners()[id] as u32,
+        stages: (g.nodes.len() + 2) as u32,
+        gelu: u32::from(p.role == ParameterRole::Gain),
+        groups_x: 1,
+        partials: 0,
+    }
+}
+
+fn element(
+    g: &ResidentGraphTraining,
+    layout: &wgpu::BindGroupLayout,
+    config: &wgpu::Buffer,
+    pipeline: &Shared<wgpu::ComputePipeline>,
+    mut p: Params,
+    buffers: [&wgpu::Buffer; 6],
+) -> Result<Pass, TrainingError> {
+    let device = g.device.runtime().context().device();
+    let grid = groups(p.len as usize, &device.limits())?;
+    p.groups_x = grid[0];
+    let uniform = runtime::upload_slice(
+        device,
+        "learner.momentum.params",
+        &[p],
+        wgpu::BufferUsages::UNIFORM,
+    )?;
+    Ok(Pass {
+        pipeline: pipeline.clone(),
+        groups: grid,
+        binding: binding(
+            device,
+            layout,
+            &[
+                buffers[0],
+                buffers[1],
+                buffers[2],
+                buffers[3],
+                buffers[4],
+                buffers[5],
+                &g.validation,
+                &uniform,
+                config,
+            ],
+        ),
+    })
 }
 
 impl Momentum {
     pub(super) fn new(g: &ResidentGraphTraining) -> Result<Self, TrainingError> {
         let device = g.device.runtime().context().device();
-        let limits = device.limits();
         let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
         let values = g
             .definition
@@ -65,8 +119,6 @@ impl Momentum {
         )?;
         let unused_read =
             runtime::empty_buffer::<f32>(device, "learner.momentum.unused_read", 1, usage)?;
-        let unused_aux =
-            runtime::empty_buffer::<f32>(device, "learner.momentum.unused_aux", 1, usage)?;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("learner.momentum.layout"),
             entries: &(0..9)
@@ -82,6 +134,7 @@ impl Momentum {
             label: Some("learner.momentum.shader"),
             source: wgpu::ShaderSource::Wgsl(
                 (training_scalar_source()
+                    + include_str!("../../../../shaders/optimizer_gradient.wgsl")
                     + EMA_MOMENTUM_WGSL
                     + include_str!("../../../../shaders/graph_momentum.wgsl"))
                 .into(),
@@ -98,84 +151,31 @@ impl Momentum {
                 }),
             )
         };
-        let normalize_pipeline = pipeline("momentum_gradient");
         let prepare_pipeline = pipeline("prepare_momentum");
         let commit_pipeline = pipeline("commit_momentum");
-        let element = |pipeline: &Shared<wgpu::ComputePipeline>,
-                       mut p: Params,
-                       buffers: [&wgpu::Buffer; 6]|
-         -> Result<Pass, TrainingError> {
-            let grid = groups(p.len as usize, &limits)?;
-            p.groups_x = grid[0];
-            let uniform = runtime::upload_slice(
-                device,
-                "learner.momentum.params",
-                &[p],
-                wgpu::BufferUsages::UNIFORM,
-            )?;
-            Ok(Pass {
-                pipeline: pipeline.clone(),
-                groups: grid,
-                binding: binding(
-                    device,
-                    &layout,
-                    &[
-                        buffers[0],
-                        buffers[1],
-                        buffers[2],
-                        buffers[3],
-                        buffers[4],
-                        buffers[5],
-                        &g.validation,
-                        &uniform,
-                        &config,
-                    ],
-                ),
-            })
-        };
-        let rows = g.input_layout().len() / g.input_layout().shape().last().unwrap();
-        let mut normalize = Vec::new();
         let mut prepare = Vec::new();
         let mut commit = Vec::new();
-        for (id, p) in g.definition.parameters().iter().enumerate() {
-            let params = Params {
-                rows: rows as u32,
-                cols: 0,
-                len: p.values.len() as u32,
-                stage: g.definition.parameter_owners()[id] as u32,
-                stages: (g.nodes.len() + 2) as u32,
-                gelu: u32::from(
-                    p.role == ParameterRole::Gain
-                        && g.policy == GraphGradientPolicy::ModuleCompatible,
-                ),
-                groups_x: 1,
-                partials: 0,
-            };
-            normalize.push(element(
-                &normalize_pipeline,
-                params,
-                [
-                    &g.raw_gradients[id],
-                    &unused_read,
-                    &unused_read,
-                    &unused_read,
-                    &g.effective_gradients[id],
-                    &unused_aux,
-                ],
-            )?);
+        for id in 0..g.parameters.len() {
+            let params = parameter_params(g, id);
             prepare.push(element(
+                g,
+                &layout,
+                &config,
                 &prepare_pipeline,
                 params,
                 [
                     &g.parameters[id],
-                    &values[id],
-                    &g.effective_gradients[id],
                     &unused_read,
+                    &g.raw_gradients[id],
+                    &values[id],
                     &g.candidates[id],
                     &next[id],
                 ],
             )?);
             commit.push(element(
+                g,
+                &layout,
+                &config,
                 &commit_pipeline,
                 params,
                 [
@@ -190,12 +190,47 @@ impl Momentum {
         }
         Ok(Self {
             values,
+            next,
             capture,
-            normalize,
             prepare,
+            clipped_prepare: None,
             commit,
             config,
+            layout,
+            prepare_pipeline,
         })
+    }
+
+    // Build both configurations at their first use, never per update. The
+    // global norm's factors are consumed directly by candidate preparation.
+    pub(super) fn prepare_clipped(
+        &mut self,
+        g: &ResidentGraphTraining,
+        clip: &Clipping,
+    ) -> Result<(), TrainingError> {
+        if self.clipped_prepare.is_none() {
+            let passes = (0..g.parameters.len())
+                .map(|id| {
+                    element(
+                        g,
+                        &self.layout,
+                        &self.config,
+                        &self.prepare_pipeline,
+                        parameter_params(g, id),
+                        [
+                            &g.parameters[id],
+                            clip.factors(),
+                            &g.raw_gradients[id],
+                            &self.values[id],
+                            &g.candidates[id],
+                            &self.next[id],
+                        ],
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            self.clipped_prepare = Some(passes);
+        }
+        Ok(())
     }
 
     pub(super) fn encode(
@@ -205,11 +240,17 @@ impl Momentum {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         if let Some(clip) = clipping {
-            clip.encode_gradients(g, encoder);
+            clip.encode_norm(g, encoder);
+            g.encode_passes(
+                encoder,
+                self.clipped_prepare
+                    .as_ref()
+                    .expect("prepared clipped momentum"),
+                &mut Default::default(),
+            );
         } else {
-            g.encode_passes(encoder, &self.normalize, &mut Default::default());
+            g.encode_passes(encoder, &self.prepare, &mut Default::default());
         }
-        g.encode_passes(encoder, &self.prepare, &mut Default::default());
         let decision = g.parameters.len();
         g.encode_passes(
             encoder,
@@ -219,11 +260,22 @@ impl Momentum {
         g.encode_passes(encoder, &self.commit, &mut Default::default());
     }
 
-    pub(super) fn write_config(&self, g: &ResidentGraphTraining, rate: f32, damping: f32) {
+    pub(super) fn write_config(
+        &self,
+        g: &ResidentGraphTraining,
+        rate: f32,
+        damping: f32,
+        clipping: bool,
+    ) {
+        let policy = if g.policy == GraphGradientPolicy::ModuleCompatible {
+            1.
+        } else {
+            0.
+        };
         g.device.runtime().context().queue().write_buffer(
             &self.config,
             0,
-            bytemuck::cast_slice(&[rate, damping, 0., 0.]),
+            bytemuck::cast_slice(&[rate, policy, damping, if clipping { 1. } else { 0. }]),
         );
     }
 

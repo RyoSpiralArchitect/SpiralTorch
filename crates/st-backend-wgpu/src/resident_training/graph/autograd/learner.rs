@@ -140,6 +140,9 @@ impl ResidentGraphLearner {
         if self.clipping.is_none() {
             self.clipping = Some(Clipping::new(&self.autograd.graph)?);
         }
+        if let Some(momentum) = &mut self.momentum {
+            momentum.prepare_clipped(&self.autograd.graph, self.clipping.as_ref().unwrap())?;
+        }
         self.grad_clip = Some(clip);
         Ok(())
     }
@@ -156,9 +159,17 @@ impl ResidentGraphLearner {
     /// enabling from a disabled state starts with zero history.
     pub fn set_momentum_damping(&mut self, damping: f32) -> Result<(), TrainingError> {
         let config = EmaMomentum::new(damping)?;
+        let reset = self.momentum.is_some() && self.momentum_damping.is_none();
         if self.momentum.is_none() {
             self.momentum = Some(Momentum::new(&self.autograd.graph)?);
-        } else if self.momentum_damping.is_none() {
+        }
+        if let Some(clip) = &self.clipping {
+            self.momentum
+                .as_mut()
+                .unwrap()
+                .prepare_clipped(&self.autograd.graph, clip)?;
+        }
+        if reset {
             self.momentum.as_ref().unwrap().reset(&self.autograd.graph);
         }
         self.momentum_damping = Some(config);
@@ -272,7 +283,7 @@ impl ResidentGraphLearner {
         if let Some(momentum) = self.momentum_damping {
             let workspace = self.momentum.as_ref().expect("prepared momentum workspace");
             workspace.encode(g, self.grad_clip.and(self.clipping.as_ref()), &mut encoder);
-            workspace.write_config(g, rate, momentum.damping());
+            workspace.write_config(g, rate, momentum.damping(), self.grad_clip.is_some());
         } else if self.grad_clip.is_some() {
             self.clipping
                 .as_ref()

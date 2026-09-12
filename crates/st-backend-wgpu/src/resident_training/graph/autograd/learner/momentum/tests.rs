@@ -5,8 +5,16 @@ use st_kernel_contracts::{
 };
 
 fn gain(runtime: WgpuRuntime) -> ResidentGraphLearner {
+    gain_shape(runtime, 1, 2, GraphGradientPolicy::Exact)
+}
+fn gain_shape(
+    runtime: WgpuRuntime,
+    rows: usize,
+    cols: usize,
+    policy: GraphGradientPolicy,
+) -> ResidentGraphLearner {
     let definition = GraphDefinition::new(
-        NdLayout::contiguous(&[1, 1, 2]).unwrap(),
+        NdLayout::contiguous(&[1, rows, cols]).unwrap(),
         vec![GraphStage::Pointwise {
             chain: PointwiseChain::new(
                 2,
@@ -20,15 +28,15 @@ fn gain(runtime: WgpuRuntime) -> ResidentGraphLearner {
         }],
         vec![GraphParameter {
             role: ParameterRole::Gain,
-            shape: vec![2],
-            values: vec![0.; 2],
+            shape: vec![cols],
+            values: vec![0.; cols],
         }],
     )
     .unwrap();
     ResidentGraphLearner::new(
         runtime,
         definition,
-        GraphGradientPolicy::Exact,
+        policy,
         Default::default(),
         MatmulKernel::Scalar,
         Default::default(),
@@ -247,5 +255,79 @@ fn momentum_gpu_does_not_validate_an_unused_plain_sgd_candidate() {
             .unwrap();
         close(&states(&l)[0], &[expected, -expected]);
         close(&weights(&l)[0], &[-5. * expected, 5. * expected]);
+    }
+}
+
+#[test]
+fn momentum_gpu_fused_clipping_preserves_wide_factors_and_enable_order() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) = runtime::ensure_default_runtime_blocking("learner.momentum.fused").unwrap();
+    assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+    for (rows, cols, magnitude, limit) in [
+        (2, 7, 4., 0.5),
+        (1, 513, 1e38, 1.),
+        (1, 513, 1e38, 1e-20),
+        (2, 3, 1e-9, 1e-30),
+    ] {
+        for policy in [
+            GraphGradientPolicy::Exact,
+            GraphGradientPolicy::ModuleCompatible,
+        ] {
+            for momentum_first in [false, true] {
+                let mut l = gain_shape(runtime.clone(), rows, cols, policy);
+                if momentum_first {
+                    l.set_momentum_damping(0.5).unwrap();
+                }
+                l.set_grad_clip_max_norm(limit).unwrap();
+                if !momentum_first {
+                    l.set_momentum_damping(0.5).unwrap();
+                }
+                let raw = if policy == GraphGradientPolicy::Exact {
+                    magnitude * rows as f32
+                } else {
+                    magnitude
+                };
+                let factors = GlobalNormClip::new(limit)
+                    .unwrap()
+                    .factors(f64::from(raw).powi(2) * cols as f64)
+                    .unwrap();
+                let mut expected = raw;
+                for &factor in factors.as_slice() {
+                    expected *= factor;
+                }
+                expected *= 0.5;
+                let g = gradient(&mut l, &vec![magnitude; rows * cols]);
+                l.sgd(&g, 1.).unwrap();
+                assert_eq!(l.update_snapshot().unwrap().read().unwrap(), 1);
+                let before = weights(&l);
+                let history = states(&l);
+                for (&weight, &state) in before[0].iter().zip(&history[0]) {
+                    let tolerance = expected.abs().max(f32::MIN_POSITIVE) * 1e-5;
+                    assert!(
+                        (weight + expected).abs() <= tolerance,
+                        "{weight} vs {}",
+                        -expected
+                    );
+                    assert!(
+                        (state - expected).abs() <= tolerance,
+                        "{state} vs {expected}"
+                    );
+                }
+                let workspace = l.momentum.as_ref().unwrap();
+                assert_eq!(workspace.prepare.len(), l.parameter_count());
+                assert_eq!(
+                    workspace.clipped_prepare.as_ref().unwrap().len(),
+                    l.parameter_count()
+                );
+                l.clear_grad_clip();
+                let g = gradient(&mut l, &vec![0.; rows * cols]);
+                l.sgd(&g, 0.).unwrap();
+                assert_eq!(l.update_snapshot().unwrap().read().unwrap(), 2);
+                assert_eq!(weights(&l), before);
+                assert_eq!(states(&l), history);
+            }
+        }
     }
 }

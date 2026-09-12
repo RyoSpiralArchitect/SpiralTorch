@@ -6,7 +6,7 @@ use st_kernel_contracts::gradient_clip::{
 
 pub(super) struct Clipping {
     passes: Vec<Pass>,
-    gradients: Vec<Pass>,
+    factors: wgpu::Buffer,
 }
 
 impl Clipping {
@@ -69,7 +69,12 @@ impl Clipping {
             .replace("CLIP_SCALE_EPSILON", &format!("{SCALE_EPSILON:e}"));
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("learner.clip.shader"),
-            source: wgpu::ShaderSource::Wgsl((training_scalar_source() + &extra).into()),
+            source: wgpu::ShaderSource::Wgsl(
+                (training_scalar_source()
+                    + include_str!("../../../../shaders/optimizer_gradient.wgsl")
+                    + &extra)
+                    .into(),
+            ),
         });
         let pipeline = |entry| {
             Shared::new(
@@ -85,7 +90,6 @@ impl Clipping {
         let reduce_partials = pipeline("clip_partials");
         let reduce = pipeline("clip_reduce");
         let prepare = pipeline("clip_prepare");
-        let gradient = pipeline("clip_gradient");
         let element = |pipeline: &Shared<wgpu::ComputePipeline>,
                        mut p: Params,
                        buffers: [&wgpu::Buffer; 6],
@@ -172,7 +176,6 @@ impl Clipping {
             ],
             true,
         )?);
-        let mut gradients = Vec::new();
         for (id, p) in g.definition.parameters().iter().enumerate() {
             let params = Params {
                 len: p.values.len() as u32,
@@ -180,19 +183,6 @@ impl Clipping {
                 stage: g.definition.parameter_owners()[id] as u32,
                 ..base
             };
-            gradients.push(element(
-                &gradient,
-                params,
-                [
-                    &g.parameters[id],
-                    &factors,
-                    &g.raw_gradients[id],
-                    &unused_read,
-                    &g.candidates[id],
-                    &g.effective_gradients[id],
-                ],
-                false,
-            )?);
             passes.push(element(
                 &prepare,
                 params,
@@ -207,21 +197,24 @@ impl Clipping {
                 false,
             )?);
         }
-        Ok(Self { passes, gradients })
+        Ok(Self { passes, factors })
     }
 
     pub(super) fn encode(&self, g: &ResidentGraphTraining, encoder: &mut wgpu::CommandEncoder) {
         g.encode_passes(encoder, &self.passes, &mut Default::default());
     }
 
-    pub(super) fn encode_gradients(
+    pub(super) fn factors(&self) -> &wgpu::Buffer {
+        &self.factors
+    }
+
+    pub(super) fn encode_norm(
         &self,
         g: &ResidentGraphTraining,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let prefix = self.passes.len() - self.gradients.len();
+        let prefix = g.parameters.len() + 1;
         g.encode_passes(encoder, &self.passes[..prefix], &mut Default::default());
-        g.encode_passes(encoder, &self.gradients, &mut Default::default());
     }
 }
 
