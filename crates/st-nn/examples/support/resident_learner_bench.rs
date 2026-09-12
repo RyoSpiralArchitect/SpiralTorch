@@ -67,6 +67,12 @@ impl Benchmark {
             MatmulKernel::Register2x2,
             MatmulAccumulation::Sequential,
         )?;
+        if let Some(optimizer) = self.config.learner_optimizer {
+            gpu.set_momentum_damping(0.5)?;
+            if matches!(optimizer, LearnerOptimizer::ClippedToposEma) {
+                gpu.set_grad_clip_max_norm(1. / 1024.)?;
+            }
+        }
         let d = gpu.tensor_device().clone();
         let negative = d.upload(
             &self.config.shape,
@@ -139,12 +145,21 @@ impl Benchmark {
         let parameters = saved.read()?;
         #[cfg(target_arch = "wasm32")]
         let parameters = saved.read_async().await?;
-        let final_state = json!({"loss":final_loss,"prediction":prediction,"input_gradients":input_gradients,
+        let mut final_state = json!({"loss":final_loss,"prediction":prediction,"input_gradients":input_gradients,
             "raw_gradients":raw_gradients,"parameters":parameters.parameters().iter().map(|p|&p.values).collect::<Vec<_>>()});
+        if self.config.learner_optimizer.is_some() {
+            let mut history = Vec::new();
+            for tensor in gpu.momentum_tensors()? {
+                history.push(values(&tensor).await?);
+            }
+            final_state["momentum"] = json!(history);
+        }
         let state_sha256 = format!("{:x}", Sha256::digest(serde_json::to_vec(&final_state)?));
         Ok(
             json!({"status":"passed","learner":true,"cadence":cadence,"steps":self.config.steps,
             "fused_learner_seeds":self.config.fuse_learner_seeds,
+            "learner_optimizer":self.config.learner_optimizer,
+            "momentum_damping":gpu.momentum_damping(),"grad_clip_max_norm":gpu.grad_clip_max_norm(),
             "completed_updates":self.config.steps,"accepted_updates":accepted_updates,"acceptance":"guarded_receipts",
             "losses":[],"initial_loss":initial_loss,"final_loss":final_loss,"elapsed_ms":elapsed_ms,"setup_ms":setup_ms,
             "state_sha256":state_sha256,"state":if capture { final_state } else { Value::Null },

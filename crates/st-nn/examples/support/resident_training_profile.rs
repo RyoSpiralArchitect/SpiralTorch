@@ -60,8 +60,8 @@ impl Benchmark {
     /// Same seeded workload as the matched benchmark. Three warm-up updates and
     /// nine retained updates; all results are checked, with no wall-clock fallback.
     pub async fn profile(&self, policy: GraphGradientPolicy) -> Result<Value> {
-        if !self.config.graph {
-            return Err("profiling fixture requires graph=true".into());
+        if !self.config.graph || self.config.learner_optimizer.is_some() {
+            return Err("profiling requires a graph without learner-only optimizer options".into());
         }
         let ordinary_features = self.runtime.context().device().features();
         if ordinary_features

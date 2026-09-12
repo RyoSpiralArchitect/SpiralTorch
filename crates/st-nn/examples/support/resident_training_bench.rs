@@ -29,6 +29,13 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LearnerOptimizer {
+    ToposEma,
+    ClippedToposEma,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -42,6 +49,8 @@ pub struct Config {
     pub fuse_pointwise: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub fuse_learner_seeds: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learner_optimizer: Option<LearnerOptimizer>,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -143,6 +152,7 @@ impl Benchmark {
             || config.seed == 0
             || (config.fuse_pointwise && !config.graph)
             || (config.fuse_learner_seeds && (!config.graph || config.fuse_pointwise))
+            || (config.learner_optimizer.is_some() && (!config.graph || config.fuse_pointwise))
         {
             return Err("benchmark exceeds bounded shape/depth/steps/seed".into());
         }
@@ -219,8 +229,8 @@ impl Benchmark {
     }
 
     pub async fn sample(&self, cadence: Cadence, capture: bool, now: fn() -> f64) -> Result<Value> {
-        if self.config.fuse_learner_seeds {
-            return Err("seed fusion requires the learner workload".into());
+        if self.config.fuse_learner_seeds || self.config.learner_optimizer.is_some() {
+            return Err("seed fusion and optimizer options require the learner workload".into());
         }
         let setup = now();
         let mut gpu = if self.config.graph {

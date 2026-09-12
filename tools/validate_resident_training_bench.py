@@ -42,6 +42,9 @@ def summarize_case(row, config, lanes, *, learner=False, seed_fusion=False):
     samples = row["samples"]
     require(len(samples) == 20, "expected two warmups and eight retained blocks per cadence")
     for index, sample in enumerate(samples):
+        optimizers = sample.get("learner_optimizers", {lane: None for lane in lanes})
+        require(set(optimizers) == set(lanes) and all(optimizers[lane] == config.get("learner_optimizer") for lane in lanes),
+                "per-interval learner optimizer differs")
         selected = sample.get("fused_learner_seeds", {lane: False for lane in lanes})
         require(set(selected) == set(lanes) and all(selected[lane] is (seed_fusion and lane == "candidate") for lane in lanes),
                 "per-interval seed fusion differs")
@@ -61,7 +64,7 @@ def summarize_case(row, config, lanes, *, learner=False, seed_fusion=False):
             statistics_by_lane[lane] = dict(median_ms=statistics.median(values), min_ms=min(values),
                                              max_ms=max(values), retained=len(values))
             capture = row["captures"][cadence + "_" + lane]
-            bench.validate_sample(capture, cadence, config["steps"], learner=learner, lane=lane, seed_fusion=seed_fusion and lane=="candidate")
+            bench.validate_sample(capture, cadence, config["steps"], learner=learner, lane=lane, seed_fusion=seed_fusion and lane=="candidate", learner_optimizer=config.get("learner_optimizer"))
             bench.close_values(capture["losses"], capture["losses"])
             require(positive(capture["initial_loss"]), "invalid initial loss")
             if lane != "torch":
@@ -99,6 +102,7 @@ def validate_progress(path, cases, seed_fusion=False):
                 require(started is None, "overlapping browser samples")
                 started = identity
             else:
+                require(event.get("learner_optimizer") == row["config"].get("learner_optimizer"), "browser interval optimizer differs")
                 require(event.get("fused_learner_seeds", False) is (seed_fusion and lane=="candidate"), "browser interval seed fusion differs")
                 require(started == identity and event["elapsed_ms"] == sample["times_ms"][lane] and
                         event["state_sha256"] == row["fingerprints"][lane] and
@@ -135,7 +139,10 @@ def run(args, result):
     result["workload"] = workload
     matrix = native.get("matrix", "standard")
     require(browser.get("matrix", "standard") == matrix, "workload matrix differs")
-    configs = bench.recipes(graph, matrix)
+    optimizer = native.get("learner_optimizer")
+    require(browser.get("learner_optimizer") == optimizer and (optimizer is None or learner), "learner optimizer differs")
+    configs = bench.recipes(graph, matrix, optimizer)
+    result["learner_optimizer"] = optimizer
     result["matrix"] = matrix
     fusion = native.get("pointwise_fusion", False)
     require(type(fusion) is bool and browser.get("pointwise_fusion", False) is fusion and

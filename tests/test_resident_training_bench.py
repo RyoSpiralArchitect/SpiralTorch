@@ -15,6 +15,24 @@ spec.loader.exec_module(validation)
 
 
 class Admission(unittest.TestCase):
+    def test_optimizer_history_and_recipe_cannot_be_relabelled(self):
+        value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
+            accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],initial_loss=.2,final_loss=.1,elapsed_ms=1.,
+            learner_optimizer="clipped_topos_ema",momentum_damping=.5,grad_clip_max_norm=1/1024,
+            state=dict(parameters=[[1.],[2.]],momentum=[[.1],[.2]]))
+        check=lambda v:bench.validate_sample(v,"deferred",8,learner=True,learner_optimizer="clipped_topos_ema")
+        check(value)
+        for key,replacement in (("learner_optimizer",None),("momentum_damping",.6),("grad_clip_max_norm",None)):
+            with self.subTest(key=key),self.assertRaises(ValueError):check(dict(value,**{key:replacement}))
+        for history in ([],[[.1]],[[.1],[float("nan")]],[[.1],[True]]):
+            with self.assertRaises(ValueError):check(dict(value,state=dict(parameters=[[1.],[2.]],momentum=history)))
+        with self.assertRaises(ValueError):check(dict(value,state=dict(parameters=[[1.],[2.]])))
+        with self.assertRaises(ValueError):bench.validate_sample(value,"deferred",8,learner=True)
+        for mode in ("topos_ema","clipped_topos_ema"):
+            self.assertTrue(all(c["learner_optimizer"]==mode for c in bench.recipes(True,"standard",mode)))
+        with self.assertRaises(ValueError):bench.recipes(False,"standard","topos_ema")
+        with self.assertRaises(ValueError):bench.recipes(True,"standard","adam")
+
     def test_seed_fusion_cannot_change_model_or_hide_its_execution(self):
         base=dict(config=dict(graph=True,shape=[2,1],steps=8),plan_json="unchanged",
             input=[1.],target=[2.],learning_rate=.01,kernel="register_2x2",accumulation="sequential",adapter={})
@@ -56,6 +74,10 @@ class Admission(unittest.TestCase):
                                 ("parameters",[[float("nan")],[.6]])):
             with self.subTest(key=key),self.assertRaises(ValueError):
                 bench.learner_reference.compare(dict(value,**{key:replacement}),value)
+        state=dict(value,momentum=[[.1],[.2]])
+        self.assertEqual(bench.learner_reference.compare(state,state),0.)
+        for bad in (value,dict(state,momentum=[[.1],[100.]]),dict(state,momentum=[[.1]])):
+            with self.assertRaises(ValueError):bench.learner_reference.compare(bad,state)
 
     def test_fusion_equivalence_rejects_residual_rebinding_or_changed_math(self):
         source = dict(schema="spiraltorch.nn.inference_plan.v2", input_shape=[2, 1],
@@ -130,6 +152,12 @@ class Admission(unittest.TestCase):
 
 
 class Revalidation(unittest.TestCase):
+    def test_per_interval_optimizer_cannot_be_relabelled(self):
+        row=self.row()
+        row["samples"][4]["learner_optimizers"]={"baseline":None,"candidate":"topos_ema"}
+        with self.assertRaisesRegex(ValueError,"optimizer"):
+            validation.summarize_case(row,row["config"],("baseline","candidate"))
+
     def test_per_interval_seed_policy_cannot_be_relabelled(self):
         row=self.row()
         row["samples"][4]["fused_learner_seeds"]={"baseline":False,"candidate":True}

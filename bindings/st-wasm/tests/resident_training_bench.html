@@ -13,10 +13,13 @@ const matrix=new URL(location.href).searchParams.get("matrix")??"standard";
 const optimization=new URL(location.href).searchParams.get("optimization")??"none";
 const fusion=optimization==="fuse-pointwise";
 const seedFusion=optimization==="fuse-learner-seeds";
+const optimizer=new URL(location.href).searchParams.get("optimizer")??"none";
+const learnerOptimizer=optimizer==="none"?null:optimizer;
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
-  workload,matrix,pointwise_fusion:fusion,learner_seed_fusion:seedFusion,
+  workload,matrix,pointwise_fusion:fusion,learner_seed_fusion:seedFusion,learner_optimizer:learnerOptimizer,
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
 if(learner)report.boundary="paired rotating Rust weighted-learning workloads; quadratic/quartic cotangents and exact VJPs; all update receipts read; no timed loss observations; 2 warmups+8 samples; no cross-framework timing ratio";
+if(learnerOptimizer)report.boundary+="; zero-initialized Topos EMA damping 0.5, optional norm limit 1/1024; history observed outside timing";
 async function progress(value) {
   element.textContent=JSON.stringify(value);
   await globalThis.recordTrainingProgress(value);
@@ -36,6 +39,8 @@ function compare(a,b) {
   let maximum=close([a.loss],[b.loss]);
   if(learner){
     for(const key of ["prediction","input_gradients","parameters","raw_gradients"])maximum=Math.max(maximum,close(a[key],b[key]));
+    require(("momentum" in a)===Boolean(learnerOptimizer)&&("momentum" in b)===Boolean(learnerOptimizer),"missing/unexpected history");
+    if(learnerOptimizer)maximum=Math.max(maximum,close(a.momentum,b.momentum));
     return maximum;
   }
   for(const key of ["prediction","input_gradient"]) maximum=Math.max(maximum,close(a[key],b[key]));
@@ -55,6 +60,7 @@ function compare(a,b) {
 try {
   require(["standard","wide"].includes(matrix)&&(matrix!=="wide"||graph),"invalid workload matrix");
   require(["none","fuse-pointwise","fuse-learner-seeds"].includes(optimization)&&(!fusion||(graph&&!learner))&&(!seedFusion||learner),"invalid optimization");
+  require(["none","topos_ema","clipped_topos_ema"].includes(optimizer)&&(!learnerOptimizer||learner),"invalid learner optimizer");
   await progress({stage:"initialize_modules"});
   await initA(); await initB();
   const adapter=await navigator.gpu.requestAdapter();
@@ -65,7 +71,7 @@ try {
   const shapes=matrix==="wide"?[[[4,64,64],8],[[2,128,128],8],[[2,64,256],4]]:
     graph?[[[2,16,32],2],[[2,129,32],4],[[4,32,64],8]]:[[[2,16,32],2],[[4,16,64],8],[[4,32,128],16]];
   for(const seed of [17,29,43]) for(const [shape,depth] of shapes) {
-    const config={shape,depth,seed,steps:8,...(graph?{graph:true}:{})};
+    const config={shape,depth,seed,steps:8,...(graph?{graph:true}:{}),...(learnerOptimizer?{learner_optimizer:learnerOptimizer}:{})};
     await progress({stage:"create_workspaces",config});
     const workers={};
     try {
@@ -94,7 +100,7 @@ try {
         const captures={};
         for(let block=0;block<10;block++) {
           const order=(block+seed)%2===0 ? ["baseline","candidate"] : ["candidate","baseline"];
-          const sample={cadence,block,warmup:block<2,order,times_ms:{},fused_learner_seeds:{}};
+          const sample={cadence,block,warmup:block<2,order,times_ms:{},fused_learner_seeds:{},learner_optimizers:{}};
           row.samples.push(sample);
           for(const lane of order) {
             await progress({stage:"sample_started",config,cadence,block,lane});
@@ -103,6 +109,10 @@ try {
               Number.isFinite(value.elapsed_ms)&&value.elapsed_ms>0,"sample identity/timing differs");
             require((value.learner??false)===learner,"wrong learner workload");
             require((value.fused_learner_seeds??false)===(seedFusion&&lane==="candidate"),"wrong seed execution");
+            require((value.learner_optimizer??null)===learnerOptimizer&&
+              (value.momentum_damping??null)===(learnerOptimizer?0.5:null)&&
+              (value.grad_clip_max_norm??null)===(learnerOptimizer==="clipped_topos_ema"?1/1024:null),"wrong optimizer execution");
+            sample.learner_optimizers[lane]=value.learner_optimizer??null;
             sample.fused_learner_seeds[lane]=value.fused_learner_seeds??false;
             if(learner)require(value.completed_updates===8&&value.acceptance==="guarded_receipts"&&
               JSON.stringify(value.accepted_updates)==="[2,3,4,5,6,7,8,9]"&&
@@ -113,7 +123,7 @@ try {
             close(value.losses,captures[lane].losses);
             sample.times_ms[lane]=value.elapsed_ms;
             await progress({stage:"sample_finished",config,cadence,block,lane,
-              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256,fused_learner_seeds:value.fused_learner_seeds??false});
+              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256,fused_learner_seeds:value.fused_learner_seeds??false,learner_optimizer:value.learner_optimizer??null});
           }
         }
         row.captures[cadence+"_baseline"]=captures.baseline;
