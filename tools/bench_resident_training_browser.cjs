@@ -4,8 +4,13 @@ const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypt
 const {chromium}=require("playwright");
 function digest(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
 async function main() {
-  const [baseline,candidate,chrome,output,workload="dense"]=process.argv.slice(2);
-  if(!baseline||!candidate||!chrome||!output||!["dense","graph"].includes(workload)) throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph]");
+  const [baseline,candidate,chrome,output,workload="dense",matrix="standard",optimization="none",optimizer="none"]=process.argv.slice(2);
+  if(!baseline||!candidate||!chrome||!output||!["dense","graph","learner"].includes(workload)||
+     !["standard","wide"].includes(matrix)||(matrix==="wide"&&workload==="dense")||
+     !["none","fuse-pointwise","fuse-learner-seeds"].includes(optimization)||(optimization==="fuse-pointwise"&&workload!=="graph")||
+     (optimization==="fuse-learner-seeds"&&workload!=="learner")||
+     !["none","topos_ema","clipped_topos_ema"].includes(optimizer)||(optimizer!=="none"&&workload!=="learner"))
+    throw Error("usage: BASELINE_MODULE CANDIDATE_MODULE CHROME NEW_OUTPUT [dense|graph|learner] [standard|wide] [none|fuse-pointwise|fuse-learner-seeds] [none|topos_ema|clipped_topos_ema]");
   const fd=fs.openSync(output,"wx");
   let server,browser,page,progressFd,casesFd,report={status:"error"},metadata={},errors=[],consoleMessages=[];
   const cases=[];
@@ -51,7 +56,7 @@ async function main() {
     const fatal=new Promise((_,reject)=>{fail=reject;});fatal.catch(()=>{});
     page.on("pageerror",error=>{errors.push(String(error));fail(error);});
     page.on("console",message=>{if(consoleMessages.length<100)consoleMessages.push({type:message.type(),text:message.text()});});
-    await page.goto("http://127.0.0.1:"+server.address().port+"/?workload="+workload);
+    await page.goto("http://127.0.0.1:"+server.address().port+"/?workload="+workload+"&matrix="+matrix+"&optimization="+optimization+"&optimizer="+optimizer);
     await Promise.race([fatal,page.locator("#result:not([data-status='running'])").waitFor({timeout:600000})]);
     report=JSON.parse(await page.locator("#result").textContent());
     if(report.status==="passed"&&(report.cases?.length!==9||cases.length!==9)) throw Error("missing completed cases");

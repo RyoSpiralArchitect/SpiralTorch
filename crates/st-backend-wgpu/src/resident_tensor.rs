@@ -8,6 +8,10 @@ use st_kernel_contracts::{
 };
 use thiserror::Error;
 
+pub(crate) mod capture;
+pub mod classification;
+pub(crate) mod guard_capture;
+pub mod loss;
 pub mod pointwise;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
@@ -15,6 +19,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    Classification(#[from] st_kernel_contracts::classification::ClassificationError),
     #[error(transparent)]
     Pointwise(#[from] st_kernel_contracts::pointwise::PointwiseError),
     #[error(transparent)]
@@ -29,6 +35,8 @@ pub enum TensorError {
     DeviceMismatch,
     #[error("operation requires a different number of operands")]
     Operands,
+    #[error("loss predictions and targets must have the same logical shape")]
+    LossShape,
     #[error("tensor exceeds portable addressing or device limits: {0}")]
     Limit(&'static str),
     #[error("tensor view addresses outside its storage")]
@@ -42,6 +50,8 @@ struct Kernels {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
     runtime: WgpuRuntime,
+    mse: std::sync::OnceLock<loss::MseKernels>,
+    classification: std::sync::OnceLock<classification::ClassificationKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -56,8 +66,12 @@ fn source() -> String {
     ))
 }
 
-fn substitute_ops(source: String) -> String {
-    let mut source = source.replace("INVALID_TENSOR_FLAG", &format!("{INVALID_TENSOR_FLAG}u"));
+pub(crate) fn substitute_ops(source: String) -> String {
+    // Standalone kernels own one flag word. Graph pointwise kernels substitute
+    // their metadata-selected stage slot before this shared expansion.
+    let mut source = source
+        .replace("CHECKED_FLAG_INDEX", "0u")
+        .replace("INVALID_TENSOR_FLAG", &format!("{INVALID_TENSOR_FLAG}u"));
     for (name, op) in [
         ("OP_ADD", ElementwiseOp::Add),
         ("OP_MULTIPLY", ElementwiseOp::Multiply),
@@ -174,11 +188,40 @@ impl TensorDevice {
             layout,
             pipeline,
             runtime,
+            mse: std::sync::OnceLock::new(),
+            classification: std::sync::OnceLock::new(),
         })))
     }
 
     pub fn runtime(&self) -> &WgpuRuntime {
         &self.0.runtime
+    }
+
+    /// Private graph destination. A caller must encode all values and the guard,
+    /// then submit, before exposing this immutable handle outside the backend.
+    pub(crate) fn allocate_output(&self, layout: &NdLayout) -> Result<ResidentTensor, TensorError> {
+        let layout = NdLayout::contiguous(layout.shape())?;
+        let gpu = self.runtime().context().device();
+        validate_view(&layout, layout.len(), &gpu.limits())?;
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+        Ok(ResidentTensor {
+            storage: Shared::new(Storage {
+                values: runtime::empty_buffer::<f32>(
+                    gpu,
+                    "tensor.direct_output",
+                    layout.len().max(1),
+                    usage,
+                )?,
+                flags: Shared::new(runtime::empty_buffer::<u32>(
+                    gpu,
+                    "tensor.direct_guard",
+                    1,
+                    usage,
+                )?),
+            }),
+            layout,
+            device: self.clone(),
+        })
     }
 
     pub fn upload(&self, shape: &[usize], values: &[f32]) -> Result<ResidentTensor, TensorError> {
@@ -204,7 +247,10 @@ impl TensorDevice {
         )?;
         let flags = runtime::upload_slice(device, "tensor.flags", &[0u32], usage)?;
         Ok(ResidentTensor {
-            storage: Shared::new(Storage { values, flags }),
+            storage: Shared::new(Storage {
+                values,
+                flags: Shared::new(flags),
+            }),
             layout,
             device: self.clone(),
         })
@@ -290,7 +336,10 @@ impl TensorDevice {
             pass.dispatch_workgroups(x, y, 1);
         }
         Ok(ResidentTensor {
-            storage: Shared::new(Storage { values, flags }),
+            storage: Shared::new(Storage {
+                values,
+                flags: Shared::new(flags),
+            }),
             layout,
             device: self.clone(),
         })
@@ -318,12 +367,37 @@ impl TensorDevice {
             layout.shape(),
         )
     }
+
+    /// Freeze within the caller's submission, retaining every upstream guard.
+    pub(crate) fn capture_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        layout: &NdLayout,
+        values: &wgpu::Buffer,
+        flags: &wgpu::Buffer,
+    ) -> Result<ResidentTensor, TensorError> {
+        self.encode(
+            encoder,
+            ElementwiseOp::Identity,
+            Operand {
+                values,
+                flags,
+                layout,
+            },
+            Operand {
+                values,
+                flags,
+                layout,
+            },
+            layout.shape(),
+        )
+    }
 }
 
 #[derive(Debug)]
 struct Storage {
     values: wgpu::Buffer,
-    flags: wgpu::Buffer,
+    flags: Shared<wgpu::Buffer>,
 }
 
 /// No mutable buffer escapes this handle. Clones and views cannot be invalidated
@@ -344,6 +418,15 @@ impl ResidentTensor {
     }
     pub fn shares_storage_with(&self, other: &Self) -> bool {
         Shared::ptr_eq(&self.storage, &other.storage)
+    }
+
+    /// Private recycling gate. No other tensor/view (or weak storage owner) can
+    /// resurrect this version. Prepared operations must retain their input
+    /// tensors until submission; already submitted reads precede reuse on the
+    /// same queue. GPU flags are rewritten together with values, never separately.
+    pub(crate) fn exclusively_owned(&mut self) -> bool {
+        Shared::get_mut(&mut self.storage)
+            .is_some_and(|storage| Shared::get_mut(&mut storage.flags).is_some())
     }
 
     fn view(&self, layout: NdLayout) -> Result<Self, TensorError> {
@@ -371,6 +454,29 @@ impl ResidentTensor {
     }
 
     pub fn apply(&self, op: ElementwiseOp, rhs: Option<&Self>) -> Result<Self, TensorError> {
+        let context = self.device.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let output = self.apply_into(&mut encoder, op, rhs)?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(output)
+    }
+
+    /// Submit the operation before preparing its terminal snapshot.
+    /// Reading remains explicit and uses the same exclusive snapshot lease.
+    pub fn apply_snapshot(
+        &self,
+        op: ElementwiseOp,
+        rhs: Option<&Self>,
+    ) -> Result<TensorReadback, TensorError> {
+        self.apply(op, rhs)?.snapshot()
+    }
+
+    pub(crate) fn apply_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        op: ElementwiseOp,
+        rhs: Option<&Self>,
+    ) -> Result<Self, TensorError> {
         if op.is_binary() != rhs.is_some() {
             return Err(TensorError::Operands);
         }
@@ -379,7 +485,8 @@ impl ResidentTensor {
         let shape = broadcast_shape(self.layout.shape(), rhs.layout.shape())?;
         let a = self.layout.broadcast_to(&shape)?;
         let b = rhs.layout.broadcast_to(&shape)?;
-        self.device.execute(
+        self.device.encode(
+            encoder,
             op,
             Operand {
                 values: &self.storage.values,
@@ -412,6 +519,18 @@ impl ResidentTensor {
             Ok(self.clone())
         } else {
             self.apply(ElementwiseOp::Identity, None)
+        }
+    }
+
+    /// Pack only if needed, within the caller's existing GPU submission.
+    pub(crate) fn contiguous_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Self, TensorError> {
+        if self.layout.is_contiguous() && self.layout.offset() == 0 {
+            Ok(self.clone())
+        } else {
+            self.apply_into(encoder, ElementwiseOp::Identity, None)
         }
     }
 

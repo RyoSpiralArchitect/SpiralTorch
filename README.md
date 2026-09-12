@@ -59,6 +59,8 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 - **[Backend vs PyTorch benchmarks](docs/backend_pytorch_benchmarks.md)** - Matched inputs, strict execution, actual WASM/CUDA runs, and preserved failures.
 - **[Resident WebGPU matmul](docs/resident_webgpu_matmul.md)** - Shared Rust execution from Python/browser WASM, GPU chaining, and asynchronous snapshots.
 - **[Resident NN inference](docs/resident_nn_inference.md)** - Lower existing Rust Linear/GELU/Sequential modules into a checked GPU-resident chain with N-D shape metadata; explicit inference, not resident training.
+- **[Mixed forward graphs](docs/resident_graph_forward.md)** - Compile existing Scaler/ReLU/Linear/GELU modules through Rust, Python or WASM without a training tape; shared `WgpuTensor` handles connect N-D processing, inference and graph training without intermediate CPU readback.
+- **[Original model, resident inputs](docs/module_resident_forward.md)** - The same NN model now reuses that graph through Rust `forward_resident`, Python `model(WgpuTensor)`, and browser `Sequential.forward`; explicit GPU outputs, parameter-aware cache reuse, and checked training handoff.
 - **[Resident NN training](docs/resident_nn_training.md)** - The same graph supports Rust-owned mean-MSE, VJP and transactional SGD through Python/browser clients, with explicit weight-only handoff.
 - 🌌 **[Z-Space Introduction](docs/zspace_intro.md)** - Understanding hyperbolic geometry in ML
 
@@ -466,6 +468,21 @@ ignored tokens and reduction rules live in one core; `nn.CrossEntropyWithLogits`
 connects it to `ModuleTrainer`. The [classification contract](docs/autograd_contract.md#classification-from-logits)
 explains the boundaries. `python examples/autograd_classification.py` runs a
 300-step, three-class learning fixture without NumPy or PyTorch.
+
+For GPU-resident class-last logits, the same loss exposes
+[`evaluate_resident(logits, labels)`](docs/module_resident_classification.md)
+across Rust, Python and WASM, connecting classification to resident VJP and
+explicit learner updates without intermediate CPU observations.
+
+For larger effective batches, [resident microbatch accumulation](docs/module_resident_microbatch.md)
+combines gradients across changing inputs in reusable GPU buffers before one
+transactional update, with explicit sample weighting and stale-state rejection.
+An optional [global gradient norm limit](docs/module_resident_gradient_clip.md)
+clips the policy-normalized window on GPU before the all-parameter update;
+Rust, Python and WASM share the same rule without a norm readback.
+Optional [Topos EMA momentum](docs/module_resident_momentum.md) keeps gradient
+history resident and commits it together with all parameters, including
+explicit reset, disable/re-enable and failed-update recovery rules.
 
 Version 0.4.23 adds `st.AutogradSgd(parameters, learning_rate=0.1)`
 for plain Rust-owned CPU updates. Fetch `optimizer.parameters()` for each forward

@@ -24,6 +24,8 @@ jobs:
           python3 -I tests/test_matmul_rank_bench.py
           python3 -I tests/test_resident_training_client_validation.py
           python3 -I tests/test_resident_graph_client_validation.py
+          python3 -I tests/test_resident_graph_forward_validation.py
+          python3 -I tests/test_graph_forward_paths.py
           python3 -I tests/test_resident_training_bench.py
           python3 -I tests/test_nd_tensor_bench.py
           python3 -I tests/test_pointwise_vjp_bench.py
@@ -208,7 +210,7 @@ jobs:
         run: |
           cargo test --locked --release -p st-backend-wgpu resident_training -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1
-          cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training -- --test-threads=1
+          cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
         run: cargo test --locked -p st-nn --features wgpu --release --lib
 
@@ -232,6 +234,7 @@ jobs:
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_graph_training_browser
+          cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_graph_forward_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_nd_tensor_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_bench_browser
       - name: build (wasm32)
@@ -469,6 +472,8 @@ jobs:
           python -P bindings/st-py/tests/test_nn_resident.py
           python -P bindings/st-py/tests/test_nn_resident_training.py
           python -P bindings/st-py/tests/test_nn_resident_graph_training.py
+          python -P bindings/st-py/tests/test_nn_resident_graph_forward.py
+          python -P bindings/st-py/tests/test_wgpu_tensor.py
           python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
         env:

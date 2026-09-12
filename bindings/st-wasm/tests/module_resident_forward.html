@@ -1,0 +1,231 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Original Rust NN Module resident forwarding</title>
+<pre id="result" data-status="running">Loading</pre>
+<script type="module">
+import init, * as st from "./module/spiraltorch_wasm.js";
+const report={schema:"spiraltorch.module_resident_forward.v1",status:"error",cases:[]};
+let assertions=0;
+function check(ok,why){assertions++;if(!ok)throw Error(why);}
+function rejects(call){let failed=false;try{call();}catch{failed=true;}check(failed,"invalid call accepted");}
+function close(a,b){check(a.length===b.length && [...a].every((v,i)=>Number.isFinite(v)&&Math.abs(v-b[i])<2e-5),"values differ");}
+const f32=v=>new Float32Array(v),owned=new Set(),keep=v=>(owned.add(v),v);
+function free(v){owned.delete(v);v.free();}
+async function read(t){const snap=keep(t.snapshot());const pending=snap.readValues();free(snap);return [...await pending];}
+function stats(m){const s=keep(m.residentCacheInfo());const v={compilations:String(s.compilations),cache_hits:String(s.cacheHits),submitted_forwards:String(s.submittedForwards)};free(s);return v;}
+try{
+  await init();
+  check(!!navigator.gpu,"WebGPU required, no CPU fallback");
+  const d=keep(await st.WgpuTensorDevice.create());report.adapter=d.adapterInfo();
+  check(report.adapter.device_type!=="Cpu","CPU adapter is not GPU evidence");
+  for(const width of [3,7,16]){
+    const m=keep(new st.Sequential());
+    m.addLinear("up",width,width+1);m.addGelu();
+    m.addScaler("gain",f32(Array(width+1).fill(1.125)));m.addRelu();
+    m.addLinear("down",width+1,width);
+    // Bounded recurrent fixture; unconstrained initial weights can explode when
+    // fed back twenty times. Keep that negative run, rather than hide its flags.
+    const initial=keep(m.inferencePlan([3,2,width])),seed=JSON.parse(initial.toJson());
+    for(const p of seed.parameters)p.values=p.values.map((_,i)=>p.role==="weight"
+      ? (Math.floor(i/p.shape[1])===i%p.shape[1] ? .875 : 0)
+      : p.role==="bias" ? (i%3-1)/64 : .9);
+    const fixed=keep(st.InferencePlan.fromJson(JSON.stringify(seed)));
+    check(initial.applyParametersTo(m,fixed)===5,"fixture handoff");
+    free(initial);free(fixed);
+    const plan=keep(m.inferencePlan([3,2,width]));
+    const raw=JSON.parse(plan.toJson());
+    const physical=Array.from({length:6*width},(_,i)=>(i%23-7)/16);
+    const source=keep(d.upload([2,3,width],f32(physical)));
+    const input=keep(source.permute([1,0,2])),logical=await read(input);
+    let current=input,first;
+    for(let i=0;i<20;i++){
+      const next=keep(m.forward(current));
+      if(i===0)first=next;
+      if(current!==input && current!==first)free(current);
+      current=next;
+    }
+    const cache=stats(m);
+    check(JSON.stringify(cache)===JSON.stringify({compilations:"1",cache_hits:"19",submitted_forwards:"20"}),"cache counts");
+    const training=keep(await plan.compileGraphTrainingWebGpu("exact"));
+    training.uploadBatch(f32(logical),new Float32Array(logical.length));
+    for(let i=0;i<4;i++){training.step(.01);const loss=keep(training.lossSnapshot());check(Number.isFinite(await loss.read()),"invalid training loss");free(loss);}
+    const snapshot=keep(training.parameterSnapshot()),updated=keep(await snapshot.readPlan());
+    check(plan.applyParametersTo(m,updated)===5,"parameter handoff count");
+    const trained=keep(m.forward(input));
+    check(stats(m).compilations==="2","handoff did not rebuild");
+    rejects(()=>plan.applyParametersTo(m,updated));
+    const changedPlan=keep(m.inferencePlan([3,2,width]));
+    const changed=JSON.parse(changedPlan.toJson());free(changedPlan);
+    const trainedValues=await read(trained);
+    m.clearResidentCache();
+    const afterClear=keep(m.forward(input));check(stats(m).compilations==="3","clear did not rebuild");
+    close(await read(afterClear),trainedValues);
+    const terminal=keep(m.forwardSnapshot(input));
+    check(JSON.stringify(Array.from(terminal.shape))===JSON.stringify([3,2,width]),"terminal shape");
+    for(let i=0;i<12;i++)free(keep(m.forwardSnapshot(input)));
+    check(stats(m).compilations==="3","terminal route rebuilt the shared cache");
+    m.clearResidentCache();
+    free(m);free(training);free(plan);free(updated);free(snapshot);free(source);
+    const pendingTerminal=terminal.readValues();free(terminal);
+    close(await pendingTerminal,trainedValues);
+    report.cases.push({shape:[3,2,width],plan:raw,input:logical,repetitions:20,
+      first:await read(first),final:await read(current),updated_plan:changed,trained:trainedValues,cache});
+  }
+  const m=keep(new st.Sequential());
+  for(const bad of [-1,1.5,true,"3",NaN,Infinity,4294967296])rejects(()=>m.addLinear("bad",bad,3));
+  for(const bad of [[],new Float64Array([1]),{},null])rejects(()=>m.addScaler("bad",bad));
+  m.addScaler("zero",f32([0.]));m.addRelu();
+  const huge=keep(d.upload([1],f32([3.4028234663852886e38])));
+  const invalid=keep(huge.mul(huge)),out=keep(m.forward(invalid));
+  let failed=false;try{await read(out);}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"invalid input got masked");
+  const terminalError=keep(m.forwardSnapshot(invalid));
+  failed=false;try{await terminalError.readValues();}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"terminal capture masked invalid input");free(terminalError);
+  const good=keep(d.upload([1],f32([1.])));close(await read(keep(m.forward(good))),[0.]);
+  check(stats(m).compilations==="1","valid recovery rebuilt");
+  const directModel=keep(new st.Sequential());directModel.addScaler("scale",f32([2.]));directModel.addRelu();
+  const directPlan=keep(directModel.inferencePlan([2,1]));
+  const graph=keep(await directPlan.compileGraphWebGpu());
+  const source=keep(d.upload([2,2],f32([99.,-1.,99.,2.]))),view=keep(source.narrow(1,1,1));
+  const first=keep(graph.forwardTensor(view)),snapshot=keep(graph.snapshot());
+  const second=keep(graph.forwardTensor(first));
+  check(graph.generation===2n&&graph.submittedDispatches===2n,"direct counters");
+  check(graph.dispatch()===3n,"explicit transition");close(await read(keep(graph.outputTensor())),[0.,8.]);
+  rejects(()=>graph.forwardTensor(good));rejects(()=>graph.forwardTensor(null));
+  check(graph.generation===2n&&graph.submittedDispatches===3n,"invalid call changed counters");
+  graph.upload(f32([1.,1.]));graph.dispatch();
+  const fresh=keep(graph.snapshot());close(await fresh.readValues(),[2.,2.]);free(fresh);
+  graph.setInputTensor(view);graph.dispatch();close(await read(keep(graph.outputTensor())),[0.,4.]);
+  free(graph);close(await snapshot.readValues(),[0.,4.]);free(snapshot);
+  close(await read(first),[0.,4.]);close(await read(second),[0.,8.]);
+  const zeroPlan=keep(m.inferencePlan([1])),zeroGraph=keep(await zeroPlan.compileGraphWebGpu());
+  const masked=keep(zeroGraph.forwardTensor(invalid));
+  close(await read(keep(zeroGraph.forwardTensor(good))),[0.]);free(zeroGraph);
+  failed=false;try{await read(masked);}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"direct guard was erased by later valid output");
+  report.direct_io_guards=true;
+  const pooled=keep(await directPlan.compileGraphWebGpu()),versions=[];
+  for(let i=0;i<12;i++){
+    const input=keep(d.upload([2,1],f32([i+1,i+1]))),output=keep(pooled.forwardTensor(input));free(input);
+    check(versions.every(old=>!output.sharesStorageWith(old)),"live output storage was reused");
+    versions.push(output);
+  }
+  const oldView=keep(versions[0].narrow(0,0,1)),oldRead=keep(versions[1].snapshot());
+  const bound=keep(new st.WgpuPointwiseInputs());bound.add(versions[0]);
+  const boundPlan=keep(bound.compile('[["identity",null]]'));
+  const consumer=keep(await directPlan.compileGraphWebGpu());consumer.setInputTensor(versions[2]);
+  for(let i=0;i<versions.length;i++){close(await read(versions[i]),[2*(i+1),2*(i+1)]);free(versions[i]);}
+  for(let i=0;i<20;i++){
+    const input=keep(d.upload([2,1],f32([i+20,i+20]))),output=keep(pooled.forwardTensor(input));
+    if(i===19)close(await read(output),[78.,78.]);free(input);free(output);
+  }
+  free(pooled);close(await read(oldView),[2.]);close(await oldRead.readValues(),[4.,4.]);free(oldRead);
+  close(await read(keep(boundPlan.run(bound,"fused"))),[2.,2.]);
+  consumer.dispatch();close(await read(keep(consumer.outputTensor())),[12.,12.]);
+  const explosive=keep(new st.Sequential());explosive.addScaler("huge",f32([3.4028234663852886e38]));explosive.addRelu();
+  const badPlan=keep(explosive.inferencePlan([1])),badGraph=keep(await badPlan.compileGraphWebGpu());
+  const negative=keep(d.upload([1],f32([-2.]))),badOutput=keep(badGraph.forwardTensor(negative));
+  const oldError=keep(badOutput.snapshot());free(badOutput);
+  const safe=keep(d.upload([1],f32([0.])));
+  for(let i=0;i<20;i++)free(keep(badGraph.forwardTensor(safe)));
+  close(await read(keep(badGraph.outputTensor())),[0.]);free(badGraph);
+  failed=false;try{await oldError.readValues();}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"recycling overwrote a pending invalid snapshot");free(oldError);
+  report.output_reuse_guards=true;
+  for(const bad of [0,7,11]){
+    const net=keep(new st.Sequential());
+    for(let block=0;block<12;block++){
+      net.addScaler(`gain${block}`,f32([block===bad ? -3.4028234663852886e38 : 1.]));net.addRelu();
+    }
+    const plan=keep(net.inferencePlan([2,1])),graph=keep(await plan.compileGraphWebGpu());
+    const input=keep(d.upload([2,1],f32([2.,2.]))),safe=keep(d.upload([2,1],f32([0.,0.])));
+    const invalid=keep(graph.forwardTensor(input)),pending=keep(graph.snapshot());
+    for(let i=0;i<8;i++)free(keep(graph.forwardTensor(safe)));
+    close(await read(keep(graph.outputTensor())),[0.,0.]);
+    let error;try{await pending.readValues();}catch(e){error=String(e);}free(pending);
+    check(error?.includes(`stage ${2*bad},`),"wrong first failing pointwise stage");
+    error=undefined;try{await read(invalid);}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"held failure was erased by shared guard reuse");
+    error=undefined;try{await read(keep(net.forward(input)));}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"Module masked a late stage failure");
+    close(await read(keep(net.forward(safe))),[0.,0.]);
+    check(stats(net).compilations==="1","valid shared-guard recovery rebuilt");
+    free(graph);free(plan);free(net);free(input);free(safe);free(invalid);
+  }
+  report.shared_stage_guards=true;
+  for(const bad of [0,7,17]){
+    const shape=[3,7,65],count=3*7*65,net=keep(new st.Sequential());
+    for(let block=0;block<18;block++){
+      const gain=new Float32Array(65).fill(1);
+      if(block===bad)gain[64]=-3.4028234663852886e38;
+      net.addScaler(`gain${block}`,gain);net.addRelu();
+    }
+    const values=new Float32Array(count);values[count-1]=2;
+    const input=keep(d.upload(shape,values)),safe=keep(d.upload(shape,new Float32Array(count)));
+    const plan=keep(net.inferencePlan(shape)),graph=keep(await plan.compileGraphWebGpu());
+    const invalid=keep(graph.forwardTensor(input)),pending=keep(graph.snapshot()),held=keep(invalid.snapshot());
+    for(let i=0;i<16;i++)free(keep(graph.forwardTensor(safe)));
+    close(await read(keep(graph.outputTensor())),Array(count).fill(0));
+    let error;try{await pending.readValues();}catch(e){error=String(e);}free(pending);
+    check(error?.includes(`stage ${2*bad},`),"late workgroup changed first failing stage");
+    error=undefined;try{await held.readValues();}catch(e){error=String(e);}free(held);
+    check(error?.includes("non-finite"),"queued late workgroup failure was erased");
+    error=undefined;try{await read(invalid);}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"late workgroup failure missed owning guard");
+    error=undefined;try{await read(keep(net.forward(input)));}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"Module failed to capture late workgroup flag");
+    close(await read(keep(net.forward(safe))),Array(count).fill(0));
+    check(stats(net).compilations==="1","late workgroup recovery rebuilt");
+    free(graph);free(plan);free(net);free(input);free(safe);free(invalid);
+  }
+  report.terminal_guard_ordering=true;
+  const captures=[];
+  for(let i=0;i<24;i++){
+    let value,expected;
+    if(i%4===0){
+      const root=keep(d.upload([2,2],f32([i,1,2,3])));
+      value=keep(root.permute([1,0]));free(root);expected=[i,2,1,3];
+    }else if(i%4===1){value=keep(d.upload([],f32([-0])));expected=[-0];}
+    else if(i%4===2){value=keep(d.upload([0,4],f32([])));expected=[];}
+    else{value=keep(d.upload([2],f32([i,i])));expected=[i,i];}
+    const snapshot=keep(value.snapshot());free(value);
+    captures.push({snapshot,expected});
+  }
+  const pending=captures.map(({snapshot,expected})=>{
+    const values=snapshot.readValues();free(snapshot);
+    return {values,expected};
+  });
+  for(let i=0;i<48;i++){
+    const value=keep(d.upload([4],f32([7,7,7,7])));
+    free(keep(value.snapshot()));
+    close(await read(value),[7,7,7,7]);free(value);
+  }
+  for(const {values,expected} of pending.reverse()){
+    const actual=Array.from(await values);close(actual,expected);
+    if(expected.length===1)check(Object.is(actual[0],-0),"snapshot reuse lost negative zero");
+  }
+  report.tensor_readback_ownership=true;
+  const identity=keep(new st.Sequential());
+  const emptyInput=keep(d.upload([0,3],f32([]))),emptyCapture=keep(identity.forwardSnapshot(emptyInput));
+  close(await emptyCapture.readValues(),[]);
+  check(stats(identity).submitted_forwards==="0","identity observation counted as NN execution");
+  free(emptyCapture);free(emptyInput);free(identity);
+  const terminalNet=keep(new st.Sequential());terminalNet.addScaler("s",f32([2.]));terminalNet.addRelu();
+  const terminalPlan=keep(terminalNet.inferencePlan([2,1]));
+  const terminalGraph=keep(await terminalPlan.compileGraphWebGpu());
+  const terminalInput=keep(d.upload([2,1],f32([1.,2.])));
+  const terminalSnapshot=keep(terminalGraph.forwardTensorSnapshot(terminalInput));
+  terminalGraph.dispatch();
+  close(await read(keep(terminalGraph.outputTensor())),[2.,4.]);
+  free(terminalGraph);free(terminalPlan);free(terminalNet);free(terminalInput);
+  close(await terminalSnapshot.readValues(),[2.,4.]);free(terminalSnapshot);
+  report.terminal_forward_capture=true;
+  report.status="passed";
+}catch(e){report.error=String(e.stack||e);}
+finally{for(const v of owned)v.free();}
+report.assertions=assertions;
+const result=document.querySelector("#result");
+result.textContent=JSON.stringify(report);result.dataset.status=report.status;
+</script>

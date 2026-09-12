@@ -1,0 +1,286 @@
+# Mixed NN Graphs Without A Training Tape
+
+For the same graph cached behind the **original model**, rather than an explicitly
+compiled plan, see [Module resident forwarding](module_resident_forward.md).
+
+`InferencePlan::compile_graph_wgpu` connects existing Rust `Linear`, `Gelu`,
+`Relu`, `Scaler` and nested `Sequential` modules to a forward-only resident
+executor. It accepts both v1 dense plans and v2 mixed plans, including
+parameter snapshots exported by resident graph training. There is no target,
+MSE, backward, gradient-policy selection or optimizer allocation in this path.
+
+The dense-only `compile_wgpu` remains available. Both inference executors
+share the checked, non-taped matmul/bias/GELU kernel; mixed graph pointwise
+stages reuse the existing Rust `PointwisePlan`, not a second implementation of
+the operations. Unsupported modules still fail at lowering without fallback.
+
+## GPU Composition
+
+Enable `st-nn/wgpu` and `st-backend-wgpu`:
+
+```rust
+use st_backend_wgpu::runtime;
+use st_nn::{layers::{Gelu, Relu, Scaler}, resident::InferencePlan, Linear, Sequential};
+use st_tensor::NdLayout;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut model = Sequential::new();
+    model.push(Scaler::new("scale", 4)?);
+    model.push(Linear::new("up", 4, 7)?);
+    model.push(Gelu::new());
+    model.push(Relu::new());
+    model.push(Linear::new("down", 7, 3)?);
+
+    let plan = InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 5, 4])?)?;
+    let (runtime, _) = runtime::ensure_default_runtime_blocking("my.graph")?;
+    let mut graph = plan.compile_graph_wgpu(runtime.clone())?;
+    let device = graph.tensor_device().clone();
+    let input = device.upload(&[2, 5, 4], &[0.25; 40])?;
+    let gains = device.upload(&[4], &[1., 0.5, 0.75, 1.25])?;
+    let preprocessed = input.mul(&gains)?.relu()?;
+    let result = graph.forward_tensor(&preprocessed)?;
+    let shifted = result.add(&device.upload(&[3], &[0.1, 0.2, 0.3])?)?;
+
+    let next = InferencePlan::from_module(&Relu::new(), graph.output_layout().clone())?;
+    let mut next = next.compile_graph_wgpu(runtime)?;
+    next.set_input_tensor(&shifted)?;
+    next.dispatch()?;
+    let snapshot = next.snapshot()?;
+    drop(graph);
+    drop(next);
+    let values = snapshot.read()?; // first CPU observation of graph results
+    assert_eq!(values.len(), 30);
+    Ok(())
+}
+```
+
+On WASM use asynchronous runtime discovery and `snapshot.read_async().await`.
+The same Rust compiler and executor run in the browser. Python and WASM expose
+this compiler through owning handles; neither client reconstructs the graph's
+operations, strides, broadcasting or error propagation.
+
+## Python And Browser Clients
+
+Use a current-source wheel with `nn` and `wgpu` (both are default features):
+
+```python
+import spiraltorch as st
+
+model = st.nn.Sequential()
+model.add(st.nn.Scaler.from_gain("scale", st.Tensor(1, 4, [1., .5, .75, 1.25])))
+model.add(st.nn.Linear(4, 7, name="up"))
+model.add(st.nn.Gelu())
+model.add(st.nn.Relu())
+model.add(st.nn.Linear(7, 3, name="down"))
+plan = model.inference_plan([2, 5, 4])
+gpu = plan.compile_graph_wgpu()
+device = gpu.tensor_device()
+x = device.upload([2, 5, 4], [.25] * 40)
+y = gpu.forward_tensor(x.relu()).add(device.upload([3], [.1, .2, .3]))
+del gpu
+snapshot = y.snapshot()
+values = snapshot.read_values()  # explicit first host observation
+payload = plan.to_json()        # the same Rust-owned plan can go to a browser
+```
+
+The independent factory `st.WgpuTensorDevice.create()` uses the same default
+device/queue as NN compilation. `st.WgpuTensor`, `st.WgpuTensorDevice` and
+`st.WgpuTensorSnapshot` are also available under `spiraltorch.wgpu`. Only the
+factory/upload/operation methods create handles; direct constructors are not
+part of the API. Ordinary host-backed `st.Tensor` is a separate type.
+
+Build the production WASM package with `webgpu`, then use the exact plan JSON:
+
+```javascript
+import init, { InferencePlan } from "./pkg/spiraltorch_wasm.js";
+await init();
+const plan = InferencePlan.fromJson(payload);
+const pending = plan.compileGraphWebGpu();
+plan.free(); // the compilation promise already owns the Rust plan
+const gpu = await pending;
+const device = gpu.tensorDevice();
+const x = device.upload([2, 5, 4], new Float32Array(40).fill(.25));
+const y = gpu.forwardTensor(x);
+gpu.free(); x.free(); device.free();
+const snapshot = y.snapshot();
+y.free();
+const shape = snapshot.shape; // Uint32Array; independent metadata
+const reading = snapshot.readValues();
+snapshot.free(); // the pending read owns its buffers, not this JS wrapper
+const values = await reading;
+```
+
+`WgpuTensorDevice.create()` is an asynchronous browser factory. Tensor methods
+`reshape`, `permute`, `narrow`, `broadcast_to`/`broadcastTo`, `contiguous`, `add`,
+`mul`, `relu`, `gelu` and `snapshot` all use the same Rust implementations.
+Shape/axes/index arguments must be integers, not booleans or fractional values;
+browser shape arguments are `number[]`, and data arguments are `Float32Array`.
+Shape/stride metadata is copied out, with strides measured in elements.
+Standalone tensors support scalar and empty layouts; NN plans still require
+nonempty last-axis inputs.
+
+`forward_tensor` / `forwardTensor` advances the input generation and dispatch
+counter together. Packed offset-zero inputs are read directly and the last stage
+writes an owning output version. Fully unobserved storage and its final/guard
+bindings may be recycled within a four-slot / 32 MiB retained-output budget.
+Live tensors, views and bound consumers prevent recycling. View packing, graph
+evaluation and error-guard capture use one submission, with no intermediate
+host observation. See the [ownership checks and paired timings](../benchmarks/results/2026-09-12-module-output-reuse/README.md);
+the retained-output budget is not a total GPU-memory limit or a universal-speedup claim.
+The older `set_input_tensor` / `dispatch` / `output_tensor` sequence remains
+available. It can be interleaved with direct calls; all returned tensors and
+snapshots stay independent of later workspace reuse. A later `dispatch` repeats
+the current input, not the preceding output.
+
+The handle also connects existing public executors:
+
+- Dense inference accepts `set_input_tensor` / `setInputTensor`; its
+  `tensor_snapshot(device)` / `tensorSnapshot(device)` returns a GPU tensor.
+- Graph training accepts `upload_batch_tensors` / `uploadBatchTensors`, and
+  returns `prediction_tensor` / `predictionTensor` and `input_gradient_tensor`
+  / `inputGradientTensor`. Both are pre-update captures with the complete
+  training guard, not proof that an enqueued SGD step was accepted.
+- Mixed inference uses `output_tensor` / `outputTensor`; any of these results
+  can feed another compatible executor without intermediate host readback.
+
+Mixed `dispatch()` returns the submitted-dispatch counter; snapshot metadata
+retains input generation and dispatch separately. The legacy dense executor's
+return value remains its input generation. Snapshot reads consume the handle
+once, including a rejected read. An invalid upstream value stays invalid after
+ReLU, reshape or an NN pass; errors are deferred to explicit observation.
+
+CPU-only Python builds retain the class names but reject device creation and
+graph compilation with `NotImplementedError`. An `nn`-only WASM build transports
+plans and rejects `compileGraphWebGpu`; it does not export `WgpuTensor*` classes.
+Neither path substitutes host Tensor operations when WebGPU is unavailable.
+
+## Transfer And Ownership Contract
+
+- `upload` copies finite host values into a stable input buffer. Invalid lengths
+  or nonfinite values leave the prior input/output generation intact.
+- `set_input_tensor` accepts exact logical N-D shapes on the same device and
+  queue. Narrow, permuted and broadcast views are packed on-device when needed,
+  then copied to stable graph input storage. This is not zero-copy admission.
+- Parameters, bindings and activation buffers are prepared once. `dispatch`
+  uses one command submission, with no per-dispatch buffer/binding allocation
+  or host readback. Intermediate activation buffers are shared between stages.
+  All nodes execute in one compute pass. Dense and pointwise nodes write their
+  own indexed words directly into one shared validation buffer. One whole-guard
+  clear replaces per-pointwise clears/copies, without changing logical
+  stage/error indices or masking earlier failures. Dense-only
+  inference retains its existing schedule. Mixed graph training batches its
+  forward dispatches on Metal only; its loss/backward/update boundaries remain
+  separate. Browser training keeps the measured original schedule.
+- `output_tensor` freezes output and all guards into an immutable GPU tensor.
+  After explicit `dispatch` it performs an on-device identity/capture pass.
+  After `forward_tensor` it clones the already owning result without a values
+  copy. Neither route performs CPU readback or exposes a mutable workspace alias;
+  subsequent dispatches cannot invalidate the returned tensor.
+- `snapshot` freezes output and stage flags into an owned readback buffer.
+  Reading is explicit and consumes the snapshot. Graph drop/reuse is safe.
+- `dispatch` returns the submitted-dispatch counter, **not** a success receipt.
+  `generation` counts accepted inputs independently. Errors detected on the
+  GPU are deferred until observation, including earlier overflow masked by a
+  later ReLU and invalid upstream tensors. Graph readback error stage
+  `stage_count` denotes the upstream input guard; `0..stage_count` are NN stages.
+- Frozen plans do not track live model updates. Ordinary `Module::forward`,
+  host-backed 2D `pure::Tensor`, automatic autograd and `ModuleTrainer` routing
+  are unchanged. The N-D graph applies Linear along the last axis; it is not a
+  generic attention/convolution/arbitrary-module compiler.
+
+These are structural transfer boundaries, not hardware-counter measurements
+or a claim that this path is faster than PyTorch.
+
+The [shared-guard verification and timings](../benchmarks/results/2026-09-12-module-shared-guard/README.md)
+cover indexed stage errors, inherited empty-input guards and four paired
+native/browser matrices, including small native timing regressions.
+
+## Timing The Connected Path
+
+`resident_graph_forward_bench` measures existing `Module::forward` with a
+no-fallback WGPU policy alongside scalar/sequential and
+register-2x2/compensated resident mixed graphs. Each model repeats
+Scaler/Linear/GELU/ReLU blocks, with three seeds and bounded depth/width/shape
+combinations. The two kernel choices also differ in accumulation policy; a
+timing difference between them is not attributable to register tiling alone.
+
+There are two separate observation boundaries: H2H includes input upload and an
+owning host output on every sample; burst measures eight independent forwards
+of the same already-resident input with one final readback. This is not eight
+dependent autoregressive steps, nor GPU timestamp-only timing. Compilation and
+setup are excluded; three warmups precede nine rotated retained sample blocks.
+All outputs are checked outside timing, and raw timings are retained.
+
+```bash
+cargo run --locked --release -p st-nn --no-default-features --features wgpu \
+  --example resident_graph_forward_bench > /tmp/new-native-forward-bench.json
+# Use a release binding built from the measured source, not an installed wheel.
+PYTORCH_ENABLE_MPS_FALLBACK=0 /path/to/torch-python -I tools/bench_graph_forward_paths.py \
+  --fixture /tmp/new-native-forward-bench.json --native-library /path/to/frozen/libspiraltorch.dylib \
+  --output /tmp/new-python-torch-forward-bench.json
+# Build the production webgpu package as above, then supply that same fixture.
+cp /tmp/new-native-forward-bench.json /tmp/new-public-module/forward-bench-fixture.json
+node tools/test_resident_browser.cjs /tmp/new-public-module /path/to/chromium \
+  /tmp/new-browser-forward-bench.json '' '' '' '' nn-forward-bench
+```
+
+The Python harness imports both current-source SpiralTorch and Torch, alternates
+their controls, and includes host-list output conversion for each. Torch uses
+eager `addmm`/bias and tanh-GELU, not `torch.compile`. Native and WASM outputs are
+host f32 vectors and typed arrays respectively, so client overheads differ.
+macOS GPU contention and browser physical GPU identity remain unverified.
+`validate_graph_forward_paths.py` compares complete baseline/candidate triples,
+checks f32 fixture bits and hashes, rejects missing/changed samples and keeps
+H2H and burst ratios separate. It does not select a fastest global backend.
+
+## Public Client Validation
+
+The production-client fixture imports a frozen core fixture, preserves its
+input values and plan contents, and executes 12 recipes through the public handles:
+
+```bash
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I bindings/st-py/tests/test_wgpu_tensor.py -v
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -I bindings/st-py/tests/test_nn_resident_graph_forward.py -v
+python -I bindings/st-py/examples/resident_graph_forward.py \
+  --fixture native.json --output /tmp/new-python-forward.json
+# Build the production webgpu package, not the dedicated Rust fixture cdylib.
+OUT_DIR=/tmp/new-public-module EXAMPLES_DIR=/tmp/no-example-sync \
+  bash scripts/build_wasm_web.sh --features webgpu
+cp native.json /tmp/new-public-module/forward-fixture.json
+node tools/test_resident_browser.cjs /tmp/new-public-module /path/to/chromium \
+  /tmp/new-browser-forward.json '' '' '' '' nn-forward-clients
+PYTORCH_ENABLE_MPS_FALLBACK=0 /path/to/torch-python -I tools/verify_resident_graph_forward_torch.py \
+  native.json /tmp/new-python-forward.json /tmp/new-browser-forward.json \
+  --output /tmp/new-client-torch.json
+```
+
+The verifier requires the hash-matching core JSON alongside client reports and
+rejects input/plan/recipe drift before importing Torch. Browser asset hashes
+must also match the declared fixture lineage. Client ownership checks are
+reported separately from the core fixture's cross-device rejection checks;
+the public clients intentionally share one default runtime.
+
+## Reproduce
+
+```bash
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn \
+  --no-default-features --features wgpu --test resident_graph_forward
+cargo run --locked --release -p st-nn --no-default-features --features wgpu \
+  --example resident_graph_forward > native.json
+cargo build --locked --release -p st-nn --no-default-features --features wgpu \
+  --target wasm32-unknown-unknown --example resident_graph_forward_browser
+wasm-bindgen target/wasm32-unknown-unknown/release/examples/resident_graph_forward_browser.wasm \
+  --target web --out-dir /tmp/new-forward-module --out-name spiraltorch_wasm
+node tools/test_resident_browser.cjs /tmp/new-forward-module /path/to/chromium \
+  /tmp/new-forward-browser.json '' '' '' '' nn-graph-forward
+PYTORCH_ENABLE_MPS_FALLBACK=0 /path/to/torch-python -I tools/verify_resident_graph_forward_torch.py \
+  native.json /tmp/new-forward-browser.json --output /tmp/new-forward-torch.json
+```
+
+Use the `wasm-bindgen` version matching Cargo.lock and supply Playwright in the
+Node environment. The isolated browser fixture executes 12 mixed-model recipes
+and nine guard/compatibility groups, including repeated dispatch, strided and
+broadcast inputs, GPU preprocessing/postprocessing, graph-to-graph composition,
+snapshot lifetime, recovery and both plan versions. Torch checks all six output
+captures per recipe on each explicitly requested device, without SpiralTorch
+math. This fixture measures correctness and ownership, not throughput.

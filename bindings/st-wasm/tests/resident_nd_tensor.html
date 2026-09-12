@@ -21,6 +21,12 @@ try {
   };
   if (report.status !== "passed" || report.cases?.length !== 3 || report.guards?.input_and_target_rejections !== 4)
     throw Error("Incomplete N-D fixture");
+  const snapshots = report.tensor_snapshots;
+  if (snapshots?.status !== "passed" || snapshots.held_snapshots !== 24 || snapshots.discard_and_reuse_cycles !== 48 ||
+      snapshots.retained_guard_failures !== 2 || snapshots.cancelled_pending_maps !== 4 ||
+      snapshots.terminal_cancelled_pending_maps !== 4 || snapshots.terminal_capture_survives_cache_clear_and_module_drop !== true ||
+      snapshots.different_shapes_and_negative_zero !== true || snapshots.survives_tensor_device_drop !== true)
+    throw Error("Incomplete snapshot ownership/cancellation fixture");
   result.textContent = JSON.stringify(report);
   result.dataset.status = "passed";
 } catch (error) {

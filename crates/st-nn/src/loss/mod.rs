@@ -26,6 +26,21 @@ pub use triplet_loss::TripletLoss;
 /// Trait implemented by differentiable losses that operate directly on
 /// SpiralTorch tensors.
 pub trait Loss {
+    /// Joint resident value and exact prediction cotangent. Implementations
+    /// share the ordinary loss definition; no optimizer or host read is implied.
+    /// The pair is whole-loss guarded, so a failed value also invalidates its seed.
+    #[cfg(feature = "wgpu")]
+    fn evaluate_resident(
+        &mut self,
+        _prediction: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        _target: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::loss::ResidentLoss, crate::resident::InferenceError>
+    {
+        Err(crate::resident::InferenceError::UnsupportedLoss(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
     /// Computes the loss value for the given predictions and targets.
     fn forward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor>;
 

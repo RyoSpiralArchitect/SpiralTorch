@@ -6,9 +6,9 @@ use crate::execution::TensorUtilRoute;
 use crate::{PureResult, Tensor};
 use st_tensor::{class_indices_from_tensor, CrossEntropyConfig, TensorError, TensorUtilBackend};
 
-/// CPU logits loss for `(samples, classes)` predictions and `(samples, 1)` integer targets.
-/// All numerical semantics live in st-tensor. Unreduced backward uses an all-ones seed.
-/// Strict accelerator execution is rejected until an accelerator kernel exists.
+/// Class-last logits loss. Host Tensor execution retains the stable CPU path;
+/// evaluate_resident uses the shared checked contract on GPU without a host read.
+/// Unreduced backward uses an all-ones loss seed on either path.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CrossEntropyWithLogits {
     config: CrossEntropyConfig,
@@ -31,7 +31,7 @@ impl CrossEntropyWithLogits {
         {
             return Err(TensorError::BackendFailure {
                 backend: "wgpu",
-                message: "CrossEntropyWithLogits has a CPU kernel only; fallback disabled".into(),
+                message: "CrossEntropyWithLogits host Tensor path is CPU-only; use evaluate_resident with GPU tensors; fallback disabled".into(),
             });
         }
         Ok(route)
@@ -49,7 +49,7 @@ impl CrossEntropyWithLogits {
                 if matches!(route.selected_backend, TensorUtilBackend::Cpu) {
                     "tensor utility size threshold selected CPU"
                 } else {
-                    "CrossEntropyWithLogits has a CPU kernel only"
+                    "CrossEntropyWithLogits host Tensor path is CPU-only"
                 },
             )
         } else {
@@ -69,6 +69,22 @@ impl CrossEntropyWithLogits {
 }
 
 impl Loss for CrossEntropyWithLogits {
+    #[cfg(feature = "wgpu")]
+    fn evaluate_resident(
+        &mut self,
+        prediction: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        target: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::loss::ResidentLoss, crate::resident::InferenceError>
+    {
+        crate::resident::require_uncommitted_route()?;
+        Ok(prediction.cross_entropy_with_logits(
+            target,
+            self.config
+                .kernel_spec()
+                .map_err(crate::resident::InferenceError::Tensor)?,
+        )?)
+    }
+
     fn forward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
         let route = self.validate_execution(prediction)?;
         let output = prediction

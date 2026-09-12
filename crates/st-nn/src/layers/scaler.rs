@@ -77,6 +77,8 @@ fn emit_scaler_meta(
 pub struct Scaler {
     gain: Parameter,
     baseline: Tensor,
+    #[cfg(feature = "wgpu")]
+    resident: crate::resident::ResidentForwardCache,
 }
 
 impl Scaler {
@@ -110,6 +112,8 @@ impl Scaler {
         Ok(Self {
             gain: Parameter::new(format!("{name}::gain"), gain),
             baseline,
+            #[cfg(feature = "wgpu")]
+            resident: Default::default(),
         })
     }
 
@@ -130,7 +134,7 @@ impl Scaler {
         if rows * cols == 0 {
             return Ok(None);
         }
-        validate_finite_tensor("scaler_gain", gain)?;
+        self.gain.validate_finite("scaler_gain")?;
         validate_finite_tensor("scaler_baseline", &self.baseline)?;
 
         let drift = gain
@@ -235,12 +239,52 @@ impl Scaler {
 }
 
 impl Module for Scaler {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        self.resident.forward(self.inference_ops()?, input)
+    }
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        self.resident.snapshot(self.inference_ops()?, input)
+    }
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        Some(self.resident.stats())
+    }
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.resident.clear();
+    }
+
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        Ok(vec![(crate::resident::ParameterRole::Gain, &self.gain)])
+    }
+
     fn inference_ops(
         &self,
     ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
-        Ok(vec![crate::resident::InferenceOp::Scale {
+        crate::resident::collect_inference_ops(self, 1)
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        operations.push(crate::resident::InferenceOp::Scale {
             gain: self.gain.value().clone(),
-        }])
+        });
+        Ok(())
     }
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
@@ -252,7 +296,7 @@ impl Module for Scaler {
             });
         }
         validate_finite_tensor("scaler_input", input)?;
-        validate_finite_tensor("scaler_gain", gain)?;
+        self.gain.validate_finite("scaler_gain")?;
         let broadcast_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let output = input.mul_row_with_backend(gain.data(), broadcast_backend)?;
         emit_scaler_meta(
@@ -284,8 +328,8 @@ impl Module for Scaler {
         }
         validate_finite_tensor("scaler_backward_input", input)?;
         validate_finite_tensor("scaler_backward_grad_output", grad_output)?;
+        self.gain.validate_finite("scaler_gain")?;
         let gain_values = self.gain.value().data().to_vec();
-        validate_finite_slice("scaler_gain", &gain_values)?;
         if rows == 0 {
             let output = Tensor::zeros(rows, cols)?;
             emit_scaler_meta("scaler_backward", rows, cols, true, None, None, None);

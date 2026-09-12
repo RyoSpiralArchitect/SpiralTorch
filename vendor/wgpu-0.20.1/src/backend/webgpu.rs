@@ -2794,10 +2794,22 @@ impl crate::context::Context for ContextWebGpu {
     fn queue_on_submitted_work_done(
         &self,
         _queue: &Self::QueueId,
-        _queue_data: &Self::QueueData,
-        _callback: crate::context::SubmittedWorkDoneCallback,
+        queue_data: &Self::QueueData,
+        callback: crate::context::SubmittedWorkDoneCallback,
     ) {
-        unimplemented!()
+        let promise = queue_data.0.on_submitted_work_done();
+        // A rejected promise must not certify completion. Dropping the callback
+        // also disconnects any owning completion channel instead of hanging it.
+        register_then_closures(
+            &promise,
+            move |completed| {
+                if completed {
+                    callback();
+                }
+            },
+            true,
+            false,
+        );
     }
 
     fn device_start_capture(&self, _device: &Self::DeviceId, _device_data: &Self::DeviceData) {}

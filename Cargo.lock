@@ -3300,6 +3300,7 @@ dependencies = [
  "futures",
  "nalgebra 0.32.6",
  "num-complex",
+ "pollster",
  "rand",
  "rand_chacha",
  "rand_distr",

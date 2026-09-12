@@ -48,6 +48,7 @@ mod trainer;
 mod vision;
 mod wgpu;
 mod wgpu_resident;
+mod wgpu_tensor;
 mod wgpu_rank;
 mod zpulse;
 mod zspace;

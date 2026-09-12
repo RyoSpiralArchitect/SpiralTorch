@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Public mixed resident NN timing</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, { InferencePlan } from "/module/spiraltorch_wasm.js";
+const target = document.querySelector("#result");
+const routes = ["scalar_h2h", "register_h2h", "scalar_burst", "register_burst"];
+const report = {schema:"spiraltorch.graph_forward_browser_bench.v1",status:"error",client:"wasm",
+  routes,warmup:3,samples_per_route:9,burst:8,cases:[],
+  boundary:"Production WASM bindings. H2H includes typed-array upload and owning Float32Array output. Burst: eight independent forwards of a fixed resident input, final readback included. Compilation/setup excluded; per-case controls rotated. Numerical checks outside timing. Physical GPU and GPU contention unverified."};
+function check(actual, expected) {
+  if(actual.length !== expected.length) throw Error("output shape differs");
+  let maximum=0;
+  for(let i=0;i<actual.length;i++) {
+    const a=actual[i],b=expected[i];
+    if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a-b)>2e-5+2e-4*Math.abs(b)) throw Error("output differs");
+    maximum=Math.max(maximum,Math.abs(a-b));
+  }
+  return maximum;
+}
+async function read(graph) {
+  const snapshot=graph.snapshot();
+  try { return await snapshot.readValues(); }
+  finally { snapshot.free(); }
+}
+try {
+  const response=await fetch("/fixture.json");
+  if(!response.ok) throw Error("fixture fetch failed");
+  const bytes=await response.arrayBuffer();
+  report.source_fixture_sha256=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),v=>v.toString(16).padStart(2,"0")).join("");
+  const fixture=JSON.parse(new TextDecoder().decode(bytes));
+  if(fixture.schema!=="spiraltorch.graph_forward_bench.v1"||fixture.status!=="passed"||fixture.cases.length!==9||fixture.warmup!==3||fixture.samples_per_route!==9||fixture.burst!==8) throw Error("native fixture changed");
+  await init();
+  for(const c of fixture.cases) {
+    const plan=InferencePlan.fromJson(JSON.stringify(c.plan));
+    const graphs=[];
+    try {
+      graphs.push(await plan.compileGraphWebGpu());
+      graphs.push(await plan.compileGraphWebGpu(undefined,"register_2x2","compensated"));
+      const input=Float32Array.from(c.input), samples=[], last_outputs={};
+      report.adapter=graphs[0].adapterInfo();
+      if(report.adapter.backend!=="BrowserWebGpu"||report.adapter.device_type==="Cpu") throw Error("WebGPU required");
+      for(let block=0;block<12;block++) {
+        const offset=(block+c.seed)%routes.length;
+        const order=[...routes.slice(offset),...routes.slice(0,offset)];
+        for(const route of order) {
+          const [kernel,cadence]=route.split("_");
+          const graph=graphs[kernel==="scalar"?0:1], forwards=cadence==="burst"?8:1;
+          if(cadence==="burst") { graph.upload(input); graph.dispatch(); await read(graph); }
+          const before=graph.submittedDispatches, start=performance.now();
+          if(cadence==="h2h") graph.upload(input);
+          for(let i=0;i<forwards;i++) graph.dispatch();
+          const output=await read(graph), elapsed_ms=performance.now()-start;
+          if(graph.submittedDispatches-before!==BigInt(forwards)) throw Error("dispatch count changed");
+          const max_abs_error=check(output,c.reference);
+          if(!Number.isFinite(elapsed_ms)||elapsed_ms<=0) throw Error("invalid timing");
+          last_outputs[route]=Array.from(output);
+          if(block>=3) samples.push({block:block-3,route,order,forwards,elapsed_ms,max_abs_error});
+        }
+      }
+      report.cases.push({shape:c.shape,seed:c.seed,depth:c.depth,samples,last_outputs});
+      target.textContent=JSON.stringify(report);
+    } finally {
+      for(const graph of graphs) graph.free();
+      plan.free();
+    }
+  }
+  report.status="passed";
+} catch(error) { report.error=String(error.stack||error); }
+target.textContent=JSON.stringify(report);
+target.dataset.status=report.status;
+</script>

@@ -15,6 +15,21 @@ pub struct PointwiseStep {
     pub rhs: Option<usize>,
 }
 
+impl PointwiseStep {
+    /// Shared client vocabulary; operand validity remains owned by the chain.
+    pub fn named(name: &str, rhs: Option<usize>) -> Result<Self, PointwiseError> {
+        let op = match name {
+            "identity" => ElementwiseOp::Identity,
+            "add" => ElementwiseOp::Add,
+            "multiply" => ElementwiseOp::Multiply,
+            "relu" => ElementwiseOp::Relu,
+            "gelu" => ElementwiseOp::Gelu,
+            _ => return Err(PointwiseError::Operation),
+        };
+        Ok(Self { op, rhs })
+    }
+}
+
 /// Execution policy, never permission to transfer devices or fall back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PointwiseExecution {
@@ -23,8 +38,24 @@ pub enum PointwiseExecution {
     Fused,
 }
 
+impl std::str::FromStr for PointwiseExecution {
+    type Err = PointwiseError;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "sequential" => Ok(Self::Sequential),
+            "batched" => Ok(Self::Batched),
+            "fused" => Ok(Self::Fused),
+            _ => Err(PointwiseError::Execution),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum PointwiseError {
+    #[error("pointwise operation must be identity, add, multiply, relu or gelu")]
+    Operation,
+    #[error("pointwise execution must be sequential, batched or fused")]
+    Execution,
     #[error("pointwise forward, cotangent, derivative or gradient is non-finite")]
     NonFinite,
     #[error("pointwise chains require 1..=16 inputs and 1..=256 steps")]
@@ -37,7 +68,7 @@ pub enum PointwiseError {
     Layout(#[from] NdLayoutError),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PointwiseChain {
     input_count: usize,
     steps: Vec<PointwiseStep>,
@@ -231,6 +262,30 @@ impl BroadcastAdjoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn client_names_and_execution_policies_are_closed() {
+        for (name, op) in [
+            ("identity", ElementwiseOp::Identity),
+            ("add", ElementwiseOp::Add),
+            ("multiply", ElementwiseOp::Multiply),
+            ("relu", ElementwiseOp::Relu),
+            ("gelu", ElementwiseOp::Gelu),
+        ] {
+            assert_eq!(PointwiseStep::named(name, None).unwrap().op, op);
+        }
+        for name in ["", "mul", "RELU", "relu "] {
+            assert!(PointwiseStep::named(name, None).is_err());
+        }
+        for (name, policy) in [
+            ("sequential", PointwiseExecution::Sequential),
+            ("batched", PointwiseExecution::Batched),
+            ("fused", PointwiseExecution::Fused),
+        ] {
+            assert_eq!(name.parse::<PointwiseExecution>().unwrap(), policy);
+        }
+        assert!("auto".parse::<PointwiseExecution>().is_err());
+        assert!(PointwiseChain::new(1, vec![PointwiseStep::named("add", None).unwrap()]).is_err());
+    }
     #[test]
     fn bounds_operands_and_fixed_domain_are_explicit() {
         let add = PointwiseStep {

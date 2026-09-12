@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Public resident N-D graph clients</title>
+<pre id="result" data-status="running">Loading production bindings</pre>
+<script type="module">
+import init, * as st from "./module/spiraltorch_wasm.js";
+const result=document.querySelector("#result");
+const report={schema:"spiraltorch.resident_graph_forward_client.v1",client:"wasm",status:"error",cases:[]};
+let assertions=0;
+function check(ok,message) { assertions++; if(!ok) throw Error(message); }
+function rejects(call) { let failed=false;try {call();}catch{failed=true;}check(failed,"invalid call accepted"); }
+function same(a,b) { check(JSON.stringify([...a])===JSON.stringify([...b]),"metadata mismatch"); }
+function close(a,b) { check(a.length===b.length && [...a].every((v,i)=>Number.isFinite(v)&&Number.isFinite(b[i])&&Math.abs(v-b[i])<=2e-5+2e-4*Math.abs(b[i])),"numeric mismatch"); }
+async function capture(c) {
+  const owned=new Set(), keep=v=>(owned.add(v),v), free=v=>{owned.delete(v);v.free();};
+  const take=s=>{const pending=s.readValues();rejects(()=>s.readValues());free(s);return pending;};
+  const f32=v=>new Float32Array(v);
+  try {
+    const plan=keep(st.InferencePlan.fromJson(JSON.stringify(c.plan)));
+    const creating=st.WgpuTensorDevice.create();
+    const compiling=plan.compileGraphWebGpu(undefined,c.kernel,c.accumulation);
+    free(plan);
+    const [d,g]=await Promise.all([creating,compiling]);keep(d);keep(g);
+    report.adapter=g.adapterInfo();
+    check(report.adapter.device_type!=="Cpu","CPU adapter is not GPU evidence");
+    same(g.inputShape,c.shape);check(g.stageCount===5 && g.parameterCount===6,"topology");
+    const shape=c.shape, x=c.input;
+    g.upload(f32(x));check(g.dispatch()===1n,"dispatch counter");
+    const host=keep(g.snapshot());
+    check(host.generation===1n && host.submittedDispatch===1n,"snapshot counters");
+    rejects(()=>g.upload(f32([])));
+    rejects(()=>g.setInputTensor(keep(d.upload([x.length,1],f32(x)))));
+    check(g.generation===1n,"failed input changed generation");
+    const padded=[];for(let i=0;i<x.length;i+=4)padded.push(91,...x.slice(i,i+4),91);
+    const source=keep(d.upload([...shape.slice(0,-1),6],f32(padded)));
+    const view=keep(source.narrow(shape.length-1,1,4));
+    check(view.sharesStorageWith(source),"view lost storage");
+    g.setInputTensor(view);check(g.dispatch()===2n,"view dispatch");
+    const strided=keep(g.snapshot());
+    const pre=keep(keep(view.mul(keep(d.upload([4],f32(c.pre_gains))))).relu());
+    g.setInputTensor(pre);
+    for(let i=3n;i<=18n;i++)check(g.dispatch()===i,"repeated dispatch");
+    const prediction=keep(g.snapshot());
+    check(prediction.generation===3n && prediction.submittedDispatch===18n,"late snapshot counters");
+    const frozen=keep(g.outputTensor()), graphDevice=keep(g.tensorDevice());
+    const post=keep(keep(frozen.add(keep(graphDevice.upload([3],f32(c.post_shift))))).gelu());
+    const nextPlan=keep(st.InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",
+      input_shape:[...g.outputShape],parameters:[],stages:[{kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]})));
+    const pendingNext=nextPlan.compileGraphWebGpu();free(nextPlan);
+    const next=keep(await pendingNext);
+    next.setInputTensor(post);next.dispatch();
+    const chained=keep(next.outputTensor());
+    next.upload(new Float32Array(chained.numel));next.dispatch();
+    g.upload(new Float32Array(x.length));g.dispatch();
+    free(next);free(g);free(source);free(view);free(pre);free(d);free(graphDevice);
+    // Freeze/read GPU outputs after workspace reuse/drop, not just old staging snapshots.
+    const reads={host:take(host),strided:take(strided),prediction:take(prediction),
+      frozen:take(keep(frozen.snapshot())),post:take(keep(post.snapshot())),chained:take(keep(chained.snapshot()))};
+    const values={};for(const [name,promise] of Object.entries(reads)){values[name]=[...await promise];close(values[name],c[name]);}
+    return {...Object.fromEntries(["seed","shape","kernel","accumulation","plan","input","pre_gains","post_shift","dispatches_before_capture"].map(k=>[k,c[k]])),...values};
+  } finally { for(const v of owned) v.free(); }
+}
+async function apiChecks() {
+  const owned=[], keep=v=>(owned.push(v),v), f32=v=>new Float32Array(v);
+  try {
+    const device=keep(await st.WgpuTensorDevice.create());
+    const x=keep(device.upload([2,3],f32([1,2,3,4,5,6])));
+    for(const invalid of [-1,1.5,true,"1",NaN,Infinity,4294967296]) {
+      rejects(()=>device.upload([invalid],f32([])));
+      rejects(()=>x.narrow(invalid,0,1));rejects(()=>x.narrow(0,invalid,1));rejects(()=>x.narrow(0,0,invalid));
+      rejects(()=>x.reshape([invalid]));rejects(()=>x.permute([invalid,0]));
+    }
+    for(const bad of [[],new Float64Array([1]),{},null])rejects(()=>device.upload([1],bad));
+    rejects(()=>device.upload(true,f32([])));rejects(()=>x.permute([0,0]));
+    const view=keep(keep(x.permute([1,0])).narrow(0,1,2));
+    same(view.shape,[2,2]);same(view.strides,[1,3]);check(view.offset===1 && !view.isContiguous,"view layout");
+    const packed=keep(view.contiguous());check(!packed.sharesStorageWith(view),"packing aliases");
+    close(await keep(packed.snapshot()).readValues(),[2,5,3,6]);
+    const broadcast=keep(keep(device.upload([3,1],f32([-1,2,3]))).broadcastTo([2,3,1]));
+    same(broadcast.shape,[2,3,1]);
+    close(await keep(keep(broadcast.permute([1,0,2])).snapshot()).readValues(),[-1,-1,2,2,3,3]);
+    close(await keep(keep(keep(device.upload([0,3],f32([]))).gelu()).snapshot()).readValues(),[]);
+    const scalar=keep(device.upload([],f32([2])));same(scalar.shape,[]);check(scalar.numel===1,"scalar");
+    const bad=keep(keep(keep(device.upload([1],f32([-3.4028234663852886e38]))).mul(scalar)).relu());
+    const reluPlan=keep(st.InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[1],parameters:[],
+      stages:[{kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]})));
+    const graph=keep(await reluPlan.compileGraphWebGpu());graph.setInputTensor(bad);
+    for(let i=0;i<2;i++) {
+      graph.dispatch();const snapshot=keep(graph.snapshot());
+      let failed=false;try{await snapshot.readValues();}catch(e){failed=/non-finite/.test(String(e));}
+      check(failed,"inherited failure masked");rejects(()=>snapshot.readValues());
+    }
+    graph.upload(f32([2]));graph.dispatch();close(await keep(graph.snapshot()).readValues(),[2]);
+    const trainingPlan=keep(st.InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2,1],
+      parameters:[{role:"gain",shape:[1],values:[2]}],stages:[{kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1}]}]})));
+    const training=keep(await trainingPlan.compileGraphTrainingWebGpu("exact"));
+    const tx=keep(device.upload([2,1],f32([1,2]))),ty=keep(device.upload([2,1],f32([0,0])));
+    training.uploadBatchTensors(tx,ty);training.step(.1);
+    const predicted=keep(training.predictionTensor()),gradient=keep(training.inputGradientTensor());
+    training.uploadBatchTensors(ty,ty);training.step(0);
+    close(await keep(predicted.snapshot()).readValues(),[2,4]);close(await keep(gradient.snapshot()).readValues(),[4,8]);
+    const densePlan=keep(st.InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v1",input_shape:[2,1],
+      stages:[{inner:1,cols:1,weight:[.5],bias:[.25],gelu:false}]})));
+    const dense=keep(await densePlan.compileWebGpu());dense.setInputTensor(predicted);dense.dispatch();
+    close(await keep(keep(dense.tensorSnapshot(device)).snapshot()).readValues(),[1.25,2.25]);
+  } finally { for(const v of owned.reverse()) v.free(); }
+}
+try {
+  await init();
+  const response=await fetch("/fixture.json");check(response.ok,"fixture missing");
+  const raw=await response.arrayBuffer(), fixture=JSON.parse(new TextDecoder().decode(raw));
+  report.source_fixture_sha256=[...new Uint8Array(await crypto.subtle.digest("SHA-256",raw))].map(x=>x.toString(16).padStart(2,"0")).join("");
+  check(fixture.schema==="spiraltorch.resident_graph_forward.v1" && fixture.status==="passed" && fixture.cases.length===12,"fixture incomplete");
+  if(!navigator.gpu)throw Error("WebGPU required; no CPU fallback");
+  for(const c of fixture.cases)report.cases.push(await capture(c));
+  await apiChecks();
+  report.guards={owned_output:true,late_readback:true,atomic_input:true,single_consumption:true,shared_runtime:true};
+  report.status="passed";
+} catch(e) { report.error=String(e.stack||e); }
+report.assertions=assertions;
+result.textContent=JSON.stringify(report);result.dataset.status=report.status;
+</script>

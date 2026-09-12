@@ -1,6 +1,6 @@
 fn check(x: f32) {
     if ((bitcast<u32>(x) & 0x7f800000u) == 0x7f800000u) {
-        atomicOr(&flags[0], INVALID_TENSOR_FLAG);
+        atomicOr(&flags[CHECKED_FLAG_INDEX], INVALID_TENSOR_FLAG);
     }
 }
 

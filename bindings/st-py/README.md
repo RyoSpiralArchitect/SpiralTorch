@@ -115,6 +115,11 @@ CPU-only wheels support plan transport but reject GPU compilation rather
 than silently falling back. See the [resident NN guide](../../docs/resident_nn_inference.md)
 for browser use, validation, and the retained PyTorch comparison boundaries.
 
+The [original model can now accept `WgpuTensor` directly](../../docs/module_resident_forward.md):
+`y = model(x_gpu)` caches the same Rust graph, follows parameter updates, and
+returns an owning GPU tensor. Host `Tensor` inputs keep the existing behavior.
+No automatic CPU fallback or per-layer host readback is introduced.
+
 ## Rust-owned protocol catalog
 
 The admission-certified catalog is generated and replayed by `st-core`; Python
@@ -251,7 +256,10 @@ print(loss.item(), logits.grad().tolist())
 error. `row_log_softmax()` and the Tensor forward/VJP methods share the same
 stable CPU kernels. `st.nn.CrossEntropyWithLogits` plugs into `ModuleTrainer`
 using `(samples, 1)` integral target Tensors; strict WGPU execution is rejected
-for this CPU-only loss. Existing `SoftmaxCrossEntropy` remains the probability
+for this host Tensor route. For GPU-resident class-last logits, the same loss
+now exposes [`evaluate_resident(logits, labels)`](../../docs/module_resident_classification.md)
+with owning loss/gradient outputs that seed a resident graph learner.
+Existing `SoftmaxCrossEntropy` remains the probability
 loss and is **not** renamed. See the [classification contract](../../docs/autograd_contract.md#classification-from-logits)
 and [runnable multiclass fixture](../../examples/autograd_classification.py).
 

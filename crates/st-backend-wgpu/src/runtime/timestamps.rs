@@ -193,6 +193,39 @@ pub(crate) struct PassTimestampRecorder {
     context: WgpuContext,
 }
 
+/// A disabled cursor allocates nothing and leaves the ordinary pass schedule intact.
+#[derive(Default)]
+pub(crate) struct PassTimestampCursor<'a> {
+    recorder: Option<&'a PassTimestampRecorder>,
+    next: u32,
+}
+
+impl<'a> PassTimestampCursor<'a> {
+    pub(crate) fn new(recorder: &'a PassTimestampRecorder) -> Self {
+        Self {
+            recorder: Some(recorder),
+            next: 0,
+        }
+    }
+
+    pub(crate) fn next(&mut self) -> Option<wgpu::ComputePassTimestampWrites<'a>> {
+        let recorder = self.recorder?;
+        let index = self.next;
+        self.next += 1;
+        Some(recorder.writes(index))
+    }
+
+    pub(crate) fn finish(self) {
+        if let Some(recorder) = self.recorder {
+            assert_eq!(
+                self.next,
+                recorder.count / 2,
+                "profile schedule differs from encoding"
+            );
+        }
+    }
+}
+
 impl PassTimestampRecorder {
     pub(crate) fn new(context: WgpuContext, passes: u32) -> Result<Self, WgpuRuntimeError> {
         let count = query_count(passes)?;

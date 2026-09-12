@@ -28,8 +28,19 @@ pub(super) fn capture(
     pool: &runtime::ReadbackPool,
     buffers: &[&wgpu::Buffer],
 ) -> Result<RawSnapshot, TrainingError> {
-    let lease = pool.checkout("training.snapshot");
     let mut encoder = context.device().create_command_encoder(&Default::default());
+    let snapshot = capture_into(context, pool, buffers, &mut encoder)?;
+    context.queue().submit(Some(encoder.finish()));
+    Ok(snapshot)
+}
+
+pub(super) fn capture_into(
+    context: &WgpuContext,
+    pool: &runtime::ReadbackPool,
+    buffers: &[&wgpu::Buffer],
+    encoder: &mut wgpu::CommandEncoder,
+) -> Result<RawSnapshot, TrainingError> {
+    let lease = pool.checkout("training.snapshot");
     let mut offset = 0u64;
     for buffer in buffers {
         let next = offset
@@ -44,7 +55,6 @@ pub(super) fn capture(
     if offset != lease.buffer().size() {
         return Err(TrainingError::InvalidReadback);
     }
-    context.queue().submit(Some(encoder.finish()));
     Ok(RawSnapshot {
         lease,
         context: context.clone(),
@@ -65,8 +75,18 @@ pub(super) fn capture_new(
 }
 
 pub(super) fn loss_and_flags(bytes: &[u8], stages: usize) -> Result<(f32, usize), TrainingError> {
+    let flags = bytes.get(4..).ok_or(TrainingError::InvalidReadback)?;
+    let prefix = validation_flags(flags, stages)? + 4;
+    let loss = f32::from_le_bytes(bytes[..4].try_into().unwrap());
+    if !loss.is_finite() || loss < 0. {
+        return Err(TrainingError::InvalidReadback);
+    }
+    Ok((loss, prefix))
+}
+
+pub(super) fn validation_flags(bytes: &[u8], stages: usize) -> Result<usize, TrainingError> {
     let prefix = stages
-        .checked_add(3)
+        .checked_add(2)
         .and_then(|n| n.checked_mul(4))
         .ok_or(TrainingError::InvalidReadback)?;
     if bytes.len() < prefix {
@@ -75,7 +95,7 @@ pub(super) fn loss_and_flags(bytes: &[u8], stages: usize) -> Result<(f32, usize)
     let mut all = 0;
     let mut failure = None;
     for stage in 0..=stages {
-        let start = (1 + stage) * 4;
+        let start = stage * 4;
         let flags = u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap());
         all |= flags;
         if flags != 0 && failure.is_none() {
@@ -89,11 +109,7 @@ pub(super) fn loss_and_flags(bytes: &[u8], stages: usize) -> Result<(f32, usize)
     if let Some(error) = failure {
         return Err(error);
     }
-    let loss = f32::from_le_bytes(bytes[..4].try_into().unwrap());
-    if !loss.is_finite() || loss < 0. {
-        return Err(TrainingError::InvalidReadback);
-    }
-    Ok((loss, prefix))
+    Ok(prefix)
 }
 
 pub(super) fn values(

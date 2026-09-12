@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident microbatch learning</title>
+<pre id="result" data-status="running">Microbatch learning</pre>
+<script type="module">
+import init,{CrossEntropyWithLogits,Sequential} from "./module/spiraltorch_wasm.js";
+const report={schema:"spiraltorch.resident_microbatch_clients.v1",status:"error",cases:[]};
+const owned=new Set(),keep=x=>(owned.add(x),x),free=x=>{owned.delete(x);x.free();};
+const f32=x=>new Float32Array(x),check=(ok,s)=>{if(!ok)throw Error(s);};
+const near=(a,b)=>check(a.length===b.length&&a.every((v,i)=>Number.isFinite(v)&&Math.abs(v-b[i])<=2e-5+2e-4*Math.abs(b[i])),"values differ");
+const reject=async f=>{let caught=false;try{await f();}catch{caught=true;}check(caught,"invalid accepted");};
+async function read(t){const s=t.snapshot();try{return Array.from(await s.readValues());}finally{s.free();}}
+async function checkpoint(l){const s=l.parameterSnapshot();try{return keep(await s.readPlan());}finally{s.free();}}
+const data=[[[1,-.5,1.5,-1],[0,1,0,1]],[[.5,1,-1,2],[0,0,1,-100]],[[2,0,0,0],[0,-100,-100,-100]]];
+try {
+ await init();
+ for(const [policy,scale] of [["exact",1],["module_compatible",.25]])for(const [reduction,limit,damping] of ["mean","sum"].flatMap(r=>[[null,null],[.05,null],[.05,.6]].map(([c,d])=>[r,c,d]))){
+  const model=keep(new Sequential());model.addScaler("gain",f32([0,0]));
+  const baseline=keep(model.inferencePlan([2,2,2])),learner=keep(await baseline.compileGraphLearnerWebGpu(policy));
+  check(learner.gradClipMaxNorm===undefined,"default clipping");
+  check(learner.momentumDamping===undefined,"default momentum");
+  if(damping!==null){learner.setMomentumDamping(damping);const prior=learner.momentumDamping;
+   for(const bad of [-1,.9,NaN,Infinity]){await reject(()=>learner.setMomentumDamping(bad));check(learner.momentumDamping===prior,"invalid damping changed setting");}}
+  if(limit!==null){learner.setGradClipMaxNorm(limit);const prior=learner.gradClipMaxNorm;
+   for(const bad of [0,-1,NaN,Infinity]){await reject(()=>learner.setGradClipMaxNorm(bad));check(learner.gradClipMaxNorm===prior,"invalid clip changed setting");}}
+  report.adapter=learner.adapterInfo();check(report.adapter.backend==="BrowserWebGpu"&&report.adapter.device_type!=="Cpu","WebGPU required");
+  const device=keep(learner.tensorDevice()),objective=keep(new CrossEntropyWithLogits(reduction,-100n,.1));
+  const batches=data.map(([x,y])=>[keep(device.upload([2,2,2],f32(x.flatMap(v=>[v,v])))),keep(device.upload([2,2],f32(y)))]);
+  const accumulator=keep(learner.gradientAccumulator()),held=[],gain=[0,0],heldHistory=[];let old,history=[0,0];
+  await reject(()=>accumulator.parameterGradientTensors());await reject(()=>learner.sgdAccumulated(accumulator,0));
+  for(let step=0;step<32;step++){
+   learner.zeroAccumulator(accumulator);check(accumulator.parameterGeneration===BigInt(step),"parameter generation");
+   const expected=[0,0];
+   for(let j=0;j<data.length;j++){
+    const [xs,ys]=data[j],[x,y]=batches[j];learner.setInputTensor(x);
+    const f=learner.forward(),p=f.predictionTensor(),pair=objective.evaluateResident(p,y),seed=pair.predictionGradientTensor(),g=keep(learner.backward(f,seed));
+    learner.accumulate(accumulator,g,reduction==="mean"?ys.filter(y=>y!==-100).length/8:1/8);
+    for(let r=0;r<4;r++){if(ys[r]===-100)continue;const probability=1/(1+Math.exp(-xs[r]*(gain[0]-gain[1]))),target=ys[r]===0?.95:.05;
+     expected[0]+=xs[r]*(probability-target)/8;expected[1]+=xs[r]*((1-probability)-(1-target))/8;
+    }
+    for(const h of [f,p,pair,seed])h.free();if(old)free(old);old=g;
+   }
+   check(accumulator.length===3n,"contribution count");const snapshot=keep(accumulator.parameterGradientTensors()[0]);
+   learner.sgdAccumulated(accumulator,.1);held.push([snapshot,expected,keep(learner.updateSnapshot())]);
+   let coefficient=scale;const norm=Math.hypot(...expected.map(g=>scale*g));
+   if(limit!==null&&norm>Math.max(limit,2**-23))coefficient*=limit/norm;
+   let effective=expected.map(g=>coefficient*g);
+   if(damping!==null){history=effective.map((g,k)=>damping*history[k]+(1-damping)*g);effective=history;
+    heldHistory.push([keep(learner.momentumTensors()[0]),history.slice()]);}
+   for(let k=0;k<2;k++)gain[k]-=.1*effective[k];
+  }
+  const before=await checkpoint(learner);check(baseline.applyParametersTo(model,before)===1,"handoff");
+  const output=keep(model.forward(batches[0][0]));near(await read(output),data[0][0].flatMap(x=>gain.map(g=>x*g)));
+  await reject(()=>learner.sgdAccumulated(accumulator,0));learner.zeroAccumulator(accumulator);
+  await reject(()=>learner.accumulate(accumulator,old,1));free(old);
+  const foreign=keep(await baseline.compileGraphLearnerWebGpu(policy));await reject(()=>foreign.zeroAccumulator(accumulator));
+  learner.setInputTensor(batches[0][0]);const f=learner.forward(),p=f.predictionTensor(),invalid=device.upload([2,2],f32([0,.5,0,1]));
+  const bad=objective.evaluateResident(p,invalid),seed=bad.predictionGradientTensor(),g=learner.backward(f,seed);
+  learner.accumulate(accumulator,g,0);const pair=objective.evaluateResident(p,batches[0][1]),goodSeed=pair.predictionGradientTensor(),good=learner.backward(f,goodSeed);
+  await reject(()=>learner.accumulate(accumulator,good,NaN));check(accumulator.length===1n,"failed add mutated window");
+  learner.accumulate(accumulator,good,1);const rejectedTensor=keep(accumulator.parameterGradientTensors()[0]);learner.sgdAccumulated(accumulator,0);
+  const rejected=keep(learner.updateSnapshot());await reject(()=>rejected.read());check((await checkpoint(learner)).toJson()===before.toJson(),"bad update committed");
+  if(damping!==null){const state=keep(learner.momentumTensors()[0]);near(await read(state),history);}
+  for(const h of [f,p,invalid,bad,seed,g,pair,goodSeed,good])h.free();
+  learner.zeroAccumulator(accumulator);const fresh=learner.forward(),prediction=fresh.predictionTensor(),loss=objective.evaluateResident(prediction,batches[0][1]),cotangent=loss.predictionGradientTensor(),gradient=learner.backward(fresh,cotangent);
+  learner.accumulate(accumulator,gradient,1);learner.sgdAccumulated(accumulator,0);
+  const recovery=keep(learner.updateSnapshot());check(await recovery.read()===34n,"recovery count");check((await checkpoint(learner)).toJson()===before.toJson(),"recovery changed weights");
+  if(damping!==null){near(await read(keep(learner.momentumTensors()[0])),history);
+   learner.clearMomentum();check(learner.momentumDamping===undefined,"clear momentum");await reject(()=>learner.momentumTensors());
+   learner.setMomentumDamping(damping);learner.resetMomentum();near(await read(keep(learner.momentumTensors()[0])),[0,0]);}
+  for(const h of [fresh,prediction,loss,cotangent,gradient])h.free();
+  learner.clearGradClip();check(learner.gradClipMaxNorm===undefined,"clear clipping");
+  for(const h of [learner,accumulator,model,device,foreign])free(h);
+  for(let i=0;i<held.length;i++){const [t,expected,receipt]=held[i];near(await read(t),expected);check(await receipt.read()===BigInt(i+1),"retained receipt");}
+  for(const [t,expected] of heldHistory)near(await read(t),expected);
+  await reject(()=>read(rejectedTensor));report.cases.push({policy,reduction,grad_clip_max_norm:limit,momentum_damping:damping,updates:32,microbatches:96,rejected_update:33,recovered_update:34,reference_gain:gain,reference_momentum:damping===null?null:history});
+ }
+ report.status="passed";
+}catch(error){report.error=String(error.stack||error);}
+finally{for(const h of owned)h.free();owned.clear();}
+const element=document.querySelector("#result");element.textContent=JSON.stringify(report);element.dataset.status=report.status;
+</script>

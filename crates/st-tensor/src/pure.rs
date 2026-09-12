@@ -98,7 +98,8 @@ use std::f32::consts::PI;
 use std::ffi::c_void;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 /// Result alias used throughout the pure module.
 pub type PureResult<T> = Result<T, TensorError>;
@@ -917,21 +918,39 @@ enum TensorBacking {
     Foreign(ForeignTensor),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct TensorBuffer {
     backing: TensorBacking,
+    mutable_exported: AtomicBool,
+}
+
+impl Clone for TensorBuffer {
+    fn clone(&self) -> Self {
+        // An outer COW clone must not create separately tracked writable
+        // buffers sharing the same values. Tensor::clone still only clones Arc.
+        match &self.backing {
+            TensorBacking::Owned(values) => Self::from_aligned(aligned_from_slice(values)),
+            TensorBacking::Snapshot(values) => Self {
+                backing: TensorBacking::Snapshot(Arc::clone(values)),
+                mutable_exported: AtomicBool::new(false),
+            },
+            TensorBacking::Foreign(foreign) => Self::from_foreign(foreign.clone()),
+        }
+    }
 }
 
 impl TensorBuffer {
     fn from_aligned(data: AlignedVec) -> Self {
         Self {
             backing: TensorBacking::Owned(Arc::new(data)),
+            mutable_exported: AtomicBool::new(false),
         }
     }
 
     fn from_foreign(foreign: ForeignTensor) -> Self {
         Self {
             backing: TensorBacking::Foreign(foreign),
+            mutable_exported: AtomicBool::new(false),
         }
     }
 
@@ -949,9 +968,14 @@ impl TensorBuffer {
         if let TensorBacking::Foreign(foreign) = &self.backing {
             let owned = aligned_from_slice(foreign.as_slice());
             self.backing = TensorBacking::Owned(Arc::new(owned));
+            *self.mutable_exported.get_mut() = false;
         }
 
         if let TensorBacking::Owned(vec) = &mut self.backing {
+            if Arc::strong_count(vec) > 1 {
+                // Detach from packs, snapshots and live external producers.
+                *self.mutable_exported.get_mut() = false;
+            }
             Arc::make_mut(vec).as_mut_slice()
         } else {
             unreachable!()
@@ -978,6 +1002,45 @@ impl TensorBuffer {
             TensorBacking::Owned(vec) | TensorBacking::Snapshot(vec) => Some(Arc::clone(vec)),
             TensorBacking::Foreign(_) => None,
         }
+    }
+
+    fn content_is_tracked(&self) -> bool {
+        !matches!(self.backing, TensorBacking::Foreign(_))
+            && !self.mutable_exported.load(Ordering::Acquire)
+    }
+}
+
+/// Opaque, process-local evidence that a tensor has not changed.
+///
+/// This is not a hash or a serialized revision. It neither retains the values
+/// nor forces a value-sized COW copy. Rust mutation dissociates its weak owner;
+/// a later shared writable DLPack export revokes it. A non-match only means the
+/// caller must revalidate. Foreign storage is never tracked, even if read-only.
+/// External producer writes must be synchronized between Rust operations, as
+/// required by the DLPack import/export contract.
+#[derive(Clone)]
+pub struct TensorContentStamp {
+    storage: Weak<TensorBuffer>,
+    shape: (usize, usize),
+    layout: Layout,
+}
+
+impl TensorContentStamp {
+    /// Whether the same protected storage, shape and layout are still current.
+    pub fn matches(&self, tensor: &Tensor) -> bool {
+        self.shape == tensor.shape()
+            && self.layout == tensor.layout()
+            && self.storage.as_ptr() == Arc::as_ptr(&tensor.data)
+            && tensor.data.content_is_tracked()
+    }
+}
+
+impl fmt::Debug for TensorContentStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TensorContentStamp")
+            .field("shape", &self.shape)
+            .field("layout", &self.layout)
+            .finish_non_exhaustive()
     }
 }
 
@@ -1747,6 +1810,16 @@ impl Tensor {
         Arc::make_mut(&mut self.data).make_mut_slice()
     }
 
+    /// Capture a cheap change detector, or `None` for externally mutable data.
+    /// Inspect it with [`TensorContentStamp::matches`] before reusing any result.
+    pub fn content_stamp(&self) -> Option<TensorContentStamp> {
+        self.data.content_is_tracked().then(|| TensorContentStamp {
+            storage: Arc::downgrade(&self.data),
+            shape: self.shape(),
+            layout: self.layout(),
+        })
+    }
+
     /// Captures an isolated value that exports read-only storage through DLPack.
     ///
     /// Mutable or foreign storage is copied. Existing snapshots can be shared;
@@ -1773,6 +1846,7 @@ impl Tensor {
         };
         self.data = Arc::new(TensorBuffer {
             backing: TensorBacking::Snapshot(values),
+            mutable_exported: AtomicBool::new(false),
         });
         self
     }
@@ -1822,7 +1896,14 @@ impl Tensor {
     /// pass it directly to [`Self::from_managed_dlpack`] without using raw pointers.
     pub fn export_dlpack(&self, options: DlpackExportOptions) -> PureResult<ManagedTensor> {
         self.layout.expect_row_major("dlpack export")?;
-        dlpack::export_tensor(self.data.export_handle(), self.rows, self.cols, options)
+        let managed =
+            dlpack::export_tensor(self.data.export_handle(), self.rows, self.cols, options)?;
+        if options.copy != DlpackCopyPolicy::Always
+            && matches!(self.data.backing, TensorBacking::Owned(_))
+        {
+            self.data.mutable_exported.store(true, Ordering::Release);
+        }
+        Ok(managed)
     }
 
     /// Return a zero-copy view of the tensor with new row/column dimensions.
@@ -6487,7 +6568,7 @@ impl Tensor {
     /// Returns the transpose of the tensor.
     pub fn transpose(&self) -> Tensor {
         self.transpose_with_backend(TensorUtilBackend::Auto)
-            .expect("CPU transpose is infallible")
+            .expect("transpose requires a supported tensor layout")
     }
 
     /// Returns the transpose of the tensor with an explicit utility backend selection.
@@ -6502,7 +6583,14 @@ impl Tensor {
                 && self.cols > 0
                 && wgpu_dense::is_available()
             {
-                match wgpu_dense::transpose(self.data(), self.rows, self.cols) {
+                let row_major;
+                let input = if self.layout == Layout::RowMajor {
+                    self
+                } else {
+                    row_major = self.to_layout(Layout::RowMajor)?;
+                    &row_major
+                };
+                match wgpu_dense::transpose(input.data(), self.rows, self.cols) {
                     Ok(buffer) => {
                         let output = Tensor::from_vec(self.cols, self.rows, buffer)?;
                         crate::emit_tensor_op(
@@ -6534,14 +6622,33 @@ impl Tensor {
             }
         }
 
-        let mut data = aligned_zeroed(self.len());
-        for r in 0..self.rows {
-            for c in 0..self.cols {
-                data[c * self.rows + r] = self.data[r * self.cols + c];
+        let data = if self.layout == Layout::ColMajor {
+            // Column-major A already stores row-major A^T. Only snapshots can
+            // share: exporting the result via DLPack must not expose the input
+            // through a writable alias that bypasses Rust copy-on-write.
+            if self.is_snapshot() {
+                self.data.clone()
+            } else {
+                Arc::new(TensorBuffer::from_aligned(aligned_from_slice(self.data())))
             }
-        }
+        } else {
+            let row_major;
+            let input = if self.layout == Layout::RowMajor {
+                self
+            } else {
+                row_major = self.to_layout(Layout::RowMajor)?;
+                &row_major
+            };
+            let mut data = aligned_zeroed(self.len());
+            for r in 0..self.rows {
+                for c in 0..self.cols {
+                    data[c * self.rows + r] = input.data[r * self.cols + c];
+                }
+            }
+            Arc::new(TensorBuffer::from_aligned(data))
+        };
         let output = Tensor {
-            data: Arc::new(TensorBuffer::from_aligned(data)),
+            data,
             rows: self.cols,
             cols: self.rows,
             layout: Layout::RowMajor,
@@ -12058,6 +12165,9 @@ fn matmul_lhs_transpose_scaled_wgpu(
 }
 
 #[cfg(test)]
+mod content_stamp_tests;
+
+#[cfg(test)]
 mod tests {
     #![allow(clippy::needless_range_loop, clippy::useless_vec)]
 
@@ -16440,6 +16550,107 @@ mod tests {
         let standard = unwrap_ok(lhs.matmul(&rhs_t));
         let prepacked = unwrap_ok(lhs.matmul_prepacked(&packed_t));
         assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn column_major_transpose_and_packed_transpose_preserve_logical_values() {
+        let row = unwrap_ok(Tensor::from_vec(2, 3, vec![1., 2., 3., 4., 5., 6.]));
+        let column = unwrap_ok(row.to_layout(Layout::ColMajor));
+        let mut transposed = unwrap_ok(column.transpose_with_backend(TensorUtilBackend::Cpu));
+        assert_eq!(transposed.shape(), (3, 2));
+        assert_eq!(transposed.layout(), Layout::RowMajor);
+        assert_eq!(transposed.data(), &[1., 4., 2., 5., 3., 6.]);
+        assert_eq!(transposed, row.transpose());
+        let packed = unwrap_ok(PackedB::from_tensor_transpose(&column, Tile::col_major()));
+        let x = unwrap_ok(Tensor::from_vec(2, 3, vec![1., 0., 2., 3., 1., 4.]));
+        assert_eq!(
+            unwrap_ok(x.matmul_prepacked(&packed)),
+            unwrap_ok(x.matmul(&row.transpose()))
+        );
+        transposed.data_mut()[0] = 99.;
+        assert_eq!(column.data(), &[1., 4., 2., 5., 3., 6.]);
+        assert_eq!(row.data(), &[1., 2., 3., 4., 5., 6.]);
+        assert_eq!(
+            unwrap_ok(Tensor::zeros(0, 3))
+                .to_layout(Layout::ColMajor)
+                .unwrap()
+                .transpose()
+                .shape(),
+            (3, 0)
+        );
+    }
+
+    #[test]
+    fn column_major_transpose_does_not_export_a_writable_alias_to_its_source() {
+        let column = Tensor::from_vec(2, 3, vec![1., 2., 3., 4., 5., 6.])
+            .unwrap()
+            .to_layout(Layout::ColMajor)
+            .unwrap();
+        let frozen = column.snapshot();
+        let native_result = column.transpose();
+        let snapshot_result = frozen.transpose();
+        assert_eq!(frozen.data().as_ptr(), snapshot_result.data().as_ptr());
+        for result in [&native_result, &snapshot_result] {
+            // DLPack remains row-major-only: export the transpose, not its input.
+            let export = result.to_dlpack().unwrap();
+            let producer = unsafe { (*export).dl_tensor.data.cast::<f32>() };
+            let foreign = unsafe { Tensor::from_dlpack(export).unwrap() };
+            let foreign_transpose = foreign.transpose();
+            // Simulate a producer write while the imported owner is alive.
+            unsafe {
+                *producer = 99.;
+            }
+            assert_eq!(foreign.data()[0], 99.);
+            assert_eq!(foreign_transpose.shape(), (2, 3));
+            assert_eq!(foreign_transpose.data(), &[1., 2., 3., 4., 5., 6.]);
+            assert_eq!(column.data(), &[1., 4., 2., 5., 3., 6.]);
+            assert_eq!(frozen.data(), &[1., 4., 2., 5., 3., 6.]);
+        }
+        assert_eq!(snapshot_result.data(), &[1., 4., 2., 5., 3., 6.]);
+    }
+
+    #[test]
+    #[cfg(all(feature = "wgpu_dense", not(target_arch = "wasm32")))]
+    fn column_major_transpose_uses_wgpu_without_changing_logical_values() {
+        if !run_wgpu_runtime_tests() {
+            return;
+        }
+        let (runtime, _) = st_backend_wgpu::runtime::ensure_default_runtime_blocking(
+            "tensor.column_major_transpose.test",
+        )
+        .unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        assert!(wgpu_dense::is_available());
+        let _lock = observer_lock();
+        for (rows, cols) in [(2, 3), (17, 35)] {
+            let row = Tensor::from_vec(
+                rows,
+                cols,
+                (0..rows * cols).map(|i| (i as f32 - 17.) / 8.).collect(),
+            )
+            .unwrap();
+            let expected = row.transpose_with_backend(TensorUtilBackend::Cpu).unwrap();
+            for layout in [Layout::RowMajor, Layout::ColMajor] {
+                let input = row.to_layout(layout).unwrap();
+                let events = Arc::new(Mutex::new(Vec::new()));
+                let captured = events.clone();
+                let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+                    captured
+                        .lock()
+                        .unwrap()
+                        .push((event.op_name, event.data.clone()));
+                })));
+                let result = input.transpose_with_backend(TensorUtilBackend::GpuWgpu);
+                crate::set_thread_meta_observer(previous);
+                assert_eq!(result.unwrap(), expected);
+                let events = events.lock().unwrap();
+                let (_, data) = events.iter().find(|(op, _)| *op == "transpose").unwrap();
+                assert_eq!(data["backend"], "wgpu_dense");
+                assert_eq!(data["requested_backend"], "wgpu");
+                assert_eq!(data["kernel"], "tensor_util.transpose");
+                assert!(data.get("fallback").is_none());
+            }
+        }
     }
 
     #[test]
