@@ -32,6 +32,15 @@ class ResidentExports(unittest.TestCase):
                 self.assertIn(name, namespace)
                 self.assertIs(namespace[name], getattr(st._rs.nn, name))
 
+    def test_existing_native_names_and_python_helpers_remain_discoverable(self):
+        namespace = {}
+        exec("from spiraltorch.nn import *", namespace)
+        for name in ("Linear", "Sequential", "Gelu", "Relu", "InferencePlan"):
+            with self.subTest(name=name):
+                self.assertIs(namespace[name], getattr(st._rs.nn, name))
+        for name in ("eval_mode", "save", "load"):
+            self.assertIs(namespace[name], getattr(st.nn, name))
+
 
 if __name__ == "__main__":
     unittest.main()
