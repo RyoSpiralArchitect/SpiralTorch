@@ -15,9 +15,12 @@ async function checkpoint(l){const s=l.parameterSnapshot();try{return keep(await
 const data=[[[1,-.5,1.5,-1],[0,1,0,1]],[[.5,1,-1,2],[0,0,1,-100]],[[2,0,0,0],[0,-100,-100,-100]]];
 try {
  await init();
- for(const [policy,scale] of [["exact",1],["module_compatible",.25]])for(const reduction of ["mean","sum"]){
+ for(const [policy,scale] of [["exact",1],["module_compatible",.25]])for(const [reduction,limit] of ["mean","sum"].flatMap(r=>[null,.05].map(c=>[r,c]))){
   const model=keep(new Sequential());model.addScaler("gain",f32([0,0]));
   const baseline=keep(model.inferencePlan([2,2,2])),learner=keep(await baseline.compileGraphLearnerWebGpu(policy));
+  check(learner.gradClipMaxNorm===undefined,"default clipping");
+  if(limit!==null){learner.setGradClipMaxNorm(limit);const prior=learner.gradClipMaxNorm;
+   for(const bad of [0,-1,NaN,Infinity]){await reject(()=>learner.setGradClipMaxNorm(bad));check(learner.gradClipMaxNorm===prior,"invalid clip changed setting");}}
   report.adapter=learner.adapterInfo();check(report.adapter.backend==="BrowserWebGpu"&&report.adapter.device_type!=="Cpu","WebGPU required");
   const device=keep(learner.tensorDevice()),objective=keep(new CrossEntropyWithLogits(reduction,-100n,.1));
   const batches=data.map(([x,y])=>[keep(device.upload([2,2,2],f32(x.flatMap(v=>[v,v])))),keep(device.upload([2,2],f32(y)))]);
@@ -37,7 +40,9 @@ try {
    }
    check(accumulator.length===3n,"contribution count");const snapshot=keep(accumulator.parameterGradientTensors()[0]);
    learner.sgdAccumulated(accumulator,.1);held.push([snapshot,expected,keep(learner.updateSnapshot())]);
-   for(let k=0;k<2;k++)gain[k]-=.1*scale*expected[k];
+   let coefficient=scale;const norm=Math.hypot(...expected.map(g=>scale*g));
+   if(limit!==null&&norm>Math.max(limit,2**-23))coefficient*=limit/norm;
+   for(let k=0;k<2;k++)gain[k]-=.1*coefficient*expected[k];
   }
   const before=await checkpoint(learner);check(baseline.applyParametersTo(model,before)===1,"handoff");
   const output=keep(model.forward(batches[0][0]));near(await read(output),data[0][0].flatMap(x=>gain.map(g=>x*g)));
@@ -55,9 +60,10 @@ try {
   learner.accumulate(accumulator,gradient,1);learner.sgdAccumulated(accumulator,0);
   const recovery=keep(learner.updateSnapshot());check(await recovery.read()===34n,"recovery count");check((await checkpoint(learner)).toJson()===before.toJson(),"recovery changed weights");
   for(const h of [fresh,prediction,loss,cotangent,gradient])h.free();
+  learner.clearGradClip();check(learner.gradClipMaxNorm===undefined,"clear clipping");
   for(const h of [learner,accumulator,model,device,foreign])free(h);
   for(let i=0;i<held.length;i++){const [t,expected,receipt]=held[i];near(await read(t),expected);check(await receipt.read()===BigInt(i+1),"retained receipt");}
-  await reject(()=>read(rejectedTensor));report.cases.push({policy,reduction,updates:32,microbatches:96,rejected_update:33,recovered_update:34,gain});
+  await reject(()=>read(rejectedTensor));report.cases.push({policy,reduction,grad_clip_max_norm:limit,updates:32,microbatches:96,rejected_update:33,recovered_update:34,reference_gain:gain});
  }
  report.status="passed";
 }catch(error){report.error=String(error.stack||error);}

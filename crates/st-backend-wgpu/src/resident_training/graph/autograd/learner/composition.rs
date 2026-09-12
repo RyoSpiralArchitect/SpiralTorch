@@ -17,7 +17,7 @@ pub(super) struct Composition {
     shapes: Vec<(wgpu::Buffer, [u32; 3])>,
 }
 
-fn entry(binding: u32, uniform: bool, read_only: bool) -> wgpu::BindGroupLayoutEntry {
+pub(super) fn entry(binding: u32, uniform: bool, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::COMPUTE,

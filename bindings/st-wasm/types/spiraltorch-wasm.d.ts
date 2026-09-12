@@ -146,6 +146,9 @@ declare module "spiraltorch-wasm" {
     }
     export class ResidentGraphLearner {
         private constructor();
+        readonly gradClipMaxNorm: number | undefined;
+        setGradClipMaxNorm(max_norm: number): void;
+        clearGradClip(): void;
         readonly inputShape: Uint32Array;
         readonly outputShape: Uint32Array;
         readonly stageCount: number;

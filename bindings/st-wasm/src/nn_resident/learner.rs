@@ -88,6 +88,20 @@ impl WasmResidentGraphLearner {
     pub fn gradient_policy(&self) -> String {
         self.inner.gradient_policy().as_str().to_owned()
     }
+    #[wasm_bindgen(getter,js_name=gradClipMaxNorm)]
+    pub fn grad_clip_max_norm(&self) -> Option<f32> {
+        self.inner.grad_clip_max_norm()
+    }
+    #[wasm_bindgen(js_name=setGradClipMaxNorm)]
+    pub fn set_grad_clip_max_norm(&mut self, max_norm: f32) -> Result<(), JsValue> {
+        self.inner
+            .set_grad_clip_max_norm(max_norm)
+            .map_err(js_error)
+    }
+    #[wasm_bindgen(js_name=clearGradClip)]
+    pub fn clear_grad_clip(&mut self) {
+        self.inner.clear_grad_clip();
+    }
     #[wasm_bindgen(getter,js_name=inputGeneration)]
     pub fn input_generation(&self) -> u64 {
         self.inner.input_generation()

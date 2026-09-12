@@ -11,6 +11,7 @@
 pub mod classification;
 pub mod compaction;
 pub mod elementwise;
+pub mod gradient_clip;
 pub mod graph;
 pub mod layout;
 pub mod pointwise;

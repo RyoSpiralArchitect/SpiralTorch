@@ -23,6 +23,7 @@ struct Window {
     expected_parameters: Vec<Vec<f32>>,
     receipt: GraphUpdateReadback,
     rate: f32,
+    clip: Option<f32>,
 }
 async fn accepted(value: GraphUpdateReadback) -> Result<u64> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -56,6 +57,16 @@ fn dataset(seed: usize) -> Vec<(Vec<f32>, Vec<f32>)> {
 }
 
 pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
+    run_with_clipping(runtime, false).await
+}
+
+pub(super) async fn run_clipped(runtime: WgpuRuntime) -> Result<Value> {
+    let mut result = run_with_clipping(runtime.clone(), true).await?;
+    result["wide_probes"] = wide_probes(runtime).await?;
+    Ok(result)
+}
+
+async fn run_with_clipping(runtime: WgpuRuntime, clipping: bool) -> Result<Value> {
     let mut cases = Vec::new();
     for (seed, reduction) in [
         (17, LossReduction::Mean),
@@ -90,6 +101,19 @@ pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
             let mut held = Vec::new();
             let mut submitted_micros = 0;
             for window in 0..32 {
+                let clip = if clipping {
+                    [Some(0.05), None, Some(0.1), Some(2.), Some(0.001)][window % 5]
+                } else {
+                    None
+                };
+                if let Some(limit) = clip {
+                    learner.set_grad_clip_max_norm(limit)?;
+                } else {
+                    learner.clear_grad_clip();
+                }
+                if learner.grad_clip_max_norm() != clip {
+                    return Err("clip setting".into());
+                }
                 learner.zero_accumulator(&mut accumulator)?;
                 if accumulator.parameter_generation() != window as u64 || !accumulator.is_empty() {
                     return Err("microbatch window generation".into());
@@ -146,19 +170,36 @@ pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 let sum_gpu = accumulator.parameter_gradients()?;
                 let rate = if window % 11 == 0 { 0. } else { 0.1 };
                 learner.sgd_accumulated(&accumulator, rate)?;
+                let mut effective = sum.clone();
+                for (values, &role) in effective.iter_mut().zip(&roles) {
+                    if policy == GraphGradientPolicy::ModuleCompatible
+                        && role == ParameterRole::Gain
+                    {
+                        for g in values {
+                            *g *= 1. / 6.;
+                        }
+                    }
+                }
+                if let Some(limit) = clip {
+                    let norm_sq = effective
+                        .iter()
+                        .flatten()
+                        .map(|&g| f64::from(g).powi(2))
+                        .sum();
+                    let factors = st_kernel_contracts::gradient_clip::GlobalNormClip::new(limit)?
+                        .factors(norm_sq)?;
+                    for g in effective.iter_mut().flatten() {
+                        for &factor in factors.as_slice() {
+                            *g *= factor;
+                        }
+                    }
+                }
                 let mut expected_parameters = Vec::new();
                 let mut id = 0;
                 reference.visit_parameters_mut(&mut |p| {
                     if rate != 0. {
-                        let scale = if policy == GraphGradientPolicy::ModuleCompatible
-                            && roles[id] == ParameterRole::Gain
-                        {
-                            1. / 6.
-                        } else {
-                            1.
-                        };
-                        for (v, &g) in p.value_mut().data_mut().iter_mut().zip(&sum[id]) {
-                            *v -= rate * (g * scale);
+                        for (v, &g) in p.value_mut().data_mut().iter_mut().zip(&effective[id]) {
+                            *v -= rate * g;
                         }
                     }
                     expected_parameters.push(p.value().data().to_vec());
@@ -173,6 +214,7 @@ pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
                     expected_parameters,
                     receipt: learner.update_snapshot()?,
                     rate,
+                    clip,
                 });
             }
             let mut evaluation = Vec::new();
@@ -235,7 +277,7 @@ pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 for (a, b) in values.iter().zip(&window.expected_parameters) {
                     close(a, b)?;
                 }
-                windows.push(json!({"microbatches":micros,"accumulated_gradients":sum,"parameters":values,"rate":window.rate}));
+                windows.push(json!({"microbatches":micros,"accumulated_gradients":sum,"parameters":values,"rate":window.rate,"grad_clip_max_norm":window.clip}));
             }
             let mut evaluated = Vec::new();
             let mut initial = 0.;
@@ -280,8 +322,42 @@ pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 "plan":serde_json::from_str::<Value>(&baseline.to_json()?)?,"dataset":data.iter().map(|(x,y)|json!({"input":x,"target":y})).collect::<Vec<_>>(),
                 "windows":windows,"evaluation":evaluated,"initial_loss":initial/sample_count as f32,"final_loss":final_loss/sample_count as f32,
                 "label_smoothing":0.1,"ignore_index":-100,"reduction":reduction.as_str(),"observations_after_updates":32,
-                "microbatches":submitted_micros,"module_parameters_applied":applied,"optimizer":"explicit_sgd_not_ModuleTrainer"}));
+                "microbatches":submitted_micros,"module_parameters_applied":applied,"optimizer":"explicit_sgd_not_ModuleTrainer","gradient_clip":clipping}));
         }
     }
     Ok(json!({"status":"passed","cases":cases}))
+}
+
+async fn wide_probes(runtime: WgpuRuntime) -> Result<Value> {
+    let mut probes = Vec::new();
+    for limit in [1., 1e-20] {
+        let mut model = Sequential::new();
+        model.push(Scaler::new("wide", 513)?);
+        model.visit_parameters_mut(&mut |p| {
+            p.value_mut().data_mut().fill(0.);
+            Ok(())
+        })?;
+        let plan = InferencePlan::from_module(&model, NdLayout::contiguous(&[1, 1, 513])?)?;
+        let mut learner =
+            plan.compile_graph_learner_wgpu(runtime.clone(), GraphGradientPolicy::Exact)?;
+        learner.set_grad_clip_max_norm(limit)?;
+        learner.upload(&[1.; 513])?;
+        let f = learner.forward()?;
+        let gradient = learner.backward(
+            &f,
+            &learner.tensor_device().upload(&[1, 1, 513], &[1e38; 513])?,
+        )?;
+        learner.sgd(&gradient, 1.)?;
+        accepted(learner.update_snapshot()?).await?;
+        let result = parameters(learner.parameter_snapshot()?).await?;
+        let values = &result.parameters()[0].values;
+        let expected = -f64::from(limit) / 513f64.sqrt();
+        for &value in values {
+            if !value.is_finite() || (f64::from(value) / expected - 1.).abs() > 1e-5 {
+                return Err("wide gradient clipping".into());
+            }
+        }
+        probes.push(json!({"limit":limit,"magnitude":1e38f32,"columns":513,"parameters":values}));
+    }
+    Ok(json!(probes))
 }

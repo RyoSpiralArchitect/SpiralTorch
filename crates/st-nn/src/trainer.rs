@@ -9085,20 +9085,20 @@ impl ModuleTrainer {
         module: &mut M,
         max_norm: f32,
     ) -> PureResult<()> {
-        if max_norm <= 0.0 {
-            return Ok(());
-        }
+        let clip = st_kernel_contracts::gradient_clip::GlobalNormClip::new(max_norm)
+            .map_err(|e| TensorError::Generic(e.to_string()))?;
         let mut total = 0.0f64;
         module.visit_parameters(&mut |param| {
             total += param.accumulators_norm_sq();
             Ok(())
         })?;
-        let norm = total.sqrt() as f32;
-        if norm <= max_norm || norm <= f32::EPSILON {
-            return Ok(());
+        let factors = clip
+            .factors(total)
+            .map_err(|e| TensorError::Generic(e.to_string()))?;
+        for &scale in factors.as_slice() {
+            self.apply_grad_scale(module, scale)?;
         }
-        let scale = (max_norm / norm).clamp(0.0, 1.0);
-        self.apply_grad_scale(module, scale)
+        Ok(())
     }
 
     #[cfg(feature = "collapse")]
@@ -10357,6 +10357,30 @@ mod tests {
         assert_eq!(trainer.optimizer_config(), before);
         assert_eq!(trainer.real_learning_rate(), Some(0.02));
         assert_eq!(trainer.grad_clip_max_norm(), Some(0.5));
+    }
+
+    #[test]
+    fn global_clip_preserves_finite_wide_gradients_and_small_limits() {
+        let _cpu = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+        let trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1., 0.05, 0.01);
+        for limit in [1., 1e-30] {
+            let mut model = crate::Sequential::new();
+            model.push(crate::layers::Scaler::new("clip", 4).unwrap());
+            model
+                .visit_parameters_mut(&mut |p| {
+                    p.accumulate_euclidean(&Tensor::from_vec(1, 4, vec![f32::MAX; 4])?)
+                })
+                .unwrap();
+            trainer.clip_grad_global_norm(&mut model, limit).unwrap();
+            model
+                .visit_parameters(&mut |p| {
+                    for &value in p.gradient().unwrap().data() {
+                        assert!((f64::from(value) / f64::from(limit) - 0.5).abs() < 1e-6);
+                    }
+                    Ok(())
+                })
+                .unwrap();
+        }
     }
 
     #[test]

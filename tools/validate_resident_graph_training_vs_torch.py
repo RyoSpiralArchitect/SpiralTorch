@@ -271,7 +271,8 @@ def replay_learning(case, device):
                 updates=64, max_abs_error=maximum)
 
 
-def admit_microbatch(case):
+def admit_microbatch(case, clipped=False):
+    assert case.get("gradient_clip", False) is clipped
     assert case["policy"] in ("Exact", "ModuleCompatible")
     assert case["input_shape"] == case["plan"]["input_shape"] == [2,3,4]
     assert case["observations_after_updates"] == 32 and case["microbatches"] == 95
@@ -285,6 +286,11 @@ def admit_microbatch(case):
         counts.append(sum(y != -100 for y in batch["target"]))
     assert counts == [6,4,2,5,3,1,6]
     for i, window in enumerate(case["windows"]):
+        limit = [0.05, None, 0.1, 2., 0.001][i % 5] if clipped else None
+        if limit is None:
+            assert window.get("grad_clip_max_norm") is None
+        else:
+            assert math.isclose(window["grad_clip_max_norm"], limit, rel_tol=1e-7, abs_tol=0.)
         ids = [(i*3+j)%7 for j in range(2+i%3)]
         assert [m["batch"] for m in window["microbatches"]] == ids
         total = sum(counts[j] for j in ids)
@@ -295,8 +301,8 @@ def admit_microbatch(case):
     assert [e["batch"] for e in case["evaluation"]] == list(range(7))
 
 
-def replay_microbatch(case, device):
-    admit_microbatch(case)
+def replay_microbatch(case, device, clipped=False):
+    admit_microbatch(case, clipped)
     plan = case["plan"]
     assert plan["schema"] == "spiraltorch.nn.inference_plan.v2"
     parameters = [torch.tensor(p["values"],dtype=torch.float32,device=device).reshape(p["shape"]).requires_grad_() for p in plan["parameters"]]
@@ -330,8 +336,18 @@ def replay_microbatch(case, device):
                 accumulated.add_(g*m["weight"])
         for g, expected in zip(aggregate,window["accumulated_gradients"],strict=True): check(g,expected)
         with torch.no_grad():
+            aggregate = [g/6 if case["policy"] == "ModuleCompatible" and spec["role"] == "gain" else g
+                         for g,spec in zip(aggregate,plan["parameters"],strict=True)]
+            limit = window.get("grad_clip_max_norm")
+            if limit is not None:
+                # Independent Torch norm; no Rust reference factors are reused.
+                norm = torch.linalg.vector_norm(torch.cat([g.reshape(-1) for g in aggregate]))
+                value = float(norm.cpu())
+                if value > max(limit, torch.finfo(torch.float32).eps):
+                    factor = limit/value
+                    if abs(factor-1.) > torch.finfo(torch.float32).eps:
+                        aggregate = [g*factor for g in aggregate]
             for p,g,spec,expected in zip(parameters,aggregate,plan["parameters"],window["parameters"],strict=True):
-                if case["policy"] == "ModuleCompatible" and spec["role"] == "gain": g = g/6
                 p.sub_(window["rate"]*g)
                 check(p,expected)
     initial_total = final_total = 0.
@@ -347,7 +363,7 @@ def replay_microbatch(case, device):
         initial_total += float(initial.cpu())*n; final_total += float(final.cpu())*n; total += n
     check(torch.tensor([initial_total/total]),[case["initial_loss"]])
     check(torch.tensor([final_total/total]),[case["final_loss"]])
-    return dict(device=device,seed=case["seed"],policy=case["policy"],microbatch=True,
+    return dict(device=device,seed=case["seed"],policy=case["policy"],microbatch=True,gradient_clip=clipped,
                 updates=32,microbatches=95,comparisons=comparisons,max_abs_error=maximum)
 
 
@@ -358,6 +374,7 @@ def main():
     parser.add_argument("--require-resident-loss", action="store_true")
     parser.add_argument("--require-classification", action="store_true")
     parser.add_argument("--require-microbatch", action="store_true")
+    parser.add_argument("--require-gradient-clip", action="store_true")
     parser.add_argument(
         "--devices", nargs="+", choices=["cpu", "mps", "cuda"], default=["cpu", "mps"]
     )
@@ -396,6 +413,8 @@ def main():
                     assert fixture.get("classification", {}).get("status") == "passed"
                 if args.require_microbatch:
                     assert fixture.get("microbatch", {}).get("status") == "passed"
+                if args.require_gradient_clip:
+                    assert fixture.get("gradient_clip", {}).get("status") == "passed"
                 report["inputs"].append(
                     {
                         "path": str(path.resolve()),
@@ -403,6 +422,21 @@ def main():
                     }
                 )
                 for device in args.devices:
+                    clipped = fixture.get("gradient_clip")
+                    if clipped is not None:
+                        assert clipped["status"] == "passed"
+                        assert [(c["seed"],c["policy"],c["reduction"]) for c in clipped["cases"]] == [
+                            (seed,policy,reduction) for seed,reduction in [(17,"mean"),(29,"sum"),(43,"mean")]
+                            for policy in ("Exact","ModuleCompatible")]
+                        for case in clipped["cases"]:
+                            result = replay_microbatch(case,device,clipped=True)
+                            result["input"] = str(path.resolve()); report["cases"].append(result)
+                        assert len(clipped["wide_probes"]) == 2
+                        for probe,limit in zip(clipped["wide_probes"],[1.,1e-20],strict=True):
+                            assert probe["columns"] == len(probe["parameters"]) == 513
+                            assert math.isclose(probe["limit"],limit,rel_tol=1e-7)
+                            assert math.isclose(probe["magnitude"],1e38,rel_tol=1e-7)
+                            assert all(math.isfinite(v) and math.isclose(v,-limit/math.sqrt(513),rel_tol=1e-5,abs_tol=0.) for v in probe["parameters"])
                     microbatch = fixture.get("microbatch")
                     if microbatch is not None:
                         assert microbatch["status"] == "passed"

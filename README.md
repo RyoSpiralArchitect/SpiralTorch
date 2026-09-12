@@ -477,6 +477,9 @@ explicit learner updates without intermediate CPU observations.
 For larger effective batches, [resident microbatch accumulation](docs/module_resident_microbatch.md)
 combines gradients across changing inputs in reusable GPU buffers before one
 transactional update, with explicit sample weighting and stale-state rejection.
+An optional [global gradient norm limit](docs/module_resident_gradient_clip.md)
+clips the policy-normalized window on GPU before the all-parameter update;
+Rust, Python and WASM share the same rule without a norm readback.
 
 Version 0.4.23 adds `st.AutogradSgd(parameters, learning_rate=0.1)`
 for plain Rust-owned CPU updates. Fetch `optimizer.parameters()` for each forward

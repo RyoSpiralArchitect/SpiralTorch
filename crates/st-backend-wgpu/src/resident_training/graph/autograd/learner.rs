@@ -4,6 +4,9 @@ mod composition;
 use composition::Composition;
 mod accumulator;
 pub use accumulator::GraphGradientAccumulator;
+mod clipping;
+use clipping::Clipping;
+use st_kernel_contracts::gradient_clip::GlobalNormClip;
 
 const MAX_TERMS: usize = 256;
 
@@ -46,6 +49,8 @@ pub struct ResidentGraphLearner {
     composition: Composition,
     updates: u64,
     last_update: Option<(u64, u64)>,
+    grad_clip: Option<GlobalNormClip>,
+    clipping: Option<Clipping>,
 }
 
 impl ResidentGraphLearner {
@@ -78,6 +83,8 @@ impl ResidentGraphLearner {
             composition,
             updates: 0,
             last_update: None,
+            grad_clip: None,
+            clipping: None,
         })
     }
 
@@ -113,6 +120,25 @@ impl ResidentGraphLearner {
     }
     pub fn gradient_policy(&self) -> GraphGradientPolicy {
         self.autograd.graph.policy
+    }
+
+    pub fn grad_clip_max_norm(&self) -> Option<f32> {
+        self.grad_clip.map(GlobalNormClip::max_norm)
+    }
+
+    /// Clip the global norm after the selected gain policy and before SGD.
+    /// Invalid configuration preserves the previous setting and parameter state.
+    pub fn set_grad_clip_max_norm(&mut self, max_norm: f32) -> Result<(), TrainingError> {
+        let clip = GlobalNormClip::new(max_norm)?;
+        if self.clipping.is_none() {
+            self.clipping = Some(Clipping::new(&self.autograd.graph)?);
+        }
+        self.grad_clip = Some(clip);
+        Ok(())
+    }
+
+    pub fn clear_grad_clip(&mut self) {
+        self.grad_clip = None;
     }
     pub fn upload(&mut self, input: &[f32]) -> Result<(), TrainingError> {
         self.autograd.upload(input)
@@ -195,7 +221,25 @@ impl ResidentGraphLearner {
     ) {
         let g = &self.autograd.graph;
         let context = g.device.runtime().context();
-        g.encode_passes(&mut encoder, &g.update_passes, &mut Default::default());
+        if let Some(clip) = self.grad_clip {
+            self.clipping
+                .as_ref()
+                .expect("prepared clipping workspace")
+                .encode(g, &mut encoder);
+            g.encode_passes(
+                &mut encoder,
+                &g.update_passes[g.parameters.len()..],
+                &mut Default::default(),
+            );
+            let (mantissa, exponent) = clip.binary_parts();
+            context.queue().write_buffer(
+                &g.step_config,
+                8,
+                bytemuck::cast_slice(&[mantissa, exponent as f32]),
+            );
+        } else {
+            g.encode_passes(&mut encoder, &g.update_passes, &mut Default::default());
+        }
         encoder.copy_buffer_to_buffer(
             &g.validation,
             0,

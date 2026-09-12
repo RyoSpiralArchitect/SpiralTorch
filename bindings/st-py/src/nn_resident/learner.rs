@@ -104,6 +104,17 @@ impl PyResidentGraphLearner {
         self.inner.gradient_policy().as_str()
     }
     #[getter]
+    fn grad_clip_max_norm(&self) -> Option<f32> {
+        self.inner.grad_clip_max_norm()
+    }
+    fn set_grad_clip_max_norm(&mut self, py: Python<'_>, max_norm: f32) -> PyResult<()> {
+        py.detach(|| self.inner.set_grad_clip_max_norm(max_norm))
+            .map_err(training_error)
+    }
+    fn clear_grad_clip(&mut self) {
+        self.inner.clear_grad_clip();
+    }
+    #[getter]
     fn input_generation(&self) -> u64 {
         self.inner.input_generation()
     }

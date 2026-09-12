@@ -24,6 +24,16 @@ def fixture():
                 evaluation=[dict(batch=i) for i in range(7)])
 
 class Admission(unittest.TestCase):
+    def test_clipping_schedule_cannot_be_relabelled_or_omitted(self):
+        good = fixture(); good["gradient_clip"] = True
+        for i,w in enumerate(good["windows"]): w["grad_clip_max_norm"] = [.05,None,.1,2.,.001][i%5]
+        reference.admit_microbatch(good,clipped=True)
+        with self.assertRaises(AssertionError): reference.admit_microbatch(good)
+        for mutate in [lambda c:c.pop("gradient_clip"), lambda c:c["windows"][0].pop("grad_clip_max_norm"),
+                       lambda c:c["windows"][0].update(grad_clip_max_norm=1.),lambda c:c["windows"][1].update(grad_clip_max_norm=.05)]:
+            bad=copy.deepcopy(good); mutate(bad)
+            with self.assertRaises((AssertionError,KeyError)): reference.admit_microbatch(bad,clipped=True)
+
     def test_frozen_microbatch_sequence_and_weights_are_required(self):
         good = fixture(); reference.admit_microbatch(good)
         mutations = [

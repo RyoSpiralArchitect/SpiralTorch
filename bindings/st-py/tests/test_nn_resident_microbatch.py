@@ -20,9 +20,16 @@ class Gpu(unittest.TestCase):
     def test_weighted_microbatches_reuse_and_recover(self):
         data = [([1.,-.5,1.5,-1.],[0.,1.,0.,1.]), ([.5,1.,-1.,2.],[0.,0.,1.,-100.]), ([2.,0.,0.,0.],[0.,-100.,-100.,-100.])]
         for policy,scale in [("exact",1.),("module_compatible",.25)]:
-            for reduction in ["mean","sum"]:
+            for reduction,limit in [(r,c) for r in ["mean","sum"] for c in [None,.05]]:
                 model = st.nn.Sequential(); model.add(st.nn.Scaler.from_gain("gain",st.Tensor(1,2,[0.,0.])))
                 baseline = model.inference_plan([2,2,2]); learner = baseline.compile_graph_learner_wgpu(gradient_policy=policy)
+                self.assertIsNone(learner.grad_clip_max_norm)
+                if limit is not None:
+                    learner.set_grad_clip_max_norm(limit)
+                    before_limit=learner.grad_clip_max_norm
+                    for bad in [0.,-1.,float("nan"),float("inf")]:
+                        with self.assertRaises(ValueError): learner.set_grad_clip_max_norm(bad)
+                        self.assertEqual(learner.grad_clip_max_norm,before_limit)
                 device = learner.tensor_device(); self.assertNotEqual(device.adapter_info()["device_type"],"Cpu")
                 batches = [(device.upload([2,2,2],[v for x in xs for v in [x,x]]),device.upload([2,2],ys)) for xs,ys in data]
                 objective = st.nn.CrossEntropyWithLogits(reduction=reduction,label_smoothing=.1)
@@ -45,7 +52,10 @@ class Gpu(unittest.TestCase):
                     self.assertEqual(len(accumulator),3)
                     held.append((accumulator.parameter_gradient_tensors()[0],expected.copy()))
                     learner.sgd_accumulated(accumulator,.1); held[-1]+=(learner.update_snapshot(),)
-                    for i in range(2): gain[i]-=.1*scale*expected[i]
+                    coefficient=scale
+                    norm=math.sqrt(sum((scale*g)**2 for g in expected))
+                    if limit is not None and norm>max(limit,2**-23): coefficient*=limit/norm
+                    for i in range(2): gain[i]-=.1*coefficient*expected[i]
                 before=learner.parameter_snapshot().read_plan()
                 self.assertEqual(baseline.apply_parameters_to(model,before),1)
                 self.near(read(model(batches[0][0])),[value*g for value in data[0][0] for g in gain])
@@ -73,6 +83,7 @@ class Gpu(unittest.TestCase):
                 learner.accumulate(accumulator,good,1.); learner.sgd_accumulated(accumulator,0.)
                 self.assertEqual(learner.update_snapshot().read(),34)
                 self.assertEqual(learner.parameter_snapshot().read_plan().to_json(),before.to_json())
+                learner.clear_grad_clip(); self.assertIsNone(learner.grad_clip_max_norm)
                 del learner,accumulator,model,device,foreign
                 for i,(snapshot,expected,receipt) in enumerate(held,1):
                     self.near(read(snapshot),expected); self.assertEqual(receipt.read(),i)

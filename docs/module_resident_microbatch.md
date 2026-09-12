@@ -96,6 +96,10 @@ average over the entire virtual batch. The update receipt identifies its last
 contribution's input/forward and the attempted update; it is not a list of all
 contributing batches. Keep application batching metadata if that is needed.
 
+Optional [global clipping](module_resident_gradient_clip.md) applies after this
+policy and before the learning rate, once per update rather than per microbatch.
+Use `learner.set_grad_clip_max_norm(1.0)` before the loop to enable it.
+
 ## Boundaries
 
 This supplies the missing cross-input accumulation primitive; it does not

@@ -151,6 +151,9 @@ function checkNnContract(types, label) {
   const learner=get("ResidentGraphLearner"), batch=get("GraphGradientBatch", true), update=get("GraphUpdateSnapshot");
   assert.match(learner, /backward\(forward: GraphForward, cotangent: WgpuTensor\): GraphGradients/);
   assert.match(learner, /sgdWeighted\(batch: GraphGradientBatch, rate: number\): bigint/);
+  assert.match(learner, /readonly gradClipMaxNorm: number \| undefined/);
+  assert.match(learner, /setGradClipMaxNorm\(max_norm: number\): void/);
+  assert.match(learner, /clearGradClip\(\): void/);
   const accumulator = get("GraphGradientAccumulator");
   assert.match(learner, /gradientAccumulator\(\): GraphGradientAccumulator/);
   assert.match(learner, /zeroAccumulator\(accumulator: GraphGradientAccumulator\): void/);
