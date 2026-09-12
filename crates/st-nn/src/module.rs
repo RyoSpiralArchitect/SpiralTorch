@@ -785,6 +785,20 @@ pub trait Module {
         ))
     }
 
+    /// Explicit terminal forward. Implementations combine execution and capture
+    /// in one submission, without changing ordinary GPU-output forwarding.
+    /// Unknown modules reject rather than emulate this through hidden readback.
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        _input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        Err(crate::resident::InferenceError::UnsupportedModule(
+            std::any::type_name::<Self>(),
+        ))
+    }
+
     #[cfg(feature = "wgpu")]
     fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
         None

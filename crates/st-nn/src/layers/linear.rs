@@ -97,6 +97,14 @@ impl Module for Linear {
         self.resident.forward(self.inference_ops()?, input)
     }
     #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        self.resident.snapshot(self.inference_ops()?, input)
+    }
+    #[cfg(feature = "wgpu")]
     fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
         Some(self.resident.stats())
     }

@@ -55,6 +55,7 @@ function checkNnContract(types, label) {
   };
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
   const module = get("Sequential", true), cache = get("ResidentForwardStats");
+  assert.match(module, /forwardSnapshot\(input: WgpuTensor\): WgpuTensorSnapshot/);
   assert.match(module, /forward\(input: WgpuTensor\): WgpuTensor/);
   assert.match(module, /inferencePlan\(shape: (?:Array<any>|number\[\])\): InferencePlan/);
   assert.match(module, /residentCacheInfo\(\): ResidentForwardStats/);
@@ -155,6 +156,7 @@ function checkNnContract(types, label) {
     tensor=get("WgpuTensor"), tensorDevice=get("WgpuTensorDevice"), tensorSnapshot=get("WgpuTensorSnapshot");
   assert.match(forward, /setInputTensor\(input: WgpuTensor\): void/);
   assert.match(forward, /forwardTensor\(input: WgpuTensor\): WgpuTensor/);
+  assert.match(forward, /forwardTensorSnapshot\(input: WgpuTensor\): WgpuTensorSnapshot/);
   assert.match(forward, /outputTensor\(\): WgpuTensor/);
   assert.match(forward, /tensorDevice\(\): WgpuTensorDevice/);
   assert.match(forward, /snapshot\(\): GraphInferenceSnapshot/);

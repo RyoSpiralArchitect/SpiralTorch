@@ -1410,6 +1410,14 @@ impl PyLinear {
         crate::nn_resident::forward_argument(self.inner()?, input)
     }
 
+    /// Submit forward and capture together; read the returned snapshot explicitly.
+    pub fn forward_snapshot(
+        &self,
+        input: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+        crate::nn_resident::snapshot_argument(self.inner()?, input)
+    }
+
     pub fn resident_cache_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         crate::nn_resident::cache_info(self.inner()?, py)
     }
@@ -3074,6 +3082,14 @@ impl PyRelu {
         crate::nn_resident::forward_argument(&self.inner, input)
     }
 
+    /// Submit forward and capture together; read the returned snapshot explicitly.
+    pub fn forward_snapshot(
+        &self,
+        input: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+        crate::nn_resident::snapshot_argument(&self.inner, input)
+    }
+
     pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
         let grad = self
             .inner
@@ -3104,6 +3120,14 @@ impl PyGelu {
 
     pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         crate::nn_resident::forward_argument(&self.inner, input)
+    }
+
+    /// Submit forward and capture together; read the returned snapshot explicitly.
+    pub fn forward_snapshot(
+        &self,
+        input: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+        crate::nn_resident::snapshot_argument(&self.inner, input)
     }
 
     pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
@@ -4062,6 +4086,14 @@ impl PySequential {
 
     pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         crate::nn_resident::forward_argument(&self.inner, input)
+    }
+
+    /// Submit forward and capture together; read the returned snapshot explicitly.
+    pub fn forward_snapshot(
+        &self,
+        input: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+        crate::nn_resident::snapshot_argument(&self.inner, input)
     }
 
     pub fn resident_cache_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -7915,6 +7947,14 @@ impl PyScaler {
 
     pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         crate::nn_resident::forward_argument(self.inner()?, input)
+    }
+
+    /// Submit forward and capture together; read the returned snapshot explicitly.
+    pub fn forward_snapshot(
+        &self,
+        input: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+        crate::nn_resident::snapshot_argument(self.inner()?, input)
     }
 
     pub fn resident_cache_info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {

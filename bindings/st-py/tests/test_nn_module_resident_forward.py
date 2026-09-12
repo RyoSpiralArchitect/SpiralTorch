@@ -44,6 +44,8 @@ class Surface(unittest.TestCase):
             self.assertEqual(m(x).tolist(), m.forward(x).tolist())
             with self.assertRaisesRegex(TypeError, "no implicit device transfer"):
                 m([0.25]*6)
+            error = TypeError if st.wgpu_kernel_reports_available() else NotImplementedError
+            with self.assertRaises(error): m.forward_snapshot(x)
         if not st.wgpu_kernel_reports_available():
             for m in [model(), st.nn.Linear(3, 3), st.nn.Scaler("g", 3)]:
                 with self.assertRaisesRegex(NotImplementedError, "wgpu"): m.resident_cache_info()
@@ -53,6 +55,9 @@ class Surface(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / "spiraltorch/__init__.pyi"
         classes = {n.name: n for n in ast.parse(path.read_text()).body if isinstance(n, ast.ClassDef)}
         for name in ["Linear", "Sequential", "Scaler", "Gelu", "Relu"]:
+            snapshot = next(n for n in classes["_Nn"+name].body if isinstance(n, ast.FunctionDef) and n.name == "forward_snapshot")
+            self.assertEqual(ast.unparse(snapshot.args.args[1].annotation), "WgpuTensor")
+            self.assertEqual(ast.unparse(snapshot.returns), "WgpuTensorSnapshot")
             for method in ["forward", "__call__"]:
                 overloads = [n for n in classes["_Nn"+name].body if isinstance(n, ast.FunctionDef) and n.name == method]
                 self.assertEqual([(ast.unparse(n.args.args[1].annotation), ast.unparse(n.returns)) for n in overloads],
@@ -69,6 +74,30 @@ class Gpu(unittest.TestCase):
         values = gpu.snapshot().read_values()
         self.assertEqual(len(values), len(host))
         for a, b in zip(values, host): self.assertAlmostEqual(a, b, delta=2e-5)
+
+    def test_terminal_forward_retains_nd_captures_and_reuses_original_cache(self):
+        x = self.d.upload([3,2,3], [(i-8)/16 for i in range(18)]).permute([1,0,2])
+        host = st.Tensor(6,3,x.snapshot().read_values())
+        for net in [model(), st.nn.Linear(3,5), st.nn.Scaler("g",3), st.nn.Gelu(), st.nn.Relu(), st.nn.Sequential()]:
+            expected = flat(net(host))
+            snapshot = net.forward_snapshot(x)
+            original = net(x)
+            self.assertEqual(snapshot.shape, original.shape)
+            for _ in range(12): net.forward_snapshot(x)
+            if hasattr(net, "resident_cache_info"):
+                stats = net.resident_cache_info()
+                self.assertIn(stats["compilations"], [0,1])
+                if stats["compilations"]:
+                    self.assertEqual(stats, dict(compilations=1,cache_hits=13,submitted_forwards=14))
+                net.clear_resident_cache()
+            del net
+            gc.collect()
+            for a,b in zip(snapshot.read_values(), expected): self.assertAlmostEqual(a,b,delta=2e-5)
+            with self.assertRaisesRegex(RuntimeError,"consumed"): snapshot.read_values()
+            self.close(original,expected)
+        empty = st.nn.Sequential()
+        self.assertEqual(empty.forward_snapshot(self.d.upload([0,3],[])).read_values(), [])
+        self.assertEqual(empty.resident_cache_info(), dict(compilations=0,cache_hits=0,submitted_forwards=0))
 
     def test_late_dlpack_export_updates_cpu_pack_and_resident_graph(self):
         net = st.nn.Linear("late", 3, 5)
@@ -122,6 +151,11 @@ class Gpu(unittest.TestCase):
                     invalid.snapshot().read_values()
                 with self.assertRaisesRegex(ValueError,"non-finite"):
                     net(self.d.upload([2,1],[2.,2.])).snapshot().read_values()
+                terminal = net.forward_snapshot(self.d.upload([2,1],[2.,2.]))
+                self.assertEqual(net.forward_snapshot(safe).read_values(), [0.,0.])
+                with self.assertRaisesRegex(ValueError,"non-finite"): terminal.read_values()
+                direct = graph.forward_tensor_snapshot(safe)
+                self.assertEqual(direct.read_values(), [0.,0.])
                 self.close(net(safe),[0.,0.])
                 self.assertEqual(net.resident_cache_info()["compilations"],1)
 

@@ -61,7 +61,14 @@ try{
     m.clearResidentCache();
     const afterClear=keep(m.forward(input));check(stats(m).compilations==="3","clear did not rebuild");
     close(await read(afterClear),trainedValues);
+    const terminal=keep(m.forwardSnapshot(input));
+    check(JSON.stringify(Array.from(terminal.shape))===JSON.stringify([3,2,width]),"terminal shape");
+    for(let i=0;i<12;i++)free(keep(m.forwardSnapshot(input)));
+    check(stats(m).compilations==="3","terminal route rebuilt the shared cache");
+    m.clearResidentCache();
     free(m);free(training);free(plan);free(updated);free(snapshot);free(source);
+    const pendingTerminal=terminal.readValues();free(terminal);
+    close(await pendingTerminal,trainedValues);
     report.cases.push({shape:[3,2,width],plan:raw,input:logical,repetitions:20,
       first:await read(first),final:await read(current),updated_plan:changed,trained:trainedValues,cache});
   }
@@ -73,6 +80,9 @@ try{
   const invalid=keep(huge.mul(huge)),out=keep(m.forward(invalid));
   let failed=false;try{await read(out);}catch(e){failed=/non-finite/.test(String(e));}
   check(failed,"invalid input got masked");
+  const terminalError=keep(m.forwardSnapshot(invalid));
+  failed=false;try{await terminalError.readValues();}catch(e){failed=/non-finite/.test(String(e));}
+  check(failed,"terminal capture masked invalid input");free(terminalError);
   const good=keep(d.upload([1],f32([1.])));close(await read(keep(m.forward(good))),[0.]);
   check(stats(m).compilations==="1","valid recovery rebuilt");
   const directModel=keep(new st.Sequential());directModel.addScaler("scale",f32([2.]));directModel.addRelu();
@@ -197,6 +207,21 @@ try{
     if(expected.length===1)check(Object.is(actual[0],-0),"snapshot reuse lost negative zero");
   }
   report.tensor_readback_ownership=true;
+  const identity=keep(new st.Sequential());
+  const emptyInput=keep(d.upload([0,3],f32([]))),emptyCapture=keep(identity.forwardSnapshot(emptyInput));
+  close(await emptyCapture.readValues(),[]);
+  check(stats(identity).submitted_forwards==="0","identity observation counted as NN execution");
+  free(emptyCapture);free(emptyInput);free(identity);
+  const terminalNet=keep(new st.Sequential());terminalNet.addScaler("s",f32([2.]));terminalNet.addRelu();
+  const terminalPlan=keep(terminalNet.inferencePlan([2,1]));
+  const terminalGraph=keep(await terminalPlan.compileGraphWebGpu());
+  const terminalInput=keep(d.upload([2,1],f32([1.,2.])));
+  const terminalSnapshot=keep(terminalGraph.forwardTensorSnapshot(terminalInput));
+  terminalGraph.dispatch();
+  close(await read(keep(terminalGraph.outputTensor())),[2.,4.]);
+  free(terminalGraph);free(terminalPlan);free(terminalNet);free(terminalInput);
+  close(await terminalSnapshot.readValues(),[2.,4.]);free(terminalSnapshot);
+  report.terminal_forward_capture=true;
   report.status="passed";
 }catch(e){report.error=String(e.stack||e);}
 finally{for(const v of owned)v.free();}

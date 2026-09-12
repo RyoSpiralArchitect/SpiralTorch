@@ -42,6 +42,82 @@ fn retention_caps_count_and_actual_output_bytes_without_overflow() {
 }
 
 #[test]
+fn terminal_snapshots_match_all_dense_modes_and_preserve_versions() {
+    let Some(runtime) = runtime() else { return };
+    let device = TensorDevice::new(runtime.clone()).unwrap();
+    let values: Vec<_> = (0..18).map(|i| (i as f32 - 8.) / 16.).collect();
+    let input = device
+        .upload(&[3, 2, 3], &values)
+        .unwrap()
+        .permute(&[1, 0, 2])
+        .unwrap();
+    for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+        for accumulation in [
+            MatmulAccumulation::Sequential,
+            MatmulAccumulation::Tiled,
+            MatmulAccumulation::Compensated,
+        ] {
+            for kinds in ["l", "p", "ll", "lp", "pl", "pp", "lpl", "plp"] {
+                let mut graph = ResidentGraph::new(
+                    runtime.clone(),
+                    definition(kinds, true),
+                    MatmulTile::default(),
+                    kernel,
+                    accumulation,
+                )
+                .unwrap();
+                let original = graph.forward_tensor(&input).unwrap();
+                let expected = read(&original);
+                let capture = graph.forward_tensor_snapshot(&input).unwrap();
+                assert_eq!(capture.layout(), original.layout());
+                let safe = device.upload(&[2, 3, 3], &[0.; 18]).unwrap();
+                for _ in 0..6 {
+                    drop(graph.forward_tensor_snapshot(&safe).unwrap());
+                }
+                assert_eq!(graph.submitted_dispatches(), 8);
+                assert_eq!(read(&original), expected);
+                assert!(graph
+                    .forward_tensor_snapshot(&safe.reshape(&[6, 3]).unwrap())
+                    .is_err());
+                assert_eq!(graph.submitted_dispatches(), 8);
+                drop(graph);
+                assert_eq!(capture.read().unwrap(), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn terminal_capture_keeps_masked_errors_and_legacy_graph_state() {
+    let Some(runtime) = runtime() else { return };
+    let mut graph = scale(&runtime, -f32::MAX);
+    let device = graph.tensor_device().clone();
+    let bad = device.upload(&[2, 1], &[0., 2.]).unwrap();
+    let safe = device.upload(&[2, 1], &[0.; 2]).unwrap();
+    let error = graph.forward_tensor_snapshot(&bad).unwrap();
+    let stage_error = graph.snapshot().unwrap();
+    for _ in 0..12 {
+        assert_eq!(
+            graph
+                .forward_tensor_snapshot(&safe)
+                .unwrap()
+                .read()
+                .unwrap(),
+            [0., 0.]
+        );
+    }
+    graph.dispatch().unwrap();
+    assert_eq!(graph.snapshot().unwrap().read().unwrap(), [0., 0.]);
+    assert_eq!(read(&graph.output_tensor().unwrap()), [0., 0.]);
+    drop(graph);
+    assert!(matches!(
+        error.read(),
+        Err(crate::resident_tensor::TensorError::NonFinite)
+    ));
+    assert!(stage_error.read().is_err());
+}
+
+#[test]
 fn outputs_at_the_byte_budget_are_not_retained_on_the_real_device() {
     let Some(runtime) = runtime() else { return };
     let elements = MAX_OUTPUT_BYTES as usize / 4;

@@ -17,6 +17,7 @@ declare module "spiraltorch-wasm" {
         addGelu(): void;
         addRelu(): void;
         forward(input: WgpuTensor): WgpuTensor;
+        forwardSnapshot(input: WgpuTensor): WgpuTensorSnapshot;
         inferencePlan(shape: number[]): InferencePlan;
         residentCacheInfo(): ResidentForwardStats;
         clearResidentCache(): void;
@@ -120,6 +121,7 @@ declare module "spiraltorch-wasm" {
         upload(data: Float32Array): void;
         setInputTensor(input: WgpuTensor): void;
         forwardTensor(input: WgpuTensor): WgpuTensor;
+        forwardTensorSnapshot(input: WgpuTensor): WgpuTensorSnapshot;
         dispatch(): bigint;
         outputTensor(): WgpuTensor;
         snapshot(): GraphInferenceSnapshot;

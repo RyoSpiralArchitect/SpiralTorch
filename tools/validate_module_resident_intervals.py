@@ -21,10 +21,17 @@ def number(value, *, positive=False):
     return value
 
 
-def validate(document, native):
-    if (document.get("schema") != "spiraltorch.module_completed_intervals.v1"
+def validate(document, native, *, terminal_capture=False):
+    schema = "spiraltorch.module_terminal_intervals.v1" if terminal_capture else "spiraltorch.module_completed_intervals.v1"
+    fixture = "nn-module-terminal-intervals" if terminal_capture else "nn-module-intervals"
+    if terminal_capture and document.get("module_apis") != dict(baseline="forward_then_snapshot", candidate="forwardSnapshot"):
+        raise ValueError("terminal API boundaries differ")
+    ordinary = dict(baseline="forward_then_snapshot", candidate="forward_then_snapshot")
+    if not terminal_capture and document.get("module_apis", ordinary) != ordinary:
+        raise ValueError("ordinary API boundaries differ")
+    if (document.get("schema") != schema
             or document.get("status") != "passed" or document.get("page_errors") != []
-            or document.get("fixture_request") != "nn-module-intervals"
+            or document.get("fixture_request") != fixture
             or document.get("protocol") != PROTOCOL or document.get("routes") != ROUTES
             or len(native.get("cases", [])) != 9 or len(document.get("cases", [])) != 36
             or any(type(document["protocol"][k]) is not int for k in PROTOCOL)
@@ -152,6 +159,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("fixture", "browser", "baseline-receipt", "candidate-receipt", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--terminal-capture", action="store_true")
     args = parser.parse_args()
     source_paths = [args.fixture, args.browser, args.baseline_receipt, args.candidate_receipt, Path(__file__),
                     Path(__file__).with_name("bench_graph_forward_paths.py")]
@@ -176,7 +184,10 @@ def main():
             if (browser.get("asset_sha256") != assets or browser.get("page_sha256") != digest(page)
                     or browser.get("wasm_sha256") != assets["/module/spiraltorch_wasm_bg.wasm"]):
                 raise ValueError("served artifact identities differ")
-            report.update(validate(browser, native))
+            report.update(validate(browser, native, terminal_capture=args.terminal_capture))
+            if args.terminal_capture:
+                report.update(schema="spiraltorch.module_terminal_intervals_validation.v1", module_apis=browser["module_apis"])
+                report["boundary"] += " Explicit candidate forwardSnapshot versus baseline forward then snapshot, including host wrapper differences; not isolated GPU queue cost."
             product_assets(args.baseline_receipt, "/baseline/")
             product_assets(args.candidate_receipt, "/module/")
             if hashes != {str(path.resolve()): digest(path) for path in source_paths}:

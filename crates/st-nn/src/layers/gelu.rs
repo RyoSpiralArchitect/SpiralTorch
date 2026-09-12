@@ -117,6 +117,18 @@ impl Module for Gelu {
         crate::resident::unary_forward(input, st_kernel_contracts::elementwise::ElementwiseOp::Gelu)
     }
 
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        crate::resident::unary_snapshot(
+            input,
+            st_kernel_contracts::elementwise::ElementwiseOp::Gelu,
+        )
+    }
+
     fn resident_parameter_bindings(
         &self,
     ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>

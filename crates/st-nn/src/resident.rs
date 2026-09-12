@@ -18,7 +18,7 @@ mod module_forward;
 mod module_update;
 mod portable;
 #[cfg(feature = "wgpu")]
-pub(crate) use module_forward::unary_forward;
+pub(crate) use module_forward::{unary_forward, unary_snapshot};
 #[cfg(feature = "wgpu")]
 pub use module_forward::{ResidentForwardCache, ResidentForwardStats};
 pub use module_update::{ModuleOptimizerStatePolicy, ResidentParameterBinding};

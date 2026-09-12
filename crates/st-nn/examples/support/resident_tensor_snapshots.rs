@@ -4,6 +4,7 @@ use st_backend_wgpu::{
     resident_tensor::{TensorDevice, TensorError, TensorReadback},
     runtime::WgpuRuntime,
 };
+use st_nn::Module;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -54,6 +55,10 @@ pub async fn run(runtime: &WgpuRuntime) -> Result<Value> {
     let empty_bad_snapshot = bad.narrow(0, 0, 0)?.snapshot()?;
     drop(bad);
     let valid = device.upload(&[4], &[7.; 4])?;
+    let mut terminal = st_nn::Sequential::new();
+    terminal.push(st_nn::Scaler::new("terminal", 4)?);
+    terminal.push(st_nn::Relu::new());
+    let terminal_capture = terminal.forward_resident_snapshot(&valid)?;
     for _ in 0..48 {
         drop(valid.snapshot()?);
         exact(&read(valid.snapshot()?).await?, &[7.; 4])?;
@@ -67,6 +72,10 @@ pub async fn run(runtime: &WgpuRuntime) -> Result<Value> {
         }
     }
     exact(&read(valid.snapshot()?).await?, &[7.; 4])?;
+    for _ in 0..12 {
+        drop(terminal.forward_resident_snapshot(&valid)?);
+    }
+    exact(&read(terminal_capture).await?, &[7.; 4])?;
 
     #[cfg(not(target_arch = "wasm32"))]
     let cancelled_pending_maps = 0;
@@ -85,13 +94,39 @@ pub async fn run(runtime: &WgpuRuntime) -> Result<Value> {
         }
         4
     };
+    #[cfg(not(target_arch = "wasm32"))]
+    let terminal_cancelled_pending_maps = 0;
+    #[cfg(target_arch = "wasm32")]
+    let terminal_cancelled_pending_maps = {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        for _ in 0..4 {
+            let mut pending = Box::pin(terminal.forward_resident_snapshot(&valid)?.read_async());
+            let mut context = Context::from_waker(Waker::noop());
+            if !matches!(pending.as_mut().poll(&mut context), Poll::Pending) {
+                return Err("terminal map did not enter a pending state".into());
+            }
+            drop(pending);
+            exact(
+                &read(terminal.forward_resident_snapshot(&valid)?).await?,
+                &[7.; 4],
+            )?;
+        }
+        4
+    };
+    let terminal_survivor = terminal.forward_resident_snapshot(&valid)?;
+    terminal.clear_resident_forward_cache();
+    drop(terminal);
     let survivor = valid.snapshot()?;
     drop(valid);
     drop(device);
     exact(&read(survivor).await?, &[7.; 4])?;
+    exact(&read(terminal_survivor).await?, &[7.; 4])?;
     Ok(
         json!({"status":"passed", "held_snapshots":24, "discard_and_reuse_cycles":48,
         "retained_guard_failures":2, "cancelled_pending_maps":cancelled_pending_maps,
+        "terminal_cancelled_pending_maps":terminal_cancelled_pending_maps,
+        "terminal_capture_survives_cache_clear_and_module_drop":true,
         "different_shapes_and_negative_zero":true, "survives_tensor_device_drop":true}),
     )
 }

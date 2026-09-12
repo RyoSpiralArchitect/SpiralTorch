@@ -1,6 +1,6 @@
 //! A browser-owned real Rust Module, not a separately reconstructed graph.
 use super::*;
-use crate::wgpu_tensor::{values, WasmWgpuTensor};
+use crate::wgpu_tensor::{values, WasmWgpuTensor, WasmWgpuTensorSnapshot};
 use st_nn::{Gelu, Linear, Module, Relu, Scaler, Sequential};
 use st_tensor::{NdLayout, Tensor};
 
@@ -79,6 +79,19 @@ impl WasmSequential {
                 .forward_resident(&input.inner)
                 .map_err(js_error)?,
         })
+    }
+
+    /// Submit the forward and terminal capture together; reading remains explicit.
+    #[wasm_bindgen(js_name = forwardSnapshot)]
+    pub fn forward_snapshot(
+        &self,
+        input: &WasmWgpuTensor,
+    ) -> Result<WasmWgpuTensorSnapshot, JsValue> {
+        let inner = self
+            .inner
+            .forward_resident_snapshot(&input.inner)
+            .map_err(js_error)?;
+        Ok(WasmWgpuTensorSnapshot::from_readback(inner))
     }
 
     #[wasm_bindgen(js_name = inferencePlan)]

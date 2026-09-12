@@ -9,10 +9,15 @@ import initBaseline, * as baseline from "./baseline/spiraltorch_wasm.js";
 import {protocol, routes, routeOrder, completedReads, clockProbe} from "./module_resident_intervals.mjs";
 
 const result = document.querySelector("#result");
-const report = {schema: "spiraltorch.module_completed_intervals.v1", status: "error",
+const terminalCapture = new URLSearchParams(location.search).get("terminal_capture") === "1";
+const report = {schema: terminalCapture ? "spiraltorch.module_terminal_intervals.v1" : "spiraltorch.module_completed_intervals.v1", status: "error",
   protocol, routes, cases: [],
   boundary: "Fixed 4 matrices, 9 shape/seed cases, 2 warmup and 9 retained intervals per route. Each interval contains 256 independent fixed-input forwards, each followed by a completed host read and output release. One outer clock, no per-call clocks; typed outputs retained until interval end and then all checked. Setup/upload/cold compilation and numerical comparison excluded. Same page, separate frozen WASM/device contexts; alternating context creation order and rotated routes. No trimming, retry, final-read-only burst, GPU timestamp, physical browser GPU or exclusive-host claim."};
 window.moduleIntervalReport = report;
+if (terminalCapture) {
+  report.module_apis = {baseline:"forward_then_snapshot", candidate:"forwardSnapshot"};
+  report.boundary += " Candidate uses an explicit single-submission forwardSnapshot; baseline uses forward then snapshot. Host wrapper/capture costs are included; this is not isolated GPU submission timing.";
+}
 const owned = new Set(), keep = value => (owned.add(value), value);
 const free = value => {owned.delete(value); value.free();};
 const check = (ok, message) => {if (!ok) throw Error(message);};
@@ -39,7 +44,7 @@ function cacheInfo(model) {
     submitted_forwards: String(info.submittedForwards)};}
   finally {info.free();}
 }
-async function context(st, c) {
+async function context(st, c, terminal) {
   const model = keep(new st.Sequential()), width = c.shape.at(-1);
   for (let i = 0; i < c.depth; i++) {
     model.addScaler("scale" + i, new Float32Array(c.plan.parameters[3*i].values));
@@ -58,7 +63,8 @@ async function context(st, c) {
   check(adapter.backend === "BrowserWebGpu" && adapter.device_type && adapter.device_type !== "Cpu",
     "browser GPU required; no CPU fallback");
   const input = keep(device.upload(c.shape, new Float32Array(c.input)));
-  const cold = keep(model.forward(input)); close(await readTensor(cold), c.reference); free(cold);
+  const cold = keep(terminal ? model.forwardSnapshot(input) : model.forward(input));
+  close(terminal ? await cold.readValues() : await readTensor(cold), c.reference); free(cold);
   graph.upload(new Float32Array(c.input)); graph.dispatch();
   const ready = keep(graph.snapshot()); close(await ready.readValues(), c.reference); free(ready);
   return {model, graph, device, input, adapter};
@@ -77,7 +83,7 @@ try {
     const cases = matrix % 2 ? [...fixture.cases].reverse() : fixture.cases;
     for (const c of cases) {
       const ctx = {};
-      for (const version of setup_order) ctx[version] = await context({baseline, candidate}[version], c);
+      for (const version of setup_order) ctx[version] = await context({baseline, candidate}[version], c, terminalCapture && version === "candidate");
       const row = {matrix, shape: c.shape, depth: c.depth, seed: c.seed, setup_order,
         samples: [], last_outputs: {}, adapters: {}, cache: {}, scalar_dispatches: {},
         warmup_completed_reads: {}, warmup_max_abs_error: {}};
@@ -86,7 +92,9 @@ try {
         for (const route of order) {
           const [version, family] = route.split("_"), v = ctx[version];
           const before = family === "module" ? BigInt(cacheInfo(v.model).submitted_forwards) : v.graph.submittedDispatches;
-          const measured = await completedReads(family === "module" ? {
+          const measured = await completedReads(family === "module" ? terminalCapture && version === "candidate" ? {
+            forward: () => v.model.forwardSnapshot(v.input), read: snapshot => snapshot.readValues(), release: snapshot => snapshot.free(),
+          } : {
             forward: () => v.model.forward(v.input), read: readTensor, release: output => output.free(),
           } : {
             forward: () => {v.graph.dispatch(); return v.graph.snapshot();},

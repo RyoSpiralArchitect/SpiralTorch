@@ -38,6 +38,20 @@ input's device and returns `WgpuTensor`. Supported modules are `Linear`,
 `Scaler`, `Gelu`, `Relu`, and compositions of them in `Sequential`.
 Unsupported layers reject before executing their host implementation.
 
+When the next consumer is the host, `model.forward_snapshot(x)` returns a
+`WgpuTensorSnapshot` directly. Packing, NN execution, the error guard and terminal
+copy share one queue submission; `capture.read_values()` explicitly waits and
+consumes it. This is not an implicit read inside `model(x)`:
+
+```python
+capture = model.forward_snapshot(x)
+values = capture.read_values()
+```
+
+The method supports the same five built-in module types, takes only `WgpuTensor`,
+and rejects CPU-only builds. Parameters and cache selection are shared with
+ordinary forwarding, not reconstructed by Python.
+
 ## Rust And Browser
 
 In Rust import `st_nn::Module` and call
@@ -47,6 +61,14 @@ In Rust import `st_nn::Module` and call
 available. Custom modules may explicitly opt into the shared
 `ResidentForwardCache::forward(operations, input)`; descriptors must faithfully
 represent their ordinary forward semantics.
+
+Rust's `Module::forward_resident_snapshot` and the browser's
+`Sequential.forwardSnapshot` return the same owning Rust tensor snapshot contract.
+Custom modules can opt in through `ResidentForwardCache::snapshot`; the default
+trait implementation rejects. At the explicit graph level, use
+`forward_tensor_snapshot` (Rust/Python) or `forwardTensorSnapshot` (WASM).
+These return tensor validity, not the stage-indexed `GraphInferenceSnapshot`;
+the separate graph snapshot API retains its detailed stage errors.
 
 The browser owns a real `st_nn::Sequential`, not a JavaScript implementation:
 
@@ -156,6 +178,15 @@ unmaps its own buffer without invalidating other captures. New native, Python
 and browser tests cover mixed shapes, retained invalid-value flags, dropped
 wrappers, negative zero and browser cancellation. Explicit graph snapshots keep
 their existing separate pool.
+
+Terminal forwarding uses that same fresh staging and exclusive lease, not either
+rejected cache prototype. Delayed reads survive later forwards, weight changes,
+cache clear and module destruction. Empty Sequential captures its input and keeps
+its NN execution counters at zero. Snapshotting a strided Tensor now packs and
+copies within one submission too; the normal contiguous snapshot route still
+does one copy submission. The explicit terminal API includes host-wrapper savings
+as well as GPU command scheduling changes, so endpoint timings do not isolate
+either cost. It does not add a backward tape or change ModuleTrainer routing.
 
 One-slot and two-alternating-slot Tensor staging caches were implemented and
 tested, but neither is enabled in the selected runtime. Both passed correctness

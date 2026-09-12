@@ -12,11 +12,16 @@ from bench_graph_forward_paths import (admit_native, close, digest, eager,
                                        summarize, validate_samples)
 
 
-def validate_python(document, native, native_path):
+def validate_python(document, native, native_path, *, terminal_capture=False):
     routes = [f"python_{k}_{c}" for k in ("scalar", "register") for c in ("h2h", "burst")]
     routes += [f"torch_{d}_{c}" for d in ("cpu", "mps") for c in ("h2h", "burst")]
     routes += ["module_resident_d2h", "module_resident_burst"]
-    if (document.get("schema") != "spiraltorch.module_forward_paths.v1" or document.get("status") != "passed"
+    schema = "spiraltorch.module_terminal_forward_paths.v1" if terminal_capture else "spiraltorch.module_forward_paths.v1"
+    if terminal_capture and document.get("module_api") != "forward_snapshot":
+        raise ValueError("terminal Python API boundary differs")
+    if not terminal_capture and document.get("module_api", "forward_then_snapshot") != "forward_then_snapshot":
+        raise ValueError("ordinary Python API boundary differs")
+    if (document.get("schema") != schema or document.get("status") != "passed"
             or document.get("sources", {}).get(str(native_path.resolve())) != digest(native_path)
             or document.get("devices") != ["cpu", "mps"] or len(document.get("cases", [])) != 9
             or document.get("build_info", {}).get("profile") != "release"

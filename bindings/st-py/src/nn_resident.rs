@@ -40,6 +40,34 @@ pub(crate) fn forward_argument(
     ))
 }
 
+/// Explicit terminal capture; never accepts a host tensor or uploads implicitly.
+pub(crate) fn snapshot_argument(
+    module: &dyn st_nn::Module,
+    input: &Bound<'_, PyAny>,
+) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+    #[cfg(feature = "wgpu")]
+    {
+        let input = input
+            .extract::<PyRef<'_, crate::wgpu_tensor::PyWgpuTensor>>()
+            .map_err(|_| {
+                PyTypeError::new_err("expected WgpuTensor; no implicit device transfer")
+            })?;
+        let inner = module
+            .forward_resident_snapshot(&input.inner)
+            .map_err(plan_error)?;
+        Ok(crate::wgpu_tensor::PyWgpuTensorSnapshot::from_readback(
+            inner,
+        ))
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        let _ = (module, input);
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "requires the wgpu feature",
+        ))
+    }
+}
+
 pub(crate) fn cache_info(module: &dyn st_nn::Module, py: Python<'_>) -> PyResult<Py<PyAny>> {
     #[cfg(feature = "wgpu")]
     {

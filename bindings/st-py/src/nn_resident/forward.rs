@@ -110,6 +110,18 @@ impl PyResidentGraphInference {
                 .map_err(error)?,
         })
     }
+    fn forward_tensor_snapshot(
+        &mut self,
+        py: Python<'_>,
+        input: &PyWgpuTensor,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensorSnapshot> {
+        let inner = py
+            .detach(|| self.inner.forward_tensor_snapshot(&input.inner))
+            .map_err(error)?;
+        Ok(crate::wgpu_tensor::PyWgpuTensorSnapshot::from_readback(
+            inner,
+        ))
+    }
     fn output_tensor(&self, py: Python<'_>) -> PyResult<PyWgpuTensor> {
         Ok(PyWgpuTensor {
             inner: py.detach(|| self.inner.output_tensor()).map_err(error)?,

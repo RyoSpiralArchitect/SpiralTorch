@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(feature = "webgpu")]
-use crate::wgpu_tensor::{WasmWgpuTensor, WasmWgpuTensorDevice};
+use crate::wgpu_tensor::{WasmWgpuTensor, WasmWgpuTensorDevice, WasmWgpuTensorSnapshot};
 #[cfg(feature = "webgpu")]
 use st_backend_wgpu::resident_graph::{GraphReadback, ResidentGraph};
 
@@ -98,6 +98,17 @@ impl WasmResidentGraphInference {
         Ok(WasmWgpuTensor {
             inner: self.inner.forward_tensor(&input.inner).map_err(js_error)?,
         })
+    }
+    #[wasm_bindgen(js_name = forwardTensorSnapshot)]
+    pub fn forward_tensor_snapshot(
+        &mut self,
+        input: &WasmWgpuTensor,
+    ) -> Result<WasmWgpuTensorSnapshot, JsValue> {
+        let inner = self
+            .inner
+            .forward_tensor_snapshot(&input.inner)
+            .map_err(js_error)?;
+        Ok(WasmWgpuTensorSnapshot::from_readback(inner))
     }
     #[wasm_bindgen(js_name = outputTensor)]
     pub fn output_tensor(&self) -> Result<WasmWgpuTensor, JsValue> {

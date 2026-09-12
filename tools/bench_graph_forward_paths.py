@@ -186,7 +186,7 @@ def original_module(case, st):
     return net
 
 
-def run_case(case, st, torch, devices, include_module=False):
+def run_case(case, st, torch, devices, include_module=False, terminal_module=False):
     plan = st.nn.InferencePlan.from_json(json.dumps(case["plan"]))
     graphs = dict(scalar=plan.compile_graph_wgpu(),
                   register=plan.compile_graph_wgpu(kernel="register_2x2", accumulation="compensated"))
@@ -201,7 +201,8 @@ def run_case(case, st, torch, devices, include_module=False):
         module = original_module(case, st)
         module_input = st.WgpuTensorDevice.create().upload(case["shape"], case["input"])
         start = perf_counter()
-        close(module(module_input).snapshot().read_values(), case["reference"])
+        capture = module.forward_snapshot(module_input) if terminal_module else module(module_input).snapshot()
+        close(capture.read_values(), case["reference"])
         cold_ms = (perf_counter()-start)*1000
         routes += ["module_resident_d2h", "module_resident_burst"]
     samples, last_outputs = [], {}
@@ -226,8 +227,12 @@ def run_case(case, st, torch, devices, include_module=False):
                 if graph.submitted_dispatches-before != forwards: raise ValueError("dispatch count differs")
             elif family == "module":
                 start = perf_counter()
-                for _ in range(forwards): value = module(module_input)
-                output = value.snapshot().read_values()
+                if terminal_module:
+                    for _ in range(forwards-1): value = module(module_input)
+                    output = module.forward_snapshot(module_input).read_values()
+                else:
+                    for _ in range(forwards): value = module(module_input)
+                    output = value.snapshot().read_values()
                 elapsed = (perf_counter()-start)*1000
             else:
                 x, parameters = contexts[variant]
@@ -262,12 +267,19 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--include-module", action="store_true",
                         help="Add ordinary model(WgpuTensor) routes; keep the legacy v1 benchmark unchanged by default")
+    parser.add_argument("--terminal-module", action="store_true",
+                        help="Explicit forward_snapshot for the final forward only; requires --include-module")
     args = parser.parse_args()
+    if args.terminal_module and not args.include_module:
+        parser.error("--terminal-module requires --include-module")
     report = dict(schema="spiraltorch.graph_forward_paths.v1", status="error", cases=[],
                   boundary="Three warmups, nine retained rotated blocks. H2H includes input transfer and host-list output. Burst keeps fixed input device-resident for eight independent forwards and includes one final host-list read. Setup excluded; numerical checks outside timing. Torch eager addmm/bias/tanh-GELU, no compile; native controls measured separately. macOS GPU contention UNKNOWN; no fastest-Torch claim.")
     if args.include_module:
         report["schema"] = "spiraltorch.module_forward_paths.v1"
         report["boundary"] += " Module routes use the same original Rust NN model; d2h keeps input resident and reads one output, burst performs eight independent forwards and reads the last output. Per-call weight bit checks and the resident I/O implementation of the hashed native artifact are included. No host transfer occurs between resident forwards. Cold compilation is recorded separately. d2h is not interchangeable with h2h."
+    if args.terminal_module:
+        report.update(schema="spiraltorch.module_terminal_forward_paths.v1", module_api="forward_snapshot")
+        report["boundary"] += " Terminal forward and snapshot copy share one submission; only the last forward in each burst uses this API. Host wrapper differences are included; not isolated GPU submission timing."
     paths = [args.fixture.resolve(strict=True), args.native_library.resolve(strict=True)]
     identities = {str(path): digest(path) for path in paths}
     with args.output.open("x") as output:
@@ -288,7 +300,7 @@ def main():
             match_adapter(document["adapter"], "mps", admission["name"])
             with torch.inference_mode():
                 for case in cases:
-                    result = run_case(case, st, torch, ["cpu", "mps"], args.include_module)
+                    result = run_case(case, st, torch, ["cpu", "mps"], args.include_module, args.terminal_module)
                     match_adapter(result["adapter"], "mps", admission["name"])
                     report["cases"].append(result)
                     print(json.dumps({k:result[k] for k in ("shape", "seed", "depth", "summary")}), flush=True)

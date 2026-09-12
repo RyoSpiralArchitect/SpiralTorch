@@ -185,10 +185,7 @@ impl PyWgpuTensor {
     }
     fn snapshot(&self, py: Python<'_>) -> PyResult<PyWgpuTensorSnapshot> {
         let inner = py.detach(|| self.inner.snapshot()).map_err(error)?;
-        Ok(PyWgpuTensorSnapshot {
-            shape: inner.layout().shape().to_vec(),
-            inner: Some(inner),
-        })
+        Ok(PyWgpuTensorSnapshot::from_readback(inner))
     }
 }
 
@@ -198,6 +195,15 @@ pub(crate) struct PyWgpuTensorSnapshot {
     inner: Option<TensorReadback>,
     #[cfg(feature = "wgpu")]
     shape: Vec<usize>,
+}
+#[cfg(feature = "wgpu")]
+impl PyWgpuTensorSnapshot {
+    pub(crate) fn from_readback(inner: TensorReadback) -> Self {
+        Self {
+            shape: inner.layout().shape().to_vec(),
+            inner: Some(inner),
+        }
+    }
 }
 #[cfg(feature = "wgpu")]
 #[pymethods]

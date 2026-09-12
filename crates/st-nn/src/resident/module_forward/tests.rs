@@ -84,6 +84,70 @@ fn operation_cache_checks_bits_layout_program_and_foreign_values() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn terminal_forward_uses_the_original_model_and_shared_cache() {
+    let Some(device) = device() else { return };
+    let _cpu = cpu();
+    let values: Vec<_> = (0..18).map(|i| (i as f32 - 8.) / 16.).collect();
+    let input = device
+        .upload(&[3, 2, 3], &values)
+        .unwrap()
+        .permute(&[1, 0, 2])
+        .unwrap();
+    let host = Tensor::from_vec(6, 3, input.snapshot().unwrap().read().unwrap()).unwrap();
+    let modules: Vec<Box<dyn Module>> = vec![
+        Box::new(model()),
+        Box::new(Linear::new("l", 3, 5).unwrap()),
+        Box::new(Scaler::new("g", 3).unwrap()),
+        Box::new(Gelu::new()),
+        Box::new(Relu::new()),
+        Box::new(Sequential::new()),
+    ];
+    for module in modules {
+        let expected = module.forward(&host).unwrap();
+        let capture = module.forward_resident_snapshot(&input).unwrap();
+        let original = module.forward_resident(&input).unwrap();
+        for _ in 0..12 {
+            drop(module.forward_resident_snapshot(&input).unwrap());
+        }
+        if let Some(stats) = module.resident_forward_stats() {
+            assert!(stats.compilations <= 1);
+            assert!(
+                stats.submitted_forwards == 0
+                    || stats
+                        == ResidentForwardStats {
+                            compilations: 1,
+                            cache_hits: 13,
+                            submitted_forwards: 14
+                        }
+            );
+        }
+        module.clear_resident_forward_cache();
+        drop(module);
+        close(&capture.read().unwrap(), expected.data());
+        close(
+            &original.snapshot().unwrap().read().unwrap(),
+            expected.data(),
+        );
+    }
+    for shape in [vec![], vec![0, 3]] {
+        let values = if shape.is_empty() { vec![-0.] } else { vec![] };
+        let input = device.upload(&shape, &values).unwrap();
+        let capture = Sequential::new().forward_resident_snapshot(&input).unwrap();
+        assert_eq!(capture.layout().shape(), shape);
+        assert_eq!(
+            capture
+                .read()
+                .unwrap()
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>(),
+            values.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
 fn exact_comparison_preserves_bits_at_odd_lengths_and_nonfinite_payloads() {
     let patterns = [
         0,
@@ -169,6 +233,7 @@ fn native_cached_linear_detects_later_export_and_retains_original_output() {
     let host = Tensor::from_vec(6, 3, vec![0.25; 18]).unwrap();
     let original_expected = model.forward(&host).unwrap();
     let original = model.forward_resident(&input).unwrap();
+    let original_capture = model.forward_resident_snapshot(&input).unwrap();
     model.forward_resident(&input).unwrap();
     let weights = model.weight().value().to_dlpack().unwrap();
     let biases = model.bias().value().to_dlpack().unwrap();
@@ -182,8 +247,10 @@ fn native_cached_linear_detects_later_export_and_retains_original_output() {
         *wp.add(14) += 0.125;
     }
     let changed = model.forward_resident(&input).unwrap();
+    let changed_capture = model.forward_resident_snapshot(&input).unwrap();
     let expected = model.forward(&host).unwrap();
     assert_ne!(expected, original_expected);
+    close(&changed_capture.read().unwrap(), expected.data());
     close(
         &changed.snapshot().unwrap().read().unwrap(),
         expected.data(),
@@ -194,6 +261,7 @@ fn native_cached_linear_detects_later_export_and_retains_original_output() {
     }
     let before = model.resident_forward_stats();
     assert!(model.forward_resident(&input).is_err());
+    assert!(model.forward_resident_snapshot(&input).is_err());
     assert!(model.forward(&host).is_err());
     assert_eq!(model.resident_forward_stats(), before);
     unsafe {
@@ -211,6 +279,7 @@ fn native_cached_linear_detects_later_export_and_retains_original_output() {
         &original.snapshot().unwrap().read().unwrap(),
         original_expected.data(),
     );
+    close(&original_capture.read().unwrap(), original_expected.data());
 }
 
 #[test]
@@ -566,6 +635,12 @@ fn committed_tensor_plan_is_not_silently_bypassed() {
     net.forward_resident(&x).unwrap();
     let before = net.resident_forward_stats();
     let scope = crate::execution::push_backend_policy(policy);
+    for module in [&net as &dyn Module, &Gelu::new(), &Sequential::new()] {
+        assert!(matches!(
+            module.forward_resident_snapshot(&x),
+            Err(InferenceError::ResidentForwardPolicy)
+        ));
+    }
     assert!(matches!(
         net.forward_resident(&x),
         Err(InferenceError::ResidentForwardPolicy)

@@ -178,10 +178,7 @@ impl WasmWgpuTensor {
     }
     pub fn snapshot(&self) -> Result<WasmWgpuTensorSnapshot, JsValue> {
         let inner = self.inner.snapshot().map_err(js_error)?;
-        Ok(WasmWgpuTensorSnapshot {
-            shape: inner.layout().shape().iter().map(|&v| v as u32).collect(),
-            inner: Some(inner),
-        })
+        Ok(WasmWgpuTensorSnapshot::from_readback(inner))
     }
 }
 
@@ -189,6 +186,14 @@ impl WasmWgpuTensor {
 pub struct WasmWgpuTensorSnapshot {
     inner: Option<TensorReadback>,
     shape: Vec<u32>,
+}
+impl WasmWgpuTensorSnapshot {
+    pub(crate) fn from_readback(inner: TensorReadback) -> Self {
+        Self {
+            shape: inner.layout().shape().iter().map(|&v| v as u32).collect(),
+            inner: Some(inner),
+        }
+    }
 }
 #[wasm_bindgen(js_class = WgpuTensorSnapshot)]
 impl WasmWgpuTensorSnapshot {

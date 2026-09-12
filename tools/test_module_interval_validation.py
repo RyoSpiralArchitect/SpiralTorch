@@ -43,6 +43,16 @@ def fixture():
 
 
 class Intervals(unittest.TestCase):
+    def test_terminal_mode_requires_distinct_api_and_schema_boundaries(self):
+        document, native = fixture()
+        with self.assertRaises(ValueError): validation.validate(document,native,terminal_capture=True)
+        document.update(schema="spiraltorch.module_terminal_intervals.v1",fixture_request="nn-module-terminal-intervals",
+                        module_apis=dict(baseline="forward_then_snapshot",candidate="forwardSnapshot"))
+        self.assertEqual(validation.validate(document,native,terminal_capture=True)["checked_forwards_including_warmup"],405504)
+        with self.assertRaises(ValueError): validation.validate(document,native)
+        document["module_apis"]["candidate"]="forward_then_snapshot"
+        with self.assertRaises(ValueError): validation.validate(document,native,terminal_capture=True)
+
     def test_fixed_matrix_and_per_forward_normalization(self):
         document, native = fixture()
         report = validation.validate(document, native)
