@@ -67,6 +67,7 @@ impl ResidentGraph {
     /// within a four-slot / 32 MiB per-graph output-data budget. Busy/oversized
     /// slots never cause aliasing, waiting or CPU fallback: allocate separately.
     /// View packing, the graph and the output guard share one queue submission.
+    /// The graph and its final guard capture also share one compute pass.
     pub fn forward_tensor(
         &mut self,
         input: &ResidentTensor,
@@ -111,11 +112,13 @@ impl ResidentGraph {
         } else {
             self.input_binding.as_ref()
         };
-        self.encode_graph(&mut encoder, Some(&packed), first, slot.last.as_ref());
-        self.guard_capture
-            .as_ref()
-            .unwrap()
-            .encode(&mut encoder, &slot.guard);
+        self.encode_graph(
+            &mut encoder,
+            Some(&packed),
+            first,
+            slot.last.as_ref(),
+            Some((self.guard_capture.as_ref().unwrap(), &slot.guard)),
+        );
         context.queue().submit(Some(encoder.finish()));
         let output = slot.tensor.clone();
         self.generation = generation;

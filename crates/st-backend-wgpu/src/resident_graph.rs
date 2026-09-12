@@ -388,7 +388,7 @@ impl ResidentGraph {
                 self.activations[0].size(),
             );
         }
-        self.encode_graph(&mut encoder, self.input_source.as_ref(), None, None);
+        self.encode_graph(&mut encoder, self.input_source.as_ref(), None, None, None);
         context.queue().submit(Some(encoder.finish()));
         self.output_generation = Some(self.generation);
         self.submitted_dispatches = dispatch;
@@ -403,6 +403,7 @@ impl ResidentGraph {
         input: Option<&ResidentTensor>,
         first: Option<&BoundaryBinding>,
         last: Option<&BoundaryBinding>,
+        guard: Option<(&GuardCapture, &wgpu::BindGroup)>,
     ) {
         encoder.clear_buffer(&self.validation, 0, None);
         if let Some(input) = input {
@@ -448,6 +449,11 @@ impl ResidentGraph {
                     }
                     _ => unreachable!("boundary binding kind matches the graph node"),
                 }
+            }
+            // Dispatch ordering also covers the stage-write -> guard-read
+            // dependency; a second pass is not needed to retain checked output.
+            if let Some((capture, binding)) = guard {
+                capture.encode_in_pass(&mut pass, binding);
             }
         }
     }

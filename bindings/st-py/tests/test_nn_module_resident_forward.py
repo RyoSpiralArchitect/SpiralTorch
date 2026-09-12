@@ -125,6 +125,33 @@ class Gpu(unittest.TestCase):
                 self.close(net(safe),[0.,0.])
                 self.assertEqual(net.resident_cache_info()["compilations"],1)
 
+    def test_late_workgroup_guard_survives_same_pass_capture_and_slot_reuse(self):
+        shape, width = [3, 7, 65], 65
+        count = 3*7*width
+        values = [0.]*count
+        values[-1] = 2.
+        bad = self.d.upload(shape, values)
+        safe = self.d.upload(shape, [0.]*count)
+        for bad_block in [0, 7, 17]:
+            net = st.nn.Sequential()
+            for block in range(18):
+                gain = [1.]*width
+                if block == bad_block: gain[-1] = -float.fromhex("0x1.fffffep+127")
+                net.add(st.nn.Scaler.from_gain(f"gain{block}", st.Tensor(1,width,gain)))
+                net.add(st.nn.Relu())
+            graph = net.inference_plan(shape).compile_graph_wgpu()
+            invalid = graph.forward_tensor(bad)
+            pending = graph.snapshot()
+            held = invalid.snapshot()
+            for _ in range(16): graph.forward_tensor(safe)
+            self.assertEqual(graph.snapshot().read_values(), [0.]*count)
+            with self.assertRaisesRegex(ValueError, rf"stage {2*bad_block},"): pending.read_values()
+            with self.assertRaisesRegex(ValueError, "non-finite"): held.read_values()
+            with self.assertRaisesRegex(ValueError, "non-finite"): invalid.snapshot().read_values()
+            with self.assertRaisesRegex(ValueError, "non-finite"): net(bad).snapshot().read_values()
+            self.assertEqual(net(safe).snapshot().read_values(), [0.]*count)
+            self.assertEqual(net.resident_cache_info()["compilations"], 1)
+
     def test_live_versions_views_and_bound_consumers_survive_output_reuse(self):
         net = st.nn.Sequential()
         net.add(st.nn.Scaler.from_gain("gain",st.Tensor(1,1,[2.])))

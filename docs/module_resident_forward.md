@@ -126,8 +126,13 @@ optimizer-state resume.
 - Dense and pointwise stages write disjoint words of one shared graph guard.
   One clear and the upstream-input guard copy replace per-pointwise clears/copies;
   logical stage error indices and the owning output guard are preserved.
+- Direct forwards append the output-guard capture dispatch to the same compute
+  pass as the NN stages. Dispatch ordering preserves stage writes before the
+  capture reads them; no flags or validation dispatches are removed. View packing
+  may still require its own pass. Explicit snapshot/output-capture APIs retain
+  their separate observation behavior.
 - Packing, new/uncacheable output allocation, command encoding, the upstream
-  guard copy and the final guard pass remain. This is not globally allocation-free
+  guard copy and the final guard dispatch remain. This is not globally allocation-free
   execution. Legacy explicit
   `set_input_tensor` / `dispatch` / `output_tensor` APIs retain their semantics;
   switching from direct forwarding back to `dispatch` copies the current input

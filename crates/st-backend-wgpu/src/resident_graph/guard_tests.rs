@@ -174,3 +174,105 @@ fn indexed_pointwise_guard_keeps_other_words_and_inherits_empty_input_failures()
         }
     }
 }
+
+#[test]
+fn terminal_guard_observes_late_workgroups_and_survives_queued_valid_forwards() {
+    let Some(runtime) = runtime() else { return };
+    let shape = [3, 7, 65];
+    let width = 65;
+    let count = shape.iter().product::<usize>();
+    let mut input = vec![0.; count];
+    input[count - 1] = 2.;
+    for dense in [false, true] {
+        for bad_stage in [0, 17, 33] {
+            let mut stages = vec![relu(); bad_stage];
+            let mut values = vec![1.; width];
+            values[width - 1] = -f32::MAX;
+            let parameters = if dense {
+                let mut weights = vec![0.; width * width];
+                for i in 0..width {
+                    weights[i * width + i] = values[i];
+                }
+                stages.push(GraphStage::Linear {
+                    weight: 0,
+                    bias: 1,
+                    gelu: false,
+                });
+                vec![
+                    GraphParameter {
+                        role: ParameterRole::Weight,
+                        shape: vec![width, width],
+                        values: weights,
+                    },
+                    GraphParameter {
+                        role: ParameterRole::Bias,
+                        shape: vec![width],
+                        values: vec![0.; width],
+                    },
+                ]
+            } else {
+                stages.push(GraphStage::Pointwise {
+                    chain: PointwiseChain::new(
+                        2,
+                        vec![PointwiseStep::named("multiply", Some(1)).unwrap()],
+                    )
+                    .unwrap(),
+                    parameters: vec![0],
+                });
+                vec![GraphParameter {
+                    role: ParameterRole::Gain,
+                    shape: vec![width],
+                    values,
+                }]
+            };
+            stages.push(relu());
+            let definition =
+                GraphDefinition::new(NdLayout::contiguous(&shape).unwrap(), stages, parameters)
+                    .unwrap();
+            let mut graph = graph(&runtime, definition);
+            let device = graph.tensor_device().clone();
+            let bad = device.upload(&shape, &input).unwrap();
+            let safe = device.upload(&shape, &vec![0.; count]).unwrap();
+            let old = graph.forward_tensor(&bad).unwrap();
+            let pending = graph.snapshot().unwrap();
+            let pending_owner = old.snapshot().unwrap();
+            for _ in 0..16 {
+                drop(graph.forward_tensor(&safe).unwrap());
+            }
+            assert_eq!(graph.snapshot().unwrap().read().unwrap(), vec![0.; count]);
+            assert!(
+                matches!(pending.read(), Err(GraphInferenceError::NonFinite { stage, .. }) if stage == bad_stage)
+            );
+            assert!(pending_owner.read().is_err());
+            assert!(old.snapshot().unwrap().read().is_err());
+            // The legacy separate output-capture path remains an independent
+            // reference for the same stage flags, after switching API routes.
+            graph.upload(&input).unwrap();
+            graph.dispatch().unwrap();
+            assert!(
+                matches!(graph.snapshot().unwrap().read(), Err(GraphInferenceError::NonFinite { stage, .. }) if stage == bad_stage)
+            );
+            assert!(graph
+                .output_tensor()
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read()
+                .is_err());
+            drop(old);
+            for _ in 0..16 {
+                drop(graph.forward_tensor(&safe).unwrap());
+            }
+            assert_eq!(
+                graph
+                    .output_tensor()
+                    .unwrap()
+                    .snapshot()
+                    .unwrap()
+                    .read()
+                    .unwrap(),
+                vec![0.; count]
+            );
+        }
+    }
+}

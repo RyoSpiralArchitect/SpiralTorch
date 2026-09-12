@@ -145,6 +145,32 @@ try{
     free(graph);free(plan);free(net);free(input);free(safe);free(invalid);
   }
   report.shared_stage_guards=true;
+  for(const bad of [0,7,17]){
+    const shape=[3,7,65],count=3*7*65,net=keep(new st.Sequential());
+    for(let block=0;block<18;block++){
+      const gain=new Float32Array(65).fill(1);
+      if(block===bad)gain[64]=-3.4028234663852886e38;
+      net.addScaler(`gain${block}`,gain);net.addRelu();
+    }
+    const values=new Float32Array(count);values[count-1]=2;
+    const input=keep(d.upload(shape,values)),safe=keep(d.upload(shape,new Float32Array(count)));
+    const plan=keep(net.inferencePlan(shape)),graph=keep(await plan.compileGraphWebGpu());
+    const invalid=keep(graph.forwardTensor(input)),pending=keep(graph.snapshot()),held=keep(invalid.snapshot());
+    for(let i=0;i<16;i++)free(keep(graph.forwardTensor(safe)));
+    close(await read(keep(graph.outputTensor())),Array(count).fill(0));
+    let error;try{await pending.readValues();}catch(e){error=String(e);}free(pending);
+    check(error?.includes(`stage ${2*bad},`),"late workgroup changed first failing stage");
+    error=undefined;try{await held.readValues();}catch(e){error=String(e);}free(held);
+    check(error?.includes("non-finite"),"queued late workgroup failure was erased");
+    error=undefined;try{await read(invalid);}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"late workgroup failure missed owning guard");
+    error=undefined;try{await read(keep(net.forward(input)));}catch(e){error=String(e);}
+    check(error?.includes("non-finite"),"Module failed to capture late workgroup flag");
+    close(await read(keep(net.forward(safe))),Array(count).fill(0));
+    check(stats(net).compilations==="1","late workgroup recovery rebuilt");
+    free(graph);free(plan);free(net);free(input);free(safe);free(invalid);
+  }
+  report.terminal_guard_ordering=true;
   report.status="passed";
 }catch(e){report.error=String(e.stack||e);}
 finally{for(const v of owned)v.free();}

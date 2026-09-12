@@ -73,11 +73,11 @@ impl GuardCapture {
 
     /// Upstream stages have finished; this output version is not externally
     /// visible yet. atomicStore overwrites a recycled destination's entire guard.
-    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, binding: &wgpu::BindGroup) {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("graph.guard_capture.pass"),
-            timestamp_writes: None,
-        });
+    pub(crate) fn encode_in_pass<'a>(
+        &'a self,
+        pass: &mut wgpu::ComputePass<'a>,
+        binding: &'a wgpu::BindGroup,
+    ) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, binding, &[]);
         pass.dispatch_workgroups(1, 1, 1);
