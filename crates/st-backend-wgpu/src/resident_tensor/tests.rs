@@ -112,24 +112,23 @@ fn resident_views_broadcasts_chains_and_failures_on_real_gpu() {
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn tensor_snapshots_reuse_only_idle_storage_on_real_gpu() {
+fn tensor_snapshots_preserve_versions_and_guards_on_real_gpu() {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
         return;
     }
-    let (runtime, _) = runtime::ensure_default_runtime_blocking("tensor.snapshot.cache").unwrap();
+    let (runtime, _) =
+        runtime::ensure_default_runtime_blocking("tensor.snapshot.versions").unwrap();
     let device = TensorDevice::new(runtime).unwrap();
     let root = device.upload(&[2, 2], &[1., 2., 3., 4.]).unwrap();
     let first = root.snapshot().unwrap();
-    let id = first.staging.buffer().global_id();
     assert_eq!(first.read().unwrap(), [1., 2., 3., 4.]);
     let second = root.snapshot().unwrap();
-    assert_ne!(second.staging.buffer().global_id(), id);
     assert_eq!(second.read().unwrap(), [1., 2., 3., 4.]);
     let held = root.snapshot().unwrap();
-    assert_eq!(held.staging.buffer().global_id(), id);
+    let held_id = held.staging.buffer().global_id();
     let other = device.clone().upload(&[4], &[9.; 4]).unwrap();
     let different = other.snapshot().unwrap();
-    assert_ne!(different.staging.buffer().global_id(), id);
+    assert_ne!(different.staging.buffer().global_id(), held_id);
     assert_eq!(different.read().unwrap(), [9.; 4]);
     assert_eq!(held.read().unwrap(), [1., 2., 3., 4.]);
     let old = root.permute(&[1, 0]).unwrap().snapshot().unwrap();
@@ -153,11 +152,9 @@ fn tensor_snapshots_reuse_only_idle_storage_on_real_gpu() {
     assert!(matches!(invalid.read(), Err(TensorError::NonFinite)));
     assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
     let invalid = bad.snapshot().unwrap();
-    let invalid_id = invalid.staging.buffer().global_id();
     assert!(matches!(invalid.read(), Err(TensorError::NonFinite)));
     assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
     let cleared = root.snapshot().unwrap();
-    assert_eq!(cleared.staging.buffer().global_id(), invalid_id);
     assert_eq!(cleared.read().unwrap(), [1., 2., 3., 4.]);
     drop(device);
     drop(root);

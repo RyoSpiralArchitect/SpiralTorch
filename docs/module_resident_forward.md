@@ -149,15 +149,19 @@ optimizer-state resume.
   plan is rejected because it does not yet describe this composite resident
   route; uncommitted scopes do not override an explicitly supplied GPU input.
 
-Explicit `WgpuTensor.snapshot()` captures alternate two size-matched idle staging
-slots per Rust `TensorDevice` (including its clones), with at most 16 MiB per slot
-and 32 MiB retained in total. This does not bound user-owned outstanding snapshots: busy or oversized
-captures allocate separate GPU buffers rather than aliasing, waiting or falling
-back to CPU. Only a discarded unread capture or a successfully unmapped read may
-return its buffer. Failed mappings and cancelled in-flight reads detach from the cache; snapshots
-remain readable after the originating tensor/device wrapper is dropped. Shape
-changes require an exact-sized buffer so guard offsets and decoded lengths stay
-unchanged. Explicit graph snapshots retain their existing separate pool.
+Explicit `WgpuTensor.snapshot()` captures retain their existing fresh staging
+allocation and exclusive readback lease. Snapshots remain readable after the
+originating tensor/device wrapper is dropped; cancelling a pending Rust read
+unmaps its own buffer without invalidating other captures. New native, Python
+and browser tests cover mixed shapes, retained invalid-value flags, dropped
+wrappers, negative zero and browser cancellation. Explicit graph snapshots keep
+their existing separate pool.
+
+One-slot and two-alternating-slot Tensor staging caches were implemented and
+tested, but neither is enabled in the selected runtime. Both passed correctness
+checks yet regressed the small/middle sustained browser fixtures by about 1-2%.
+Their complete [positive and negative evidence](../benchmarks/results/2026-09-12-tensor-readback-cache/README.md)
+is preserved; fewer buffer creations alone are not evidence of higher speed.
 
 For timing, `tools/bench_graph_forward_paths.py --include-module` adds ordinary
 `model(WgpuTensor)` calls to the existing matched fixture and PyTorch controls.

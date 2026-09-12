@@ -15,8 +15,6 @@ pub mod pointwise;
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
 pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
-const MAX_CACHED_READBACK_BYTES: u64 = 32 * 1024 * 1024;
-
 #[derive(Debug, Error)]
 pub enum TensorError {
     #[error(transparent)]
@@ -45,7 +43,6 @@ pub enum TensorError {
 struct Kernels {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
-    readbacks: runtime::ReadbackCache,
     runtime: WgpuRuntime,
 }
 
@@ -182,10 +179,6 @@ impl TensorDevice {
         Ok(Self(Shared::new(Kernels {
             layout,
             pipeline,
-            readbacks: runtime::ReadbackCache::new(
-                runtime.context().clone(),
-                MAX_CACHED_READBACK_BYTES,
-            ),
             runtime,
         })))
     }
@@ -535,24 +528,24 @@ impl ResidentTensor {
     }
 
     /// Capture logical values and validity now; awaiting does not re-read the source.
-    /// The device alternates two idle staging slots, each bounded to 16 MiB.
-    /// Outstanding snapshots and pending maps are never reused by another capture.
     pub fn snapshot(&self) -> Result<TensorReadback, TensorError> {
         let packed = self.contiguous()?;
         let context = self.device.runtime().context();
         let len = self.layout.len();
-        let staging = self.device.0.readbacks.checkout::<u32>(
+        let staging = runtime::empty_buffer::<u32>(
+            context.device(),
             "tensor.snapshot",
             len.checked_add(1).ok_or(TensorError::Limit("readback"))?,
+            wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         )?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
         if len > 0 {
-            encoder.copy_buffer_to_buffer(packed.values(), 0, staging.buffer(), 0, len as u64 * 4);
+            encoder.copy_buffer_to_buffer(packed.values(), 0, &staging, 0, len as u64 * 4);
         }
-        encoder.copy_buffer_to_buffer(packed.flags(), 0, staging.buffer(), len as u64 * 4, 4);
+        encoder.copy_buffer_to_buffer(packed.flags(), 0, &staging, len as u64 * 4, 4);
         context.queue().submit(Some(encoder.finish()));
         Ok(TensorReadback {
-            staging,
+            staging: runtime::ReadbackLease::unpooled(staging),
             layout: NdLayout::contiguous(self.layout.shape())?,
             context: context.clone(),
         })
