@@ -21,6 +21,40 @@ class TensorSurface(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class TensorGpu(unittest.TestCase):
+    def test_delayed_mixed_size_snapshots_survive_reuse_and_device_drop(self):
+        device = st.WgpuTensorDevice.create()
+        held = []
+        for index in range(24):
+            value = float(index)
+            if index % 4 == 0:
+                tensor = device.upload([2,2], [value,1.,2.,3.]).permute([1,0])
+                expected = [value,2.,1.,3.]
+            elif index % 4 == 1:
+                tensor, expected = device.upload([], [-0.]), [-0.]
+            elif index % 4 == 2:
+                tensor, expected = device.upload([0,4], []), []
+            else:
+                tensor = device.upload([3], [value]*3).narrow(0,1,2)
+                expected = [value]*2
+            held.append((tensor.snapshot(), expected))
+        bad = device.upload([4], [-float.fromhex("0x1.fffffep+127")]*4).mul(device.upload([], [2.])).relu()
+        invalid = bad.snapshot()
+        empty_invalid = bad.narrow(0,0,0).snapshot()
+        valid = device.upload([4], [7.]*4)
+        for _ in range(48):
+            discarded = valid.snapshot()
+            del discarded
+            self.assertEqual(valid.snapshot().read_values(), [7.]*4)
+        del device, tensor, bad, valid
+        gc.collect()
+        for snapshot, expected in reversed(held):
+            actual = snapshot.read_values()
+            self.assertEqual(actual, expected)
+            if expected == [-0.]:
+                self.assertEqual(actual[0].hex(), "-0x0.0p+0")
+        for snapshot in (invalid, empty_invalid):
+            with self.assertRaisesRegex(ValueError, "non-finite"): snapshot.read_values()
+
     def test_views_snapshots_and_shape_metadata(self):
         device = st.WgpuTensorDevice.create()
         self.assertNotEqual(device.adapter_info()["device_type"], "Cpu")

@@ -149,6 +149,16 @@ optimizer-state resume.
   plan is rejected because it does not yet describe this composite resident
   route; uncommitted scopes do not override an explicitly supplied GPU input.
 
+Explicit `WgpuTensor.snapshot()` captures share one size-matched idle staging
+buffer per Rust `TensorDevice` (including its clones), with a 32 MiB retained-byte
+limit. This does not bound user-owned outstanding snapshots: busy or oversized
+captures allocate separate GPU buffers rather than aliasing, waiting or falling
+back to CPU. Only a discarded unread capture or a successfully unmapped read may
+return its buffer. Failed/cancelled reads detach from the cache, and snapshots
+remain readable after the originating tensor/device wrapper is dropped. Shape
+changes require an exact-sized buffer so guard offsets and decoded lengths stay
+unchanged. Explicit graph snapshots retain their existing separate pool.
+
 For timing, `tools/bench_graph_forward_paths.py --include-module` adds ordinary
 `model(WgpuTensor)` calls to the existing matched fixture and PyTorch controls.
 The module d2h route excludes input upload; compare it separately from h2h.
