@@ -31,7 +31,10 @@ pub use graph::{
     WasmGraphTrainingParametersSnapshot, WasmGraphTrainingSnapshot, WasmGraphTrainingState,
     WasmResidentGraphTraining,
 };
-pub use learner::{WasmGraphGradientBatch, WasmGraphUpdateSnapshot, WasmResidentGraphLearner};
+pub use learner::{
+    WasmGraphGradientAccumulator, WasmGraphGradientBatch, WasmGraphUpdateSnapshot,
+    WasmResidentGraphLearner,
+};
 #[cfg(feature = "webgpu")]
 pub use module::{WasmResidentForwardStats, WasmSequential};
 mod training;

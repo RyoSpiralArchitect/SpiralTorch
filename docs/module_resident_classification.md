@@ -7,6 +7,9 @@ softmax or derivative implementation.
 
 ## Python Learning
 
+For changing batches and one update over several microbatches, see
+[resident microbatch accumulation](module_resident_microbatch.md).
+
 ```python
 import spiraltorch as st
 

@@ -1,11 +1,25 @@
 //! Loss-independent resident VJPs of a frozen graph. No optimizer is executed.
 use super::*;
 mod learner;
-pub use learner::{GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner};
+pub use learner::{
+    GraphGradientAccumulator, GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner,
+};
+
+#[derive(Clone)]
+struct ParameterState {
+    workspace: Shared<()>,
+    revision: u64,
+}
+impl ParameterState {
+    fn matches(&self, other: &Self) -> bool {
+        self.revision == other.revision && Shared::ptr_eq(&self.workspace, &other.workspace)
+    }
+}
 
 struct ForwardIdentity {
     generation: u64,
     submission: u64,
+    parameters: ParameterState,
 }
 
 /// Owning prediction and opaque identity of one workspace's latest forward.
@@ -65,6 +79,7 @@ pub struct ResidentGraphAutograd {
     forward_validation: wgpu::Buffer,
     input_source: Option<ResidentTensor>,
     current: Option<Shared<ForwardIdentity>>,
+    parameters: ParameterState,
     forwards: u64,
     backwards: u64,
 }
@@ -114,6 +129,10 @@ impl ResidentGraphAutograd {
             forward_validation,
             input_source: None,
             current: None,
+            parameters: ParameterState {
+                workspace: Shared::new(()),
+                revision: 0,
+            },
             forwards: 0,
             backwards: 0,
         })
@@ -248,6 +267,7 @@ impl ResidentGraphAutograd {
         let identity = Shared::new(ForwardIdentity {
             generation: self.input_generation(),
             submission,
+            parameters: self.parameters.clone(),
         });
         self.current = Some(identity.clone());
         self.forwards = submission;

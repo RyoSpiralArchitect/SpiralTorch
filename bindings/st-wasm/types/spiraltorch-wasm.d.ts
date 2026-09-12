@@ -164,6 +164,10 @@ declare module "spiraltorch-wasm" {
         /** Attempt number; acceptance requires reading an update snapshot. */
         sgd(gradients: GraphGradients, rate: number): bigint;
         sgdWeighted(batch: GraphGradientBatch, rate: number): bigint;
+        gradientAccumulator(): GraphGradientAccumulator;
+        zeroAccumulator(accumulator: GraphGradientAccumulator): void;
+        accumulate(accumulator: GraphGradientAccumulator, gradients: GraphGradients, weight: number): bigint;
+        sgdAccumulated(accumulator: GraphGradientAccumulator, rate: number): bigint;
         parameterSnapshot(): GraphTrainingParametersSnapshot;
         updateSnapshot(): GraphUpdateSnapshot;
         free(): void;
@@ -172,6 +176,13 @@ declare module "spiraltorch-wasm" {
         constructor();
         readonly length: number;
         add(gradients: GraphGradients, weight: number): void;
+        free(): void;
+    }
+    export class GraphGradientAccumulator {
+        private constructor();
+        readonly length: bigint;
+        readonly parameterGeneration: bigint;
+        parameterGradientTensors(): WgpuTensor[];
         free(): void;
     }
     export class GraphUpdateSnapshot {

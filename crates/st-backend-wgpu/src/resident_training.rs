@@ -44,6 +44,12 @@ pub enum TrainingError {
     StaleForward,
     #[error("gradient terms must contain 1..=256 same-forward contributions with finite weights")]
     GradientTerms,
+    #[error("gradient weight must be finite")]
+    GradientWeight,
+    #[error("accumulator and gradients must belong to this learner's current parameter state")]
+    AccumulatorState,
+    #[error("accumulate a gradient before observing or updating from the accumulator")]
+    EmptyAccumulator,
     #[error("submit an SGD update before requesting its receipt")]
     MissingUpdate,
     #[error("read the pending profile before reusing the private profiler; an abandoned or invalid profile requires a new workspace")]

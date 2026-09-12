@@ -2,6 +2,8 @@
 use super::*;
 mod composition;
 use composition::Composition;
+mod accumulator;
+pub use accumulator::GraphGradientAccumulator;
 
 const MAX_TERMS: usize = 256;
 
@@ -178,6 +180,21 @@ impl ResidentGraphLearner {
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&g.validation, 0, None);
         let weights = self.composition.encode(g, terms, &mut encoder);
+        let source = (current.generation, current.submission);
+        self.composition.write_weights(context.queue(), &weights);
+        self.submit_update(encoder, rate, attempt, source);
+        Ok(attempt)
+    }
+
+    fn submit_update(
+        &mut self,
+        mut encoder: wgpu::CommandEncoder,
+        rate: f32,
+        attempt: u64,
+        source: (u64, u64),
+    ) {
+        let g = &self.autograd.graph;
+        let context = g.device.runtime().context();
         g.encode_passes(&mut encoder, &g.update_passes, &mut Default::default());
         encoder.copy_buffer_to_buffer(
             &g.validation,
@@ -187,13 +204,12 @@ impl ResidentGraphLearner {
             g.validation.size(),
         );
         // Nothing fallible remains after changing a queue-visible learning rate.
-        self.composition.write_weights(context.queue(), &weights);
         g.write_rate(rate);
         context.queue().submit(Some(encoder.finish()));
-        self.last_update = Some((current.generation, current.submission));
+        self.last_update = Some(source);
         self.updates = attempt;
         self.autograd.current = None;
-        Ok(attempt)
+        self.autograd.parameters.revision = attempt;
     }
 
     /// Receipt of the latest attempted update, retained across later forwards.

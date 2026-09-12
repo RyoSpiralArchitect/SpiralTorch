@@ -16,8 +16,8 @@ mod snapshot;
 pub use snapshot::{GraphParameterReadback, GraphState, GraphStateReadback};
 mod autograd;
 pub use autograd::{
-    GraphForward, GraphGradientBatch, GraphGradients, GraphUpdateReadback, ResidentGraphAutograd,
-    ResidentGraphLearner,
+    GraphForward, GraphGradientAccumulator, GraphGradientBatch, GraphGradients,
+    GraphUpdateReadback, ResidentGraphAutograd, ResidentGraphLearner,
 };
 mod profile;
 use crate::runtime::timestamps::PassTimestampCursor;

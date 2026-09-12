@@ -155,6 +155,41 @@ impl WasmResidentGraphLearner {
     ) -> Result<u64, JsValue> {
         self.inner.sgd_batch(&batch.inner, rate).map_err(js_error)
     }
+    #[wasm_bindgen(js_name=gradientAccumulator)]
+    pub fn gradient_accumulator(&self) -> Result<WasmGraphGradientAccumulator, JsValue> {
+        Ok(WasmGraphGradientAccumulator {
+            inner: self.inner.gradient_accumulator().map_err(js_error)?,
+        })
+    }
+    #[wasm_bindgen(js_name=zeroAccumulator)]
+    pub fn zero_accumulator(
+        &self,
+        accumulator: &mut WasmGraphGradientAccumulator,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .zero_accumulator(&mut accumulator.inner)
+            .map_err(js_error)
+    }
+    pub fn accumulate(
+        &mut self,
+        accumulator: &mut WasmGraphGradientAccumulator,
+        gradients: &WasmGraphGradients,
+        weight: f32,
+    ) -> Result<u64, JsValue> {
+        self.inner
+            .accumulate(&mut accumulator.inner, &gradients.inner, weight)
+            .map_err(js_error)
+    }
+    #[wasm_bindgen(js_name=sgdAccumulated)]
+    pub fn sgd_accumulated(
+        &mut self,
+        accumulator: &WasmGraphGradientAccumulator,
+        rate: f32,
+    ) -> Result<u64, JsValue> {
+        self.inner
+            .sgd_accumulated(&accumulator.inner, rate)
+            .map_err(js_error)
+    }
     #[wasm_bindgen(js_name=parameterSnapshot)]
     pub fn parameter_snapshot(&self) -> Result<WasmGraphTrainingParametersSnapshot, JsValue> {
         Ok(WasmGraphTrainingParametersSnapshot {
@@ -170,6 +205,34 @@ impl WasmResidentGraphLearner {
             forward: inner.submitted_forward(),
             inner: Some(inner),
         })
+    }
+}
+
+#[wasm_bindgen(js_name=GraphGradientAccumulator)]
+pub struct WasmGraphGradientAccumulator {
+    #[cfg(feature = "webgpu")]
+    inner: backend::GraphGradientAccumulator,
+}
+#[cfg(feature = "webgpu")]
+#[wasm_bindgen(js_class=GraphGradientAccumulator)]
+impl WasmGraphGradientAccumulator {
+    #[wasm_bindgen(getter)]
+    pub fn length(&self) -> u64 {
+        self.inner.len()
+    }
+    #[wasm_bindgen(getter, js_name=parameterGeneration)]
+    pub fn parameter_generation(&self) -> u64 {
+        self.inner.parameter_generation()
+    }
+    #[wasm_bindgen(js_name=parameterGradientTensors, unchecked_return_type="WgpuTensor[]")]
+    pub fn parameter_gradient_tensors(&self) -> Result<Array, JsValue> {
+        Ok(self
+            .inner
+            .parameter_gradients()
+            .map_err(js_error)?
+            .into_iter()
+            .map(|inner| JsValue::from(WasmWgpuTensor { inner }))
+            .collect())
     }
 }
 

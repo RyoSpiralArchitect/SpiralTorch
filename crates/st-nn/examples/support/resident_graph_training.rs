@@ -32,6 +32,8 @@ mod classification;
 mod fusion;
 #[path = "resident_graph_training/learning.rs"]
 mod learning;
+#[path = "resident_graph_training/microbatch.rs"]
+mod microbatch;
 #[path = "resident_graph_training/resident_loss.rs"]
 mod resident_loss;
 macro_rules! readback {
@@ -343,6 +345,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         "learning":learning::run(runtime.clone()).await?,
         "resident_loss":resident_loss::run(runtime.clone()).await?,
         "classification":classification::run(runtime.clone()).await?,
+        "microbatch":microbatch::run(runtime.clone()).await?,
         "scope":"Sequential with owned gains; mean-MSE plain SGD; no intermediate host readbacks; not a throughput claim"}),
     )
 }

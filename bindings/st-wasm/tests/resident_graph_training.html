@@ -36,6 +36,9 @@ try {
       report.classification?.probes?.length!==43||report.classification.cases.some(c=>
         c.observations_after_updates!==64||c.module_parameters_applied!==7||c.steps.length!==64))
     throw Error("Missing class-last CrossEntropy learning and numerical probes");
+  if(report.microbatch?.status!=="passed"||report.microbatch?.cases?.length!==6||report.microbatch.cases.some(c=>
+      c.observations_after_updates!==32||c.microbatches!==95||c.windows.length!==32||c.module_parameters_applied!==7))
+    throw Error("Missing cross-input microbatch accumulation and module handoff");
   if(capture.length!==1||capture[0].captured_vjps!==4||capture[0].observation!=="after_workspace_drop"||
       JSON.stringify(capture[0].input_shape)!=="[2,3,257]")
     throw Error("Missing detached VJP capture and shared-guard recovery checks");

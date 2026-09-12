@@ -271,12 +271,93 @@ def replay_learning(case, device):
                 updates=64, max_abs_error=maximum)
 
 
+def admit_microbatch(case):
+    assert case["policy"] in ("Exact", "ModuleCompatible")
+    assert case["input_shape"] == case["plan"]["input_shape"] == [2,3,4]
+    assert case["observations_after_updates"] == 32 and case["microbatches"] == 95
+    assert case["module_parameters_applied"] == 7 and case["optimizer"] == "explicit_sgd_not_ModuleTrainer"
+    assert len(case["windows"]) == 32 and len(case["dataset"]) == 7
+    assert case["reduction"] in ("mean", "sum") and case["label_smoothing"] == .1 and case["ignore_index"] == -100
+    counts = []
+    for batch in case["dataset"]:
+        assert len(batch["input"]) == 24 and all(math.isfinite(x) for x in batch["input"])
+        assert len(batch["target"]) == 6 and all(y in (0,1,2,-100) for y in batch["target"])
+        counts.append(sum(y != -100 for y in batch["target"]))
+    assert counts == [6,4,2,5,3,1,6]
+    for i, window in enumerate(case["windows"]):
+        ids = [(i*3+j)%7 for j in range(2+i%3)]
+        assert [m["batch"] for m in window["microbatches"]] == ids
+        total = sum(counts[j] for j in ids)
+        for m in window["microbatches"]:
+            weight = (counts[m["batch"]] if case["reduction"] == "mean" else 1) / total
+            assert math.isclose(m["weight"],weight,rel_tol=1e-7,abs_tol=0.)
+        assert math.isclose(window["rate"],0. if i%11 == 0 else .1,rel_tol=1e-7,abs_tol=0.)
+    assert [e["batch"] for e in case["evaluation"]] == list(range(7))
+
+
+def replay_microbatch(case, device):
+    admit_microbatch(case)
+    plan = case["plan"]
+    assert plan["schema"] == "spiraltorch.nn.inference_plan.v2"
+    parameters = [torch.tensor(p["values"],dtype=torch.float32,device=device).reshape(p["shape"]).requires_grad_() for p in plan["parameters"]]
+    original = [p.detach().clone() for p in parameters]
+    comparisons = 0
+    maximum = 0.
+    def check(actual, expected):
+        nonlocal comparisons, maximum
+        actual = actual.detach().cpu().reshape(-1)
+        expected = torch.tensor(expected,dtype=torch.float32).reshape(-1)
+        assert torch.isfinite(actual).all() and torch.isfinite(expected).all()
+        torch.testing.assert_close(actual,expected,atol=2e-5,rtol=2e-4)
+        maximum = max(maximum,float((actual-expected).abs().max()) if actual.numel() else 0.)
+        comparisons += 1
+    def batch(index):
+        data = case["dataset"][index]
+        return (torch.tensor(data["input"],dtype=torch.float32,device=device).reshape([2,3,4]).requires_grad_(),
+                torch.tensor(data["target"],dtype=torch.long,device=device))
+    def loss(prediction, target, reduction):
+        return torch.nn.functional.cross_entropy(prediction.reshape(-1,3),target,reduction=reduction,ignore_index=-100,label_smoothing=.1)
+    for window in case["windows"]:
+        aggregate = [torch.zeros_like(p) for p in parameters]
+        for m in window["microbatches"]:
+            x,y = batch(m["batch"])
+            predicted = evaluate(plan,x,parameters)
+            objective = loss(predicted,y,case["reduction"])
+            dx,*raw = torch.autograd.grad(objective,[x,*parameters])
+            check(predicted,m["prediction"]); check(objective,[m["loss"]]); check(dx,m["input_gradient"])
+            for g, expected, accumulated in zip(raw,m["raw_gradients"],aggregate,strict=True):
+                check(g,expected)
+                accumulated.add_(g*m["weight"])
+        for g, expected in zip(aggregate,window["accumulated_gradients"],strict=True): check(g,expected)
+        with torch.no_grad():
+            for p,g,spec,expected in zip(parameters,aggregate,plan["parameters"],window["parameters"],strict=True):
+                if case["policy"] == "ModuleCompatible" and spec["role"] == "gain": g = g/6
+                p.sub_(window["rate"]*g)
+                check(p,expected)
+    initial_total = final_total = 0.
+    total = 0
+    for e in case["evaluation"]:
+        x,y = batch(e["batch"])
+        with torch.no_grad():
+            prediction = evaluate(plan,x,parameters)
+            final = loss(prediction,y,"mean")
+            initial = loss(evaluate(plan,x,original),y,"mean")
+        check(prediction,e["prediction"]); check(final,[e["loss"]]); check(initial,[e["initial_loss"]])
+        n = sum(v != -100 for v in case["dataset"][e["batch"]]["target"])
+        initial_total += float(initial.cpu())*n; final_total += float(final.cpu())*n; total += n
+    check(torch.tensor([initial_total/total]),[case["initial_loss"]])
+    check(torch.tensor([final_total/total]),[case["final_loss"]])
+    return dict(device=device,seed=case["seed"],policy=case["policy"],microbatch=True,
+                updates=32,microbatches=95,comparisons=comparisons,max_abs_error=maximum)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--require-resident-loss", action="store_true")
     parser.add_argument("--require-classification", action="store_true")
+    parser.add_argument("--require-microbatch", action="store_true")
     parser.add_argument(
         "--devices", nargs="+", choices=["cpu", "mps", "cuda"], default=["cpu", "mps"]
     )
@@ -313,6 +394,8 @@ def main():
                     assert fixture.get("resident_loss", {}).get("status") == "passed"
                 if args.require_classification:
                     assert fixture.get("classification", {}).get("status") == "passed"
+                if args.require_microbatch:
+                    assert fixture.get("microbatch", {}).get("status") == "passed"
                 report["inputs"].append(
                     {
                         "path": str(path.resolve()),
@@ -320,6 +403,15 @@ def main():
                     }
                 )
                 for device in args.devices:
+                    microbatch = fixture.get("microbatch")
+                    if microbatch is not None:
+                        assert microbatch["status"] == "passed"
+                        assert [(c["seed"],c["policy"],c["reduction"]) for c in microbatch["cases"]] == [
+                            (seed,policy,reduction) for seed,reduction in [(17,"mean"),(29,"sum"),(43,"mean")]
+                            for policy in ("Exact","ModuleCompatible")]
+                        for case in microbatch["cases"]:
+                            result = replay_microbatch(case,device)
+                            result["input"] = str(path.resolve()); report["cases"].append(result)
                     classification = fixture.get("classification")
                     if classification is not None:
                         assert classification["status"] == "passed" and len(classification["cases"]) == 6

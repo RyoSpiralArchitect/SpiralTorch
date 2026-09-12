@@ -177,6 +177,29 @@ impl Composition {
         terms: &[(&GraphGradients, f32)],
         encoder: &mut wgpu::CommandEncoder,
     ) -> Vec<u32> {
+        let weights = self.encode_into(g, terms, &g.raw_gradients, None, encoder);
+        encoder.copy_buffer_to_buffer(
+            &self.flags,
+            0,
+            &g.validation,
+            (g.nodes.len() + 2) as u64 * 4,
+            4,
+        );
+        weights
+    }
+
+    /// Reuse the ordered, checked composition kernel for fixed-size accumulation.
+    /// A prior guard is captured before replacing it; it cannot be canceled away.
+    pub(super) fn encode_into(
+        &self,
+        g: &ResidentGraphTraining,
+        terms: &[(&GraphGradients, f32)],
+        outputs: &[wgpu::Buffer],
+        prior: Option<&wgpu::Buffer>,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Vec<u32> {
+        let inherited = usize::from(prior.is_some());
+        debug_assert!(terms.len() + inherited <= MAX_TERMS);
         let device = g.device.runtime().context().device();
         let stride = self.stride / 4;
         let mut weights = vec![0u32; terms.len().div_ceil(LANES) * stride];
@@ -184,14 +207,23 @@ impl Composition {
             for (i, (_, weight)) in sources.iter().enumerate() {
                 weights[chunk * stride + i] = weight.to_bits();
             }
-            weights[chunk * stride + 4] = (chunk * LANES) as u32;
+            weights[chunk * stride + 4] = (chunk * LANES + inherited) as u32;
             weights[chunk * stride + 5] = sources.len() as u32;
-            weights[chunk * stride + 6] = terms.len() as u32;
+            weights[chunk * stride + 6] = (terms.len() + inherited) as u32;
         }
         encoder.clear_buffer(&self.flags, 0, None);
+        if let Some(prior) = prior {
+            encoder.copy_buffer_to_buffer(prior, 0, &self.sources, 0, 4);
+        }
         // Entire VJP flags are independent of parameters, including zero weights.
         for (i, (source, _)) in terms.iter().enumerate() {
-            encoder.copy_buffer_to_buffer(source.input.flags(), 0, &self.sources, i as u64 * 4, 4);
+            encoder.copy_buffer_to_buffer(
+                source.input.flags(),
+                0,
+                &self.sources,
+                (i + inherited) as u64 * 4,
+                4,
+            );
         }
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -202,8 +234,8 @@ impl Composition {
             pass.set_bind_group(0, &self.guard_group, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
-        for (id, output) in g.raw_gradients.iter().enumerate() {
-            if terms.len() == 1 && terms[0].1 == 1. {
+        for (id, output) in outputs.iter().enumerate() {
+            if prior.is_none() && terms.len() == 1 && terms[0].1 == 1. {
                 encoder.copy_buffer_to_buffer(
                     terms[0].0.parameters[id].values(),
                     0,
@@ -260,14 +292,11 @@ impl Composition {
                 pass.dispatch_workgroups(grid[0], grid[1], 1);
             }
         }
-        encoder.copy_buffer_to_buffer(
-            &self.flags,
-            0,
-            &g.validation,
-            (g.nodes.len() + 2) as u64 * 4,
-            4,
-        );
         weights
+    }
+
+    pub(super) fn capture_flags(&self, encoder: &mut wgpu::CommandEncoder, output: &wgpu::Buffer) {
+        encoder.copy_buffer_to_buffer(&self.flags, 0, output, 0, 4);
     }
 
     pub(super) fn write_weights(&self, queue: &wgpu::Queue, values: &[u32]) {

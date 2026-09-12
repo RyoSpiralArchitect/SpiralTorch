@@ -170,6 +170,43 @@ impl PyResidentGraphLearner {
         py.detach(|| self.inner.sgd_batch(&batch.inner, rate))
             .map_err(training_error)
     }
+    fn gradient_accumulator(&self, py: Python<'_>) -> PyResult<PyGraphGradientAccumulator> {
+        Ok(PyGraphGradientAccumulator {
+            inner: py
+                .detach(|| self.inner.gradient_accumulator())
+                .map_err(training_error)?,
+        })
+    }
+    fn zero_accumulator(
+        &self,
+        py: Python<'_>,
+        accumulator: &mut PyGraphGradientAccumulator,
+    ) -> PyResult<()> {
+        py.detach(|| self.inner.zero_accumulator(&mut accumulator.inner))
+            .map_err(training_error)
+    }
+    fn accumulate(
+        &mut self,
+        py: Python<'_>,
+        accumulator: &mut PyGraphGradientAccumulator,
+        gradients: &PyGraphGradients,
+        weight: f32,
+    ) -> PyResult<u64> {
+        py.detach(|| {
+            self.inner
+                .accumulate(&mut accumulator.inner, &gradients.inner, weight)
+        })
+        .map_err(training_error)
+    }
+    fn sgd_accumulated(
+        &mut self,
+        py: Python<'_>,
+        accumulator: &PyGraphGradientAccumulator,
+        rate: f32,
+    ) -> PyResult<u64> {
+        py.detach(|| self.inner.sgd_accumulated(&accumulator.inner, rate))
+            .map_err(training_error)
+    }
     fn parameter_snapshot(&self, py: Python<'_>) -> PyResult<PyGraphTrainingParametersSnapshot> {
         Ok(PyGraphTrainingParametersSnapshot {
             inner: Some(
@@ -188,6 +225,37 @@ impl PyResidentGraphLearner {
             forward: inner.submitted_forward(),
             inner: Some(inner),
         })
+    }
+}
+
+#[pyclass(name = "GraphGradientAccumulator", module = "spiraltorch.nn")]
+pub(super) struct PyGraphGradientAccumulator {
+    #[cfg(feature = "wgpu")]
+    inner: backend::GraphGradientAccumulator,
+}
+#[cfg(feature = "wgpu")]
+#[pymethods]
+impl PyGraphGradientAccumulator {
+    fn __len__(&self) -> PyResult<usize> {
+        isize::try_from(self.inner.len())
+            .map(|n| n as usize)
+            .map_err(|_| {
+                pyo3::exceptions::PyOverflowError::new_err(
+                    "accumulator length exceeds Python sequence limits",
+                )
+            })
+    }
+    #[getter]
+    fn parameter_generation(&self) -> u64 {
+        self.inner.parameter_generation()
+    }
+    fn parameter_gradient_tensors(&self, py: Python<'_>) -> PyResult<Vec<PyWgpuTensor>> {
+        Ok(py
+            .detach(|| self.inner.parameter_gradients())
+            .map_err(training_error)?
+            .into_iter()
+            .map(|inner| PyWgpuTensor { inner })
+            .collect())
     }
 }
 
@@ -228,6 +296,7 @@ impl PyGraphUpdateSnapshot {
 pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyResidentGraphLearner>()?;
     module.add_class::<PyGraphGradientBatch>()?;
+    module.add_class::<PyGraphGradientAccumulator>()?;
     module.add_class::<PyGraphUpdateSnapshot>()?;
     Ok(())
 }
