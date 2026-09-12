@@ -27,6 +27,7 @@ enum Node {
     Linear {
         forward: Pass,
         backward: Vec<Pass>,
+        delta: wgpu::Buffer,
     },
     Pointwise {
         plan: Box<PointwiseVjpPlan>,
@@ -34,6 +35,17 @@ enum Node {
         forward: wgpu::BindGroup,
         parameters: Vec<usize>,
     },
+}
+
+// Retain the existing binding resources so an owning VJP can replace only the
+// public destinations, without preparing another tape or different kernels.
+struct BackwardResources {
+    matrix_layout: wgpu::BindGroupLayout,
+    element_layout: wgpu::BindGroupLayout,
+    unused_read: wgpu::Buffer,
+    unused_out: wgpu::Buffer,
+    unused_aux: wgpu::Buffer,
+    tile: MatmulTile,
 }
 
 #[derive(Clone, Copy)]
@@ -55,6 +67,7 @@ pub struct ResidentGraphTraining {
     effective_gradients: Vec<wgpu::Buffer>,
     candidates: Vec<wgpu::Buffer>,
     nodes: Vec<Node>,
+    backward_resources: BackwardResources,
     loss_passes: Vec<Pass>,
     update_passes: Vec<Pass>,
     target: wgpu::Buffer,
@@ -444,7 +457,11 @@ impl ResidentGraphTraining {
                             },
                         )?,
                     ];
-                    Node::Linear { forward, backward }
+                    Node::Linear {
+                        forward,
+                        backward,
+                        delta,
+                    }
                 }
                 GraphStage::Pointwise {
                     chain,
@@ -587,6 +604,14 @@ impl ResidentGraphTraining {
             effective_gradients,
             candidates,
             nodes,
+            backward_resources: BackwardResources {
+                matrix_layout,
+                element_layout,
+                unused_read,
+                unused_out,
+                unused_aux,
+                tile,
+            },
             loss_passes,
             update_passes,
             target,

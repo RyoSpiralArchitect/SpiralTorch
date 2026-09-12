@@ -1,6 +1,7 @@
 //! Loss-independent resident VJPs of a frozen graph. No optimizer is executed.
 use super::*;
 mod learner;
+mod outputs;
 pub use learner::{
     GraphGradientAccumulator, GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner,
 };
@@ -71,11 +72,12 @@ impl GraphGradients {
 }
 
 /// Separate forward and arbitrary-cotangent backward on the same GPU tape.
-/// Parameters are frozen at compilation. VJPs overwrite scratch, never silently
-/// accumulate or apply batch normalization, loss scaling, or an optimizer.
+/// Parameters are frozen at compilation. VJPs share only intermediate scratch;
+/// returned gradients own their output version. No implicit accumulation,
+/// batch normalization, loss scaling, or optimizer is applied.
 pub struct ResidentGraphAutograd {
     graph: ResidentGraphTraining,
-    capture: crate::resident_tensor::capture::PreparedCapture,
+    outputs: outputs::GradientOutputs,
     forward_validation: wgpu::Buffer,
     input_source: Option<ResidentTensor>,
     current: Option<Shared<ForwardIdentity>>,
@@ -103,20 +105,7 @@ impl ResidentGraphAutograd {
     }
 
     fn from_prepared(graph: ResidentGraphTraining) -> Result<Self, TrainingError> {
-        let parameter_layouts = graph
-            .definition
-            .parameters()
-            .iter()
-            .map(|p| NdLayout::contiguous(&p.shape).map_err(TensorError::from))
-            .collect::<Result<Vec<_>, _>>()?;
-        let sources = std::iter::once((graph.input_layout(), &graph.gradients[0]))
-            .chain(parameter_layouts.iter().zip(&graph.raw_gradients))
-            .collect::<Vec<_>>();
-        let capture = crate::resident_tensor::capture::PreparedCapture::new(
-            &graph.device,
-            &sources,
-            &graph.validation,
-        )?;
+        let outputs = outputs::GradientOutputs::new(&graph)?;
         let forward_validation = runtime::empty_buffer::<u32>(
             graph.device.runtime().context().device(),
             "graph.autograd.forward_flags",
@@ -125,7 +114,7 @@ impl ResidentGraphAutograd {
         )?;
         Ok(Self {
             graph,
-            capture,
+            outputs,
             forward_validation,
             input_source: None,
             current: None,
@@ -327,17 +316,7 @@ impl ResidentGraphAutograd {
             0,
             g.output_layout().len() as u64 * 4,
         );
-        g.encode_backward(&mut encoder, &mut Default::default());
-        // Training's final-decision slot is unused here; keep backward pointwise
-        // flags separate so copying them cannot erase forward pointwise failures.
-        encoder.copy_buffer_to_buffer(
-            &g.pointwise_flags,
-            0,
-            &g.validation,
-            (g.nodes.len() + 3) as u64 * 4,
-            4,
-        );
-        let mut captured = self.capture.encode_reusing(&mut encoder)?.into_iter();
+        let mut captured = self.outputs.encode(g, &mut encoder)?.into_iter();
         let input = captured.next().expect("prepared input gradient capture");
         let parameters = captured.collect();
         context.queue().submit(Some(encoder.finish()));

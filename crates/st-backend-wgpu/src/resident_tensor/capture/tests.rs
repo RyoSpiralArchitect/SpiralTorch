@@ -22,164 +22,40 @@ fn test_device() -> Option<TensorDevice> {
     Some(TensorDevice::new(runtime).unwrap())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn reusable_capture(plan: &mut PreparedCapture) -> Vec<ResidentTensor> {
-    let context = plan.device.runtime().context().clone();
-    let mut encoder = context.device().create_command_encoder(&Default::default());
-    let result = plan.encode_reusing(&mut encoder).unwrap();
-    context.queue().submit(Some(encoder.finish()));
-    result
-}
-
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn capture_reuse_pins_whole_versions_and_resets_failed_guards() {
+fn whole_output_ownership_includes_views_weak_owners_and_the_shared_guard() {
     let Some(device) = test_device() else {
         return;
     };
-    let context = device.runtime().context();
-    let gpu = context.device();
-    let queue = context.queue();
-    let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
-    let expected: Vec<_> = (0..771).map(|i| (i % 17) as f32 * 0.25 - 2.).collect();
-    let values = runtime::upload_slice(gpu, "capture.reuse.matrix", &expected, usage).unwrap();
-    let scalar = runtime::upload_slice(gpu, "capture.reuse.scalar", &[-0f32], usage).unwrap();
-    let guards = runtime::upload_slice(gpu, "capture.reuse.guards", &[0u32; 5], usage).unwrap();
-    let matrix = NdLayout::contiguous(&[3, 257]).unwrap();
-    let scalar_layout = NdLayout::contiguous(&[]).unwrap();
-    let empty_layout = NdLayout::contiguous(&[0, 7]).unwrap();
-    let mut plan = PreparedCapture::new(
-        &device,
-        &[
-            (&matrix, &values),
-            (&scalar_layout, &scalar),
-            (&empty_layout, &scalar),
-        ],
-        &guards,
-    )
-    .unwrap();
-    let original = reusable_capture(&mut plan);
-    let snapshot = original[0].snapshot().unwrap();
-    // Even a view of an unrelated member protects the common whole-VJP guard.
-    let scalar_view = original[1].reshape(&[1]).unwrap();
-    drop(original);
-    queue.write_buffer(&guards, 16, bytemuck::cast_slice(&[1u32]));
-    let bad = reusable_capture(&mut plan);
-    let bad_reads: Vec<_> = bad.iter().map(|t| t.snapshot().unwrap()).collect();
-    let bad_consumer = bad[0]
-        .mul(&device.upload(&[], &[0.]).unwrap())
-        .unwrap()
-        .snapshot()
-        .unwrap();
-    drop(bad);
-    queue.write_buffer(&guards, 16, bytemuck::cast_slice(&[0u32]));
-    let recovered = reusable_capture(&mut plan);
-    assert_eq!(
-        plan.stats,
-        CaptureStats {
-            allocations: 2,
-            reuses: 1
-        }
-    );
-    assert_eq!(recovered[0].snapshot().unwrap().read().unwrap(), expected);
-    assert!(recovered[2].snapshot().unwrap().read().unwrap().is_empty());
-    drop(recovered);
-    // Last-element nonfinite detection must also re-poison every member.
-    queue.write_buffer(&values, 770 * 4, bytemuck::cast_slice(&[f32::INFINITY]));
-    let nonfinite = reusable_capture(&mut plan);
-    let nonfinite_reads: Vec<_> = nonfinite.iter().map(|t| t.snapshot().unwrap()).collect();
-    drop(nonfinite);
-    queue.write_buffer(&values, 770 * 4, bytemuck::cast_slice(&[expected[770]]));
-    let last = reusable_capture(&mut plan);
-    assert_eq!(
-        plan.stats,
-        CaptureStats {
-            allocations: 2,
-            reuses: 3
-        }
-    );
-    drop(plan);
-    assert_eq!(snapshot.read().unwrap(), expected);
-    assert_eq!(
-        scalar_view.snapshot().unwrap().read().unwrap()[0].to_bits(),
-        (-0f32).to_bits()
-    );
-    assert_eq!(last[0].snapshot().unwrap().read().unwrap(), expected);
-    for read in bad_reads
-        .into_iter()
-        .chain(nonfinite_reads)
-        .chain([bad_consumer])
-    {
-        assert!(matches!(read.read(), Err(TensorError::NonFinite)));
-    }
-}
-
-#[test]
-#[cfg(not(target_arch = "wasm32"))]
-fn capture_pool_spills_busy_versions_and_respects_weak_owners() {
-    let Some(device) = test_device() else {
-        return;
-    };
-    let context = device.runtime().context();
-    let gpu = context.device();
-    let queue = context.queue();
-    let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
-    let values = runtime::upload_slice(gpu, "capture.pool.values", &[1f32; 257], usage).unwrap();
-    let guards = runtime::upload_slice(gpu, "capture.pool.guards", &[0u32], usage).unwrap();
-    let layout = NdLayout::contiguous(&[257]).unwrap();
-    let mut plan = PreparedCapture::new(&device, &[(&layout, &values)], &guards).unwrap();
-    let mut retained = Vec::new();
-    for i in 0..6 {
-        queue.write_buffer(&values, 0, bytemuck::cast_slice(&[i as f32; 257]));
-        retained.push(reusable_capture(&mut plan));
-    }
-    assert_eq!(plan.outputs.len(), MAX_CAPTURE_BATCHES);
-    assert_eq!(
-        plan.stats,
-        CaptureStats {
-            allocations: 6,
-            reuses: 0
-        }
-    );
-    let weak = Shared::downgrade(&retained[0][0].storage);
-    drop(retained.remove(0));
-    let spill = reusable_capture(&mut plan);
-    assert_eq!(plan.stats.allocations, 7);
-    assert_eq!(weak.upgrade().unwrap().values.size(), 257 * 4);
+    let layouts = [
+        NdLayout::contiguous(&[3, 257]).unwrap(),
+        NdLayout::contiguous(&[]).unwrap(),
+        NdLayout::contiguous(&[0, 7]).unwrap(),
+    ];
+    let mut outputs =
+        allocate_whole_outputs(&device, &layouts, wgpu::BufferUsages::COPY_DST).unwrap();
+    assert!(!whole_outputs_exclusively_owned(&mut []));
+    assert!(whole_outputs_exclusively_owned(&mut outputs));
+    let view = outputs[1].reshape(&[1]).unwrap();
+    assert!(!whole_outputs_exclusively_owned(&mut outputs));
+    drop(view);
+    let weak = Shared::downgrade(&outputs[0].storage);
+    assert!(!whole_outputs_exclusively_owned(&mut outputs));
     drop(weak);
-    let weak_guard = Shared::downgrade(&plan.outputs[0].outputs[0].storage.flags);
-    drop(reusable_capture(&mut plan));
-    assert_eq!(plan.stats.allocations, 8);
+    let weak_guard = Shared::downgrade(&outputs[2].storage.flags);
+    assert!(!whole_outputs_exclusively_owned(&mut outputs));
     drop(weak_guard);
-    let reused = reusable_capture(&mut plan);
-    assert_eq!(plan.stats.reuses, 1);
-    drop(plan);
-    for (i, batch) in retained.iter().enumerate() {
-        assert_eq!(
-            batch[0].snapshot().unwrap().read().unwrap(),
-            vec![(i + 1) as f32; 257]
-        );
-    }
-    for batch in [spill, reused] {
-        assert_eq!(
-            batch[0].snapshot().unwrap().read().unwrap(),
-            vec![5f32; 257]
-        );
-    }
-    // Exercise the no-retention branch without reserving an oversized test buffer.
-    let mut unpooled = PreparedCapture::new(&device, &[(&layout, &values)], &guards).unwrap();
-    unpooled.retention_limit = 0;
-    for _ in 0..8 {
-        drop(reusable_capture(&mut unpooled));
-    }
-    assert!(unpooled.outputs.is_empty());
-    assert_eq!(
-        unpooled.stats,
-        CaptureStats {
-            allocations: 8,
-            reuses: 0
-        }
-    );
+    let guard = outputs[2].storage.flags.clone();
+    assert!(!whole_outputs_exclusively_owned(&mut outputs));
+    drop(guard);
+    assert!(whole_outputs_exclusively_owned(&mut outputs));
+    assert!(allocate_whole_outputs(
+        &device,
+        [&layouts[0].permute(&[1, 0]).unwrap()],
+        wgpu::BufferUsages::empty()
+    )
+    .is_err());
 }
 
 #[test]

@@ -42,6 +42,10 @@ enum ReductionWorkspace {
     },
 }
 
+/// Only terminal reductions are rebound; contribution and partial scratch stay
+/// in the serial workspace, not in each owning graph-gradient version.
+pub(crate) struct VjpOutputBindings(Vec<Option<wgpu::BindGroup>>);
+
 fn groups_grid(groups: usize, limits: &wgpu::Limits) -> Result<[u32; 2], TensorError> {
     let groups = u32::try_from(groups.max(1)).map_err(|_| TensorError::Limit("VJP groups"))?;
     let x = groups.min(limits.max_compute_workgroups_per_dimension);
@@ -378,6 +382,56 @@ impl PointwiseVjpPlan {
         );
     }
 
+    pub(crate) fn bind_outputs(
+        &self,
+        workspace: &VjpWorkspace,
+        gradients: &[&wgpu::Buffer],
+        flags: &wgpu::Buffer,
+    ) -> VjpOutputBindings {
+        assert_eq!(gradients.len(), self.reductions.len());
+        let gpu = self.forward.device.runtime().context().device();
+        VjpOutputBindings(
+            self.reductions
+                .iter()
+                .zip(&workspace.reductions)
+                .zip(gradients)
+                .map(|((reduction, bound), &values)| match bound {
+                    ReductionWorkspace::Direct => None,
+                    ReductionWorkspace::Sum { second, .. } => {
+                        let (source, metadata) = if let Some(second) = second {
+                            (&second.0, &reduction.second.as_ref().unwrap().0)
+                        } else {
+                            (&workspace.contributions, &reduction.first)
+                        };
+                        Some(bind(
+                            gpu,
+                            &self.reduction_layout,
+                            &[source, values, metadata, flags],
+                        ))
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// All destinations must match bind_outputs(). This reuses the same checked
+    /// producers and reduction order as the fixed-workspace path.
+    pub(crate) fn encode_prepared_to<'a>(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        workspace: &VjpWorkspace,
+        outputs: &VjpOutputBindings,
+        gradients: impl IntoIterator<Item = &'a wgpu::Buffer>,
+    ) {
+        self.encode_prepared_inner(
+            encoder,
+            workspace,
+            Some(outputs),
+            gradients,
+            &mut Default::default(),
+        );
+    }
+
     pub(crate) fn profile_passes(&self, workspace: &VjpWorkspace) -> Vec<(Option<usize>, usize)> {
         let mut passes = vec![(None, 0)];
         for (slot, reduction) in workspace.reductions.iter().enumerate() {
@@ -406,6 +460,20 @@ impl PointwiseVjpPlan {
         gradients: impl IntoIterator<Item = &'a wgpu::Buffer>,
         timestamps: &mut PassTimestampCursor<'_>,
     ) {
+        self.encode_prepared_inner(encoder, workspace, None, gradients, timestamps);
+    }
+
+    fn encode_prepared_inner<'a>(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        workspace: &VjpWorkspace,
+        outputs: Option<&VjpOutputBindings>,
+        gradients: impl IntoIterator<Item = &'a wgpu::Buffer>,
+        timestamps: &mut PassTimestampCursor<'_>,
+    ) {
+        if let Some(outputs) = outputs {
+            assert_eq!(outputs.0.len(), self.reductions.len());
+        }
         encode_bound_with_timestamps(
             encoder,
             &self.pipeline,
@@ -414,8 +482,14 @@ impl PointwiseVjpPlan {
             timestamps.next(),
         );
         let mut gradients = gradients.into_iter();
-        for (reduction, bound) in self.reductions.iter().zip(&workspace.reductions) {
+        for (slot, (reduction, bound)) in self
+            .reductions
+            .iter()
+            .zip(&workspace.reductions)
+            .enumerate()
+        {
             let values = gradients.next().expect("validated gradient slot");
+            let terminal = outputs.and_then(|outputs| outputs.0[slot].as_ref());
             match bound {
                 ReductionWorkspace::Direct => {
                     if !reduction.layout.is_empty() {
@@ -432,7 +506,11 @@ impl PointwiseVjpPlan {
                     encode_bound_with_timestamps(
                         encoder,
                         &self.reduction_pipeline,
-                        first,
+                        if second.is_none() {
+                            terminal.unwrap_or(first)
+                        } else {
+                            first
+                        },
                         reduction.first_grid,
                         timestamps.next(),
                     );
@@ -441,7 +519,7 @@ impl PointwiseVjpPlan {
                         encode_bound_with_timestamps(
                             encoder,
                             &self.reduction_pipeline,
-                            binding,
+                            terminal.unwrap_or(binding),
                             reduction.second.as_ref().unwrap().1,
                             timestamps.next(),
                         );

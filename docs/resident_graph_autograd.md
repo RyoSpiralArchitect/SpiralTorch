@@ -62,15 +62,26 @@ All compilers also have explicit tile/kernel/accumulation options.
   gradient handles are frozen by GPU operations in their respective submission.
   That avoids host round trips, not all GPU copies or dispatch overhead.
 
-The gradient snapshot path prepares fixed contiguous source bindings and shape
-metadata once. It copies the input and parameter gradients in one compute pass,
-with a new immutable values buffer per tensor and one shared finite guard per
-VJP. That guard includes every upstream flag and every captured value, including
-late parameter failures. It is never reused by a later backward. Clones and
-views retain it after the original gradient container or workspace is dropped.
-This removes per-output metadata/guard allocations and separate capture passes,
-not the value copies, output allocations, or individual copy dispatches. The
-general tensor/view evaluator and ordinary MSE/SGD encoder remain separate.
+Backward writes dense weight/bias gradients and terminal input gradients into
+owning result buffers. Pointwise reductions are rebound to the same owning
+destinations while intermediate contributions and reduction partials remain in
+the serial workspace. Producers check their results; one final guard-only
+dispatch freezes all forward, seed and backward failures, including late
+parameter reductions. There is no final full-gradient copy/check dispatch per
+tensor. Pointwise contribution copies, cotangent packing, forward prediction
+capture and shared intermediate scratch still exist; this is not a claim of
+copy-free execution or a measured speedup.
+
+The workspace retains at most four whole output versions within a 32 MiB
+output-data budget (values, empty padding and the shared guard, not all tape or
+binding resources). Bindings are prepared once per version. A version is reused
+only when no member, view, strong or weak owner can observe its values or guard.
+Held or oversized versions spill into separate allocations without waiting or
+aliasing. Pending snapshots and already-submitted consumers precede reuse on the
+same queue. Every returned tensor and its whole-VJP guard survive workspace drop.
+Explicit optimizer/history snapshots still use the independent checked-copy
+path. The general tensor/view evaluator and ordinary MSE/SGD encoder remain
+separate.
 
 ## Scope
 

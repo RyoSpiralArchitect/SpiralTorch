@@ -10,7 +10,7 @@ struct Slot {
 const MAX_CAPTURE_BATCHES: usize = 4;
 const MAX_CAPTURE_BYTES: u64 = 32 * 1024 * 1024;
 
-fn retention_limit(mut lengths: impl Iterator<Item = usize>) -> usize {
+pub(crate) fn retention_limit(mut lengths: impl Iterator<Item = usize>) -> usize {
     lengths
         .try_fold(4u64, |bytes, len| {
             (len.max(1) as u64).checked_mul(4)?.checked_add(bytes)
@@ -25,36 +25,62 @@ struct OutputBatch {
     bindings: Vec<wgpu::BindGroup>,
 }
 
-impl OutputBatch {
-    fn exclusively_owned(&mut self) -> bool {
-        // A single retained member pins the whole guard. Tensor views and weak
-        // storage owners must be gone before any value or shared flag is reset.
-        self.outputs
+pub(crate) fn whole_outputs_exclusively_owned(outputs: &mut [ResidentTensor]) -> bool {
+    // A single retained member pins the whole guard. Tensor views and weak
+    // storage owners must be gone before any value or shared flag is reset.
+    !outputs.is_empty()
+        && outputs
             .iter_mut()
             .all(|t| Shared::get_mut(&mut t.storage).is_some())
-            && Shared::strong_count(&self.outputs[0].storage.flags) == self.outputs.len()
-            && Shared::weak_count(&self.outputs[0].storage.flags) == 0
-    }
+        && Shared::strong_count(&outputs[0].storage.flags) == outputs.len()
+        && Shared::weak_count(&outputs[0].storage.flags) == 0
 }
 
-#[cfg(test)]
-#[derive(Default, Debug, PartialEq, Eq)]
-struct CaptureStats {
-    allocations: usize,
-    reuses: usize,
+/// Private destinations sharing one whole-result guard. The caller must write
+/// every value and finalize the guard before submitting/exposing these handles.
+pub(crate) fn allocate_whole_outputs<'a>(
+    device: &TensorDevice,
+    layouts: impl IntoIterator<Item = &'a NdLayout>,
+    extra_usage: wgpu::BufferUsages,
+) -> Result<Vec<ResidentTensor>, TensorError> {
+    let gpu = device.runtime().context().device();
+    let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+    let flags = Shared::new(runtime::empty_buffer::<u32>(
+        gpu,
+        "graph.capture.flags",
+        1,
+        usage | wgpu::BufferUsages::COPY_DST,
+    )?);
+    layouts
+        .into_iter()
+        .map(|layout| {
+            validate_view(layout, layout.len(), &gpu.limits())?;
+            if !layout.is_contiguous() || layout.offset() != 0 {
+                return Err(TensorError::Limit("graph output requires packed storage"));
+            }
+            Ok(ResidentTensor {
+                storage: Shared::new(Storage {
+                    values: runtime::empty_buffer::<f32>(
+                        gpu,
+                        "graph.capture.values",
+                        layout.len().max(1),
+                        usage | extra_usage,
+                    )?,
+                    flags: flags.clone(),
+                }),
+                layout: layout.clone(),
+                device: device.clone(),
+            })
+        })
+        .collect()
 }
 
-/// Fixed source bindings and an optional bounded pool of whole output versions.
-/// `encode` always allocates; `encode_reusing` only recycles unobserved batches.
+/// Fixed source bindings for explicit owning snapshots of mutable scratch.
 pub(crate) struct PreparedCapture {
     device: TensorDevice,
     pipeline: wgpu::ComputePipeline,
     output_layout: wgpu::BindGroupLayout,
     slots: Vec<Slot>,
-    outputs: Vec<OutputBatch>,
-    retention_limit: usize,
-    #[cfg(test)]
-    stats: CaptureStats,
 }
 
 impl PreparedCapture {
@@ -164,10 +190,6 @@ impl PreparedCapture {
             pipeline,
             output_layout,
             slots,
-            outputs: Vec::new(),
-            retention_limit: retention_limit(sources.iter().map(|(layout, _)| layout.len())),
-            #[cfg(test)]
-            stats: CaptureStats::default(),
         })
     }
 
@@ -180,83 +202,29 @@ impl PreparedCapture {
         Ok(batch.outputs)
     }
 
-    /// Caller retains returned tensors until submission on the owning queue.
-    /// Pending snapshots/previously submitted consumers precede subsequent reuse;
-    /// busy or oversized batches allocate separately, without waiting or aliasing.
-    pub(crate) fn encode_reusing(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Vec<ResidentTensor>, TensorError> {
-        let batch = if let Some(index) = self
-            .outputs
-            .iter_mut()
-            .position(OutputBatch::exclusively_owned)
-        {
-            #[cfg(test)]
-            {
-                self.stats.reuses += 1;
-            }
-            let batch = self.outputs.swap_remove(index);
-            // All capture dispatches OR into one flag, so clear it before the
-            // pass, never from a racing shader invocation within the pass.
-            encoder.clear_buffer(batch.outputs[0].flags(), 0, None);
-            batch
-        } else {
-            let batch = self.allocate()?;
-            #[cfg(test)]
-            {
-                self.stats.allocations += 1;
-            }
-            batch
-        };
-        self.encode_batch(encoder, &batch);
-        let result = batch.outputs.clone();
-        if self.outputs.len() < self.retention_limit {
-            self.outputs.push(batch);
-        }
-        Ok(result)
-    }
-
     fn allocate(&self) -> Result<OutputBatch, TensorError> {
         let gpu = self.device.runtime().context().device();
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
-        let flags = Shared::new(runtime::empty_buffer::<u32>(
-            gpu,
-            "graph.capture.flags",
-            1,
-            usage | wgpu::BufferUsages::COPY_DST,
-        )?);
-        let mut outputs = Vec::with_capacity(self.slots.len());
+        let outputs = allocate_whole_outputs(
+            &self.device,
+            self.slots.iter().map(|slot| &slot.layout),
+            wgpu::BufferUsages::empty(),
+        )?;
         let mut bindings = Vec::with_capacity(self.slots.len());
-        for slot in &self.slots {
-            let values = runtime::empty_buffer::<f32>(
-                gpu,
-                "graph.capture.values",
-                slot.layout.len().max(1),
-                usage,
-            )?;
+        for output in &outputs {
             bindings.push(gpu.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("graph.capture.output"),
                 layout: &self.output_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: values.as_entire_binding(),
+                        resource: output.values().as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: flags.as_entire_binding(),
+                        resource: output.flags().as_entire_binding(),
                     },
                 ],
             }));
-            outputs.push(ResidentTensor {
-                storage: Shared::new(Storage {
-                    values,
-                    flags: flags.clone(),
-                }),
-                layout: slot.layout.clone(),
-                device: self.device.clone(),
-            });
         }
         Ok(OutputBatch { outputs, bindings })
     }
