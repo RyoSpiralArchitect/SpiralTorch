@@ -185,7 +185,7 @@ regress across the retained four-matrix comparison.
 
 The [four-way isolation](../benchmarks/results/2026-09-12-module-preparation-factorial/README.md)
 compares assembly-only, bulk-comparison-only, both, and the preceding baseline.
-The current source retains checked single-vector assembly but restores the
+That selected source retained checked single-vector assembly but restored the
 per-element bit comparison. Assembly-only burst medians are approximately at
 baseline in the isolation worktree; that is not a universal speedup claim.
 
@@ -193,4 +193,12 @@ The [main-worktree confirmation](../benchmarks/results/2026-09-12-module-assembl
 rebuilds this selected source and repeats the complete verification and four
 paired timing matrices against the original baseline. Burst medians remain
 approximately baseline, with fewer descriptor allocations and individual
-regressions retained. Parameter scans and finite checks are still performed.
+regressions retained. At that baseline, parameter scans and finite checks were
+still performed on each call.
+
+The [content-stamp follow-up](../benchmarks/results/2026-09-12-parameter-content-stamps/README.md)
+uses revocable weak ownership to avoid rescanning unchanged native parameters,
+and fixes stale CPU packs after a later writable DLPack export. Four paired
+matrices show the largest completed single-call route at 0.851x baseline in
+Python and 0.900x in the browser; burst results are more modest or unchanged.
+Small-case regressions, quantization and control drift remain in the record.
