@@ -7,6 +7,9 @@ pub use accumulator::GraphGradientAccumulator;
 mod clipping;
 use clipping::Clipping;
 use st_kernel_contracts::gradient_clip::GlobalNormClip;
+mod momentum;
+use momentum::Momentum;
+use st_kernel_contracts::momentum::EmaMomentum;
 
 const MAX_TERMS: usize = 256;
 
@@ -51,6 +54,8 @@ pub struct ResidentGraphLearner {
     last_update: Option<(u64, u64)>,
     grad_clip: Option<GlobalNormClip>,
     clipping: Option<Clipping>,
+    momentum_damping: Option<EmaMomentum>,
+    momentum: Option<Momentum>,
 }
 
 impl ResidentGraphLearner {
@@ -85,6 +90,8 @@ impl ResidentGraphLearner {
             last_update: None,
             grad_clip: None,
             clipping: None,
+            momentum_damping: None,
+            momentum: None,
         })
     }
 
@@ -139,6 +146,47 @@ impl ResidentGraphLearner {
 
     pub fn clear_grad_clip(&mut self) {
         self.grad_clip = None;
+    }
+
+    pub fn momentum_damping(&self) -> Option<f32> {
+        self.momentum_damping.map(EmaMomentum::damping)
+    }
+
+    /// Topos EMA, not heavy-ball momentum. Changing damping preserves history;
+    /// enabling from a disabled state starts with zero history.
+    pub fn set_momentum_damping(&mut self, damping: f32) -> Result<(), TrainingError> {
+        let config = EmaMomentum::new(damping)?;
+        if self.momentum.is_none() {
+            self.momentum = Some(Momentum::new(&self.autograd.graph)?);
+        } else if self.momentum_damping.is_none() {
+            self.momentum.as_ref().unwrap().reset(&self.autograd.graph);
+        }
+        self.momentum_damping = Some(config);
+        Ok(())
+    }
+
+    /// Disable history updates. Re-enabling resets history, rather than applying
+    /// momentum from before intervening plain-SGD steps.
+    pub fn clear_momentum(&mut self) {
+        self.momentum_damping = None;
+    }
+
+    pub fn reset_momentum(&mut self) -> Result<(), TrainingError> {
+        self.momentum_damping
+            .ok_or(TrainingError::MissingMomentum)?;
+        self.momentum.as_ref().unwrap().reset(&self.autograd.graph);
+        Ok(())
+    }
+
+    /// Owning snapshots of the last committed history, including after a failed
+    /// attempt. These are not an optimizer checkpoint or update-acceptance receipt.
+    pub fn momentum_tensors(&self) -> Result<Vec<ResidentTensor>, TrainingError> {
+        self.momentum_damping
+            .ok_or(TrainingError::MissingMomentum)?;
+        self.momentum
+            .as_ref()
+            .unwrap()
+            .snapshot(&self.autograd.graph)
     }
     pub fn upload(&mut self, input: &[f32]) -> Result<(), TrainingError> {
         self.autograd.upload(input)
@@ -221,7 +269,11 @@ impl ResidentGraphLearner {
     ) {
         let g = &self.autograd.graph;
         let context = g.device.runtime().context();
-        if let Some(clip) = self.grad_clip {
+        if let Some(momentum) = self.momentum_damping {
+            let workspace = self.momentum.as_ref().expect("prepared momentum workspace");
+            workspace.encode(g, self.grad_clip.and(self.clipping.as_ref()), &mut encoder);
+            workspace.write_config(g, rate, momentum.damping());
+        } else if self.grad_clip.is_some() {
             self.clipping
                 .as_ref()
                 .expect("prepared clipping workspace")
@@ -231,14 +283,16 @@ impl ResidentGraphLearner {
                 &g.update_passes[g.parameters.len()..],
                 &mut Default::default(),
             );
+        } else {
+            g.encode_passes(&mut encoder, &g.update_passes, &mut Default::default());
+        }
+        if let Some(clip) = self.grad_clip {
             let (mantissa, exponent) = clip.binary_parts();
             context.queue().write_buffer(
                 &g.step_config,
                 8,
                 bytemuck::cast_slice(&[mantissa, exponent as f32]),
             );
-        } else {
-            g.encode_passes(&mut encoder, &g.update_passes, &mut Default::default());
         }
         encoder.copy_buffer_to_buffer(
             &g.validation,

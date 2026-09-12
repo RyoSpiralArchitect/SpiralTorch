@@ -347,6 +347,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         "classification":classification::run(runtime.clone()).await?,
         "microbatch":microbatch::run(runtime.clone()).await?,
         "gradient_clip":microbatch::run_clipped(runtime.clone()).await?,
+        "momentum":microbatch::run_momentum(runtime.clone()).await?,
         "scope":"Sequential with owned gains; mean-MSE plain SGD; no intermediate host readbacks; not a throughput claim"}),
     )
 }

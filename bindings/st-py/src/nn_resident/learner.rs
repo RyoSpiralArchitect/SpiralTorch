@@ -115,6 +115,29 @@ impl PyResidentGraphLearner {
         self.inner.clear_grad_clip();
     }
     #[getter]
+    fn momentum_damping(&self) -> Option<f32> {
+        self.inner.momentum_damping()
+    }
+    fn set_momentum_damping(&mut self, py: Python<'_>, damping: f32) -> PyResult<()> {
+        py.detach(|| self.inner.set_momentum_damping(damping))
+            .map_err(training_error)
+    }
+    fn clear_momentum(&mut self) {
+        self.inner.clear_momentum();
+    }
+    fn reset_momentum(&mut self, py: Python<'_>) -> PyResult<()> {
+        py.detach(|| self.inner.reset_momentum())
+            .map_err(training_error)
+    }
+    fn momentum_tensors(&self, py: Python<'_>) -> PyResult<Vec<PyWgpuTensor>> {
+        Ok(py
+            .detach(|| self.inner.momentum_tensors())
+            .map_err(training_error)?
+            .into_iter()
+            .map(|inner| PyWgpuTensor { inner })
+            .collect())
+    }
+    #[getter]
     fn input_generation(&self) -> u64 {
         self.inner.input_generation()
     }

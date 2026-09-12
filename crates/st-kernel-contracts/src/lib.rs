@@ -14,5 +14,6 @@ pub mod elementwise;
 pub mod gradient_clip;
 pub mod graph;
 pub mod layout;
+pub mod momentum;
 pub mod pointwise;
 pub mod rank;

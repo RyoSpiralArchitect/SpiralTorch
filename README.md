@@ -480,6 +480,9 @@ transactional update, with explicit sample weighting and stale-state rejection.
 An optional [global gradient norm limit](docs/module_resident_gradient_clip.md)
 clips the policy-normalized window on GPU before the all-parameter update;
 Rust, Python and WASM share the same rule without a norm readback.
+Optional [Topos EMA momentum](docs/module_resident_momentum.md) keeps gradient
+history resident and commits it together with all parameters, including
+explicit reset, disable/re-enable and failed-update recovery rules.
 
 Version 0.4.23 adds `st.AutogradSgd(parameters, learning_rate=0.1)`
 for plain Rust-owned CPU updates. Fetch `optimizer.parameters()` for each forward

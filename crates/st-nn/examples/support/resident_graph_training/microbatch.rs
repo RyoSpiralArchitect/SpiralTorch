@@ -24,6 +24,9 @@ struct Window {
     receipt: GraphUpdateReadback,
     rate: f32,
     clip: Option<f32>,
+    damping: Option<f32>,
+    reset_momentum: bool,
+    momentum: Option<(Vec<ResidentTensor>, Vec<Vec<f32>>)>,
 }
 async fn accepted(value: GraphUpdateReadback) -> Result<u64> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -57,16 +60,22 @@ fn dataset(seed: usize) -> Vec<(Vec<f32>, Vec<f32>)> {
 }
 
 pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
-    run_with_clipping(runtime, false).await
+    run_with_options(runtime, false, false).await
 }
 
 pub(super) async fn run_clipped(runtime: WgpuRuntime) -> Result<Value> {
-    let mut result = run_with_clipping(runtime.clone(), true).await?;
+    let mut result = run_with_options(runtime.clone(), true, false).await?;
     result["wide_probes"] = wide_probes(runtime).await?;
     Ok(result)
 }
 
-async fn run_with_clipping(runtime: WgpuRuntime, clipping: bool) -> Result<Value> {
+pub(super) async fn run_momentum(runtime: WgpuRuntime) -> Result<Value> {
+    let mut result = run_with_options(runtime, true, true).await?;
+    result["momentum_rule"] = json!(st_tensor::TOPOS_OPTIMIZER_MOMENTUM_RULE);
+    Ok(result)
+}
+
+async fn run_with_options(runtime: WgpuRuntime, clipping: bool, momentum: bool) -> Result<Value> {
     let mut cases = Vec::new();
     for (seed, reduction) in [
         (17, LossReduction::Mean),
@@ -100,7 +109,35 @@ async fn run_with_clipping(runtime: WgpuRuntime, clipping: bool) -> Result<Value
             let mut cpu_objective = CrossEntropyWithLogits::new(config)?;
             let mut held = Vec::new();
             let mut submitted_micros = 0;
+            let mut history: Vec<Vec<f32>> = definition
+                .parameters()
+                .iter()
+                .map(|p| vec![0.; p.values.len()])
+                .collect();
             for window in 0..32 {
+                let damping = if momentum {
+                    [Some(0.6), Some(0.85), Some(0.), None, Some(0.3)][window % 5]
+                } else {
+                    None
+                };
+                if let Some(d) = damping {
+                    learner.set_momentum_damping(d)?;
+                } else {
+                    learner.clear_momentum();
+                    for p in &mut history {
+                        p.fill(0.);
+                    }
+                }
+                let reset_momentum = momentum && damping.is_some() && window % 13 == 0;
+                if reset_momentum {
+                    learner.reset_momentum()?;
+                    for p in &mut history {
+                        p.fill(0.);
+                    }
+                }
+                if learner.momentum_damping() != damping {
+                    return Err("momentum setting".into());
+                }
                 let clip = if clipping {
                     [Some(0.05), None, Some(0.1), Some(2.), Some(0.001)][window % 5]
                 } else {
@@ -195,6 +232,21 @@ async fn run_with_clipping(runtime: WgpuRuntime, clipping: bool) -> Result<Value
                     }
                 }
                 let mut expected_parameters = Vec::new();
+                if let Some(damping) = damping {
+                    // Exercise the ordinary Topos implementation, not a local EMA replica.
+                    let control = st_tensor::ToposOptimizerStateControl::new(
+                        0.,
+                        [0.; st_tensor::TOPOS_OPTIMIZER_GRADIENT_BIAS_BASIS_DIM],
+                        1.,
+                        damping,
+                    )?;
+                    for (g, previous) in effective.iter_mut().zip(&mut history) {
+                        *g = control.gradient_step(g, previous)?.into_next_momentum();
+                        if rate != 0. {
+                            previous.clone_from(g);
+                        }
+                    }
+                }
                 let mut id = 0;
                 reference.visit_parameters_mut(&mut |p| {
                     if rate != 0. {
@@ -215,6 +267,13 @@ async fn run_with_clipping(runtime: WgpuRuntime, clipping: bool) -> Result<Value
                     receipt: learner.update_snapshot()?,
                     rate,
                     clip,
+                    damping,
+                    reset_momentum,
+                    momentum: if damping.is_some() {
+                        Some((learner.momentum_tensors()?, history.clone()))
+                    } else {
+                        None
+                    },
                 });
             }
             let mut evaluation = Vec::new();
@@ -277,7 +336,19 @@ async fn run_with_clipping(runtime: WgpuRuntime, clipping: bool) -> Result<Value
                 for (a, b) in values.iter().zip(&window.expected_parameters) {
                     close(a, b)?;
                 }
-                windows.push(json!({"microbatches":micros,"accumulated_gradients":sum,"parameters":values,"rate":window.rate,"grad_clip_max_norm":window.clip}));
+                let observed_momentum = if let Some((snapshots, expected)) = window.momentum {
+                    let mut observed = Vec::new();
+                    for (t, expected) in snapshots.into_iter().zip(expected) {
+                        let value = tensor(t.snapshot()?).await?;
+                        close(&value, &expected)?;
+                        observed.push(value);
+                    }
+                    Some(observed)
+                } else {
+                    None
+                };
+                windows.push(json!({"microbatches":micros,"accumulated_gradients":sum,"parameters":values,"rate":window.rate,"grad_clip_max_norm":window.clip,
+                    "momentum_damping":window.damping,"reset_momentum":window.reset_momentum,"momentum":observed_momentum}));
             }
             let mut evaluated = Vec::new();
             let mut initial = 0.;
@@ -322,7 +393,7 @@ async fn run_with_clipping(runtime: WgpuRuntime, clipping: bool) -> Result<Value
                 "plan":serde_json::from_str::<Value>(&baseline.to_json()?)?,"dataset":data.iter().map(|(x,y)|json!({"input":x,"target":y})).collect::<Vec<_>>(),
                 "windows":windows,"evaluation":evaluated,"initial_loss":initial/sample_count as f32,"final_loss":final_loss/sample_count as f32,
                 "label_smoothing":0.1,"ignore_index":-100,"reduction":reduction.as_str(),"observations_after_updates":32,
-                "microbatches":submitted_micros,"module_parameters_applied":applied,"optimizer":"explicit_sgd_not_ModuleTrainer","gradient_clip":clipping}));
+                "microbatches":submitted_micros,"module_parameters_applied":applied,"optimizer":"explicit_sgd_not_ModuleTrainer","gradient_clip":clipping,"topos_momentum":momentum}));
         }
     }
     Ok(json!({"status":"passed","cases":cases}))

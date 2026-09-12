@@ -23,6 +23,10 @@ pub use readback::{
 #[derive(Debug, Error)]
 pub enum TrainingError {
     #[error(transparent)]
+    Momentum(#[from] st_kernel_contracts::momentum::MomentumError),
+    #[error("enable momentum before resetting or observing its state")]
+    MissingMomentum,
+    #[error(transparent)]
     GradientClip(#[from] st_kernel_contracts::gradient_clip::GradientClipError),
     #[error(transparent)]
     Graph(#[from] st_kernel_contracts::graph::GraphError),

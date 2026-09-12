@@ -80,7 +80,7 @@ pub const TOPOS_OPTIMIZER_GRADIENT_CLIP_RULE: &str =
     "g_clipped[i]=clamp(g_biased[i],-rms(g_biased)/(1-clip_scale),rms(g_biased)/(1-clip_scale))";
 
 /// Canonical state transition used to damp abrupt gradient changes.
-pub const TOPOS_OPTIMIZER_MOMENTUM_RULE: &str = "m_t=damping*m_(t-1)+(1-damping)*g_clipped";
+pub const TOPOS_OPTIMIZER_MOMENTUM_RULE: &str = st_kernel_contracts::momentum::EMA_MOMENTUM_RULE;
 
 /// Canonical normalization used by the Topos gradient-bias rule.
 pub const TOPOS_OPTIMIZER_GRADIENT_BIAS_NORMALIZATION: &str = "raw_gradient_rms";
@@ -764,7 +764,7 @@ impl ToposOptimizerStateControl {
                 value: effective_momentum_damping,
             });
         }
-        if !(0.0..=0.85).contains(&effective_momentum_damping) {
+        if st_kernel_contracts::momentum::EmaMomentum::new(effective_momentum_damping).is_err() {
             return Err(TensorError::InvalidValue {
                 label: "topos_optimizer_momentum_damping",
             });
@@ -941,18 +941,27 @@ impl ToposOptimizerStateControl {
             clipped_gradient.push(clipped);
         }
 
-        let damping = self.effective_momentum_damping;
-        let incoming = 1.0 - damping;
+        let momentum =
+            st_kernel_contracts::momentum::EmaMomentum::new(self.effective_momentum_damping)
+                .map_err(|_| TensorError::InvalidValue {
+                    label: "topos_optimizer_momentum_damping",
+                })?;
         let mut next_momentum = Vec::with_capacity(raw_gradient.len());
         for (&clipped, &previous) in clipped_gradient.iter().zip(previous_momentum.iter()) {
-            let momentum = damping * previous + incoming * clipped;
-            if !momentum.is_finite() {
-                return Err(TensorError::NonFiniteValue {
-                    label: "topos_optimizer_next_momentum",
-                    value: momentum,
-                });
-            }
-            next_momentum.push(momentum);
+            let next = momentum
+                .transition(clipped, previous)
+                .map_err(|error| match error {
+                    st_kernel_contracts::momentum::MomentumError::NonFinite(value) => {
+                        TensorError::NonFiniteValue {
+                            label: "topos_optimizer_next_momentum",
+                            value,
+                        }
+                    }
+                    _ => TensorError::InvalidValue {
+                        label: "topos_optimizer_momentum_damping",
+                    },
+                })?;
+            next_momentum.push(next);
         }
         Ok(ToposOptimizerGradientStep {
             raw_gradient_rms,

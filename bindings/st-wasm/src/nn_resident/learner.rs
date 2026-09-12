@@ -102,6 +102,32 @@ impl WasmResidentGraphLearner {
     pub fn clear_grad_clip(&mut self) {
         self.inner.clear_grad_clip();
     }
+    #[wasm_bindgen(getter,js_name=momentumDamping)]
+    pub fn momentum_damping(&self) -> Option<f32> {
+        self.inner.momentum_damping()
+    }
+    #[wasm_bindgen(js_name=setMomentumDamping)]
+    pub fn set_momentum_damping(&mut self, damping: f32) -> Result<(), JsValue> {
+        self.inner.set_momentum_damping(damping).map_err(js_error)
+    }
+    #[wasm_bindgen(js_name=clearMomentum)]
+    pub fn clear_momentum(&mut self) {
+        self.inner.clear_momentum();
+    }
+    #[wasm_bindgen(js_name=resetMomentum)]
+    pub fn reset_momentum(&mut self) -> Result<(), JsValue> {
+        self.inner.reset_momentum().map_err(js_error)
+    }
+    #[wasm_bindgen(js_name=momentumTensors,unchecked_return_type="WgpuTensor[]")]
+    pub fn momentum_tensors(&self) -> Result<Array, JsValue> {
+        Ok(self
+            .inner
+            .momentum_tensors()
+            .map_err(js_error)?
+            .into_iter()
+            .map(|inner| JsValue::from(WasmWgpuTensor { inner }))
+            .collect())
+    }
     #[wasm_bindgen(getter,js_name=inputGeneration)]
     pub fn input_generation(&self) -> u64 {
         self.inner.input_generation()

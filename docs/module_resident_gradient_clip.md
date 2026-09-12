@@ -35,7 +35,9 @@ fail without replacing the previous setting or invalidating parameter state.
    receive that extra average.
 3. Compute a single norm over these effective gradients, then scale them all
    by `min(1, max_norm / norm)`.
-4. Apply the learning rate, validate every candidate, and commit all parameters
+4. Apply optional [Topos EMA momentum](module_resident_momentum.md) to the
+   clipped gradient. The global limit does not reclip previous history.
+5. Apply the learning rate, validate every candidate, and commit all parameters
    together or none.
 
 The shared `st-kernel-contracts::gradient_clip` contract retains ModuleTrainer's

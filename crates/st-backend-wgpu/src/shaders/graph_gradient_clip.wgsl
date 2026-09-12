@@ -86,17 +86,33 @@ fn clip_reduce(@builtin(local_invocation_index) lane: u32) {
     }
 }
 
+fn clipped_gradient(i: u32) -> f32 {
+    var gradient = effective(c[i]);
+    let count = u32(b[0]);
+    for (var j = 0u; j < count; j += 1u) { gradient *= b[1u + j]; }
+    check(gradient, 4096u);
+    return gradient;
+}
+
 @compute @workgroup_size(256)
 fn clip_prepare(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let i = index(wid, lane);
     if (i < p.len) {
-        var gradient = effective(c[i]);
-        let count = u32(b[0]);
-        for (var j = 0u; j < count; j += 1u) { gradient *= b[1u + j]; }
+        let gradient = clipped_gradient(i);
         let change = step.rate * gradient;
         let candidate = a[i] - change;
         check(gradient, 4096u); check(change, 8192u); check(candidate, 16384u);
         out[i] = candidate;
         aux[i] = gradient;
+    }
+}
+
+// Optimizers with state must validate their own candidate, not an unused SGD
+// candidate that could overflow before the state transition has reduced it.
+@compute @workgroup_size(256)
+fn clip_gradient(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    let i = index(wid, lane);
+    if (i < p.len) {
+        aux[i] = clipped_gradient(i);
     }
 }

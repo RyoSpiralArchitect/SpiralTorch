@@ -146,6 +146,11 @@ declare module "spiraltorch-wasm" {
     }
     export class ResidentGraphLearner {
         private constructor();
+        readonly momentumDamping: number | undefined;
+        setMomentumDamping(damping: number): void;
+        clearMomentum(): void;
+        resetMomentum(): void;
+        momentumTensors(): WgpuTensor[];
         readonly gradClipMaxNorm: number | undefined;
         setGradClipMaxNorm(max_norm: number): void;
         clearGradClip(): void;

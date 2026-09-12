@@ -24,6 +24,21 @@ def fixture():
                 evaluation=[dict(batch=i) for i in range(7)])
 
 class Admission(unittest.TestCase):
+    def test_momentum_schedule_history_and_resets_are_required(self):
+        good = fixture();good.update(gradient_clip=True,topos_momentum=True)
+        for i,w in enumerate(good["windows"]):
+            d=[.6,.85,0.,None,.3][i%5]
+            w.update(grad_clip_max_norm=[.05,None,.1,2.,.001][i%5],momentum_damping=d,
+                     momentum=None if d is None else [[] for _ in range(7)],reset_momentum=d is not None and i%13==0)
+        reference.admit_microbatch(good,clipped=True,momentum=True)
+        with self.assertRaises(AssertionError): reference.admit_microbatch(good,clipped=True)
+        for mutate in [lambda c:c.pop("topos_momentum"),lambda c:c["windows"][0].update(momentum_damping=.9),
+                       lambda c:c["windows"][0].update(reset_momentum=False),lambda c:c["windows"][0].update(momentum=None),
+                       lambda c:c["windows"][3].update(momentum_damping=.6)]:
+            bad=copy.deepcopy(good);mutate(bad)
+            with self.assertRaises((AssertionError,KeyError,TypeError)):
+                reference.admit_microbatch(bad,clipped=True,momentum=True)
+
     def test_clipping_schedule_cannot_be_relabelled_or_omitted(self):
         good = fixture(); good["gradient_clip"] = True
         for i,w in enumerate(good["windows"]): w["grad_clip_max_norm"] = [.05,None,.1,2.,.001][i%5]

@@ -271,8 +271,9 @@ def replay_learning(case, device):
                 updates=64, max_abs_error=maximum)
 
 
-def admit_microbatch(case, clipped=False):
+def admit_microbatch(case, clipped=False, momentum=False):
     assert case.get("gradient_clip", False) is clipped
+    assert case.get("topos_momentum", False) is momentum
     assert case["policy"] in ("Exact", "ModuleCompatible")
     assert case["input_shape"] == case["plan"]["input_shape"] == [2,3,4]
     assert case["observations_after_updates"] == 32 and case["microbatches"] == 95
@@ -286,6 +287,13 @@ def admit_microbatch(case, clipped=False):
         counts.append(sum(y != -100 for y in batch["target"]))
     assert counts == [6,4,2,5,3,1,6]
     for i, window in enumerate(case["windows"]):
+        damping = [.6,.85,0.,None,.3][i%5] if momentum else None
+        if damping is None:
+            assert window.get("momentum_damping") is None and window.get("momentum") is None
+        else:
+            assert math.isclose(window["momentum_damping"],damping,rel_tol=1e-7,abs_tol=0.)
+            assert len(window["momentum"]) == 7
+        assert window.get("reset_momentum",False) is (momentum and damping is not None and i%13==0)
         limit = [0.05, None, 0.1, 2., 0.001][i % 5] if clipped else None
         if limit is None:
             assert window.get("grad_clip_max_norm") is None
@@ -301,12 +309,13 @@ def admit_microbatch(case, clipped=False):
     assert [e["batch"] for e in case["evaluation"]] == list(range(7))
 
 
-def replay_microbatch(case, device, clipped=False):
-    admit_microbatch(case, clipped)
+def replay_microbatch(case, device, clipped=False, momentum=False):
+    admit_microbatch(case, clipped, momentum)
     plan = case["plan"]
     assert plan["schema"] == "spiraltorch.nn.inference_plan.v2"
     parameters = [torch.tensor(p["values"],dtype=torch.float32,device=device).reshape(p["shape"]).requires_grad_() for p in plan["parameters"]]
     original = [p.detach().clone() for p in parameters]
+    history = [torch.zeros_like(p) for p in parameters]
     comparisons = 0
     maximum = 0.
     def check(actual, expected):
@@ -347,6 +356,16 @@ def replay_microbatch(case, device, clipped=False):
                     factor = limit/value
                     if abs(factor-1.) > torch.finfo(torch.float32).eps:
                         aggregate = [g*factor for g in aggregate]
+            damping = window.get("momentum_damping")
+            if damping is None or window.get("reset_momentum",False):
+                for h in history: h.zero_()
+            if damping is not None:
+                # Topos uses a zero-initialized EMA, not torch.optim.SGD's
+                # first-gradient initialization or its heavy-ball momentum.
+                aggregate = [damping*h+(1.-damping)*g for h,g in zip(history,aggregate,strict=True)]
+                if window["rate"] != 0.:
+                    history = [g.clone() for g in aggregate]
+                for h, expected in zip(history,window["momentum"],strict=True): check(h,expected)
             for p,g,spec,expected in zip(parameters,aggregate,plan["parameters"],window["parameters"],strict=True):
                 p.sub_(window["rate"]*g)
                 check(p,expected)
@@ -363,7 +382,7 @@ def replay_microbatch(case, device, clipped=False):
         initial_total += float(initial.cpu())*n; final_total += float(final.cpu())*n; total += n
     check(torch.tensor([initial_total/total]),[case["initial_loss"]])
     check(torch.tensor([final_total/total]),[case["final_loss"]])
-    return dict(device=device,seed=case["seed"],policy=case["policy"],microbatch=True,gradient_clip=clipped,
+    return dict(device=device,seed=case["seed"],policy=case["policy"],microbatch=True,gradient_clip=clipped,topos_momentum=momentum,
                 updates=32,microbatches=95,comparisons=comparisons,max_abs_error=maximum)
 
 
@@ -375,6 +394,7 @@ def main():
     parser.add_argument("--require-classification", action="store_true")
     parser.add_argument("--require-microbatch", action="store_true")
     parser.add_argument("--require-gradient-clip", action="store_true")
+    parser.add_argument("--require-momentum", action="store_true")
     parser.add_argument(
         "--devices", nargs="+", choices=["cpu", "mps", "cuda"], default=["cpu", "mps"]
     )
@@ -415,6 +435,8 @@ def main():
                     assert fixture.get("microbatch", {}).get("status") == "passed"
                 if args.require_gradient_clip:
                     assert fixture.get("gradient_clip", {}).get("status") == "passed"
+                if args.require_momentum:
+                    assert fixture.get("momentum", {}).get("status") == "passed"
                 report["inputs"].append(
                     {
                         "path": str(path.resolve()),
@@ -422,6 +444,16 @@ def main():
                     }
                 )
                 for device in args.devices:
+                    momentum = fixture.get("momentum")
+                    if momentum is not None:
+                        assert momentum["status"] == "passed"
+                        assert momentum["momentum_rule"] == "m_t=damping*m_(t-1)+(1-damping)*g_clipped"
+                        assert [(c["seed"],c["policy"],c["reduction"]) for c in momentum["cases"]] == [
+                            (seed,policy,reduction) for seed,reduction in [(17,"mean"),(29,"sum"),(43,"mean")]
+                            for policy in ("Exact","ModuleCompatible")]
+                        for case in momentum["cases"]:
+                            result = replay_microbatch(case,device,clipped=True,momentum=True)
+                            result["input"] = str(path.resolve()); report["cases"].append(result)
                     clipped = fixture.get("gradient_clip")
                     if clipped is not None:
                         assert clipped["status"] == "passed"

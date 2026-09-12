@@ -154,6 +154,11 @@ function checkNnContract(types, label) {
   assert.match(learner, /readonly gradClipMaxNorm: number \| undefined/);
   assert.match(learner, /setGradClipMaxNorm\(max_norm: number\): void/);
   assert.match(learner, /clearGradClip\(\): void/);
+  assert.match(learner, /readonly momentumDamping: number \| undefined/);
+  assert.match(learner, /setMomentumDamping\(damping: number\): void/);
+  assert.match(learner, /clearMomentum\(\): void/);
+  assert.match(learner, /resetMomentum\(\): void/);
+  assert.match(learner, /momentumTensors\(\): WgpuTensor\[\]/);
   const accumulator = get("GraphGradientAccumulator");
   assert.match(learner, /gradientAccumulator\(\): GraphGradientAccumulator/);
   assert.match(learner, /zeroAccumulator\(accumulator: GraphGradientAccumulator\): void/);
