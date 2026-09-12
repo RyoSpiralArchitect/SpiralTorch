@@ -337,7 +337,7 @@ impl ResidentGraphAutograd {
             (g.nodes.len() + 3) as u64 * 4,
             4,
         );
-        let mut captured = self.capture.encode(&mut encoder)?.into_iter();
+        let mut captured = self.capture.encode_reusing(&mut encoder)?.into_iter();
         let input = captured.next().expect("prepared input gradient capture");
         let parameters = captured.collect();
         context.queue().submit(Some(encoder.finish()));

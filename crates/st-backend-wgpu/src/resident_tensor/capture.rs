@@ -7,13 +7,54 @@ struct Slot {
     grid: [u32; 2],
 }
 
-/// Only source bindings and shape metadata persist. Every encode owns new values
-/// and a new shared guard, so neither graph reuse nor another capture can mutate it.
+const MAX_CAPTURE_BATCHES: usize = 4;
+const MAX_CAPTURE_BYTES: u64 = 32 * 1024 * 1024;
+
+fn retention_limit(mut lengths: impl Iterator<Item = usize>) -> usize {
+    lengths
+        .try_fold(4u64, |bytes, len| {
+            (len.max(1) as u64).checked_mul(4)?.checked_add(bytes)
+        })
+        .map_or(0, |bytes| {
+            (MAX_CAPTURE_BYTES / bytes).min(MAX_CAPTURE_BATCHES as u64) as usize
+        })
+}
+
+struct OutputBatch {
+    outputs: Vec<ResidentTensor>,
+    bindings: Vec<wgpu::BindGroup>,
+}
+
+impl OutputBatch {
+    fn exclusively_owned(&mut self) -> bool {
+        // A single retained member pins the whole guard. Tensor views and weak
+        // storage owners must be gone before any value or shared flag is reset.
+        self.outputs
+            .iter_mut()
+            .all(|t| Shared::get_mut(&mut t.storage).is_some())
+            && Shared::strong_count(&self.outputs[0].storage.flags) == self.outputs.len()
+            && Shared::weak_count(&self.outputs[0].storage.flags) == 0
+    }
+}
+
+#[cfg(test)]
+#[derive(Default, Debug, PartialEq, Eq)]
+struct CaptureStats {
+    allocations: usize,
+    reuses: usize,
+}
+
+/// Fixed source bindings and an optional bounded pool of whole output versions.
+/// `encode` always allocates; `encode_reusing` only recycles unobserved batches.
 pub(crate) struct PreparedCapture {
     device: TensorDevice,
     pipeline: wgpu::ComputePipeline,
     output_layout: wgpu::BindGroupLayout,
     slots: Vec<Slot>,
+    outputs: Vec<OutputBatch>,
+    retention_limit: usize,
+    #[cfg(test)]
+    stats: CaptureStats,
 }
 
 impl PreparedCapture {
@@ -123,6 +164,10 @@ impl PreparedCapture {
             pipeline,
             output_layout,
             slots,
+            outputs: Vec::new(),
+            retention_limit: retention_limit(sources.iter().map(|(layout, _)| layout.len())),
+            #[cfg(test)]
+            stats: CaptureStats::default(),
         })
     }
 
@@ -130,13 +175,56 @@ impl PreparedCapture {
         &self,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<Vec<ResidentTensor>, TensorError> {
+        let batch = self.allocate()?;
+        self.encode_batch(encoder, &batch);
+        Ok(batch.outputs)
+    }
+
+    /// Caller retains returned tensors until submission on the owning queue.
+    /// Pending snapshots/previously submitted consumers precede subsequent reuse;
+    /// busy or oversized batches allocate separately, without waiting or aliasing.
+    pub(crate) fn encode_reusing(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Vec<ResidentTensor>, TensorError> {
+        let batch = if let Some(index) = self
+            .outputs
+            .iter_mut()
+            .position(OutputBatch::exclusively_owned)
+        {
+            #[cfg(test)]
+            {
+                self.stats.reuses += 1;
+            }
+            let batch = self.outputs.swap_remove(index);
+            // All capture dispatches OR into one flag, so clear it before the
+            // pass, never from a racing shader invocation within the pass.
+            encoder.clear_buffer(batch.outputs[0].flags(), 0, None);
+            batch
+        } else {
+            let batch = self.allocate()?;
+            #[cfg(test)]
+            {
+                self.stats.allocations += 1;
+            }
+            batch
+        };
+        self.encode_batch(encoder, &batch);
+        let result = batch.outputs.clone();
+        if self.outputs.len() < self.retention_limit {
+            self.outputs.push(batch);
+        }
+        Ok(result)
+    }
+
+    fn allocate(&self) -> Result<OutputBatch, TensorError> {
         let gpu = self.device.runtime().context().device();
         let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
         let flags = Shared::new(runtime::empty_buffer::<u32>(
             gpu,
             "graph.capture.flags",
             1,
-            usage,
+            usage | wgpu::BufferUsages::COPY_DST,
         )?);
         let mut outputs = Vec::with_capacity(self.slots.len());
         let mut bindings = Vec::with_capacity(self.slots.len());
@@ -170,18 +258,20 @@ impl PreparedCapture {
                 device: self.device.clone(),
             });
         }
+        Ok(OutputBatch { outputs, bindings })
+    }
+
+    fn encode_batch(&self, encoder: &mut wgpu::CommandEncoder, batch: &OutputBatch) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("graph.capture"),
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.pipeline);
-        for (slot, binding) in self.slots.iter().zip(&bindings) {
+        for (slot, binding) in self.slots.iter().zip(&batch.bindings) {
             pass.set_bind_group(0, &slot.source, &[]);
             pass.set_bind_group(1, binding, &[]);
             pass.dispatch_workgroups(slot.grid[0], slot.grid[1], 1);
         }
-        drop(pass);
-        Ok(outputs)
     }
 }
 

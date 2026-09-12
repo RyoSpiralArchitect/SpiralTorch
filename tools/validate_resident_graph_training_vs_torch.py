@@ -530,11 +530,17 @@ def main():
                     autograd = fixture.get("autograd")
                     if autograd is not None:
                         assert len(autograd["cases"]) == 6
-                        assert len(autograd["guards"]) == 12
+                        assert len(autograd["guards"]) == 13
                         assert all(g["passed"] for g in autograd["guards"])
                         capture = [g for g in autograd["guards"] if g["case"] == "queued_capture_tail_shapes_detached_guard_recovery"]
                         assert len(capture) == 1 and capture[0]["captured_vjps"] == 4
                         assert capture[0]["input_shape"] == [2, 3, 257] and capture[0]["observation"] == "after_workspace_drop"
+                        pool = [g for g in autograd["guards"] if g["case"] == "whole_vjp_pool_pending_reads_views_and_spill"]
+                        assert len(pool) == 1 and pool[0]["captured_vjps"] == 9 and pool[0]["held_versions"] == 7
+                        assert pool[0]["observation"] == "after_workspace_drop"
+                        assert len(pool[0]["observations"]) == 6
+                        for seed, observation in enumerate(pool[0]["observations"], 2):
+                            assert observation == dict(seed=seed, input_gradient=[2*seed]*258, gain_gradient=[258*seed])
                         for case in autograd["cases"]:
                             result = replay(case, device)
                             result["input"] = str(path.resolve())

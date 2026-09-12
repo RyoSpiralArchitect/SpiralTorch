@@ -24,10 +24,16 @@ try {
   if(masked.length!==32||expected.size) throw Error("Missing masked-overflow guard");
   if(report.pointwise_fusion?.cases?.length!==6||report.pointwise_fusion?.guards?.length!==16)
     throw Error("Missing fused forward/VJP/rollback comparisons");
-  if(report.autograd?.cases?.length!==6||report.autograd?.guards?.length!==12||
+  if(report.autograd?.cases?.length!==6||report.autograd?.guards?.length!==13||
       report.autograd.cases.some(c=>c.replays.length!==4)||report.autograd.guards.some(g=>g.passed!==true))
     throw Error("Missing arbitrary-cotangent VJP and recovery checks");
   const capture = report.autograd.guards.filter(g=>g.case==="queued_capture_tail_shapes_detached_guard_recovery");
+  const pool = report.autograd.guards.filter(g=>g.case==="whole_vjp_pool_pending_reads_views_and_spill");
+  if(pool.length!==1||pool[0].captured_vjps!==9||pool[0].held_versions!==7||
+      pool[0].observation!=="after_workspace_drop"||pool[0].observations.length!==6||
+      pool[0].observations.some((v,i)=>v.seed!==i+2||v.input_gradient.length!==258||
+        v.input_gradient.some(x=>x!==2*(i+2))||JSON.stringify(v.gain_gradient)!==JSON.stringify([258*(i+2)])))
+    throw Error("Missing whole-VJP pool ownership and failure recovery checks");
   if(report.resident_loss?.status!=="passed"||report.resident_loss?.cases?.length!==6||
       report.resident_loss?.probes?.length!==7||report.resident_loss.cases.some(c=>
         c.observations_after_updates!==64||c.module_parameters_applied!==7||c.steps.length!==64))

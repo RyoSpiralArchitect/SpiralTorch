@@ -332,8 +332,70 @@ async fn guards(runtime: WgpuRuntime) -> Result<Vec<Value>> {
         return Err("parameterless residual acquired parameter slots".into());
     }
     records.push(json!({"case":"parameterless_repeated_residual","passed":true}));
-    records.push(capture_reuse(runtime).await?);
+    records.push(capture_reuse(runtime.clone()).await?);
+    records.push(whole_version_reuse(runtime).await?);
     Ok(records)
+}
+
+async fn whole_version_reuse(runtime: WgpuRuntime) -> Result<Value> {
+    let mut model = Sequential::new();
+    model.push(Scaler::from_gain(
+        "gain",
+        Tensor::from_vec(1, 1, vec![2.])?,
+    )?);
+    let shape = [2, 129, 1];
+    let plan = InferencePlan::from_module(&model, NdLayout::contiguous(&shape)?)?;
+    let mut gpu = plan.compile_graph_autograd_wgpu(runtime)?;
+    let device = gpu.tensor_device().clone();
+    gpu.upload(&[1.; 258])?;
+    let forward = gpu.forward()?;
+    let original = gpu.backward(&forward, &device.upload(&shape, &[1.; 258])?)?;
+    let original_read = original.input_gradient().snapshot()?;
+    let view = original.parameter_gradients()[0].reshape(&[1, 1])?;
+    drop(original);
+    let bad = gpu.backward(&forward, &device.upload(&shape, &[f32::MAX; 258])?)?;
+    let bad_reads = [
+        bad.input_gradient().snapshot()?,
+        bad.parameter_gradients()[0].snapshot()?,
+    ];
+    let bad_consumer = bad
+        .input_gradient()
+        .mul(&device.upload(&[], &[0.])?)?
+        .snapshot()?;
+    drop(bad);
+    let recovered = gpu.backward(&forward, &device.upload(&shape, &[0.; 258])?)?;
+    let (dx, raw) = gradients(&recovered).await?;
+    close(&dx, &[0.; 258])?;
+    close(&raw[0], &[0.])?;
+    drop(recovered);
+    let mut held = Vec::new();
+    for seed in 2..8 {
+        held.push(gpu.backward(&forward, &device.upload(&shape, &[seed as f32; 258])?)?);
+    }
+    if gpu.submitted_backwards() != 9 {
+        return Err("capture reuse VJP count".into());
+    }
+    drop(gpu);
+    close(&tensor(original_read).await?, &[2.; 258])?;
+    close(&tensor(view.snapshot()?).await?, &[258.])?;
+    for read in bad_reads.into_iter().chain([bad_consumer]) {
+        if tensor(read).await.is_ok() {
+            return Err("recycled flags changed an old failed read".into());
+        }
+    }
+    let mut observed = Vec::new();
+    for (i, g) in held.iter().enumerate() {
+        let seed = (i + 2) as f32;
+        let (dx, raw) = gradients(g).await?;
+        close(&dx, &[2. * seed; 258])?;
+        close(&raw[0], &[258. * seed])?;
+        observed.push(json!({"seed":seed,"input_gradient":dx,"gain_gradient":raw[0]}));
+    }
+    Ok(
+        json!({"case":"whole_vjp_pool_pending_reads_views_and_spill", "passed":true,
+        "captured_vjps":9,"held_versions":7,"observations":observed,
+        "observation":"after_workspace_drop"}),
+    )
 }
 
 async fn capture_reuse(runtime: WgpuRuntime) -> Result<Value> {
