@@ -64,5 +64,19 @@ mod browser {
                 .map(|v| v.to_string())
                 .map_err(|e| JsValue::from_str(&e.to_string()))
         }
+        #[wasm_bindgen(js_name = learnHostProfile)]
+        pub async fn learn_host_profile(
+            &self,
+            cadence: String,
+            capture: bool,
+        ) -> Result<String, JsValue> {
+            let cadence =
+                serde_json::from_str(&cadence).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            self.inner
+                .learn_host_profile(cadence, capture, now)
+                .await
+                .map(|v| v.to_string())
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
     }
 }

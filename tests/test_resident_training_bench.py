@@ -12,9 +12,33 @@ spec.loader.exec_module(bench)
 spec=importlib.util.spec_from_file_location("training_bench_validation",Path(__file__).resolve().parents[1]/"tools/validate_resident_training_bench.py")
 validation=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validation)
+spec=importlib.util.spec_from_file_location("learner_host_profile",Path(__file__).resolve().parents[1]/"tools/profile_resident_learner_host.py")
+host_profile=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(host_profile)
 
 
 class Admission(unittest.TestCase):
+    def test_host_profile_requires_complete_bounded_host_only_measurements(self):
+        value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
+            accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],initial_loss=.2,final_loss=.1,elapsed_ms=9.,
+            host_profile=dict(schema="spiraltorch.learner_host_phases.v1",instrumented=True,clock_domain="host_wall",
+                gpu_phase_attribution=False,unattributed_ms=1.,
+                phases=[dict(name=name,ms=1.,count=8) for name in host_profile.PHASES]))
+        check=lambda v:host_profile.validate(v,"deferred",dict(steps=8))
+        check(value)
+        for key,bad in (("clock_domain","gpu"),("instrumented",False),("gpu_phase_attribution",True),
+                        ("unattributed_ms",-1.),("unattributed_ms",2.)):
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                check(dict(value,host_profile=dict(value["host_profile"],**{key:bad})))
+        for key,bad in (("ms",float("nan")),("ms",True),("ms",-1.),("count",True),("count",7),("name","gpu")):
+            invalid=copy.deepcopy(value);invalid["host_profile"]["phases"][0][key]=bad
+            with self.subTest(key=key),self.assertRaises(ValueError):check(invalid)
+
+    def test_host_instrumentation_is_not_ordinary_throughput(self):
+        for profile in (None, {}, {"instrumented": True}):
+            with self.assertRaisesRegex(ValueError, "instrumented"):
+                bench.validate_sample(dict(host_profile=profile), "deferred", 8, learner=True)
+
     def test_optimizer_history_and_recipe_cannot_be_relabelled(self):
         value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
             accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],initial_loss=.2,final_loss=.1,elapsed_ms=1.,

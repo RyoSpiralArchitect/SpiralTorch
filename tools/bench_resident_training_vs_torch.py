@@ -137,6 +137,8 @@ def torch_sample(torch, fixture, device, cadence, synchronize):
 
 
 def validate_sample(value, cadence, steps, *, learner=False, lane=None, seed_fusion=False, learner_optimizer=None):
+    if "host_profile" in value:
+        raise ValueError("instrumented host profile is not an ordinary throughput interval")
     damping, clip = optimizer_settings(learner_optimizer)
     if learner_optimizer is not None and not learner:
         raise ValueError("optimizer requires a learner interval")
