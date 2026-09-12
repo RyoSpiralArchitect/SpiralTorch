@@ -207,3 +207,11 @@ and fixes stale CPU packs after a later writable DLPack export. Four paired
 matrices show the largest completed single-call route at 0.851x baseline in
 Python and 0.900x in the browser; burst results are more modest or unchanged.
 Small-case regressions, quantization and control drift remain in the record.
+
+The [in-pass guard follow-up](../benchmarks/results/2026-09-12-module-inline-guard/README.md)
+keeps the final validation dispatch but appends it to the graph compute pass.
+Four paired matrices put native burst medians at 0.799/0.950/0.985x the preceding
+baseline for the three fixed sizes. Browser burst medians are unchanged; the
+small browser single-call metric is unresolved across coarse-clock statistics,
+not a browser speedup claim. Multi-workgroup guard and output-lifetime tests pass
+in the Rust, Python and browser clients.

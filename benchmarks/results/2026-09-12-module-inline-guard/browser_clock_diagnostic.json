@@ -1,0 +1,218 @@
+{
+  "schema": "spiraltorch.inline_guard_browser_clock_diagnostic.v1",
+  "source": {
+    "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+    "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+  },
+  "baseline_source": {
+    "commit": "04fec016ad1ee8871d2a786974e94caeb556b84b",
+    "tree": "c23a390ab6cfe9aae20d83a1a70ed33ae4726b97"
+  },
+  "analysis_script_sha256": "f077b3905ecd0a89ecb6964f582602e6628d187b3355e009d8cce319534f9dbb",
+  "primary_summary_sha256": "958ba4af2ab78c078b1e3a08a148ab9b8d28924d95ec72172131e4665903b6b1",
+  "inputs": [
+    {
+      "path": "raw/verified-a/browser-module-matched.json.xz",
+      "sha256": "4c121787c7479a719545bc5ff1d23c348947b0d4841db512128d69bee566bfc9",
+      "compressed_sha256": "32da41cd8e91ece4a2e64e95a57250d8577ae25f9ca861a66532cc3b9cd7ead6"
+    },
+    {
+      "path": "raw/replications/1-browser.json.xz",
+      "sha256": "53451f2db6fbccdd39e02941272eaaf3183ec072dac34732b052a318620555ef",
+      "compressed_sha256": "80876e1de6b01554d463683d09c710ea6bae6a30066dec979ea9ffd624b5f42c"
+    },
+    {
+      "path": "raw/replications/2-browser.json.xz",
+      "sha256": "f3c968c39009450502129dd2f7b95b40ae8d578408f1b611f2cfb4bcbbb6b4ff",
+      "compressed_sha256": "12904c4fcd10234be9eb8df8869b4c1fae37dfa2f17bead27169ca9c578a1f24"
+    },
+    {
+      "path": "raw/replications/3-browser.json.xz",
+      "sha256": "b34668c3aaad861d87eaabfdab10878b77b9ed85ebbd6c4bb463a2421284bdbe",
+      "compressed_sha256": "77e1d2f76e12dd587e674128d07a78f0a85aed2744b65486301ccbcb2a0a8198"
+    }
+  ],
+  "shape": [
+    2,
+    3,
+    7
+  ],
+  "route": "module_d2h",
+  "trials": [
+    {
+      "trial": "initial",
+      "versions": {
+        "baseline": {
+          "samples": 27,
+          "total_elapsed_ms": 8.300000000745058,
+          "mean_elapsed_ms": 0.30740740743500217,
+          "median_elapsed_ms": 0.30000000074505806,
+          "min_ms": 0.19999999925494194,
+          "max_ms": 0.6000000014901161,
+          "histogram_rounded_to_0_001_ms": {
+            "0.2": 8,
+            "0.3": 13,
+            "0.4": 4,
+            "0.6": 2
+          }
+        },
+        "candidate": {
+          "samples": 27,
+          "total_elapsed_ms": 6.800000011920929,
+          "mean_elapsed_ms": 0.25185185229336776,
+          "median_elapsed_ms": 0.20000000298023224,
+          "min_ms": 0.09999999776482582,
+          "max_ms": 0.4000000022351742,
+          "histogram_rounded_to_0_001_ms": {
+            "0.1": 2,
+            "0.2": 13,
+            "0.3": 8,
+            "0.4": 4
+          }
+        }
+      },
+      "total_elapsed_candidate_over_baseline": 0.8192771097964482
+    },
+    {
+      "trial": "1",
+      "versions": {
+        "baseline": {
+          "samples": 27,
+          "total_elapsed_ms": 8.199999999254942,
+          "mean_elapsed_ms": 0.30370370367610894,
+          "median_elapsed_ms": 0.30000000074505806,
+          "min_ms": 0.09999999776482582,
+          "max_ms": 0.6999999992549419,
+          "histogram_rounded_to_0_001_ms": {
+            "0.1": 1,
+            "0.2": 10,
+            "0.3": 9,
+            "0.4": 4,
+            "0.5": 1,
+            "0.6": 1,
+            "0.7": 1
+          }
+        },
+        "candidate": {
+          "samples": 27,
+          "total_elapsed_ms": 7.9000000059604645,
+          "mean_elapsed_ms": 0.29259259281335054,
+          "median_elapsed_ms": 0.30000000074505806,
+          "min_ms": 0.19999999925494194,
+          "max_ms": 0.6000000014901161,
+          "histogram_rounded_to_0_001_ms": {
+            "0.2": 8,
+            "0.3": 15,
+            "0.4": 3,
+            "0.6": 1
+          }
+        }
+      },
+      "total_elapsed_candidate_over_baseline": 0.963414634960764
+    },
+    {
+      "trial": "2",
+      "versions": {
+        "baseline": {
+          "samples": 27,
+          "total_elapsed_ms": 7.100000012665987,
+          "mean_elapsed_ms": 0.2629629634320736,
+          "median_elapsed_ms": 0.20000000298023224,
+          "min_ms": 0.19999999925494194,
+          "max_ms": 0.5,
+          "histogram_rounded_to_0_001_ms": {
+            "0.2": 16,
+            "0.3": 6,
+            "0.4": 4,
+            "0.5": 1
+          }
+        },
+        "candidate": {
+          "samples": 27,
+          "total_elapsed_ms": 7.00000000372529,
+          "mean_elapsed_ms": 0.259259259397233,
+          "median_elapsed_ms": 0.29999999701976776,
+          "min_ms": 0.19999999925494194,
+          "max_ms": 0.30000000074505806,
+          "histogram_rounded_to_0_001_ms": {
+            "0.2": 11,
+            "0.3": 16
+          }
+        }
+      },
+      "total_elapsed_candidate_over_baseline": 0.9859154917236194
+    },
+    {
+      "trial": "3",
+      "versions": {
+        "baseline": {
+          "samples": 27,
+          "total_elapsed_ms": 7.199999988079071,
+          "mean_elapsed_ms": 0.2666666662251508,
+          "median_elapsed_ms": 0.29999999701976776,
+          "min_ms": 0.19999999925494194,
+          "max_ms": 0.5999999977648258,
+          "histogram_rounded_to_0_001_ms": {
+            "0.2": 13,
+            "0.3": 12,
+            "0.4": 1,
+            "0.6": 1
+          }
+        },
+        "candidate": {
+          "samples": 27,
+          "total_elapsed_ms": 7.100000008940697,
+          "mean_elapsed_ms": 0.2629629632940999,
+          "median_elapsed_ms": 0.30000000074505806,
+          "min_ms": 0.10000000149011612,
+          "max_ms": 0.5,
+          "histogram_rounded_to_0_001_ms": {
+            "0.1": 1,
+            "0.2": 10,
+            "0.3": 15,
+            "0.5": 1
+          }
+        }
+      },
+      "total_elapsed_candidate_over_baseline": 0.9861111139855635
+    }
+  ],
+  "primary_median_paired_ratio": 1.2499999813735487,
+  "pooled": {
+    "baseline": {
+      "samples": 108,
+      "total_elapsed_ms": 30.800000000745058,
+      "mean_elapsed_ms": 0.28518518519208386,
+      "median_elapsed_ms": 0.29999999701976776,
+      "min_ms": 0.09999999776482582,
+      "max_ms": 0.6999999992549419,
+      "histogram_rounded_to_0_001_ms": {
+        "0.1": 1,
+        "0.2": 47,
+        "0.3": 40,
+        "0.4": 13,
+        "0.5": 2,
+        "0.6": 4,
+        "0.7": 1
+      }
+    },
+    "candidate": {
+      "samples": 108,
+      "total_elapsed_ms": 28.80000003054738,
+      "mean_elapsed_ms": 0.2666666669495128,
+      "median_elapsed_ms": 0.2999999988824129,
+      "min_ms": 0.09999999776482582,
+      "max_ms": 0.6000000014901161,
+      "histogram_rounded_to_0_001_ms": {
+        "0.1": 3,
+        "0.2": 42,
+        "0.3": 54,
+        "0.4": 7,
+        "0.5": 1,
+        "0.6": 1
+      }
+    }
+  },
+  "total_elapsed_candidate_over_baseline": 0.9350649360341138,
+  "boundary": "Post-hoc diagnosis of the small-browser median discrepancy, not a replacement endpoint or evidence of a uniform speedup/slowdown. All 108 samples per version remain, without trimming or remeasurement. Histograms alone round values; calculations use unrounded elapsed times. Median paired ratios, pooled medians and total elapsed measure different things. Coarse clock bins and trial drift limit single-call inference."
+}
