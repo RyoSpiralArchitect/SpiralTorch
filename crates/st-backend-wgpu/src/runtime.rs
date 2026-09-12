@@ -702,11 +702,12 @@ impl ReadbackPool {
     }
 }
 
-/// One exact-sized idle buffer across variable-shaped snapshots. Outstanding
-/// leases own their buffers; the bound covers cached bytes, not live snapshots.
+/// Two alternating exact-sized idle buffers across variable-shaped snapshots.
+/// Each slot has half the byte budget; live snapshots are not part of the cache.
 #[derive(Debug)]
 pub(crate) struct ReadbackCache {
-    idle: Shared<ReadbackSlot>,
+    idle: [Shared<ReadbackSlot>; 2],
+    next: AtomicBool,
     max_cached_bytes: u64,
     // Release cached buffers before the final device handle can retire.
     context: WgpuContext,
@@ -715,7 +716,8 @@ pub(crate) struct ReadbackCache {
 impl ReadbackCache {
     pub(crate) fn new(context: WgpuContext, max_cached_bytes: u64) -> Self {
         Self {
-            idle: Shared::new(ReadbackSlot::default()),
+            idle: std::array::from_fn(|_| Shared::new(ReadbackSlot::default())),
+            next: AtomicBool::new(false),
             max_cached_bytes,
             context,
         }
@@ -732,10 +734,10 @@ impl ReadbackCache {
             elements,
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         )?;
-        let cacheable = bytes <= self.max_cached_bytes;
-        let buffer = cacheable
-            .then(|| self.idle.take())
-            .flatten()
+        let idle = (bytes <= self.max_cached_bytes / 2)
+            .then(|| &self.idle[usize::from(self.next.fetch_xor(true, Ordering::Relaxed))]);
+        let buffer = idle
+            .and_then(|slot| slot.take())
             .filter(|buffer| buffer.size() == bytes)
             .unwrap_or_else(|| {
                 self.context
@@ -749,11 +751,7 @@ impl ReadbackCache {
             });
         Ok(ReadbackLease {
             buffer: Some(buffer),
-            idle: if cacheable {
-                Shared::downgrade(&self.idle)
-            } else {
-                WeakShared::new()
-            },
+            idle: idle.map_or_else(WeakShared::new, Shared::downgrade),
             map_active: Shared::new(AtomicBool::new(false)),
         })
     }
@@ -1046,14 +1044,21 @@ mod tests {
         let runtime =
             pollster::block_on(WgpuRuntime::request_headless("readback.cache.test")).unwrap();
         let context = runtime.context();
-        let cache = ReadbackCache::new(context.clone(), 16);
+        let cache = ReadbackCache::new(context.clone(), 32);
         let first = cache.checkout::<u32>("cache.first", 4).unwrap();
         let first_id = first.buffer().global_id();
         drop(first);
+        let second = cache.checkout::<u32>("cache.second", 4).unwrap();
+        let second_id = second.buffer().global_id();
+        assert_ne!(second_id, first_id);
+        drop(second);
         let mut reused = cache.checkout::<u32>("cache.reused", 4).unwrap();
         assert_eq!(reused.buffer().global_id(), first_id);
         let busy = cache.checkout::<u32>("cache.busy", 4).unwrap();
-        assert_ne!(busy.buffer().global_id(), first_id);
+        assert_eq!(busy.buffer().global_id(), second_id);
+        let overflow = cache.checkout::<u32>("cache.busy_overflow", 4).unwrap();
+        assert_ne!(overflow.buffer().global_id(), first_id);
+        assert_ne!(overflow.buffer().global_id(), second_id);
         context
             .queue()
             .write_buffer(reused.buffer(), 0, bytemuck::cast_slice(&[7u32; 4]));
@@ -1066,15 +1071,18 @@ mod tests {
         );
         drop(reused);
         drop(busy);
-        let cached = cache.idle.take().unwrap();
-        assert_eq!(cached.global_id(), first_id);
-        assert!(cache.idle.take().is_none());
-        cache.idle.recycle(cached);
+        drop(overflow);
+        for (slot, expected) in cache.idle.iter().zip([first_id, second_id]) {
+            let cached = slot.take().unwrap();
+            assert_eq!(cached.global_id(), expected);
+            assert!(slot.take().is_none());
+            slot.recycle(cached);
+        }
         let large = cache.checkout::<u32>("cache.oversized", 5).unwrap();
         assert!(large.idle.upgrade().is_none());
         drop(large);
         let same = cache.checkout::<u32>("cache.after_oversized", 4).unwrap();
-        assert_eq!(same.buffer().global_id(), first_id);
+        assert_eq!(same.buffer().global_id(), second_id);
         drop(same);
         assert!(cache.checkout::<u32>("cache.overflow", usize::MAX).is_err());
         let different = cache.checkout::<u32>("cache.different_size", 2).unwrap();
@@ -1082,9 +1090,9 @@ mod tests {
         assert_ne!(different.buffer().global_id(), first_id);
         drop(different);
         let survivor = cache.checkout::<u32>("cache.survivor", 2).unwrap();
-        let weak = Shared::downgrade(&cache.idle);
+        let weak: Vec<_> = cache.idle.iter().map(Shared::downgrade).collect();
         drop(cache);
-        assert!(weak.upgrade().is_none());
+        assert!(weak.iter().all(|slot| slot.upgrade().is_none()));
         drop(survivor);
         let uncached = ReadbackCache::new(context.clone(), 0);
         assert!(uncached

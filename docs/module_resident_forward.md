@@ -149,12 +149,12 @@ optimizer-state resume.
   plan is rejected because it does not yet describe this composite resident
   route; uncommitted scopes do not override an explicitly supplied GPU input.
 
-Explicit `WgpuTensor.snapshot()` captures share one size-matched idle staging
-buffer per Rust `TensorDevice` (including its clones), with a 32 MiB retained-byte
-limit. This does not bound user-owned outstanding snapshots: busy or oversized
+Explicit `WgpuTensor.snapshot()` captures alternate two size-matched idle staging
+slots per Rust `TensorDevice` (including its clones), with at most 16 MiB per slot
+and 32 MiB retained in total. This does not bound user-owned outstanding snapshots: busy or oversized
 captures allocate separate GPU buffers rather than aliasing, waiting or falling
 back to CPU. Only a discarded unread capture or a successfully unmapped read may
-return its buffer. Failed/cancelled reads detach from the cache, and snapshots
+return its buffer. Failed mappings and cancelled in-flight reads detach from the cache; snapshots
 remain readable after the originating tensor/device wrapper is dropped. Shape
 changes require an exact-sized buffer so guard offsets and decoded lengths stay
 unchanged. Explicit graph snapshots retain their existing separate pool.

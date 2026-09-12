@@ -122,6 +122,9 @@ fn tensor_snapshots_reuse_only_idle_storage_on_real_gpu() {
     let first = root.snapshot().unwrap();
     let id = first.staging.buffer().global_id();
     assert_eq!(first.read().unwrap(), [1., 2., 3., 4.]);
+    let second = root.snapshot().unwrap();
+    assert_ne!(second.staging.buffer().global_id(), id);
+    assert_eq!(second.read().unwrap(), [1., 2., 3., 4.]);
     let held = root.snapshot().unwrap();
     assert_eq!(held.staging.buffer().global_id(), id);
     let other = device.clone().upload(&[4], &[9.; 4]).unwrap();
@@ -149,6 +152,13 @@ fn tensor_snapshots_reuse_only_idle_storage_on_real_gpu() {
     assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
     assert!(matches!(invalid.read(), Err(TensorError::NonFinite)));
     assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
+    let invalid = bad.snapshot().unwrap();
+    let invalid_id = invalid.staging.buffer().global_id();
+    assert!(matches!(invalid.read(), Err(TensorError::NonFinite)));
+    assert_eq!(root.snapshot().unwrap().read().unwrap(), [1., 2., 3., 4.]);
+    let cleared = root.snapshot().unwrap();
+    assert_eq!(cleared.staging.buffer().global_id(), invalid_id);
+    assert_eq!(cleared.read().unwrap(), [1., 2., 3., 4.]);
     drop(device);
     drop(root);
     drop(other);

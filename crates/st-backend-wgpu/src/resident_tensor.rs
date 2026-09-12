@@ -535,7 +535,7 @@ impl ResidentTensor {
     }
 
     /// Capture logical values and validity now; awaiting does not re-read the source.
-    /// The device retains at most one idle staging buffer, bounded to 32 MiB.
+    /// The device alternates two idle staging slots, each bounded to 16 MiB.
     /// Outstanding snapshots and pending maps are never reused by another capture.
     pub fn snapshot(&self) -> Result<TensorReadback, TensorError> {
         let packed = self.contiguous()?;
