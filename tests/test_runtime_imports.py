@@ -209,6 +209,33 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         )
         self.assertEqual(missing, [])
 
+    def test_wgpu_stub_preserves_facade_and_wildcard_aliases(self) -> None:
+        stub = ast.parse(TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8"))
+        classes = {
+            node.name: node for node in stub.body if isinstance(node, ast.ClassDef)
+        }
+        aliases = {
+            node.target.id: ast.unparse(node.annotation)
+            for node in classes["_WgpuModule"].body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        exports = next(
+            ast.literal_eval(node.value)
+            for node in stub.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "__all__"
+                for target in node.targets
+            )
+        )
+        names = {name for name in classes if name.startswith("Wgpu")}
+        self.assertTrue(names)
+        for name in sorted(names):
+            with self.subTest(name=name):
+                self.assertIn(name, classes)
+                self.assertEqual(aliases.get(name), f"type[{name}]")
+                self.assertIn(name, exports)
+
     def test_top_level_stub_exposes_runtime_import_helpers(self) -> None:
         stub = TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8")
 

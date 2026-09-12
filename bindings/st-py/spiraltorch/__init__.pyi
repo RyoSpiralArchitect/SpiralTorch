@@ -11316,6 +11316,8 @@ class _WgpuModule(ModuleType):
     WgpuTensorDevice: type[WgpuTensorDevice]
     WgpuTensor: type[WgpuTensor]
     WgpuTensorSnapshot: type[WgpuTensorSnapshot]
+    WgpuPointwiseInputs: type[WgpuPointwiseInputs]
+    WgpuPointwisePlan: type[WgpuPointwisePlan]
     WgpuRank: type[WgpuRank]
     def wgpu_kernel_reports_available() -> bool: ...
 
@@ -13183,6 +13185,8 @@ __all__ = [
     "WgpuTensorDevice",
     "WgpuTensor",
     "WgpuTensorSnapshot",
+    "WgpuPointwiseInputs",
+    "WgpuPointwisePlan",
     "WgpuRank",
     "wgpu_kernel_reports_available",
     "wgpu_kernel_catalog",
