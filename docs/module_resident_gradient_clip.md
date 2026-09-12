@@ -71,3 +71,11 @@ This does not replace ModuleTrainer's hypergrad, realgrad, spectral adapter or
 band policies with SGD. It adds their common global-norm primitive to the
 explicit resident learner. CPU-only bindings still cannot compile that learner.
 Loss quality, throughput and CUDA behavior require separate measurements.
+
+## Verified Execution
+
+The [source-bound record](../benchmarks/results/2026-09-12-module-resident-gradient-clip/README.md)
+includes native/browser learning, Python/WASM public clients, independent
+PyTorch CPU/MPS replay and the original wide-norm failures. Restrictive clipping
+slowed learning on these small fixtures compared with unclipped controls;
+the result is update-control correctness, not an accuracy or speed advantage.
