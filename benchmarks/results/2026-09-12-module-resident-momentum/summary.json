@@ -1,0 +1,1028 @@
+{
+  "schema": "spiraltorch.module_resident_momentum_record.v1",
+  "status": "passed",
+  "candidate_source": {
+    "commit": "5229ba90f4f049068b11bfe702fa339ab7b81843",
+    "tree": "769b83bb2e5b43153a216fb9177407db6ae4e2cf"
+  },
+  "momentum_rule": "m_t=damping*m_(t-1)+(1-damping)*g_clipped",
+  "feature_base_commit": "d9c1ef966480d85df9c99cb9a10572d9133364ac",
+  "baseline_control_source": {
+    "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+    "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+  },
+  "verification_steps": 69,
+  "verification_seconds": 656.4318722079988,
+  "decision": "Reuse Topos EMA after composition, gain normalization and optional global clipping; commit history and all parameters together. Reset or disable explicitly and expose owning history snapshots without host observations in the update loop.",
+  "test_counts": {
+    "terminal-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "python-cpu-handoff.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 4
+    },
+    "python-resident-loss.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "interval-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 10
+    },
+    "python-graph_autograd.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "contracts.log": {
+      "rust_passed": 28,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 10
+    },
+    "classification-wgpu.log": {
+      "rust_passed": 16,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "microbatch-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "python-cpu-resident-loss.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "classification-cpu.log": {
+      "rust_passed": 16,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "nn-cpu.log": {
+      "rust_passed": 708,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-pointwise.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "classification-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-cpu-classification.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-module_update.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "integration.log": {
+      "rust_passed": 6,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-cpu-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 2
+    },
+    "python-microbatch.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 2
+    },
+    "backend-serial.log": {
+      "rust_passed": 147,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-cpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-wgpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 35
+    },
+    "tensor-wgpu.log": {
+      "rust_passed": 497,
+      "rust_ignored": 1,
+      "python_ran": 0
+    },
+    "nn-serial.log": {
+      "rust_passed": 761,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "tensor-cpu.log": {
+      "rust_passed": 449,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-graph_learner.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "torch-reference-shapes.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-cpu-microbatch.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-classification.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    }
+  },
+  "torch_all_matched": {
+    "version": "2.12.1",
+    "cases": 432,
+    "tensor_or_scalar_comparisons": 197976,
+    "max_abs_error": 1.811981201171875e-05,
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "torch_momentum_matched": {
+    "version": "2.12.1",
+    "cases": 24,
+    "tensor_or_scalar_comparisons": 38472,
+    "max_abs_error": 9.5367431640625e-07,
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "existing_torch_reference_gaps": [
+    {
+      "device": "cpu",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": 0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048513285848406e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/native-correctness.json"
+    },
+    {
+      "device": "mps",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": -0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048514720778033e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/native-correctness.json"
+    },
+    {
+      "device": "cpu",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": 0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048513285848406e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/browser-correctness.json"
+    },
+    {
+      "device": "mps",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": -0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048514720778033e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/browser-correctness.json"
+    }
+  ],
+  "trajectories": [
+    {
+      "route": "native",
+      "seed": 17,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 0.9971793293952942,
+      "final_over_initial": 0.9006504104957184,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 0.9298034906387329,
+      "final_minus_clipped_sgd": 0.06737583875656128,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 17,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 1.000532627105713,
+      "final_over_initial": 0.903679102397339,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 0.9408352971076965,
+      "final_minus_clipped_sgd": 0.05969732999801636,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 29,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.088525652885437,
+      "final_over_initial": 0.9709750067283974,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.0723962783813477,
+      "final_minus_clipped_sgd": 0.016129374504089355,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 29,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.0887717008590698,
+      "final_over_initial": 0.971194483809365,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.0725442171096802,
+      "final_minus_clipped_sgd": 0.01622748374938965,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 43,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.0968208312988281,
+      "final_over_initial": 0.9684915003839419,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.077451467514038,
+      "final_minus_clipped_sgd": 0.01936936378479004,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 43,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.0969494581222534,
+      "final_over_initial": 0.9686050777173166,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.0771808624267578,
+      "final_minus_clipped_sgd": 0.019768595695495605,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 17,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 0.9971793293952942,
+      "final_over_initial": 0.9006504104957184,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 0.9298034906387329,
+      "final_minus_clipped_sgd": 0.06737583875656128,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 17,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 1.000532627105713,
+      "final_over_initial": 0.903679102397339,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 0.9408352971076965,
+      "final_minus_clipped_sgd": 0.05969732999801636,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 29,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.0885257720947266,
+      "final_over_initial": 0.9709751130641925,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.0723962783813477,
+      "final_minus_clipped_sgd": 0.016129493713378906,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 29,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.0887718200683594,
+      "final_over_initial": 0.9711945901451601,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.0725442171096802,
+      "final_minus_clipped_sgd": 0.0162276029586792,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 43,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.0968208312988281,
+      "final_over_initial": 0.9684915003839419,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.077451467514038,
+      "final_minus_clipped_sgd": 0.01936936378479004,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 43,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.0969494581222534,
+      "final_over_initial": 0.9686050777173166,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "clipped_sgd_final_loss": 1.0771808624267578,
+      "final_minus_clipped_sgd": 0.019768595695495605,
+      "boundary": "Same small training fixtures versus the same clipping schedule without EMA; not held-out generalization or an EMA-quality win gate."
+    }
+  ],
+  "browser_clients": {
+    "schema": "spiraltorch.resident_microbatch_clients.v1",
+    "status": "passed",
+    "cases": [
+      {
+        "policy": "exact",
+        "reduction": "mean",
+        "grad_clip_max_norm": null,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.7360257176501033,
+          -0.7360257176501033
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "exact",
+        "reduction": "mean",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "exact",
+        "reduction": "mean",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": 0.6,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.10783378455302024,
+          -0.10783378455302023
+        ],
+        "reference_momentum": [
+          -0.03535533624551576,
+          0.03535533624551576
+        ]
+      },
+      {
+        "policy": "exact",
+        "reduction": "sum",
+        "grad_clip_max_norm": null,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.7360257176501033,
+          -0.7360257176501033
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "exact",
+        "reduction": "sum",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "exact",
+        "reduction": "sum",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": 0.6,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.10783378455302024,
+          -0.10783378455302023
+        ],
+        "reference_momentum": [
+          -0.03535533624551576,
+          0.03535533624551576
+        ]
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "mean",
+        "grad_clip_max_norm": null,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.3003926596974693,
+          -0.3003926596974693
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "mean",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "mean",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": 0.6,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.10783378455302024,
+          -0.10783378455302023
+        ],
+        "reference_momentum": [
+          -0.03535533624551576,
+          0.03535533624551576
+        ]
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "sum",
+        "grad_clip_max_norm": null,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.3003926596974693,
+          -0.3003926596974693
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "sum",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ],
+        "reference_momentum": null
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "sum",
+        "grad_clip_max_norm": 0.05,
+        "momentum_damping": 0.6,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.10783378455302024,
+          -0.10783378455302023
+        ],
+        "reference_momentum": [
+          -0.03535533624551576,
+          0.03535533624551576
+        ]
+      }
+    ],
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "wasm_sha256": "8edaf6cf59276e1bfa32adb76d91b47a9d53118cf468b3492460c7d8da590768",
+    "page_sha256": "0ae2dc3f2e79db8a2844fcefcfa3fdb877386b91f1c1168b885c2e85a41f4856",
+    "launch_flags": [
+      "--enable-unsafe-webgpu"
+    ],
+    "tiles_mnk_request": "",
+    "kernels_request": "",
+    "accumulations_request": "",
+    "shapes_request": "",
+    "fixture_request": "nn-microbatch-clients",
+    "asset_sha256": {
+      "/": "0ae2dc3f2e79db8a2844fcefcfa3fdb877386b91f1c1168b885c2e85a41f4856",
+      "/module/spiraltorch_wasm.js": "c163d0a22ca7ff0ac64191b2dd707facf06eef95351fa70d115ceb123527686b",
+      "/module/spiraltorch_wasm_bg.wasm": "8edaf6cf59276e1bfa32adb76d91b47a9d53118cf468b3492460c7d8da590768",
+      "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    "browser_version": "152.0.7977.84",
+    "page_errors": [],
+    "console_messages": []
+  },
+  "docs_example": {
+    "status": "passed",
+    "source": {
+      "commit": "5229ba90f4f049068b11bfe702fa339ab7b81843",
+      "tree": "769b83bb2e5b43153a216fb9177407db6ae4e2cf"
+    },
+    "library": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/python-release.dylib",
+    "library_sha256": "41d8824660f31500fe2794d9a48db9e527edda9fb34df18d4b615e4c6a8b1a9c",
+    "code_sha256": "828cf44c1544fa1b865f73036643e468aff5c096f3ad10bdecfbe73d66b2b493",
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    },
+    "updates": 32,
+    "microbatches": 32,
+    "output_shape": [
+      2,
+      3,
+      3
+    ],
+    "momentum": [
+      [
+        0.014201651327311993,
+        0.007806146517395973,
+        -0.02200780063867569,
+        -0.029043421149253845,
+        -0.03200104832649231,
+        0.061044469475746155,
+        0.05478271096944809,
+        -0.07441079616546631,
+        0.01962808333337307,
+        0.01362832635641098,
+        0.006243604701012373,
+        -0.019871937111020088
+      ],
+      [
+        -0.014184614643454552,
+        0.023292742669582367,
+        -0.009108137339353561
+      ]
+    ],
+    "retained_history_after_reset_disable_drop": true,
+    "handoff_max_abs_error": 0.0,
+    "boundary": "Unmodified guide code plus explicit history lifetime/reset checks, separate from the 69-stage run. This is weight-only handoff, not optimizer resume or quality/performance evidence."
+  },
+  "browser_client_gain_scope": "Client reference_gain/reference_momentum fields are scalar references after the 32 learning updates, before rejection/recovery/reset probes; they are not GPU dumps. Shared fixtures record actual GPU parameters, losses and history.",
+  "unchanged_shader_sha256": {
+    "crates/st-backend-wgpu/src/shaders/gradient_composition.wgsl": "cb0d2b8e92961f48ebb411aa52e6466dfc27b515f2c9ad15586cabd5967b01ac",
+    "crates/st-backend-wgpu/src/shaders/gradient_source_guard.wgsl": "f82778ff70e2ef937e0ff0603f6d1e934d970ac4605ddf1816c614633ce6db84",
+    "crates/st-backend-wgpu/src/shaders/graph_parameter.wgsl": "5a3fef133ac776fcdda47b8f11eb2391cebefacd8b7bb00ddb17e4c7c0b0b8e2"
+  },
+  "frozen_products_checked": 39,
+  "products": [
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-release.dylib",
+      "sha256": "c6544678b00afcecfe44839a85c32317c7ef7aea9cf505ac3bd3f582c4debff9"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "3d3c1eb619496d1c7458db917d57ffeaea9c05b7a91d132ec886825b4fb6c937"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "6b9c57a978ce857751a82a90a2596c04dc621a04411e6d01760a601a6d2efb8b"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "3663ecb040ee6b8af9dd22b5377f6b430a3c850f63f1f1c1b3f0a889d1809c73"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "6803b4786e4436cf4e5cf6d6077160125ea7ee54b0ac40719d82a6d56faa858c"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward",
+      "sha256": "b0669f7e4e77860cb32f3e5413dcb46c6df36e9acc24332336040b31d0269600"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_training",
+      "sha256": "124c6602f3bf55ea2e5cfd5a1dc189609c6da04bb3effdc4214923b459539515"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "3cc89c6d0bea8943ef6ce3368f8fc200e222819525c34d48888b7e210bdea3f5"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "76984253b45c5dbe28a59402e8a751dc2de3d8a66ffa5ff3946ec9f21341b1c3"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "2264079518fb70d52d64cf0227abea64e00389ff188cecd78ca743bedc56ba16"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "68231735b5a022d765056231c0966cdd7c67db1c17ac5d080a417ffb950e6cca"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "bc4d287e29b1d736795bd988340b2b951107609c8767d98364fceeabef37d83e"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-cpu.dylib",
+      "sha256": "6197378462134c8580e8107b144fdf5a8c7c057c63c8d1eb3f13cb71d2325835"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/python-release.dylib",
+      "sha256": "41d8824660f31500fe2794d9a48db9e527edda9fb34df18d4b615e4c6a8b1a9c"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "532dd70338c633f3506d5d332b4f717e59d77a433d40fbb813e2ae78a6c6f716"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "c163d0a22ca7ff0ac64191b2dd707facf06eef95351fa70d115ceb123527686b"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "4a63372e7d6110f85dc751cce6b5df6a99c45a38b55ffe94ce6f36938a2453d3"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "8edaf6cf59276e1bfa32adb76d91b47a9d53118cf468b3492460c7d8da590768"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/resident_graph_forward",
+      "sha256": "200ab875c34c8a11bd111e484672da18f451b02759d811b8b605868e36bd0a21"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/resident_graph_training",
+      "sha256": "c5d7a798e7d058dd0f73d6d90299ac94633d7ddc73b7c50152cf899878721c33"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "28255e7bd6146077aed28e8e33653666a5163e63f7c07d3a475316d8d5d6913f"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/resident_nd_tensor",
+      "sha256": "d2545720b49ee679a8e2f0669a380db8d5ca540a187f8f674349359a7301c5d8"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "1cd23a97a039774c7b2c54e6c2074d20ad5b94dd4bd67cf9c5fd31efa70c1670"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "4b27564a17afd408c60fda6fde648909317f95c9ce070a632d47f679c16e4781"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "4209ed17843c7aaa295dba0372e4f91e712da0198b59a3af2c8227dbceae56c6"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "2116b8990a62a3e4ee86b6f2d14e683fb295a3909488db1026abab2e32caad4e"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/nd/spiraltorch_wasm.d.ts",
+      "sha256": "57b5025c40c94463538845ea0fb56b4e4ddb5014ccd25100302cdbf8b4d2873a"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/nd/spiraltorch_wasm.js",
+      "sha256": "41ca6e5af1bda7094e66024dafed2e3667ce46426f8228c3769df5ceb312c099"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "957c46e5bdd9ba7ff803fa8b7da1bef1ffa7b38e528d1fa238c0f76d187c681c"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm",
+      "sha256": "ba0c9a55f87c20e5fc95e99ccc3c9d3c9a478c56e29477ccb0d5ca56f0ae1077"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "6179c4f3004fd6ff83a2ca861397cc4da2f39d8d3a258dccb951379f16ffda68"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-momentum-20260912/verified-a/python-cpu.dylib",
+      "sha256": "6f21b559373443c930844e660e6b57f84193c52e36b14b39b526f16756755d12"
+    }
+  ],
+  "raw_records": 213,
+  "manifest_sha256": "292f2aae0e49e4ec2e915fc82cf805be333a82fdaa3c7036af12fe4eb6837b8f",
+  "preliminary_logs": "See prototype-notes.md: pre-freeze native GPU and ordinary Topos parity checks are retained, not counted as frozen verification.",
+  "boundary": "Small deterministic learning and correctness, not generalization, LLM/FT quality or speed. Native Apple M4/Metal; browser WebGPU physical GPU UNKNOWN. Owned GPU work serial, host exclusivity UNKNOWN. Eager Torch CPU/MPS, fallback disabled. Fixed microbatch shape, explicit valid-label weights, explicit SGD with optional Topos EMA, no full Topos RMS-control migration, optimizer checkpoint/resume, generic ModuleTrainer migration, implicit averaging, CUDA/Furnace, release, push or merge. Existing forward controls are not sustained-interval performance evidence."
+}

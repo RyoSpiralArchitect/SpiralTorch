@@ -1,0 +1,129 @@
+..E....E....EEEE....
+======================================================================
+ERROR: test_cli_runtime_device_ready_gate_uses_lazy_describer (__main__.RuntimeImportsTest.test_cli_runtime_device_ready_gate_uses_lazy_describer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 728, in test_cli_runtime_device_ready_gate_uses_lazy_describer
+    exit_code = module.main(
+                ^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1864, in main
+    report = runtime_import_preflight_report(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1646, in runtime_import_preflight_report
+    runtime_device_report_fields(
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1471, in runtime_device_report_fields
+    contract = evaluate_runtime_device_route(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1307, in evaluate_runtime_device_route
+    return _native_runtime_device_route_contract(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1184, in _native_runtime_device_route_contract
+    evaluate = _native_runtime_device_route_function(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 842, in _native_runtime_device_route_function
+    raise RuntimeError(
+RuntimeError: runtime-device route semantics require the compiled Rust core; rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate
+
+======================================================================
+ERROR: test_preflight_report_includes_runtime_device_failures (__main__.RuntimeImportsTest.test_preflight_report_includes_runtime_device_failures)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 608, in test_preflight_report_includes_runtime_device_failures
+    report = module.runtime_import_preflight_report(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1646, in runtime_import_preflight_report
+    runtime_device_report_fields(
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1471, in runtime_device_report_fields
+    contract = evaluate_runtime_device_route(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1307, in evaluate_runtime_device_route
+    return _native_runtime_device_route_contract(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1184, in _native_runtime_device_route_contract
+    evaluate = _native_runtime_device_route_function(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 842, in _native_runtime_device_route_function
+    raise RuntimeError(
+RuntimeError: runtime-device route semantics require the compiled Rust core; rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate
+
+======================================================================
+ERROR: test_runtime_device_report_fields_gate_ready_backends (__main__.RuntimeImportsTest.test_runtime_device_report_fields_gate_ready_backends)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 423, in test_runtime_device_report_fields_gate_ready_backends
+    fields = module.runtime_device_report_fields(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1471, in runtime_device_report_fields
+    contract = evaluate_runtime_device_route(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1307, in evaluate_runtime_device_route
+    return _native_runtime_device_route_contract(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1184, in _native_runtime_device_route_contract
+    evaluate = _native_runtime_device_route_function(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 842, in _native_runtime_device_route_function
+    raise RuntimeError(
+RuntimeError: runtime-device route semantics require the compiled Rust core; rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate
+
+======================================================================
+ERROR: test_runtime_device_report_fields_replays_custom_route_with_current_gates (__main__.RuntimeImportsTest.test_runtime_device_report_fields_replays_custom_route_with_current_gates)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 475, in test_runtime_device_report_fields_replays_custom_route_with_current_gates
+    route = module.evaluate_runtime_device_route(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1307, in evaluate_runtime_device_route
+    return _native_runtime_device_route_contract(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1184, in _native_runtime_device_route_contract
+    evaluate = _native_runtime_device_route_function(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 842, in _native_runtime_device_route_function
+    raise RuntimeError(
+RuntimeError: runtime-device route semantics require the compiled Rust core; rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate
+
+======================================================================
+ERROR: test_runtime_device_report_keeps_ready_surrogate_diagnostic_available (__main__.RuntimeImportsTest.test_runtime_device_report_keeps_ready_surrogate_diagnostic_available)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 525, in test_runtime_device_report_keeps_ready_surrogate_diagnostic_available
+    fields = module.runtime_device_report_fields(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1471, in runtime_device_report_fields
+    contract = evaluate_runtime_device_route(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1307, in evaluate_runtime_device_route
+    return _native_runtime_device_route_contract(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1184, in _native_runtime_device_route_contract
+    evaluate = _native_runtime_device_route_function(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 842, in _native_runtime_device_route_function
+    raise RuntimeError(
+RuntimeError: runtime-device route semantics require the compiled Rust core; rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate
+
+======================================================================
+ERROR: test_runtime_device_report_preserves_unknown_readiness (__main__.RuntimeImportsTest.test_runtime_device_report_preserves_unknown_readiness)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 561, in test_runtime_device_report_preserves_unknown_readiness
+    fields = module.runtime_device_report_fields(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1471, in runtime_device_report_fields
+    contract = evaluate_runtime_device_route(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1307, in evaluate_runtime_device_route
+    return _native_runtime_device_route_contract(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 1184, in _native_runtime_device_route_contract
+    evaluate = _native_runtime_device_route_function(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py/spiraltorch/runtime_imports.py", line 842, in _native_runtime_device_route_function
+    raise RuntimeError(
+RuntimeError: runtime-device route semantics require the compiled Rust core; rebuild or reinstall SpiralTorch with _runtime_device_route_evaluate
+
+----------------------------------------------------------------------
+Ran 20 tests in 2.287s
+
+FAILED (errors=6)

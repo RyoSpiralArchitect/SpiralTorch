@@ -1,0 +1,920 @@
+{
+  "schema": "spiraltorch.module_resident_gradient_clip_record.v1",
+  "status": "passed",
+  "candidate_source": {
+    "commit": "32414050677e97a3e365f7d0f5e971eedb4e8fa5",
+    "tree": "00babb974c34afed756ecdb9f8928c99001ca66e"
+  },
+  "feature_base_commit": "3030335e5512996a6ae17d9de0110de7461fd034",
+  "baseline_control_source": {
+    "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+    "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+  },
+  "verification_steps": 69,
+  "verification_seconds": 640.3222836659988,
+  "decision": "Optional exponent-aware global clipping after composition and gain normalization, before the existing all-parameter commit. Share the norm contract with ModuleTrainer and preserve disabled resident update kernels.",
+  "test_counts": {
+    "terminal-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "python-cpu-handoff.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 4
+    },
+    "python-resident-loss.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "interval-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 10
+    },
+    "python-graph_autograd.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "contracts.log": {
+      "rust_passed": 27,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 10
+    },
+    "classification-wgpu.log": {
+      "rust_passed": 16,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "microbatch-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 2
+    },
+    "python-cpu-resident-loss.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "classification-cpu.log": {
+      "rust_passed": 16,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "nn-cpu.log": {
+      "rust_passed": 708,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-pointwise.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "classification-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-cpu-classification.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-module_update.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "integration.log": {
+      "rust_passed": 6,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-cpu-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 2
+    },
+    "python-microbatch.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 2
+    },
+    "backend-serial.log": {
+      "rust_passed": 144,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-cpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-wgpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 35
+    },
+    "tensor-wgpu.log": {
+      "rust_passed": 497,
+      "rust_ignored": 1,
+      "python_ran": 0
+    },
+    "nn-serial.log": {
+      "rust_passed": 761,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "tensor-cpu.log": {
+      "rust_passed": 449,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-graph_learner.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "torch-reference-shapes.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-cpu-microbatch.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "python-classification.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    }
+  },
+  "torch_all_matched": {
+    "version": "2.12.1",
+    "cases": 408,
+    "tensor_or_scalar_comparisons": 159504,
+    "max_abs_error": 1.811981201171875e-05,
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "torch_gradient_clip_matched": {
+    "version": "2.12.1",
+    "cases": 24,
+    "tensor_or_scalar_comparisons": 34104,
+    "max_abs_error": 1.430511474609375e-06,
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "existing_torch_reference_gaps": [
+    {
+      "device": "cpu",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": 0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048513285848406e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/native-correctness.json"
+    },
+    {
+      "device": "mps",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": -0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048514720778033e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/native-correctness.json"
+    },
+    {
+      "device": "cpu",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": 0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048513285848406e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/browser-correctness.json"
+    },
+    {
+      "device": "mps",
+      "probe": "tiny_tail",
+      "classification": true,
+      "scope": "analytic two-class tail check, NOT a matched PyTorch-autograd comparison",
+      "spiraltorch_loss": [
+        1.804851041598915e-35
+      ],
+      "spiraltorch_gradient": [
+        -1.804851041598915e-35,
+        1.804851041598915e-35
+      ],
+      "torch_loss": -0.0,
+      "torch_gradient": [
+        0.0,
+        1.8048514720778033e-35
+      ],
+      "input": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/browser-correctness.json"
+    }
+  ],
+  "trajectories": [
+    {
+      "route": "native",
+      "seed": 17,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 0.9298034906387329,
+      "final_over_initial": 0.8397966853484182,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 0.6934325098991394,
+      "final_minus_unclipped": 0.2363709807395935,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 17,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 0.9408352971076965,
+      "final_over_initial": 0.84976059126974,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 0.7789208889007568,
+      "final_minus_unclipped": 0.1619144082069397,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 29,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.0723962783813477,
+      "final_over_initial": 0.956587454651771,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.0420304536819458,
+      "final_minus_unclipped": 0.030365824699401855,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 29,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.0725442171096802,
+      "final_over_initial": 0.9567194173734187,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.044956088066101,
+      "final_minus_unclipped": 0.0275881290435791,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 43,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.077451467514038,
+      "final_over_initial": 0.9513883750073026,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.0447320938110352,
+      "final_minus_unclipped": 0.03271937370300293,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "native",
+      "seed": 43,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.0771808624267578,
+      "final_over_initial": 0.9511494310344011,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.045428991317749,
+      "final_minus_unclipped": 0.03175187110900879,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 17,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 0.9298034906387329,
+      "final_over_initial": 0.8397966853484182,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 0.6934325098991394,
+      "final_minus_unclipped": 0.2363709807395935,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 17,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1071768999099731,
+      "final_loss": 0.9408352971076965,
+      "final_over_initial": 0.84976059126974,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 0.7789208889007568,
+      "final_minus_unclipped": 0.1619144082069397,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 29,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.0723962783813477,
+      "final_over_initial": 0.956587454651771,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.0420304536819458,
+      "final_minus_unclipped": 0.030365824699401855,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 29,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "sum",
+      "initial_loss": 1.12106454372406,
+      "final_loss": 1.0725442171096802,
+      "final_over_initial": 0.9567194173734187,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.044956088066101,
+      "final_minus_unclipped": 0.0275881290435791,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 43,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.077451467514038,
+      "final_over_initial": 0.9513883750073026,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.0447320938110352,
+      "final_minus_unclipped": 0.03271937370300293,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    },
+    {
+      "route": "browser",
+      "seed": 43,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "reduction": "mean",
+      "initial_loss": 1.1325043439865112,
+      "final_loss": 1.0771808624267578,
+      "final_over_initial": 0.9511494310344011,
+      "loss_decreased": true,
+      "updates": 32,
+      "microbatches": 95,
+      "first_observation_after_updates": 32,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer",
+      "unclipped_final_loss": 1.045428991317749,
+      "final_minus_unclipped": 0.03175187110900879,
+      "boundary": "Same small training fixtures, not held-out generalization or a clip-quality win gate."
+    }
+  ],
+  "browser_clients": {
+    "schema": "spiraltorch.resident_microbatch_clients.v1",
+    "status": "passed",
+    "cases": [
+      {
+        "policy": "exact",
+        "reduction": "mean",
+        "grad_clip_max_norm": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.7360257176501033,
+          -0.7360257176501033
+        ]
+      },
+      {
+        "policy": "exact",
+        "reduction": "mean",
+        "grad_clip_max_norm": 0.05,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ]
+      },
+      {
+        "policy": "exact",
+        "reduction": "sum",
+        "grad_clip_max_norm": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.7360257176501033,
+          -0.7360257176501033
+        ]
+      },
+      {
+        "policy": "exact",
+        "reduction": "sum",
+        "grad_clip_max_norm": 0.05,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ]
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "mean",
+        "grad_clip_max_norm": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.3003926596974693,
+          -0.3003926596974693
+        ]
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "mean",
+        "grad_clip_max_norm": 0.05,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ]
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "sum",
+        "grad_clip_max_norm": null,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.3003926596974693,
+          -0.3003926596974693
+        ]
+      },
+      {
+        "policy": "module_compatible",
+        "reduction": "sum",
+        "grad_clip_max_norm": 0.05,
+        "updates": 32,
+        "microbatches": 96,
+        "rejected_update": 33,
+        "recovered_update": 34,
+        "reference_gain": [
+          0.11313708498984763,
+          -0.11313708498984763
+        ]
+      }
+    ],
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "wasm_sha256": "041b6de2b8c29553cc560fcbe87bec4f9dc09ebef0d45f86e950e842c1698fba",
+    "page_sha256": "44550c516f43524052f1c65003ca1c8a7ffebac7bf43dc5dd43cb32782eec7b3",
+    "launch_flags": [
+      "--enable-unsafe-webgpu"
+    ],
+    "tiles_mnk_request": "",
+    "kernels_request": "",
+    "accumulations_request": "",
+    "shapes_request": "",
+    "fixture_request": "nn-microbatch-clients",
+    "asset_sha256": {
+      "/": "44550c516f43524052f1c65003ca1c8a7ffebac7bf43dc5dd43cb32782eec7b3",
+      "/module/spiraltorch_wasm.js": "4c1c866bca47ac35b19f391bdcfb13627873a2b71e0f57fa7aabccd28ea78592",
+      "/module/spiraltorch_wasm_bg.wasm": "041b6de2b8c29553cc560fcbe87bec4f9dc09ebef0d45f86e950e842c1698fba",
+      "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    "browser_version": "152.0.7977.84",
+    "page_errors": [],
+    "console_messages": []
+  },
+  "docs_example": {
+    "status": "passed",
+    "source": {
+      "commit": "32414050677e97a3e365f7d0f5e971eedb4e8fa5",
+      "tree": "00babb974c34afed756ecdb9f8928c99001ca66e"
+    },
+    "library": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/python-release.dylib",
+    "library_sha256": "f14812b7b9a76d2e882ba30817f471ccf00e193db86472448b6f0ae865a7b9bb",
+    "code_sha256": {
+      "module_resident_microbatch.md": "73f227609cf79ab3198c136b0ee14b638f9735c5cf6a13b4dfaa6ab095402e2b",
+      "module_resident_gradient_clip.md": "837a46e3bf097b0fb2283957e65a174813e56e1110b6cc51cd8395a3b426065f"
+    },
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    },
+    "updates": 33,
+    "microbatches": 99,
+    "output_shape": [
+      2,
+      3,
+      3
+    ],
+    "handoff_max_abs_error": 0.0,
+    "boundary": "Exact two documentation code blocks with a fresh window prepared between them; not quality or performance evidence, separate from the 69-stage run."
+  },
+  "browser_client_gain_scope": "The client reference_gain field is an independent scalar reference, not a GPU parameter dump; client GPU outputs are checked against it. Shared fixtures record observed GPU parameters and losses.",
+  "unchanged_shader_sha256": {
+    "crates/st-backend-wgpu/src/shaders/gradient_composition.wgsl": "cb0d2b8e92961f48ebb411aa52e6466dfc27b515f2c9ad15586cabd5967b01ac",
+    "crates/st-backend-wgpu/src/shaders/gradient_source_guard.wgsl": "f82778ff70e2ef937e0ff0603f6d1e934d970ac4605ddf1816c614633ce6db84",
+    "crates/st-backend-wgpu/src/shaders/graph_parameter.wgsl": "5a3fef133ac776fcdda47b8f11eb2391cebefacd8b7bb00ddb17e4c7c0b0b8e2"
+  },
+  "frozen_products_checked": 39,
+  "products": [
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-release.dylib",
+      "sha256": "c6544678b00afcecfe44839a85c32317c7ef7aea9cf505ac3bd3f582c4debff9"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "3d3c1eb619496d1c7458db917d57ffeaea9c05b7a91d132ec886825b4fb6c937"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "6b9c57a978ce857751a82a90a2596c04dc621a04411e6d01760a601a6d2efb8b"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "3663ecb040ee6b8af9dd22b5377f6b430a3c850f63f1f1c1b3f0a889d1809c73"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "6803b4786e4436cf4e5cf6d6077160125ea7ee54b0ac40719d82a6d56faa858c"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward",
+      "sha256": "b0669f7e4e77860cb32f3e5413dcb46c6df36e9acc24332336040b31d0269600"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_training",
+      "sha256": "124c6602f3bf55ea2e5cfd5a1dc189609c6da04bb3effdc4214923b459539515"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "3cc89c6d0bea8943ef6ce3368f8fc200e222819525c34d48888b7e210bdea3f5"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "76984253b45c5dbe28a59402e8a751dc2de3d8a66ffa5ff3946ec9f21341b1c3"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "2264079518fb70d52d64cf0227abea64e00389ff188cecd78ca743bedc56ba16"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "68231735b5a022d765056231c0966cdd7c67db1c17ac5d080a417ffb950e6cca"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "bc4d287e29b1d736795bd988340b2b951107609c8767d98364fceeabef37d83e"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-cpu.dylib",
+      "sha256": "6197378462134c8580e8107b144fdf5a8c7c057c63c8d1eb3f13cb71d2325835"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/python-release.dylib",
+      "sha256": "f14812b7b9a76d2e882ba30817f471ccf00e193db86472448b6f0ae865a7b9bb"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "ddbf0c713550d0e4012103978a572d45094b40fd5fbca1f3f8fe1c40e3803ec3"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "4c1c866bca47ac35b19f391bdcfb13627873a2b71e0f57fa7aabccd28ea78592"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "0d89f43178e9268c194b9d1f34a03d1e4cfd908ef5fc2cf66f0bb16cbbec92c7"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "041b6de2b8c29553cc560fcbe87bec4f9dc09ebef0d45f86e950e842c1698fba"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/resident_graph_forward",
+      "sha256": "79f74863a204ea74d8c474eaa690730edcbd942c911160c007955631271dfd50"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/resident_graph_training",
+      "sha256": "d563c206f6f7729b9993d643f0b41955ab1f1a8d8a814aff96791066d95b93e4"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "25771d875ef082dd92c639f131c1a2143ebee76fa5648ec5c715166a83753ad9"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/resident_nd_tensor",
+      "sha256": "334bab3d8e764efc644ed5789ea1fb1b2e16215ba6c04ae6e9a16e7e3d757ce1"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "b5c711daa815b03b180b404c88a1b4ebf4ad1dc4911c8d35eb8e7002aa562568"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "01d13430bbc51f060db9383eb38edde8ba223e4404e4102ad6f4752f586cda19"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "bce48f54e08c6dfc32e2653bab9a26d150b230e1d168dd783608ca0b3a155e9c"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "deb3b5ce06ebcf5799721186f01c54d36d7e9dd1ee005397f51052be86f5ffe8"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/nd/spiraltorch_wasm.d.ts",
+      "sha256": "40ee51f2a10c2cd6c748166e2a547259376183c25dc47bbcb9e9d910f78ff394"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/nd/spiraltorch_wasm.js",
+      "sha256": "f2c293883d221043dcd73e640729285c6b7a0ef3c78ce322913aea7d004661a2"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "346255c6c741c2359ac565edd6d1274b8be483213d3d9a9bcc9f864d76dcbcf3"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm",
+      "sha256": "b239bc22e51f4a2cf4793ce242d0bad639fb00b1a94fbcc1bf688d96eef9bba1"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "deddfdd9b58f78bca05436702ad4b71c27cd1fa3046d7fb9708131b2ecbb64be"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-gradient-clip-20260912/verified-a/python-cpu.dylib",
+      "sha256": "11ccdd880ac3b193e991d452baedabc68da2ae3740f3346a4b26ddf6c95d7be2"
+    }
+  ],
+  "raw_records": 216,
+  "manifest_sha256": "3e50efe3d319cbac1423aecd73950010dab09075c94f6296e7307ad7598df9b7",
+  "preliminary_logs": "See prototype-notes.md: initial wide-norm numerical failures and pre-freeze checks are retained, not counted as frozen verification.",
+  "boundary": "Small deterministic learning and correctness, not generalization, LLM/FT quality or speed. Native Apple M4/Metal; browser WebGPU physical GPU UNKNOWN. Owned GPU work serial, host exclusivity UNKNOWN. Eager Torch CPU/MPS, fallback disabled. Fixed microbatch shape, explicit valid-label weights, plain SGD, no generic ModuleTrainer migration, implicit averaging, momentum, CUDA/Furnace, release, push or merge. Existing forward controls are not sustained-interval performance evidence."
+}

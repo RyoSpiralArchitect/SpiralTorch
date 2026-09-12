@@ -1,0 +1,304 @@
+{
+  "schema": "spiraltorch.source_archive.v1",
+  "status": "passed",
+  "records": [
+    {
+      "archive": "raw/inputs/baseline-receipt.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/parameter-content-stamps-20260912/verified-a/receipt.json",
+      "bytes": 31392,
+      "sha256": "fc6ef4a00318a652ccfefefcb27ea96ce3e21532865f5d19c931a6a2899997ed",
+      "compressed_bytes": 3868,
+      "compressed_sha256": "1e071aaaad2e2bee53ae14a449713dcab26756be4ce2a22f0bcd54fe7a8f2fe9"
+    },
+    {
+      "archive": "raw/inputs/candidate-receipt.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/receipt.json",
+      "bytes": 31038,
+      "sha256": "1829fa786cace01ff062f35c9b4dc2fdfe23f40a323b5b24876e663ba09be2ec",
+      "compressed_bytes": 3824,
+      "compressed_sha256": "2573b29728f17fcb766051d48b82fd02a5fc972f55b3d0963abd8d3d7efe37fa"
+    },
+    {
+      "archive": "raw/inputs/earlier-python-baseline.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/baseline-module-bench.json",
+      "bytes": 2549915,
+      "sha256": "58e1a43de7a262c5838efb9485775f5071f91532787be1fe7a56210d95e8ebd3",
+      "compressed_bytes": 98716,
+      "compressed_sha256": "18b9167a02c2a0540c76d80134226048bc3465e122a596080bae150e75ab1f01"
+    },
+    {
+      "archive": "raw/inputs/earlier-python-candidate.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/module-forward-bench.json",
+      "bytes": 2549880,
+      "sha256": "ebb512c51afc916e7b6f8de77219db3cb340928a87c2b316fb569396e49efcdc",
+      "compressed_bytes": 98808,
+      "compressed_sha256": "ca1510ec789f0d8d5df0f1398bc5af2fc9cd24a7bae998b6d08b21c75222f2aa"
+    },
+    {
+      "archive": "raw/inputs/earlier-single-call-summary.json.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/benchmarks/results/2026-09-12-module-inline-guard/summary.json",
+      "bytes": 499473,
+      "sha256": "958ba4af2ab78c078b1e3a08a148ab9b8d28924d95ec72172131e4665903b6b1",
+      "compressed_bytes": 35452,
+      "compressed_sha256": "c0dc9b507b4cafd8a57e5b957c363ea7bd41426d45f6e4ac44b47ee64575f2e1"
+    },
+    {
+      "archive": "raw/inputs/native-fixture.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/native-forward-bench.json",
+      "bytes": 12542107,
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097",
+      "compressed_bytes": 80064,
+      "compressed_sha256": "ecf613aa2a43bf5b747e53182cecaddf1be633d3a8f26ec86b90e6e10cc2ae37"
+    },
+    {
+      "archive": "raw/run/archive.py.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/archive.py",
+      "bytes": 5826,
+      "sha256": "941986f604147ca28ffcbb52b989523196eb22490f2583f56c3b6eb0c497f26c",
+      "compressed_bytes": 2188,
+      "compressed_sha256": "b827cae7deb4c491dc3c9e59bf41cd51f16e770be048a364e46f2e3169c923e9"
+    },
+    {
+      "archive": "raw/run/diff-check.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/run/driver-syntax.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/driver-syntax.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/run/forward-admission-tests.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/forward-admission-tests.log",
+      "bytes": 858,
+      "sha256": "ae548dd176f96793934caa800befe880be90b16a0d3b898f57a32520aeed6dc0",
+      "compressed_bytes": 364,
+      "compressed_sha256": "cdacbe8a1fffcdece5aa0a842f0208a4f128b5660be984703cf0c3ec61790dd7"
+    },
+    {
+      "archive": "raw/run/interval-admission-tests.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/interval-admission-tests.log",
+      "bytes": 1186,
+      "sha256": "458cdf9c7aec5bc8485cf031164ac7399c737bd31a5c8f6bdd120d158652d204",
+      "compressed_bytes": 440,
+      "compressed_sha256": "45d108e9b1e0f1de88c3a95f42a055637b63335000df915ba884edb0e47f15c0"
+    },
+    {
+      "archive": "raw/run/interval-browser.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/interval-browser.json",
+      "bytes": 6478926,
+      "sha256": "aedd96d4f72547dc9f8c931f4795e61dda6ea03603c35ee99facf2b588821843",
+      "compressed_bytes": 50624,
+      "compressed_sha256": "ada7ba814cae97a2de308b42132aa76c4e87f56322ab7eb4c543e9a791a25c78"
+    },
+    {
+      "archive": "raw/run/interval-browser.json.cases.jsonl.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/interval-browser.json.cases.jsonl",
+      "bytes": 3492938,
+      "sha256": "1967b9bf6c39b69796e50e94c99244374cbeef3e66d6ee35c522a6344bb11dfb",
+      "compressed_bytes": 47076,
+      "compressed_sha256": "231548a84aac719c838ff86c7c44f64747ebee6c9a54aae5626cb8880fafa95f"
+    },
+    {
+      "archive": "raw/run/interval-browser.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/interval-browser.log",
+      "bytes": 151,
+      "sha256": "2c2fa1d8676854547135437a9261ead9e6740e7080bd3c5d383db10b96e7a470",
+      "compressed_bytes": 196,
+      "compressed_sha256": "30a94e46adcb2d1d0f441f13ab88cc41a447d7693b31e1be478f8e026fbd951b"
+    },
+    {
+      "archive": "raw/run/interval-js-tests.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/interval-js-tests.log",
+      "bytes": 586,
+      "sha256": "519732ca125c47339fd5ad450d59b49f32cb5f7a90ba0a53baf41053047cfe87",
+      "compressed_bytes": 428,
+      "compressed_sha256": "a22b9fdce60fd383a305b06b9e354d3eb931ae8c7defbe70a4cb16096a1e4dbe"
+    },
+    {
+      "archive": "raw/run/interval-validation.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/interval-validation.json",
+      "bytes": 47836,
+      "sha256": "f0038232a50467679f1949610d0be3ba7ce95cf56e5b0e985891c77950706eb0",
+      "compressed_bytes": 5112,
+      "compressed_sha256": "ee184c4c19dae0af66c835cf546237f1787830b13ef2c6648bc236b2922c83c9"
+    },
+    {
+      "archive": "raw/run/interval-validation.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/interval-validation.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/run/old-admission-tests.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/old-admission-tests.log",
+      "bytes": 358,
+      "sha256": "ca973837ccff153cc1948d13adbc76e6cd765a112830da8be80dc28349ac260f",
+      "compressed_bytes": 204,
+      "compressed_sha256": "0b2a129e94c865076428d93ca91d3a2130654640cb55f9de72a871025c7732c8"
+    },
+    {
+      "archive": "raw/run/old-browser.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/old-browser.json",
+      "bytes": 2421724,
+      "sha256": "2894a432d462b64338599df8f5c4cb2230c23b5c739108359270bc1492556758",
+      "compressed_bytes": 42316,
+      "compressed_sha256": "89148ea69d5779ec57a35d75441b6b2a5f898705152480e4ac667dffc09b393f"
+    },
+    {
+      "archive": "raw/run/old-browser.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/old-browser.log",
+      "bytes": 145,
+      "sha256": "78828ba847ca72ee214010909d38426106bc40e99fe805c5eb3434f890fc01a0",
+      "compressed_bytes": 196,
+      "compressed_sha256": "47b7fe215c6f98d0a38c9234bf69e76a2aea84bae053279ce4589f4eb7a4bf1c"
+    },
+    {
+      "archive": "raw/run/old-validation.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/old-validation.json",
+      "bytes": 77886,
+      "sha256": "8f581242ceb6f9630198fd3340ea554065f9fadfa489bcb2109062096960f65f",
+      "compressed_bytes": 7936,
+      "compressed_sha256": "ff218f6c7effd20cb198a4ae3e5f97bf331ab7bd6f3a21f5bd7b7be12e94cf56"
+    },
+    {
+      "archive": "raw/run/old-validation.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/old-validation.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/run/receipt.json.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/receipt.json",
+      "bytes": 11858,
+      "sha256": "230fd03a116fcdf00398269566bc5b5992c1cf982029898524dce9a5e3cb80a8",
+      "compressed_bytes": 3108,
+      "compressed_sha256": "1c5bb642824eb024c55fd05dbe836be296be23b72eb56dabbda83afc84ed92c6"
+    },
+    {
+      "archive": "raw/run/run.log.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/run.log",
+      "bytes": 472,
+      "sha256": "a2d7250ab7ab8a3d2b05efcb73e5335a85f8e99e15121a7200309581c9bf1cec",
+      "compressed_bytes": 208,
+      "compressed_sha256": "1b70ec503abd11eb767c94fed66ca4ee00b45761c663bf779c20541f42d1ac42"
+    },
+    {
+      "archive": "raw/run/run.py.xz",
+      "origin": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-completed-intervals-20260912/run.py",
+      "bytes": 6042,
+      "sha256": "78e50465c4a6a87fe5516d0e97e57e8a447894b78b72d4c254f6b6d174d587cc",
+      "compressed_bytes": 2312,
+      "compressed_sha256": "8c2832d20875b31b67b4bd2f63e53e139567db91e4cedba00731f4d057116b99"
+    },
+    {
+      "archive": "raw/source/bindings/st-wasm/tests/module_resident_intervals.html.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/module_resident_intervals.html",
+      "bytes": 7847,
+      "sha256": "28d66c71ea8d2bd4e092f5d10e6170ef88cd53c82a193497feb396dd31737a47",
+      "compressed_bytes": 2868,
+      "compressed_sha256": "d9264b0c7e6fae1bbfb922829430f819f5ac79c51e916dc9124008a1e7211cae"
+    },
+    {
+      "archive": "raw/source/bindings/st-wasm/tests/module_resident_intervals.mjs.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/module_resident_intervals.mjs",
+      "bytes": 1719,
+      "sha256": "99c8471e6b6345b580e53817c9505203de58d156f1a45cf96f366b6f4b3943c6",
+      "compressed_bytes": 824,
+      "compressed_sha256": "fcce40618b3ad78619bf72ce892523b373722e4e36c865ad4e53048ff43de079"
+    },
+    {
+      "archive": "raw/source/bindings/st-wasm/tests/module_resident_matched.html.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/module_resident_matched.html",
+      "bytes": 5656,
+      "sha256": "b73ce02d1d6ab85268b2d062e140830f759b4fa5452af6506f1250b55f06ae18",
+      "compressed_bytes": 2392,
+      "compressed_sha256": "ea8a016a9719b0a28f02b215632881f9ae0ab594973655837b8c0b26c793c736"
+    },
+    {
+      "archive": "raw/source/tests/test_graph_forward_paths.py.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tests/test_graph_forward_paths.py",
+      "bytes": 6689,
+      "sha256": "2db1e3da4a5e734f20106183543cfffd50ea3bf944fc5fe136215d93dc035a21",
+      "compressed_bytes": 2304,
+      "compressed_sha256": "ed4c2caa67ae1e739d131a7ebac1010767f31b1f9aafbb1cf4af33c41fe4634e"
+    },
+    {
+      "archive": "raw/source/tools/bench_graph_forward_paths.py.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/bench_graph_forward_paths.py",
+      "bytes": 16265,
+      "sha256": "215a5854fe1913ec818685085acbb198665bd148554970be5cb449f112711c54",
+      "compressed_bytes": 5224,
+      "compressed_sha256": "a83df7b676b46a212ae171d1c28a587e221c1064045e7bcbdc6852e1e6f172fc"
+    },
+    {
+      "archive": "raw/source/tools/test_module_direct_io.py.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/test_module_direct_io.py",
+      "bytes": 3090,
+      "sha256": "e93a719a38319055ee4ed1d0e58295e07e1ba82f262dc6d138cc759ea3d57065",
+      "compressed_bytes": 1328,
+      "compressed_sha256": "bbd1f9f0c1b52f0a62cddece8df7d3ce768e228f12d09d7c0825100cdec80f48"
+    },
+    {
+      "archive": "raw/source/tools/test_module_interval_validation.py.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/test_module_interval_validation.py",
+      "bytes": 9534,
+      "sha256": "dc199d7db11b18c63b0900bf9910b8751775cc00060f4af63ca492c9fcadf8ed",
+      "compressed_bytes": 2668,
+      "compressed_sha256": "fb25027862d34839cdcb966fe0497761486f3ea580b5bf036b4e3218ae142cde"
+    },
+    {
+      "archive": "raw/source/tools/test_module_resident_intervals.mjs.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/test_module_resident_intervals.mjs",
+      "bytes": 3598,
+      "sha256": "8ced1d09e6f5c67e9861fef072f08d295abc4b5510dd096233aff5b5e2a58a71",
+      "compressed_bytes": 1416,
+      "compressed_sha256": "07552aa98ec3e351725c6ca8aabe1d3666030b57c47c7beb0c5225ef0f5e9a0e"
+    },
+    {
+      "archive": "raw/source/tools/test_resident_browser.cjs.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/test_resident_browser.cjs",
+      "bytes": 13949,
+      "sha256": "6e0bf253659ea58528b74f8982161e8c447fe3fb77c261b6487db2173f0f9a1d",
+      "compressed_bytes": 3692,
+      "compressed_sha256": "b2c5f1828a66e321c8b45928be00bd0fab2c8921e44d1d7d7de45f7abb276120"
+    },
+    {
+      "archive": "raw/source/tools/validate_module_direct_io.py.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/validate_module_direct_io.py",
+      "bytes": 5892,
+      "sha256": "190f337cf3072c3f941a1e7b22c8cb5fdda4638d9bea93817ab4d18b98d40144",
+      "compressed_bytes": 2188,
+      "compressed_sha256": "272b2fac62b292c2ecdd9be77999211250d9f250e176814af87a41440c8c2ebd"
+    },
+    {
+      "archive": "raw/source/tools/validate_module_forward_paths.py.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/validate_module_forward_paths.py",
+      "bytes": 6188,
+      "sha256": "5863353be3bcbb55d833c065fa5a7c7f2dd4cf032f25cfae883c56a4aa9dff0c",
+      "compressed_bytes": 2308,
+      "compressed_sha256": "0259d4dc95de8d0653a89d6492c8729ad758e6b5cbfd4219fef86331b608fa1b"
+    },
+    {
+      "archive": "raw/source/tools/validate_module_resident_intervals.py.xz",
+      "origin": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/tools/validate_module_resident_intervals.py",
+      "bytes": 12259,
+      "sha256": "a2c124d0547ebce560abd6a397a6cd37a9fe56705ffe9e42395c54c2dd020eea",
+      "compressed_bytes": 3776,
+      "compressed_sha256": "3ed88abbc2cc39ae4934ac08c69bfc82f1c9828b0578a2af813dad1867b3d562"
+    }
+  ],
+  "raw_bytes": 30843283,
+  "compressed_bytes": 514556
+}

@@ -1,0 +1,491 @@
+{
+  "status": "passed",
+  "source": {
+    "commit": "8d2bd26ad292961acb7deb25d4276cadbe2c3d9c",
+    "tree": "cc06b512a6b3bf76c261e86eb77be0da9c36d0e6"
+  },
+  "pid": 74263,
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 5.472000166002545,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "origin/main...HEAD"
+      ],
+      "exit_code": 0,
+      "seconds": 0.13749358300265158,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-kernel-contracts"
+      ],
+      "exit_code": 0,
+      "seconds": 1.940058374995715,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "contracts-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-kernel-contracts",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 0.27454004200262716,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "backend-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 0.30563370800518896,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "tensor-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 0.35107699999934994,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "backend-guard-gpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "resident_graph::guard_tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 31.767646916996455,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "nn-ci-gpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--features",
+        "wgpu",
+        "--release",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 111.91208541700325,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "python-gpu-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "spiraltorch-py"
+      ],
+      "exit_code": 0,
+      "seconds": 142.1096672499989,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "gpu-test_nn_resident_exports",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_exports.py"
+      ],
+      "exit_code": 0,
+      "seconds": 2.563184624996211,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_graph_autograd",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_graph_autograd.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.1495125419969554,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_graph_learner",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_graph_learner.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.4971552499991958,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_module_resident_forward",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_module_resident_forward.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.7012518329938757,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_module_update",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_module_update.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2461151250026887,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_loss",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_loss.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.4416186670059687,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_classification",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_classification.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.9017615830016439,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_microbatch",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_microbatch.py"
+      ],
+      "exit_code": 0,
+      "seconds": 3.5415632919975906,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_wgpu_pointwise",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_wgpu_pointwise.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.327884999998787,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_native_binding_ownership",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_native_binding_ownership.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.269928167006583,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_unittest_smoke",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_unittest_smoke.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2010652919998392,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "python-cpu-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "spiraltorch-py",
+        "--no-default-features",
+        "--features",
+        "python-default"
+      ],
+      "exit_code": 0,
+      "seconds": 164.2922950420034,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_resident_exports",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_exports.py"
+      ],
+      "exit_code": 0,
+      "seconds": 2.5367908750049537,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_resident_graph_autograd",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_graph_autograd.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.9967425420036307,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_resident_graph_learner",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_graph_learner.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0057508749960107,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_module_resident_forward",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_module_resident_forward.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.022458874998847,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_resident_module_update",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_module_update.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.9921197910007322,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_resident_loss",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_loss.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.9122729999944568,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_resident_classification",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_classification.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.9113860420038691,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_nn_resident_microbatch",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_microbatch.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.9038059580052504,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_wgpu_pointwise",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_wgpu_pointwise.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.9144204590047593,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_native_binding_ownership",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_native_binding_ownership.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0961694169964176,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-test_unittest_smoke",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-c/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_unittest_smoke.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.146141457997146,
+      "gpu_opt_in": false
+    }
+  ],
+  "products": {
+    "python-gpu.dylib": "eb8392b85c8dcf545dcf8a0d8ab3bbc8907f31bbd466860a8e64e85c961a2c30",
+    "python-cpu.dylib": "8ae53eff1cfb47f02c9cbd81c11138954240dd5a64b6e7e8a66957c3a1bde37d"
+  },
+  "seconds": 491.642762083
+}

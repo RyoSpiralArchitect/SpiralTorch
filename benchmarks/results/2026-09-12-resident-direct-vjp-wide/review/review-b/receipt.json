@@ -1,0 +1,161 @@
+{
+  "status": "error",
+  "source": {
+    "commit": "dc9e20de520d71850481a3f8053c28bbcb20aafc",
+    "tree": "ec3c6383c1744cc65dcfb1d93b50a981784471d7"
+  },
+  "pid": 72514,
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 2.385527375001402,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "origin/main...HEAD"
+      ],
+      "exit_code": 0,
+      "seconds": 0.08201162499608472,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-kernel-contracts"
+      ],
+      "exit_code": 0,
+      "seconds": 1.3582027910015313,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "contracts-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-kernel-contracts",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 0.1379769170016516,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "backend-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 1.5304878749957425,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "tensor-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 6.768396792002022,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "nn-ci-gpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--features",
+        "wgpu",
+        "--release",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 100.66136495899991,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "python-gpu-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "spiraltorch-py"
+      ],
+      "exit_code": 0,
+      "seconds": 124.49012366699753,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "gpu-test_nn_resident_exports",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/review-b/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-nn-integration-v1",
+        "bindings/st-py/tests/test_nn_resident_exports.py"
+      ],
+      "exit_code": 1,
+      "seconds": 2.3810575829993468,
+      "gpu_opt_in": true
+    }
+  ],
+  "products": {
+    "python-gpu.dylib": "eb8392b85c8dcf545dcf8a0d8ab3bbc8907f31bbd466860a8e64e85c961a2c30"
+  },
+  "error": "RuntimeError('gpu-test_nn_resident_exports')",
+  "seconds": 240.14880583399645
+}

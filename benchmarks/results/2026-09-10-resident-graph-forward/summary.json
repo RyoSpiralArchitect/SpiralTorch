@@ -1,0 +1,342 @@
+{
+  "schema": "spiraltorch.resident_graph_forward_evidence.v1",
+  "feature_checks": "passed",
+  "parallel_regression_status": "unresolved_single_failure",
+  "source": {
+    "kind": "working_tree",
+    "base": "4cf624d533265f93c1ff5a337712bd3748f4f8e7",
+    "files_sha256": {
+      "bindings/st-wasm/tests/resident_graph_forward.html": "f7782a64ee61bf078cc1de9000dccb585643661e197bfbd34d1f960e4b2f8740",
+      "crates/st-backend-wgpu/src/resident_graph.rs": "3d83aad06f93a2051aa2961799dde7ab84683bf842b69cab2d591254deb7681c",
+      "crates/st-nn/examples/resident_graph_forward.rs": "b0efe08f14e667de45f5f5f7e62ca7af42442d84800de69f989d98f48bd0a83f",
+      "crates/st-nn/examples/resident_graph_forward_browser.rs": "82fa05f5524c62e7c5e1e9a40c4d23969f8ecef42546109c3cf855264e088daf",
+      "crates/st-nn/examples/support/resident_graph_forward.rs": "fdf867c3c07bff49cdc2beea2a33eb3fd9dbe3b606da10c3db26b1a79016953f",
+      "crates/st-nn/tests/resident_graph_forward.rs": "8f9396ae2059c58eb97d4cd0c205eae4f31279d35b47ca6396de8f46a0c25d5d",
+      "docs/resident_graph_forward.md": "b1438498af8c1d1ea4fb905ae4bc5df5b7a94870de0141c53e0a036906967b2e",
+      "tests/test_resident_graph_forward_validation.py": "e40ac66751990826536b5d791d55e511ed6dbe6c0dec464e8598bad7cb9c89d8",
+      "tools/verify_resident_graph_forward_torch.py": "a3fb46a7357032c2bc6bb0aa0531f31c0ed85c1c9aa1d0872d788a8ecc81c5b4",
+      ".github/workflows/ci.yml": "507a9ee022be506702ef9a0204a35bcb8b70af704fe4af3371acc49d9a843148",
+      "README.md": "eb1610747149c23544ca9ff052e9d8199ff4045975313734368f39ba627beb11",
+      "crates/st-backend-wgpu/src/lib.rs": "57d64334df570301239c3ea89441b0302b92402b5bbed5c17f562feb55a5dc87",
+      "crates/st-backend-wgpu/src/resident_dense.rs": "a0f0a2851c8d9d465c8428b56f7b8be7feea988e36f7984a1ca49a065114afa6",
+      "crates/st-nn/Cargo.toml": "f8682a661340eea2c4b169ab70e7dcfe067aedee15421054d93e6552f4404a20",
+      "crates/st-nn/src/resident.rs": "f1e9297c372c552ee59b280c0128ef4b043fea8668d8c5ac53f8e101f12b134e",
+      "crates/st-nn/src/resident/graph.rs": "2c6c2715bbbd54e5e39ffc425dbb588c5c2db1294e6faeb589a297bf816411a4",
+      "docs/resident_nn_inference.md": "ddf3cc649203e01835dc79be050515f7f122c40501a87b1ef0236ebcaedbe3aa",
+      "tools/test_resident_browser.cjs": "db16e25d2bcd9b4933a0e54402f3354ec6f84e105749b19b2bc8dc0d3a885ecd"
+    }
+  },
+  "native": {
+    "backend": "Metal",
+    "device_type": "IntegratedGpu",
+    "name": "Apple M4"
+  },
+  "browser": {
+    "version": "152.0.7977.83",
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "physical_adapter_verified": false
+  },
+  "torch": {
+    "version": "2.12.1",
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "replays": 48,
+    "comparisons": 288,
+    "max_abs_error": 1.1920928955078125e-07
+  },
+  "native_cases": 12,
+  "browser_cases": 12,
+  "guards": {
+    "broadcast_permute": true,
+    "dense_masked_overflow": true,
+    "dense_v1_v2_specialized": true,
+    "device_mismatch_atomic": true,
+    "gpu_input_guard": true,
+    "pointwise_masked_overflow": true,
+    "recovery": true,
+    "repeated_inherited_guard": true,
+    "whole_graph_guard_capture": true
+  },
+  "verified_checks": [
+    {
+      "label": "final-fmt-v2",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 1.9526911669963738,
+      "output": null
+    },
+    {
+      "label": "final-backend-tests-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 2.334188084001653,
+      "output": null
+    },
+    {
+      "label": "final-nn-tests-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--lib",
+        "--test",
+        "resident_inference",
+        "--test",
+        "resident_training",
+        "--test",
+        "resident_nd_tensor",
+        "--test",
+        "resident_graph_training",
+        "--test",
+        "resident_graph_forward",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 71.46357845899911,
+      "output": null
+    },
+    {
+      "label": "final-backend-clippy-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 1.64817866699741,
+      "output": null
+    },
+    {
+      "label": "final-backend-wasm-clippy-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 4.347370208997745,
+      "output": null
+    },
+    {
+      "label": "final-python-check-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "bindings/st-py/Cargo.toml"
+      ],
+      "exit_code": 0,
+      "seconds": 25.403779291998944,
+      "output": null
+    },
+    {
+      "label": "final-wasm-package-check-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "bindings/st-wasm/Cargo.toml",
+        "--no-default-features",
+        "--features",
+        "webgpu",
+        "--target",
+        "wasm32-unknown-unknown"
+      ],
+      "exit_code": 0,
+      "seconds": 21.229777124994143,
+      "output": null
+    },
+    {
+      "label": "final-admission-v2",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "tests/test_resident_graph_forward_validation.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "seconds": 0.1771917090009083,
+      "output": null
+    },
+    {
+      "label": "final-native-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "run",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_graph_forward"
+      ],
+      "exit_code": 0,
+      "seconds": 1.9618950829972164,
+      "output": "native-final.json"
+    },
+    {
+      "label": "final-wasm-build-v2",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--example",
+        "resident_graph_forward_browser"
+      ],
+      "exit_code": 0,
+      "seconds": 32.92388529199525,
+      "output": null
+    },
+    {
+      "label": "final-bindgen-v2",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_graph_forward_browser.wasm",
+        "--target",
+        "web",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final",
+        "--out-name",
+        "spiraltorch_wasm"
+      ],
+      "exit_code": 0,
+      "seconds": 0.06176575000426965,
+      "output": null
+    },
+    {
+      "label": "final-browser-v2",
+      "command": [
+        "node",
+        "tools/test_resident_browser.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final.json",
+        "",
+        "",
+        "",
+        "",
+        "nn-graph-forward"
+      ],
+      "exit_code": 0,
+      "seconds": 0.9077788329959731,
+      "output": null
+    },
+    {
+      "label": "final-torch-v2",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rank-finite-bound-20260907/venv/bin/python",
+        "-I",
+        "tools/verify_resident_graph_forward_torch.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/native-final.json",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final.json",
+        "--output",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/torch-final.json"
+      ],
+      "exit_code": 0,
+      "seconds": 1.5456553749972954,
+      "output": null
+    },
+    {
+      "label": "final-diff-check-v2",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.020001750002847984,
+      "output": null
+    }
+  ],
+  "product_sha256": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/native-final.json": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final.json": "52b6b8491ed73f159efc68c59c841d0e53ea3fc3598ff04464a517cef6032d4f",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/torch-final.json": "d144029b40e33b126416313827f4834065b272deadb3731543980be4d51b4702",
+    "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/examples/resident_graph_forward": "910cca1a38747020263f1eca36c89cac558381762aa4595dbe3481333fe18a88",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final/spiraltorch_wasm.d.ts": "0a4507745ec86816e01a1f6db859ee9112a436eb7a20392c6a54e05baeb2bc5f",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final/spiraltorch_wasm.js": "638842cdbcc03800b28345d56521fce5602e3fe02a2e4808120ff7de07d6b984",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final/spiraltorch_wasm_bg.wasm": "f959303968f5ed5d5ea902b427f110342f6e7adf880f680ea24d04fab9dccf80",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-20260910/browser-final/spiraltorch_wasm_bg.wasm.d.ts": "338b631b193d3a5197ea157c1dc8628b1e6ed1ef6a088399b42a8c3c15b59f7d"
+  },
+  "tests": {
+    "backend_serial": 111,
+    "nn_lib": 733,
+    "gpu_integration": 8,
+    "admission_only": 5
+  },
+  "unresolved": {
+    "test": "resident_training::stage_tests::transposed_vjps_cover_rectangular_tiles_and_partial_edges_when_enabled",
+    "observed": "one initial candidate parallel-suite failure: prediction[0] 0 != -0.044921875",
+    "isolation": "passed",
+    "baseline_parallel_additional_repetitions": 10,
+    "candidate_parallel_additional_repetitions": 10,
+    "repeated_failures": 0,
+    "root_cause": "UNKNOWN; not claimed fixed or proven pre-existing"
+  },
+  "boundary": "Explicit Rust forward compiler; real native/browser execution; not public Python/JS mixed inference, automatic Module/autograd residency, throughput or CUDA evidence."
+}

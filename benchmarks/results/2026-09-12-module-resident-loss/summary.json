@@ -1,0 +1,611 @@
+{
+  "schema": "spiraltorch.module_resident_loss_record.v1",
+  "status": "passed",
+  "candidate_source": {
+    "commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+    "tree": "cc8160a4ea3aad15f94d410125729ab91006cd82"
+  },
+  "parent_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+  "baseline_control_source": {
+    "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+    "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+  },
+  "decision": "Connect the ordinary MeanSquaredError to resident VJP and explicit learner updates through identical Rust/Python/WASM contracts. No generic ModuleTrainer policy substitution or throughput claim.",
+  "verification_steps": 59,
+  "verification_seconds": 570.4619115000023,
+  "test_counts": {
+    "terminal-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "python-cpu-handoff.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 4
+    },
+    "python-resident-loss.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "interval-admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 10
+    },
+    "python-graph_autograd.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "contracts.log": {
+      "rust_passed": 23,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 10
+    },
+    "python-cpu-resident-loss.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    },
+    "admission-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "nn-cpu.log": {
+      "rust_passed": 707,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-pointwise.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "python-module_update.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 5
+    },
+    "integration.log": {
+      "rust_passed": 6,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-cpu-module-forward.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 2
+    },
+    "backend-serial.log": {
+      "rust_passed": 136,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-cpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "descriptor-wgpu.log": {
+      "rust_passed": 4,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-tests.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 35
+    },
+    "tensor-wgpu.log": {
+      "rust_passed": 497,
+      "rust_ignored": 1,
+      "python_ran": 0
+    },
+    "nn-serial.log": {
+      "rust_passed": 760,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "tensor-cpu.log": {
+      "rust_passed": 449,
+      "rust_ignored": 0,
+      "python_ran": 0
+    },
+    "python-graph_learner.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 3
+    },
+    "torch-reference-shapes.log": {
+      "rust_passed": 0,
+      "rust_ignored": 0,
+      "python_ran": 1
+    }
+  },
+  "torch_all": {
+    "version": "2.12.1",
+    "cases": 172,
+    "tensor_or_scalar_comparisons": 54056,
+    "max_abs_error": 5.7220458984375e-06,
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "torch_resident_loss": {
+    "version": "2.12.1",
+    "cases": 52,
+    "tensor_or_scalar_comparisons": 36920,
+    "max_abs_error": 4.470348358154297e-08,
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "trajectories": [
+    {
+      "route": "native",
+      "seed": 17,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.06976919621229172,
+      "final_loss": 0.04017513990402222,
+      "final_over_initial": 0.5758291923240516,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "native",
+      "seed": 17,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.06976919621229172,
+      "final_loss": 0.040119316428899765,
+      "final_over_initial": 0.5750290759667899,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "native",
+      "seed": 29,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0580696240067482,
+      "final_loss": 0.04194250330328941,
+      "final_over_initial": 0.7222795742299851,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "native",
+      "seed": 29,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0580696240067482,
+      "final_loss": 0.04216456413269043,
+      "final_over_initial": 0.7261036187833856,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "native",
+      "seed": 43,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0790489912033081,
+      "final_loss": 0.0423760861158371,
+      "final_over_initial": 0.5360737116410375,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "native",
+      "seed": 43,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0790489912033081,
+      "final_loss": 0.042229995131492615,
+      "final_over_initial": 0.5342256047630035,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "browser",
+      "seed": 17,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.06976919621229172,
+      "final_loss": 0.04017513990402222,
+      "final_over_initial": 0.5758291923240516,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "browser",
+      "seed": 17,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.06976919621229172,
+      "final_loss": 0.040119316428899765,
+      "final_over_initial": 0.5750290759667899,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "browser",
+      "seed": 29,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0580696240067482,
+      "final_loss": 0.04194250330328941,
+      "final_over_initial": 0.7222795742299851,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "browser",
+      "seed": 29,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0580696240067482,
+      "final_loss": 0.04216456413269043,
+      "final_over_initial": 0.7261036187833856,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "browser",
+      "seed": 43,
+      "policy": "Exact",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0790489912033081,
+      "final_loss": 0.0423760861158371,
+      "final_over_initial": 0.5360737116410375,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    },
+    {
+      "route": "browser",
+      "seed": 43,
+      "policy": "ModuleCompatible",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "initial_loss": 0.0790489912033081,
+      "final_loss": 0.042229995131492615,
+      "final_over_initial": 0.5342256047630035,
+      "updates": 64,
+      "first_observation_after_updates": 64,
+      "module_parameters_applied": 7,
+      "optimizer": "explicit_sgd_not_ModuleTrainer"
+    }
+  ],
+  "browser_clients": {
+    "schema": "spiraltorch.resident_loss_clients.v1",
+    "status": "passed",
+    "cases": [
+      {
+        "policy": "exact",
+        "accepted_training_updates": 32,
+        "rejected_update": 33,
+        "recovery_update": 34,
+        "expected_gain": 1.0007922816251427
+      },
+      {
+        "policy": "module_compatible",
+        "accepted_training_updates": 32,
+        "rejected_update": 33,
+        "recovery_update": 34,
+        "expected_gain": 1.1937114844585008
+      }
+    ],
+    "views_empty_lifetimes_whole_loss_guards": true,
+    "adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "wasm_sha256": "9f71ea90bd3a8711bcb5ac91c1d5a93165633dfa2656a2b146109c08a9bb86b6",
+    "page_sha256": "e340e345fd02941d50159249df37abf59efe16a2963193e317a5fca955be05ef",
+    "launch_flags": [
+      "--enable-unsafe-webgpu"
+    ],
+    "tiles_mnk_request": "",
+    "kernels_request": "",
+    "accumulations_request": "",
+    "shapes_request": "",
+    "fixture_request": "nn-loss-clients",
+    "asset_sha256": {
+      "/": "e340e345fd02941d50159249df37abf59efe16a2963193e317a5fca955be05ef",
+      "/module/spiraltorch_wasm.js": "c667e8337fa798af07e2cfbf5fc7f0b1adea6e105ca47a974e8491ac640e485a",
+      "/module/spiraltorch_wasm_bg.wasm": "9f71ea90bd3a8711bcb5ac91c1d5a93165633dfa2656a2b146109c08a9bb86b6",
+      "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    "browser_version": "152.0.7977.84",
+    "page_errors": [],
+    "console_messages": []
+  },
+  "shared_training_shader_sha256": "c098ce1acb312483a29aa9d9e8a4a29f10a395090267f131b3164ba5968e61c2",
+  "shader_math_unchanged_from_parent": true,
+  "empty_contract": "SpiralTorch zero loss and empty seed; not PyTorch mean(empty). The independent replay explicitly labels this override.",
+  "frozen_products_checked": 39,
+  "products": [
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-release.dylib",
+      "sha256": "c6544678b00afcecfe44839a85c32317c7ef7aea9cf505ac3bd3f582c4debff9"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "3d3c1eb619496d1c7458db917d57ffeaea9c05b7a91d132ec886825b4fb6c937"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "6b9c57a978ce857751a82a90a2596c04dc621a04411e6d01760a601a6d2efb8b"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "3663ecb040ee6b8af9dd22b5377f6b430a3c850f63f1f1c1b3f0a889d1809c73"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "6803b4786e4436cf4e5cf6d6077160125ea7ee54b0ac40719d82a6d56faa858c"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward",
+      "sha256": "b0669f7e4e77860cb32f3e5413dcb46c6df36e9acc24332336040b31d0269600"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_training",
+      "sha256": "124c6602f3bf55ea2e5cfd5a1dc189609c6da04bb3effdc4214923b459539515"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "3cc89c6d0bea8943ef6ce3368f8fc200e222819525c34d48888b7e210bdea3f5"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "76984253b45c5dbe28a59402e8a751dc2de3d8a66ffa5ff3946ec9f21341b1c3"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "2264079518fb70d52d64cf0227abea64e00389ff188cecd78ca743bedc56ba16"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "68231735b5a022d765056231c0966cdd7c67db1c17ac5d080a417ffb950e6cca"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "bc4d287e29b1d736795bd988340b2b951107609c8767d98364fceeabef37d83e"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097"
+    },
+    {
+      "version": "baseline-control",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-cpu.dylib",
+      "sha256": "6197378462134c8580e8107b144fdf5a8c7c057c63c8d1eb3f13cb71d2325835"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-release.dylib",
+      "sha256": "29d789b5d054ab982611a1d82dde55875b7b55ed1dd0e153ca01d9059ad04347"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "33237f0b9e91512ec05071ec9f612b26487295325da0cec94757cf2169d4c7fd"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "c667e8337fa798af07e2cfbf5fc7f0b1adea6e105ca47a974e8491ac640e485a"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "e67d6138825b63e45bb0194cc0e5df35c4c648169a6ebccf1118958fdce764d6"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "9f71ea90bd3a8711bcb5ac91c1d5a93165633dfa2656a2b146109c08a9bb86b6"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/resident_graph_forward",
+      "sha256": "9ccd9464492e8a01a52b2babfd9642f564b24b2eed65497be9230e371798fb46"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/resident_graph_training",
+      "sha256": "e07f370721bab5a3310f0704bb1a162957dafae06d48175702864aaa5831c3d4"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "c8d54a9383af7a1d8effc991e0539f551d0c968f01d4c72704e0701d5f66b30c"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/resident_nd_tensor",
+      "sha256": "f6234dd740a1af1bd2067b85d5e7ca1f355a9889aa8e7f30cb868439e380485c"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "5fe8790ceb35011b1a862563a02fe593ef8a159d23bf5bd62cf9e7108f488994"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "b4caf89c51515b45c37cb4034d38aa8a8f0d68e191bfb65cb0e053f0059ec843"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "2c248820116ebf0d4deff063db34d84b81c695cafa9b1cb1c4cdc1a72d2683ba"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "e9dc238e270dc88d18c01555422234dfe31ff1a47435b9b4f96d2b2cf536a19f"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd/spiraltorch_wasm.d.ts",
+      "sha256": "156fc74f2e29fc498034d7fc1be171a3b4548628264c38c3c6256e85479ddd85"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd/spiraltorch_wasm.js",
+      "sha256": "3fe52f005ce57408f145812e2e67400780e455f792fcdb99f03513b0d31c60aa"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "c508a792fa4af736fa86ec3c08562a8fd6ed93589b77d0d4987ee0df207f979c"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm",
+      "sha256": "52382d739f3b8595f5bc8b4572478349994ba8977e31d60cead2af81909f360b"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "381f2c921df99f1c5e953863d0785bf84e88e3e8e84abbf0ed4a73125bd743a2"
+    },
+    {
+      "version": "candidate",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-cpu.dylib",
+      "sha256": "e7528312299e01fa2d269189d7c3a7eb27b038888e6b004f41d2c932b2e4cc61"
+    }
+  ],
+  "raw_records": 182,
+  "manifest_sha256": "3dde2a51d2f0c62c3c680d1b61db4ac2da3a65930d694ba937a653a46ac50a20",
+  "preliminary_logs": "initial-backend.log and initial-nn.log predate the frozen source and are retained as history, not counted as committed-source verification.",
+  "boundary": "Small deterministic graph learning and numerical correctness, not LLM/FT quality or a speedup. Six 64-update cases on each native/browser route, with no GPU observation inside the loop; explicit SGD only. Native Apple M4/Metal, eager Torch CPU/MPS with MPS fallback disabled. Browser physical GPU and host exclusivity UNKNOWN. Original forward controls are retained but not sustained-interval performance proof. No CUDA/Furnace, generic ModuleTrainer migration, release, push or merge."
+}

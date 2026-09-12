@@ -1,0 +1,13 @@
+F
+======================================================================
+FAIL: test_wgpu_stub_preserves_facade_and_wildcard_aliases (__main__.RuntimeImportsTest.test_wgpu_stub_preserves_facade_and_wildcard_aliases)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/tests/test_runtime_imports.py", line 229, in test_wgpu_stub_preserves_facade_and_wildcard_aliases
+    self.assertTrue(names)
+AssertionError: set() is not true
+
+----------------------------------------------------------------------
+Ran 1 test in 1.201s
+
+FAILED (failures=1)

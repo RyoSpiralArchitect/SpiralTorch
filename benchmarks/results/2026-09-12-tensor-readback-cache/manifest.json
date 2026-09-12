@@ -1,0 +1,2315 @@
+{
+  "schema": "spiraltorch.source_archive.v1",
+  "status": "passed",
+  "records": [
+    {
+      "archive": "raw/inputs/baseline-native-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/native-forward-bench.json"
+      },
+      "bytes": 12542107,
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097",
+      "compressed_bytes": 80064,
+      "compressed_sha256": "ecf613aa2a43bf5b747e53182cecaddf1be633d3a8f26ec86b90e6e10cc2ae37"
+    },
+    {
+      "archive": "raw/inputs/baseline-receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/receipt.json"
+      },
+      "bytes": 31038,
+      "sha256": "1829fa786cace01ff062f35c9b4dc2fdfe23f40a323b5b24876e663ba09be2ec",
+      "compressed_bytes": 3824,
+      "compressed_sha256": "2573b29728f17fcb766051d48b82fd02a5fc972f55b3d0963abd8d3d7efe37fa"
+    },
+    {
+      "archive": "raw/inputs/cpu_probe.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-parameter-handoff-20260912/cpu_probe.py"
+      },
+      "bytes": 517,
+      "sha256": "37e621ed8a3d99ea703153fcd5f495b4fa06581567dc252975c166f1ccb56ce4",
+      "compressed_bytes": 416,
+      "compressed_sha256": "bf18537730bd0b44a66a8dc48de1764ef52d73feddd2272e6b1ea13d8c2f62cd"
+    },
+    {
+      "archive": "raw/inputs/python-client.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py"
+      },
+      "bytes": 1902,
+      "sha256": "b1997314bfd3cc08014549d99eae1836e01a9e50e7aa337509c3dba4e386b4c6",
+      "compressed_bytes": 928,
+      "compressed_sha256": "469057ee6c57b0e0f21abdc210b9b9061340d4cc79a75f092fa40877a2c84024"
+    },
+    {
+      "archive": "raw/runs/archive.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/archive.py"
+      },
+      "bytes": 15663,
+      "sha256": "282ba8aa153ccec7b5f97e6a6e15e82655f1e291cfdbe53768c3715fe1e827e6",
+      "compressed_bytes": 4892,
+      "compressed_sha256": "1d48d66ebe2ea3f4567ca722bf56ef5f122b719844f457524c587a13610a2521"
+    },
+    {
+      "archive": "raw/runs/initial-tensor-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/initial-tensor-tests.log"
+      },
+      "bytes": 114566,
+      "sha256": "8df29d770d4ccf66dd84085952e99c8c1940325e86314fbb38c9ba27f5a0c54d",
+      "compressed_bytes": 3816,
+      "compressed_sha256": "a1135d69776af7b2a0dac986dafcccfc34df6f3963ca7289e139d84d4d01b3f4"
+    },
+    {
+      "archive": "raw/runs/measure.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measure.py"
+      },
+      "bytes": 5940,
+      "sha256": "b6d83bda0da19911594e625b924c95cbbc78e687924648c3f117a817b3d380bc",
+      "compressed_bytes": 2252,
+      "compressed_sha256": "68e3e36ccfa05b2c2bf4282d28c9f5d940466c93fe7d98fff5fb3bd5873d6931"
+    },
+    {
+      "archive": "raw/runs/measurement.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement.log"
+      },
+      "bytes": 518,
+      "sha256": "5a912c1dd170c54edcade00e4f9e0442746867977160daf1abd88a5ca4a57040",
+      "compressed_bytes": 192,
+      "compressed_sha256": "ae09246b0218e9f7d2c868484cee83ec4b25220ed3d7894cb249b6df9d093779"
+    },
+    {
+      "archive": "raw/runs/measurement/1-baseline.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-baseline.json"
+      },
+      "bytes": 2549949,
+      "sha256": "0b17409d9fde6bd243fb5fd773e6c116559aa11c2eeb9cfa6cc6b3c2eb582c4e",
+      "compressed_bytes": 98764,
+      "compressed_sha256": "4bec4b00f796369a42e9c0b3cc048216904a37839ccc08f6015024077fbd1eb4"
+    },
+    {
+      "archive": "raw/runs/measurement/1-baseline.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-baseline.log"
+      },
+      "bytes": 17947,
+      "sha256": "f510c7580b978736c9bbb6a44fb84e73da840b2844a7e4f9b6c94d9d4b7930c2",
+      "compressed_bytes": 2904,
+      "compressed_sha256": "dd70666459d0697924ec9fb49237c3262d551b244ec78ec6a49333821b0d0457"
+    },
+    {
+      "archive": "raw/runs/measurement/1-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-browser.json"
+      },
+      "bytes": 2421485,
+      "sha256": "d01000e53d3ffff4f438c27534bd976e5e54600ddc5b24dd6b794ef1a8a0fdc0",
+      "compressed_bytes": 42296,
+      "compressed_sha256": "0d601d923ddcdfe598327a10b9910b52b3acc9a68718ce7b0e59a6e8a9ea9e35"
+    },
+    {
+      "archive": "raw/runs/measurement/1-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-browser.log"
+      },
+      "bytes": 150,
+      "sha256": "0935971433bc82e9aebf7e4b162a2139b9f03ca16c0c19247f8266cb3ca60397",
+      "compressed_bytes": 200,
+      "compressed_sha256": "c39d83becb2863818dd2ad0d60fcdc11b771f0a431a543d654396c90abceb705"
+    },
+    {
+      "archive": "raw/runs/measurement/1-candidate.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-candidate.json"
+      },
+      "bytes": 2549909,
+      "sha256": "df9042bb06f80c01faf0071325b1c8a9c3cf16c953ea78be2fdc266fbfc13f0c",
+      "compressed_bytes": 98804,
+      "compressed_sha256": "4c8383f0915e23cc955f914c69cc8e0d7a7b1829d3f9b20852e1421396f0dd0e"
+    },
+    {
+      "archive": "raw/runs/measurement/1-candidate.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-candidate.log"
+      },
+      "bytes": 17927,
+      "sha256": "4bfa572fbe9fc863a9f431d3674a5b69c97f7cc42546af4ceb2bb1848ff2e74c",
+      "compressed_bytes": 2892,
+      "compressed_sha256": "320b4cc26fe259fef56fa470bd87c361913d8cf1108ca09aef475b04bb493833"
+    },
+    {
+      "archive": "raw/runs/measurement/1-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-validation.json"
+      },
+      "bytes": 77835,
+      "sha256": "497f50545417771f4745dd720bc0aeecda7fba3204bfc047c16ebbf59ec57273",
+      "compressed_bytes": 7956,
+      "compressed_sha256": "23e9d219a271a1a0f625c766b2ac97f380e0d18d81a01a188083b9af9b398e3a"
+    },
+    {
+      "archive": "raw/runs/measurement/1-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/1-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/measurement/2-baseline.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-baseline.json"
+      },
+      "bytes": 2549925,
+      "sha256": "4dbfa93ea94189db346e5220ab350cf5d768672bdecf102b5ee5db67c5a0efa6",
+      "compressed_bytes": 98660,
+      "compressed_sha256": "b1bdedcf9d93fdba326fcf95c96c26d36479e52309ccef458a5913d4d1fa2057"
+    },
+    {
+      "archive": "raw/runs/measurement/2-baseline.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-baseline.log"
+      },
+      "bytes": 17956,
+      "sha256": "fd131e4ee8e05e7d0e07753f8b54ba7388874d0030f36bd07c06523e86c8f558",
+      "compressed_bytes": 2896,
+      "compressed_sha256": "f92061cf16cef79545873b2380beb6a569623d107c5fdddf6684ec34177092fe"
+    },
+    {
+      "archive": "raw/runs/measurement/2-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-browser.json"
+      },
+      "bytes": 2421327,
+      "sha256": "e93b95d8110dc9821a2cb7cac9b20c156426984ff1cf1a0b4c9f7f5352131473",
+      "compressed_bytes": 42352,
+      "compressed_sha256": "06a8cb40bf8d79d8cb5325deb9fbdfc288b95622a16f5035da9d14f432bd9e52"
+    },
+    {
+      "archive": "raw/runs/measurement/2-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-browser.log"
+      },
+      "bytes": 150,
+      "sha256": "6b35bec2584a28670bd4a2272fd4bc63bce5120bcf50678a07ea12f63a71b88d",
+      "compressed_bytes": 200,
+      "compressed_sha256": "9d2fa30ddaeae15236596e1545a3f51e1b5cd8602e1efd2cd18cc1c24b258e39"
+    },
+    {
+      "archive": "raw/runs/measurement/2-candidate.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-candidate.json"
+      },
+      "bytes": 2549925,
+      "sha256": "77168c7e405c9cef2c8f62f6bc3af94d1f7b784663c8b9219522aa670c087005",
+      "compressed_bytes": 98844,
+      "compressed_sha256": "b4fe0fe784e4d1d48e215a4fe894b9ad92e6fe68324567cf0a26389f7213e49f"
+    },
+    {
+      "archive": "raw/runs/measurement/2-candidate.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-candidate.log"
+      },
+      "bytes": 17946,
+      "sha256": "d5673fb8efc212feba3536d86eacf7fbb90a859c11efbe5cee86e3fe34b26ab3",
+      "compressed_bytes": 2884,
+      "compressed_sha256": "d5e5d41dbf8cb237dcffe4367a0718fba48488d5386c41f2bf1f4efd672e1d47"
+    },
+    {
+      "archive": "raw/runs/measurement/2-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-validation.json"
+      },
+      "bytes": 77903,
+      "sha256": "928442f2988b8f4dcced513202925fb8f04386d7273fb4f1dae8d7279fd0bbcb",
+      "compressed_bytes": 7972,
+      "compressed_sha256": "92bba30200bc05d799ca8c29e96844191c69d6a18a6395424f7cb5fbff48a3a9"
+    },
+    {
+      "archive": "raw/runs/measurement/2-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/2-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/measurement/3-baseline.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-baseline.json"
+      },
+      "bytes": 2549890,
+      "sha256": "d9e16a5709c5a1d71a9f548a9cdd7d9db46fbdadee96cb9f1b4d0724283bc19d",
+      "compressed_bytes": 98788,
+      "compressed_sha256": "cfcfd8295757e19e02d350c2a54a9a4f1a16480f475ef879d5eea611c3f5c6e6"
+    },
+    {
+      "archive": "raw/runs/measurement/3-baseline.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-baseline.log"
+      },
+      "bytes": 17928,
+      "sha256": "bbb527f9960e0741de1e4a9ea3322337ddb4ecf97fb3d593638abc7d425ea296",
+      "compressed_bytes": 2908,
+      "compressed_sha256": "3524e5fb68f15b373f7ce49b9978409e573593710df1bce3f9239ed046505497"
+    },
+    {
+      "archive": "raw/runs/measurement/3-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-browser.json"
+      },
+      "bytes": 2421721,
+      "sha256": "c4c8c537c9461f262882742619e4325efb207b9e9ebf46de4bb1d95203fee37f",
+      "compressed_bytes": 42304,
+      "compressed_sha256": "ab0189a47ce878ab3aac8435018cd298ff97602bef6fb440239a3c66ce425851"
+    },
+    {
+      "archive": "raw/runs/measurement/3-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-browser.log"
+      },
+      "bytes": 150,
+      "sha256": "7d554803721c9ea76944edc4a7213427833de44c1928cf21aaed0b08f3c19946",
+      "compressed_bytes": 200,
+      "compressed_sha256": "fcf412619b283a33098340610f1bcdca04da976c571c6cfcb5eabeadf3a84a28"
+    },
+    {
+      "archive": "raw/runs/measurement/3-candidate.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-candidate.json"
+      },
+      "bytes": 2549901,
+      "sha256": "2d1c2c1274c7ab0533f7f48442c74edf70e6a49161571114bc05c940ab556a38",
+      "compressed_bytes": 98748,
+      "compressed_sha256": "c45b99543a71b70e82d3475c451f97ef360bfc719bd502984ea551a2050848f2"
+    },
+    {
+      "archive": "raw/runs/measurement/3-candidate.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-candidate.log"
+      },
+      "bytes": 17928,
+      "sha256": "0053853735c8ec1936902648bb2dff85c9299efaa9ff88f051e8489d4f70feb5",
+      "compressed_bytes": 2888,
+      "compressed_sha256": "f70ff146925483508ddc03f5538cd7b705e56fb5071dc79e4ead919cf5fdf389"
+    },
+    {
+      "archive": "raw/runs/measurement/3-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-validation.json"
+      },
+      "bytes": 77932,
+      "sha256": "ec3a9d6fd4bcac7d629de90be2d9502a5aec34223043305c0de4f7f855b5cf86",
+      "compressed_bytes": 8024,
+      "compressed_sha256": "94ee55d7c8bd0469eb77be3b869b56daebccbd80d30cbd93a7e534ea40068355"
+    },
+    {
+      "archive": "raw/runs/measurement/3-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/3-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/measurement/interval-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/interval-browser.json"
+      },
+      "bytes": 6477464,
+      "sha256": "387d58a258fcdc996a01fd8aecaac7212126380046e2d21b6cdaf67cbda4b10d",
+      "compressed_bytes": 50644,
+      "compressed_sha256": "282746fd7952988c4d51499d9fff94968df795047fa79fb6ccd3b51cebd7fc4d"
+    },
+    {
+      "archive": "raw/runs/measurement/interval-browser.json.cases.jsonl.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/interval-browser.json.cases.jsonl"
+      },
+      "bytes": 3492638,
+      "sha256": "d2e7ff6791e21540e780842b5756d007a431ea7a72c413ce73e9aa80b5d37699",
+      "compressed_bytes": 47236,
+      "compressed_sha256": "0e70c510a7a3dabaddfa06190c13798ee455d329a5d7fb463c23cba666effede"
+    },
+    {
+      "archive": "raw/runs/measurement/interval-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/interval-browser.log"
+      },
+      "bytes": 158,
+      "sha256": "9ddadea25db535c76e496de304a1def528edcb0d62546a5f7fa70d8b5d273172",
+      "compressed_bytes": 204,
+      "compressed_sha256": "d652ff1dbb87e5fe87ae00366ced60d6bb2217c2e43f4b11089b8c1fb671ce1d"
+    },
+    {
+      "archive": "raw/runs/measurement/interval-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/interval-validation.json"
+      },
+      "bytes": 47899,
+      "sha256": "b9a204414e19bfda21e53c6e535d04fee61523b527135e6e2c2b9a32ac20b262",
+      "compressed_bytes": 5072,
+      "compressed_sha256": "e26c6fb496cc4fcd010f4bb98299b4e222a0c66cc1c0975853a91fc589d139dd"
+    },
+    {
+      "archive": "raw/runs/measurement/interval-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/interval-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/measurement/receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/measurement/receipt.json"
+      },
+      "bytes": 15282,
+      "sha256": "b7cead4500a36100a62400ed023fafa81472fd50097767c5e1ba8d7af3964f77",
+      "compressed_bytes": 2020,
+      "compressed_sha256": "da1941e5098896db725d5f279042386d3977e9f29052c069cf84f43bb3d5200e"
+    },
+    {
+      "archive": "raw/runs/run.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/run.py"
+      },
+      "bytes": 13009,
+      "sha256": "47904c16d19da379458254ad2e8d9f8c18cfe53a4e2f25b7e93fa7717f2da728",
+      "compressed_bytes": 4016,
+      "compressed_sha256": "408a17fb167dd1bb0ff455bf9c0772be4dce253233ce1b56a4750c65ed62117c"
+    },
+    {
+      "archive": "raw/runs/screen_two.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/screen_two.py"
+      },
+      "bytes": 6666,
+      "sha256": "a30a3639ff8ef0adb278f3cd849b9db5b156f1aab45b82225db320b306bdccb0",
+      "compressed_bytes": 2640,
+      "compressed_sha256": "0f7b8d5903620c8b8214c55741b5a2379f75761bfce54ee8d7047e92613f2a06"
+    },
+    {
+      "archive": "raw/runs/selected.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected.log"
+      },
+      "bytes": 526,
+      "sha256": "4fe588fdc83cbaa879feb60a1db56eaf08f6485af1e00a45c1ad64a4100ba204",
+      "compressed_bytes": 240,
+      "compressed_sha256": "d1d067c978c2d734835a7d4c81639274fd14757a3d3b3543fbccc092b92ef81b"
+    },
+    {
+      "archive": "raw/runs/selected/backend.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/backend.log"
+      },
+      "bytes": 126343,
+      "sha256": "2c597ab0f01b2de57b5c7144d1cec7cc5cc0758b7fef483696ba50d47336e2f9",
+      "compressed_bytes": 6656,
+      "compressed_sha256": "ba5570320ecf3f13809c96f1a8491fea8ca9cb70d8fe1af17b353c6725e6508d"
+    },
+    {
+      "archive": "raw/runs/selected/cpu-handoff-surface.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/cpu-handoff-surface.log"
+      },
+      "bytes": 644,
+      "sha256": "88732d98ab2381e6d339d3efb4c0bfd2047ef26a203ef655a465f4964061461e",
+      "compressed_bytes": 308,
+      "compressed_sha256": "5cfd15eb8448a9f48222da885ee64f29b1b6b326a9d99d3b8da38671d8f59814"
+    },
+    {
+      "archive": "raw/runs/selected/cpu-module-surface.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/cpu-module-surface.log"
+      },
+      "bytes": 334,
+      "sha256": "f52b0f0930c52340ef5e973435310b66a1ee21861ad46b22f29b9a44cb78cbaf",
+      "compressed_bytes": 208,
+      "compressed_sha256": "87a6413584e30b51784c06f1968a84d78ca6d8a7efca3ff47fb9bcbc49f6ecd8"
+    },
+    {
+      "archive": "raw/runs/selected/cpu-tensor-surface.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/cpu-tensor-surface.log"
+      },
+      "bytes": 336,
+      "sha256": "724f1ead4de91b0951ece426c1f707ffd55057878cfb124b06983b0aa447127f",
+      "compressed_bytes": 216,
+      "compressed_sha256": "a70e8e07e306b1b0ce5d5f47f21efbbf8c6b6af9d1dd68bf236bf5a3b2af5da7"
+    },
+    {
+      "archive": "raw/runs/selected/format.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/format.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/selected/frozen-products.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/frozen-products.json"
+      },
+      "bytes": 809,
+      "sha256": "4591884b73c8876a24429e75989794ca301b7e3ac352a0a5c61b90aebb637037",
+      "compressed_bytes": 588,
+      "compressed_sha256": "94318276769b95b4733a9d916120b7f76a08205562fb551eff0388672d1f87a8"
+    },
+    {
+      "archive": "raw/runs/selected/module-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/module-browser.json"
+      },
+      "bytes": 62095,
+      "sha256": "d271bbf59e30f9c5c4fa55ae2de5d6a6afdf102fe80f72c27f1bd579f1f8ff84",
+      "compressed_bytes": 6900,
+      "compressed_sha256": "1bd7c23269e9b6a53db2f57a7f5e6288ab4f3741dd7ab53e6af7c38f076ea356"
+    },
+    {
+      "archive": "raw/runs/selected/module-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/module-browser.log"
+      },
+      "bytes": 152,
+      "sha256": "50f0338695e4e258431546ff23540ada61f9b3fe2c9732735e9143f1517f6d37",
+      "compressed_bytes": 200,
+      "compressed_sha256": "ba798ac6219f8e098f8942310eea40bc5b5358c9070d02e9779c824fc8d9350c"
+    },
+    {
+      "archive": "raw/runs/selected/native-nd-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/native-nd-build.log"
+      },
+      "bytes": 114965,
+      "sha256": "f4e40706951f6c2976ff0a505d81d706a6235a3cf9838c2d81dc6bfedbea109d",
+      "compressed_bytes": 3692,
+      "compressed_sha256": "87b2ab275193679abef58a006ee5eee7886597f62ce4617f65a252649335c071"
+    },
+    {
+      "archive": "raw/runs/selected/native-nd.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/native-nd.json"
+      },
+      "bytes": 2738286,
+      "sha256": "c34f3b0b57b6e54215fb1d6426b221b09b42e9dcc2d6ac339281f1e19739fc93",
+      "compressed_bytes": 24280,
+      "compressed_sha256": "dc1f0a99dbc00a521b402b285952252a337cdae76a7d121c3b493278ec82681f"
+    },
+    {
+      "archive": "raw/runs/selected/native-nd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/native-nd.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/selected/nd-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/selected/nd-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd-browser.json"
+      },
+      "bytes": 6219818,
+      "sha256": "fc5e853663b28b338496e488bde3aa079c7e73f62ec5e7c85c2324fcec5a1b66",
+      "compressed_bytes": 26396,
+      "compressed_sha256": "aca56c9feb49530c4b061e148355915f700abba7aa7400fa4d32a276e995dcc5"
+    },
+    {
+      "archive": "raw/runs/selected/nd-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd-browser.log"
+      },
+      "bytes": 148,
+      "sha256": "a1ec46fc2e6ca948660cdeafb75e2cb1a6ed7ec867413e86ca92344e7ff29da3",
+      "compressed_bytes": 196,
+      "compressed_sha256": "d5f3b4cf8d0b341651f2ff8b94107bd91c706d5fcc9b8dff4ea7f049c6843ea0"
+    },
+    {
+      "archive": "raw/runs/selected/nd/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 2974,
+      "sha256": "05018e96851988c91df92a82f42e1cd52d9920d1f5b4b25aaa97b842a2f874a8",
+      "compressed_bytes": 864,
+      "compressed_sha256": "f68082859ab0bb21bd6be2b6f0c164d2cf72f993f7bbf19b6bc6169817c6a079"
+    },
+    {
+      "archive": "raw/runs/selected/nd/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd/spiraltorch_wasm.js"
+      },
+      "bytes": 44217,
+      "sha256": "338350ff3abb0ec433dc24f48c55125a3f125afe117f710b47f5b36cc8f8f088",
+      "compressed_bytes": 8076,
+      "compressed_sha256": "a2066abf54f4aa7174be227f63365bbf512b685e8bf09ca4c5082268ad0c5705"
+    },
+    {
+      "archive": "raw/runs/selected/nd/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 1991,
+      "sha256": "b03aa22f3b62b0b1e60fd0d105650ef20018b2d9eb760130b102c1739b6add46",
+      "compressed_bytes": 468,
+      "compressed_sha256": "0433006f341f7afada0a22186dda0e8465501e880d2f3629e310d92d524e0453"
+    },
+    {
+      "archive": "raw/runs/selected/python-module-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/python-module-forward.log"
+      },
+      "bytes": 1368,
+      "sha256": "2e25223dfc30261ebeec2041d1e774edc570534bce9ee257a02dd0412f9bb816",
+      "compressed_bytes": 480,
+      "compressed_sha256": "034e87a406a156b715fded2854d6a69eb629aa33c322bd2862ed0ee30ced1cab"
+    },
+    {
+      "archive": "raw/runs/selected/python-tests.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/python-tests.json"
+      },
+      "bytes": 786,
+      "sha256": "279a4e80f04f6f4e5b2a13639247089ee7ef002aa4584bf1508b2c36902412f0",
+      "compressed_bytes": 444,
+      "compressed_sha256": "7090b2d6c6abb9c8952109efba2e39de584fc38d148c3910d45e6f2c44319d8e"
+    },
+    {
+      "archive": "raw/runs/selected/python-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/python-tests.log"
+      },
+      "bytes": 5925,
+      "sha256": "c97688c34dc41f6c14a1cb07a6d0f30ed44d64f68ed652a03f2247f00dcdefdc",
+      "compressed_bytes": 1544,
+      "compressed_sha256": "4c6103c88a4e01b73890f6b06d118c269a2176e29e9197552ec24c6bc6fe3d81"
+    },
+    {
+      "archive": "raw/runs/selected/receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/receipt.json"
+      },
+      "bytes": 24200,
+      "sha256": "4694fa2ff6d50c6ea2317b846fcfafde85506f6a98926ee0b2c70a9c2968ed21",
+      "compressed_bytes": 3080,
+      "compressed_sha256": "c49e21a8b69eda97061f699cfab354c5495cdfbb965011df91d9c3e700fea811"
+    },
+    {
+      "archive": "raw/runs/selected/wasm-nd-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/wasm-nd-build.log"
+      },
+      "bytes": 111779,
+      "sha256": "6fc9dee55410a8dbafbca3ed042178bbf2f1f220d589222025436b05ba723484",
+      "compressed_bytes": 3472,
+      "compressed_sha256": "e4a136debf05b53580eef092dc3cbd1725605beccba2967ce20792ca6164a1e2"
+    },
+    {
+      "archive": "raw/runs/two-slot-initial-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot-initial-tests.log"
+      },
+      "bytes": 126439,
+      "sha256": "a91d73e79180c62f2edb4d8eaee4a3c721dbb9d2029b2fac3353e731b62f39b1",
+      "compressed_bytes": 6672,
+      "compressed_sha256": "25302b9704a122ea2c4803796203df69251036e50055a970ceb12b057294d596"
+    },
+    {
+      "archive": "raw/runs/two-slot.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot.log"
+      },
+      "bytes": 372,
+      "sha256": "835d2f41e2469a795c547c8e4f6360d07fe540d61380a4e88c39a4a3402225f5",
+      "compressed_bytes": 192,
+      "compressed_sha256": "d5b760a8c1f7261bac21255ac2b93001384e596393fd50b9a6b90c414e639052"
+    },
+    {
+      "archive": "raw/runs/two-slot/backend.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/backend.log"
+      },
+      "bytes": 126288,
+      "sha256": "0b1cf426c6e39f03bdd8a6870d8396739b8c38e086a2dc835adf75686dec236a",
+      "compressed_bytes": 6628,
+      "compressed_sha256": "2b418e373aaa296c23274877c76623406bd17d002edecbdedf88e9142c41ef14"
+    },
+    {
+      "archive": "raw/runs/two-slot/client-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/two-slot/client-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client-build.log"
+      },
+      "bytes": 111925,
+      "sha256": "f83677be1bcf9f5d2489a96331b07ebccb16e78e19a9ae307a9515df8f7a8e54",
+      "compressed_bytes": 3488,
+      "compressed_sha256": "ea010a3ae9dcb5faa28cb123a93afbcfb8869ddf6e872447871f1cc0c7e3dca2"
+    },
+    {
+      "archive": "raw/runs/two-slot/client/forward-bench-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/forward-bench-fixture.json"
+      },
+      "bytes": 12542107,
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097",
+      "compressed_bytes": 80064,
+      "compressed_sha256": "ecf613aa2a43bf5b747e53182cecaddf1be633d3a8f26ec86b90e6e10cc2ae37"
+    },
+    {
+      "archive": "raw/runs/two-slot/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js"
+      },
+      "bytes": 4526,
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "compressed_bytes": 1084,
+      "compressed_sha256": "368ef83d5315e8ba31ed274687c72446c8f760dad9122a83587c21fdee6a2a18"
+    },
+    {
+      "archive": "raw/runs/two-slot/client/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 128438,
+      "sha256": "657f090aa42ca473ff10378c42f5e2847fc70c1fcd204c97627e3c411c7d452c",
+      "compressed_bytes": 15124,
+      "compressed_sha256": "661dff0feddc54d6fadff208a26a3143ecec6bf423b4da227ec44926089c3792"
+    },
+    {
+      "archive": "raw/runs/two-slot/client/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/spiraltorch_wasm.js"
+      },
+      "bytes": 374461,
+      "sha256": "d1d930498d270a0097b879a29ff97a9dbc2a6ff21532e27aee427ae990de60c2",
+      "compressed_bytes": 30680,
+      "compressed_sha256": "16b72f7ce42cc1650474f6adb4d16e1994c6413e707eacaa7a1b604247fcb2ed"
+    },
+    {
+      "archive": "raw/runs/two-slot/client/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 72284,
+      "sha256": "a96231a8c7174bb0a1a0ce5f821cd79dd1814439582d49b219f3847ce8cb2030",
+      "compressed_bytes": 6312,
+      "compressed_sha256": "98dd413b3406ab0ee5def16b025e22de52c24ff7023a9d6b3aefabeb3b9485b8"
+    },
+    {
+      "archive": "raw/runs/two-slot/format.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/format.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/two-slot/interval-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/interval-browser.json"
+      },
+      "bytes": 6478308,
+      "sha256": "9756f9d7a248ce8d5be8d68151f7d2d99864030486d147c9676f21b903384938",
+      "compressed_bytes": 50536,
+      "compressed_sha256": "4301ac94354c702a681423faff0872bdb73ec279f3f6a9c011b9325ebb8ae930"
+    },
+    {
+      "archive": "raw/runs/two-slot/interval-browser.json.cases.jsonl.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/interval-browser.json.cases.jsonl"
+      },
+      "bytes": 3493103,
+      "sha256": "4247eea7e01eeb2c0698d7c8760c2f8371b11f09e0faf2ebbd2e76f6b057baec",
+      "compressed_bytes": 47132,
+      "compressed_sha256": "7880dde8acf3d3144022784894dbde8693561a3cd2c6875647c7b0ecc346f8f9"
+    },
+    {
+      "archive": "raw/runs/two-slot/interval-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/interval-browser.log"
+      },
+      "bytes": 155,
+      "sha256": "d93ddbb76098b56a69cdfeb6c49985922eee429cb7cd4a3f1ea7ae1f4258dd01",
+      "compressed_bytes": 204,
+      "compressed_sha256": "3cffa845bad2522261cea416cc0072fc0c47653f047e33659155345c1c71b154"
+    },
+    {
+      "archive": "raw/runs/two-slot/interval-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/interval-validation.json"
+      },
+      "bytes": 48034,
+      "sha256": "471e2d0cc4b10b51859db937d143d3cd7486708c23009549d85907f8b14ec1c8",
+      "compressed_bytes": 5100,
+      "compressed_sha256": "3fdba552274d562173f774fc3a933520b8de709f3fd8a46b71cfa946c691c764"
+    },
+    {
+      "archive": "raw/runs/two-slot/interval-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/interval-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/two-slot/module-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/module-browser.json"
+      },
+      "bytes": 62095,
+      "sha256": "cf747d55bdc27110c71a7a0c0408de59573f47ea54c7bc0b4935476da8791165",
+      "compressed_bytes": 6904,
+      "compressed_sha256": "08879e98b08d8fbfa64eaa05071ac74cd8e1519d0b6b9f85594e7c1a2f92a94c"
+    },
+    {
+      "archive": "raw/runs/two-slot/module-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/module-browser.log"
+      },
+      "bytes": 152,
+      "sha256": "d55f60a277f02c003f6187d8cff3d6c329127795d1a5bdc550f1e1033996b10b",
+      "compressed_bytes": 200,
+      "compressed_sha256": "13f54003bdc54e98add9c80f4e3f502d2024721966ed6bcc87606bc4bc5944c8"
+    },
+    {
+      "archive": "raw/runs/two-slot/nd-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/two-slot/nd-browser.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd-browser.json"
+      },
+      "bytes": 6219818,
+      "sha256": "bebedd63bc2fca71a50d7add49351196ba5e2bed8d4534359d81c32443f95aad",
+      "compressed_bytes": 26360,
+      "compressed_sha256": "f9911be703966f6d152992af932ac9d72645a7c4ae10fcd95de6c92a69ca10e4"
+    },
+    {
+      "archive": "raw/runs/two-slot/nd-browser.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd-browser.log"
+      },
+      "bytes": 148,
+      "sha256": "8e11ba363ad352ac5e278c4b6fd236d6dc5caeb74ee0ddca6be198b025dd8010",
+      "compressed_bytes": 200,
+      "compressed_sha256": "d685cc7528a93204685557042247d67d158976c3cb5f757ccabb9a3b973d6738"
+    },
+    {
+      "archive": "raw/runs/two-slot/nd-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd-build.log"
+      },
+      "bytes": 111779,
+      "sha256": "d9d9a8056982aad1399d1556a32583805fd909223d980f75f8072f3e2ab46120",
+      "compressed_bytes": 3472,
+      "compressed_sha256": "a96f868ad167d5e7df38733c3ea1ac6f77aa0a23360e8b400ab7f05b3469b882"
+    },
+    {
+      "archive": "raw/runs/two-slot/nd/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 2974,
+      "sha256": "1be325218d3fbe059e341c24914b528fe38bba43531db029ede543eb5f9d3264",
+      "compressed_bytes": 864,
+      "compressed_sha256": "22ff59bc8063aedd75200423d9d65b4fea7da2a35ed776bbf014738be1d1aae2"
+    },
+    {
+      "archive": "raw/runs/two-slot/nd/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd/spiraltorch_wasm.js"
+      },
+      "bytes": 44219,
+      "sha256": "9beb5023d5c3c747979675ff77c577b0a3f8e9979262209f7fcd8c708f84b656",
+      "compressed_bytes": 8076,
+      "compressed_sha256": "e7af458d00ea345cf32176ab4373fb6506e2e0317cd5b2e74ae3c3e7c2e9f2b9"
+    },
+    {
+      "archive": "raw/runs/two-slot/nd/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 1991,
+      "sha256": "0e57bf5f56670d79f197e0245b948736515308ba8d283ce96887583836b609d6",
+      "compressed_bytes": 468,
+      "compressed_sha256": "6b3474c301ac4a81a7e21eb72fa967ffed3b541d3516c5268df4ee2b5e90358b"
+    },
+    {
+      "archive": "raw/runs/two-slot/receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/receipt.json"
+      },
+      "bytes": 5764,
+      "sha256": "8d76b582343173f8cdb9d92325c16561b7282d6ca82496681e1af0bc30ce6707",
+      "compressed_bytes": 1836,
+      "compressed_sha256": "db7dd0ddf078355e9086da58c096f1e4ca1460146418e72a72d3fac14f6a8499"
+    },
+    {
+      "archive": "raw/runs/two-slot/screen-receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/screen-receipt.json"
+      },
+      "bytes": 7492,
+      "sha256": "c2726a8ea3ae5911e0d7d96af691070c3f451d49c969faad5dbaffc38ceb06bf",
+      "compressed_bytes": 2036,
+      "compressed_sha256": "e2eb58a8e9b626e4d05975dd18389b6c2870a463dc180cfacb5b4c171dcf9316"
+    },
+    {
+      "archive": "raw/runs/verified-a.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a.log"
+      },
+      "bytes": 2508,
+      "sha256": "1f35c68cdcffd763ae9f21a8238b6ce38e8027b7e4ddfead34f9988f71c5763f",
+      "compressed_bytes": 624,
+      "compressed_sha256": "186d5e5feed80959acccb1b49704b93f08a4c1f1f150d9e88ef97f5ffc9ef15d"
+    },
+    {
+      "archive": "raw/runs/verified-a/admission-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/admission-tests.log"
+      },
+      "bytes": 358,
+      "sha256": "59e3da9c1d64c292b6916de04994d7cf72306b48f16a013dc0edfb53caa68347",
+      "compressed_bytes": 204,
+      "compressed_sha256": "5a70a893af0643ffe37c9f9dc01a6d07d72b85684f23eed64c9d8b378d6102d1"
+    },
+    {
+      "archive": "raw/runs/verified-a/backend-serial.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/backend-serial.log"
+      },
+      "bytes": 126288,
+      "sha256": "e7caa569098290e151b26496d22d9874673bcc933442a998e973c8cd307808c8",
+      "compressed_bytes": 6628,
+      "compressed_sha256": "bc117fb57556571da565884585a3bbbaabc01513ad0c0cdb5f86cd419cbba941"
+    },
+    {
+      "archive": "raw/runs/verified-a/baseline-module-bench.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/baseline-module-bench.json"
+      },
+      "bytes": 2549922,
+      "sha256": "e482b39d79ff917a38ddce6ac96d9e4807282411da78163d8849a38eda9ac80f",
+      "compressed_bytes": 98684,
+      "compressed_sha256": "07759555f833c0d8e2b9993b6f290d4454e1c71b280eed526ccf84d3f84ab5f9"
+    },
+    {
+      "archive": "raw/runs/verified-a/baseline-module-bench.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/baseline-module-bench.log"
+      },
+      "bytes": 17938,
+      "sha256": "d6e829a0fcd6cfccdf1ea35cc6e0c4cb11d044728d40073ea1eb1cc04e162125",
+      "compressed_bytes": 2888,
+      "compressed_sha256": "b84faa97b4eea9b8c0b9d3bb58a4f6ae19e6cef202cb109d7287be4530fa267a"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-correctness.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-correctness.json"
+      },
+      "bytes": 7465181,
+      "sha256": "407979c439874251c8f2f6c116d16930342bac3c315b51abc3739986d2928a43",
+      "compressed_bytes": 198076,
+      "compressed_sha256": "0fa4f184a2d5d5a42c8eac005149e7b1e4fe9ba3f024549f4759894baf955964"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-correctness.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-correctness.log"
+      },
+      "bytes": 159,
+      "sha256": "0f88834f694e24ced014428d598de79e05c70d5546721a128aac83b9fbe21a7e",
+      "compressed_bytes": 204,
+      "compressed_sha256": "3625cb658e5c91f8fb813c513fe504939eaad707ad92fdf97e917e02628e966e"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-handoff.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-handoff.json"
+      },
+      "bytes": 9864,
+      "sha256": "6c21f65bf97862a39400a5f857345a4205197f304a43faab18199f89e2984218",
+      "compressed_bytes": 1692,
+      "compressed_sha256": "d77dd980e13e69d4a86bade80ca06e7d04485a5c1602643739179af46c2cf16f"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-handoff.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-handoff.log"
+      },
+      "bytes": 155,
+      "sha256": "c4bbabc9874bc9e4ccf83ea0971ff5b8c25d9f7ebab3c313482ad8f8f0524d7d",
+      "compressed_bytes": 204,
+      "compressed_sha256": "9b37c1d7535eac7de8ac787475a8fb680659c3d56be829e3f5171fae8867f9e6"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-forward.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-module-forward.json"
+      },
+      "bytes": 62095,
+      "sha256": "b364b99d0940721b513eda644f0a4ff22a600d9d971220695486e436f502cbc8",
+      "compressed_bytes": 6904,
+      "compressed_sha256": "66f014d37dc0f256153bffa2502b64863c2506360ea2970bdce5eb2cd8899bba"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-module-forward.log"
+      },
+      "bytes": 162,
+      "sha256": "90e87a32b0073403bc9b9a887c536a3ada39e5586a9dc1c1cf333b8e28052167",
+      "compressed_bytes": 208,
+      "compressed_sha256": "b75b0eee7d05ed9ad0e3ceec411164ae40db1143408cad6dc0b2b7268b84bb41"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-matched.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-module-matched.json"
+      },
+      "bytes": 2421540,
+      "sha256": "ff4c5d33e7f46eb423a7658dcc2e747ac529690279fcaa25a36c9710d1e5e9c0",
+      "compressed_bytes": 42376,
+      "compressed_sha256": "76373b8b5a12ddcb7b408e3e56f9061e2637ec866f6ab29fb3faa48bc171757f"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-matched.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-module-matched.log"
+      },
+      "bytes": 162,
+      "sha256": "3acb8fcc310a65158944210184dc51bdb71d87353d3c935c587e31b074596357",
+      "compressed_bytes": 208,
+      "compressed_sha256": "4637351c2475dc18b55ab9bbd48511a5ba010de306796f1974f60392d3566014"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-nd.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-nd.json"
+      },
+      "bytes": 6219818,
+      "sha256": "40a723840e93f476d630ba770a8ad896ef9c0307916a11e41eda051581c6ec0e",
+      "compressed_bytes": 26352,
+      "compressed_sha256": "df4d4c6117ee1aced00099720b97254b956ff415c9fbb394ab64d69d30f38962"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-nd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-nd.log"
+      },
+      "bytes": 150,
+      "sha256": "f9342ad543dc37691294a2acf66a81bc8a63840fcfc9f6580ba0d9c3bd94296a",
+      "compressed_bytes": 200,
+      "compressed_sha256": "ceb1d0514befc6e6e00760eb4832956cbde7b7330bfa1aa9a60dfafe5f16d14d"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-cpu-python.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-to-cpu-python.json"
+      },
+      "bytes": 900,
+      "sha256": "011ffbf16224fc2b1d22b46678dd093f4c21388a42ba951181d5d9351d375f2b",
+      "compressed_bytes": 372,
+      "compressed_sha256": "6ab8430826c22764e1f8ca88234fc08e9ef45ec8895f1b1eaf00e5715152196f"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-cpu-python.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-to-cpu-python.log"
+      },
+      "bytes": 154,
+      "sha256": "567fca495270a6f03881e33afc3379f9360ab3efa7872571bb39eb9a9840c9a3",
+      "compressed_bytes": 204,
+      "compressed_sha256": "8b84449de9997b35666934eaab2d6db3e7639d8d73fbeb8871e9809eb1c19cdb"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-python.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-to-python.json"
+      },
+      "bytes": 900,
+      "sha256": "011ffbf16224fc2b1d22b46678dd093f4c21388a42ba951181d5d9351d375f2b",
+      "compressed_bytes": 372,
+      "compressed_sha256": "6ab8430826c22764e1f8ca88234fc08e9ef45ec8895f1b1eaf00e5715152196f"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-python.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/browser-to-python.log"
+      },
+      "bytes": 150,
+      "sha256": "f5b71f9223cb5d403581f8e6a7f219a488aa5ee7d29cf61311d97ad2eb16dd61",
+      "compressed_bytes": 200,
+      "compressed_sha256": "478fb6cbe113c0b3202b203a4fcafda4100ce11e449429eb9e78e73e82f4547f"
+    },
+    {
+      "archive": "raw/runs/verified-a/client-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/client-types.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client-types.log"
+      },
+      "bytes": 316,
+      "sha256": "50c95105c4e2d5453d343330a499af8fdf3081fbdc095056c7344b9a6a972324",
+      "compressed_bytes": 160,
+      "compressed_sha256": "231d46c3980f39c5bfe75b7cf1de3184c9fbfecfcad9509236ccf16a2263a362"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/forward-bench-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/forward-bench-fixture.json"
+      },
+      "bytes": 12542061,
+      "sha256": "4c4181c66408fb4ef6c58f7be9f2a5eee897a9a016cd8ee61b037bb713e74477",
+      "compressed_bytes": 80056,
+      "compressed_sha256": "1c232bb3856ab64d5f8b1b5b5320592cde8c2bcd126789ef8c9ca56bd4f8109d"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/forward-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/forward-fixture.json"
+      },
+      "bytes": 699371,
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0",
+      "compressed_bytes": 6808,
+      "compressed_sha256": "dc51b1391f66b23febf4be5110779debcfe07b2cf0d42a4a20cd61bd8a41a047"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/handoff-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/handoff-fixture.json"
+      },
+      "bytes": 1219,
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1",
+      "compressed_bytes": 452,
+      "compressed_sha256": "cd58cd6689a76a24adfb9ed442fc68ffcbf2cecfe0c7420f80c8aba372768c7a"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js"
+      },
+      "bytes": 4526,
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "compressed_bytes": 1084,
+      "compressed_sha256": "368ef83d5315e8ba31ed274687c72446c8f760dad9122a83587c21fdee6a2a18"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 128438,
+      "sha256": "bf28bea3b2a9275eebdd699aedbf802726377ec8f914103cfcaec1fd7dec1f75",
+      "compressed_bytes": 15124,
+      "compressed_sha256": "d83bd8ae6ada060334b3bbb479a3e3c3707953d0693f897c21bbfcdc092afdf0"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/spiraltorch_wasm.js"
+      },
+      "bytes": 374463,
+      "sha256": "7399e352b272d43dbf5518ef67c1258df0d47b74c602a7149d5fc8ca6c536869",
+      "compressed_bytes": 30660,
+      "compressed_sha256": "3211b5622eaac15e8bb532611dba8a98d9eb6c1e277f3a10d8371ff980fe4706"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 72284,
+      "sha256": "93a804c2af03053e4bff64dca4d3c338309be0932b1bce47c35e2001ffbaa33d",
+      "compressed_bytes": 6312,
+      "compressed_sha256": "ecfd2e486afdaae9a8976bb6f4324164e5773d38e94a40aaf08dd0980e1ecd75"
+    },
+    {
+      "archive": "raw/runs/verified-a/contracts.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/contracts.log"
+      },
+      "bytes": 2241,
+      "sha256": "babd9294794ee651e29f8870d90fdfdd5a830ca842b1a92881992c862445ce63",
+      "compressed_bytes": 984,
+      "compressed_sha256": "7a33aa278775293e3dbd309204c1c675eb8a0dc9f5fdb9ef1b8032b118da2e67"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 2984,
+      "sha256": "ef4763e3e328ff360a7b84604d940f53086b683c4ea857d1df00b51c12117879",
+      "compressed_bytes": 868,
+      "compressed_sha256": "305ea572ecfcd59ea90c249c9b23b5cb8da6e994310d244a20f2868b875c9795"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness/spiraltorch_wasm.js"
+      },
+      "bytes": 44229,
+      "sha256": "a4f87c3e923713d3f3ff0d37cfc83071e56e0508bcd2a56a0de5453761570e7a",
+      "compressed_bytes": 8080,
+      "compressed_sha256": "38be0e8972b6757e4209e9c8898c0eb4f70aacd9bf1e8893c12a54de552dbed6"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 1996,
+      "sha256": "1876ff1dc7f05ee31e75f3b09b16a9347f3ce003754c5b884f0da7481474f360",
+      "compressed_bytes": 472,
+      "compressed_sha256": "3014f5ce2150253055d5013751908608ffbd0798dfda1ded8db57dd4f46be5e1"
+    },
+    {
+      "archive": "raw/runs/verified-a/descriptor-cpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/descriptor-cpu.log"
+      },
+      "bytes": 1529,
+      "sha256": "0797d999dd80bb6d8594160f97bee655dea453e3493978f28b7d728563b7230d",
+      "compressed_bytes": 680,
+      "compressed_sha256": "678794c06ad048b58e546cbe1f5200d56e561cf06df2d46296ade5f76893949c"
+    },
+    {
+      "archive": "raw/runs/verified-a/descriptor-wgpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/descriptor-wgpu.log"
+      },
+      "bytes": 115467,
+      "sha256": "38df63db0f6c9e6a3aa22fcacc88e2c285048e3605027320a80862cdaf93e305",
+      "compressed_bytes": 4028,
+      "compressed_sha256": "7050a24744cd0a9f286786b877110724b2df62487bc0961e2769f886a8f9d5ea"
+    },
+    {
+      "archive": "raw/runs/verified-a/direct-io-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/direct-io-validation.json"
+      },
+      "bytes": 77948,
+      "sha256": "502f2e09735051fa28f4ae05b6c093f87557980007fc7b15f422c86b8199e519",
+      "compressed_bytes": 7888,
+      "compressed_sha256": "082bdec727f1f79993d2301a3eff786411984d802cfab519644ec95f2beabcce"
+    },
+    {
+      "archive": "raw/runs/verified-a/direct-io-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/direct-io-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/format.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/format.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/forward-fixture.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/forward-fixture.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/handoff-fixture.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/handoff-fixture.log"
+      },
+      "bytes": 155,
+      "sha256": "37edf3effd228a3a6b24e3e8bcf443ba4c5d6585a1676ea38f471e9db9c587d8",
+      "compressed_bytes": 204,
+      "compressed_sha256": "0e52a9d4215c6816ca1b68e37af027ee94c4328edb61ff87767932a55bbcddb6"
+    },
+    {
+      "archive": "raw/runs/verified-a/integration.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/integration.log"
+      },
+      "bytes": 115816,
+      "sha256": "d87c27ec44d19dad79604f178c9f2bf1c9d67b78813ad251494323ce122265f0",
+      "compressed_bytes": 4036,
+      "compressed_sha256": "a0a2717e4c173930f48f24d90317e04159a604f7a72590660f985a1c0dc6f082"
+    },
+    {
+      "archive": "raw/runs/verified-a/interval-admission-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/interval-admission-tests.log"
+      },
+      "bytes": 1186,
+      "sha256": "dc13706e5da246ec8f84fbab3fbb9a43b104a8fb41ff3ef3811fc039b2e1d36b",
+      "compressed_bytes": 444,
+      "compressed_sha256": "e75d2264100b6df0702335285fb14a3d45f40b9897c214e70e8ba8e5dbf1d3e6"
+    },
+    {
+      "archive": "raw/runs/verified-a/interval-cadence-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/interval-cadence-tests.log"
+      },
+      "bytes": 586,
+      "sha256": "6853c868aef64fefb4e601a3a14df8d0c73610afe80ef9aee196dc6efc2d88e1",
+      "compressed_bytes": 432,
+      "compressed_sha256": "2396d45d59de1b56155c8f336b89b5d51365a63ea876b6d2f24ca0be85707a29"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-bench.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/module-forward-bench.json"
+      },
+      "bytes": 2549928,
+      "sha256": "8826339bc1543b363cdff7f36d1f2d5ed15ecc62d652a83256eb3d3d598523e1",
+      "compressed_bytes": 98812,
+      "compressed_sha256": "70f09fb90251fd6edf1a36908d72ef6cfb0b48796d9730d39ad2619572f88c91"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-bench.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/module-forward-bench.log"
+      },
+      "bytes": 17943,
+      "sha256": "c6612d78efb82bb7ed295f88fbbca08eb584158bfa9f857d49fca6468dea960a",
+      "compressed_bytes": 2912,
+      "compressed_sha256": "8e27ceeeb17a14b0ed745a530c1815c9e360436c47fb155f7d98843733361917"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/module-forward-validation.json"
+      },
+      "bytes": 27970,
+      "sha256": "8da561986e9f3f529ddf4d97abf0291edae08442f0de2b794a913da1df39b252",
+      "compressed_bytes": 3848,
+      "compressed_sha256": "85b7567eb23ae873cc916d5c7b8264a1a2eaabfdc0b2cc89b4fcfda311200e43"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/module-forward-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/native-build.log"
+      },
+      "bytes": 114679,
+      "sha256": "a8890844f0b72bad486780b6d9040659c761ee2f0de4047e438a9177cd4e2a8d",
+      "compressed_bytes": 3668,
+      "compressed_sha256": "53ece8a51a5bcdf4f2c02842598bc7a352789ef06ff07faf0f8a5d05982f9aaf"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-correctness.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/native-correctness.json"
+      },
+      "bytes": 7415728,
+      "sha256": "2fd42198ca17c6869e440fbc26944e9825d17615c25ee1e3f123196ca28a849d",
+      "compressed_bytes": 199036,
+      "compressed_sha256": "526b553aafaa45f72ebea6d82e2479bf83110bf740fb388e8f39656d9d828c85"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-correctness.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/native-correctness.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-forward-bench.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/native-forward-bench.json"
+      },
+      "bytes": 12542061,
+      "sha256": "4c4181c66408fb4ef6c58f7be9f2a5eee897a9a016cd8ee61b037bb713e74477",
+      "compressed_bytes": 80056,
+      "compressed_sha256": "1c232bb3856ab64d5f8b1b5b5320592cde8c2bcd126789ef8c9ca56bd4f8109d"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-forward-bench.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/native-forward-bench.log"
+      },
+      "bytes": 580,
+      "sha256": "b9d8fa6f625add09eafc78e488866a3ea9d5b759bef3f09fd51c5d4e2bc6bfa4",
+      "compressed_bytes": 248,
+      "compressed_sha256": "2933522de769f064e9c0836f8d45ad44a2a3469a5924084d19ae07cdfde080a3"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-nd.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/native-nd.json"
+      },
+      "bytes": 2738286,
+      "sha256": "1613a41f5430d7a61e42306f375271a0850a5f2792d73d6ccdaf0aa583fed41c",
+      "compressed_bytes": 24304,
+      "compressed_sha256": "775e35695cf438ffed398d8e26ee3fc82955f71158fe9b4aa92dd776fb599443"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-nd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/native-nd.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 2974,
+      "sha256": "1be325218d3fbe059e341c24914b528fe38bba43531db029ede543eb5f9d3264",
+      "compressed_bytes": 864,
+      "compressed_sha256": "22ff59bc8063aedd75200423d9d65b4fea7da2a35ed776bbf014738be1d1aae2"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd/spiraltorch_wasm.js"
+      },
+      "bytes": 44217,
+      "sha256": "aef892a7d480aa6c60d92ac3617181cebe9e56aa9556ec13da5226b740783429",
+      "compressed_bytes": 8080,
+      "compressed_sha256": "84b9dd42cf7278bd4ca441bbe139af2f0e465e04ebaf2a451e247afc6a857a61"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 1991,
+      "sha256": "0e57bf5f56670d79f197e0245b948736515308ba8d283ce96887583836b609d6",
+      "compressed_bytes": 468,
+      "compressed_sha256": "6b3474c301ac4a81a7e21eb72fa967ffed3b541d3516c5268df4ee2b5e90358b"
+    },
+    {
+      "archive": "raw/runs/verified-a/nn-cpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nn-cpu.log"
+      },
+      "bytes": 61537,
+      "sha256": "c514c32c1468535f03ff71cef8347c946e6a0e6192d6802877464da9f71df230",
+      "compressed_bytes": 10392,
+      "compressed_sha256": "a84c016ffe6312629779cb5e182e9b87178676c95766b27a55efaa758cd5d6f0"
+    },
+    {
+      "archive": "raw/runs/verified-a/nn-serial.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nn-serial.log"
+      },
+      "bytes": 180998,
+      "sha256": "77def2410ea5d2f2d7242f9b807ff4f9d898ab0efb13756dc2dfeb6e93ed8484",
+      "compressed_bytes": 14440,
+      "compressed_sha256": "503e9a58f36876cbf7ac276bf433bc9b0d7c4f7cb924dd5458910a541814eb84"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-build.log"
+      },
+      "bytes": 115962,
+      "sha256": "29061c0ca8a53d9b7e9bdce8a1d80207c208aebf2027b2eaa0e327f43596949f",
+      "compressed_bytes": 3780,
+      "compressed_sha256": "fa3e1aab3a2e6a088db8f5bb257a57212462ebec40547e91b6b55352ad46e29a"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-cpu-build.log"
+      },
+      "bytes": 1738,
+      "sha256": "58b5c96253425df39a06afd7492de5f117bb6979eab27f76457e894716184408",
+      "compressed_bytes": 380,
+      "compressed_sha256": "a85b894755947778da5424eb633e6ae843fc067f349d93d9851946afc0cf4370"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-handoff.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-cpu-handoff.log"
+      },
+      "bytes": 644,
+      "sha256": "8d024920b11ef18cc14c030272474a9c0c20001d556c9e912798ac4087ed97cf",
+      "compressed_bytes": 308,
+      "compressed_sha256": "b7cfe53ce0d8721fb78447759c229fd8725a9c9681c4f70a0627814318b24f81"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-module-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-cpu-module-forward.log"
+      },
+      "bytes": 334,
+      "sha256": "9ab776c3bb25060e4bd219fbd71e4b4c2ebbca135fb7cdd2d4751572c05eaece",
+      "compressed_bytes": 208,
+      "compressed_sha256": "6d17be8bf7918a2e5c138d106d1783318bc6f2da692befa03a23001094314fe2"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-probe.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-cpu-probe.json"
+      },
+      "bytes": 728,
+      "sha256": "59f469e8aad2218e32d4dbfe0e8b3f5775792cd76634e66314c9cfd00a82eff4",
+      "compressed_bytes": 420,
+      "compressed_sha256": "01e7fd5a6d1933d1cd897b82fb00c0d3928216f153549e43a99b25a546ece046"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-probe.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-cpu-probe.log"
+      },
+      "bytes": 571,
+      "sha256": "13388da54260ee74cb07d208c0c178e178fdbe7d5ec814447b6810431b1ee8ac",
+      "compressed_bytes": 400,
+      "compressed_sha256": "9a98bb0f7dc23d168569d5b74733e3ba1be78a0dbc1cc921af0d2675d7f58a62"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-graph_autograd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-graph_autograd.log"
+      },
+      "bytes": 450,
+      "sha256": "18cf7b2156e78df77253bb95e4e298057af6456be49cf9413be18d182572bc8f",
+      "compressed_bytes": 252,
+      "compressed_sha256": "07b76b6734642696027e2216d1f32f573485d2b8cf8e400c4c69106355385d80"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-graph_learner.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-graph_learner.log"
+      },
+      "bytes": 462,
+      "sha256": "1d00034be8cea7685a18a65ffc8b1f5d900bbe19d1b6693e630ebcd5045ef90b",
+      "compressed_bytes": 252,
+      "compressed_sha256": "54993d3cc49e670d2045864257a265bbdcac7e7ccbbb5b53e821ba5df3571a27"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-module-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-module-forward.log"
+      },
+      "bytes": 1368,
+      "sha256": "66828f1663ee69786472b887e7195570966e07b15b7a0a5809a69510a7e60083",
+      "compressed_bytes": 480,
+      "compressed_sha256": "0788da0065a6a471aef9af1b3dac47148519bbc498ccbcba7277c483d798ed60"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-module_update.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-module_update.log"
+      },
+      "bytes": 804,
+      "sha256": "5c4ce152051c949d5306865eb4bdc716782a144aa65a4bf0545b1d877ab812ed",
+      "compressed_bytes": 356,
+      "compressed_sha256": "0160a499017c3ad20d5955795229c12d623c4e259e9a0a97a2f792a6253d2ac8"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-pointwise.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-pointwise.log"
+      },
+      "bytes": 628,
+      "sha256": "2d7dba080cedba0ac86fa585b50b91f8cbf4c53533ca2334f14284efc1a745ef",
+      "compressed_bytes": 296,
+      "compressed_sha256": "36608390f9c24e598554f13ad81a17a1d49633c2c34f3727c74b88ba53b4c0ce"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-tests.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-tests.json"
+      },
+      "bytes": 788,
+      "sha256": "7d5b0dd68a293ab85b789fa828149af618ed6473d76986a64c6284779dddbe17",
+      "compressed_bytes": 444,
+      "compressed_sha256": "2c83d09f8755f1a9935ad18d1fe2a23c1c02c5d684882799941eb5a4b85b4642"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-tests.log"
+      },
+      "bytes": 5927,
+      "sha256": "3f3ded6cabbcc73aebe4b7ef24c6fb33c47d3b6feccd29c66b750fcfd582c064",
+      "compressed_bytes": 1540,
+      "compressed_sha256": "5ab6771f378bb3115bd17f976accd5ca562b34b44e6b829d03e496035eb62efe"
+    },
+    {
+      "archive": "raw/runs/verified-a/receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/receipt.json"
+      },
+      "bytes": 33658,
+      "sha256": "121aab7c2266229378e730f61e87249a04a5579c3b483a221be2a49ddddc7593",
+      "compressed_bytes": 4152,
+      "compressed_sha256": "1e48b0bb8aced35c76178d8dd656d41fce7062ee990c3f0de1335997cdf886fb"
+    },
+    {
+      "archive": "raw/runs/verified-a/tensor-cpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/tensor-cpu.log"
+      },
+      "bytes": 37051,
+      "sha256": "230e7d9f9c83bcc578d44dc03dac9b7de7998cb4fa2a752b3f755e87193e5941",
+      "compressed_bytes": 6860,
+      "compressed_sha256": "2fe3f0a1c97925b1df8ee8d8da588d2dabbb76c6cd865dd428a6419139a6f195"
+    },
+    {
+      "archive": "raw/runs/verified-a/tensor-wgpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/tensor-wgpu.log"
+      },
+      "bytes": 155655,
+      "sha256": "162b1dfd835739c9300adfe00a5dd126fa18832f2f3afb1e7e1f884e203c00ca",
+      "compressed_bytes": 10836,
+      "compressed_sha256": "28f3543631588f1e69180c2b48379339dcc7ab4d17702c7fed1be75be9e7aaea"
+    },
+    {
+      "archive": "raw/runs/verified-a/torch-correctness.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/torch-correctness.json"
+      },
+      "bytes": 55173,
+      "sha256": "e67933057254bacb64b3ed01bc116f75a74b965c0587f69ea3e660074d886cb9",
+      "compressed_bytes": 1604,
+      "compressed_sha256": "af3a43ecf12102dfbb789562c4f4ec40357ef12e59c45ba17d3efc83a18ce01f"
+    },
+    {
+      "archive": "raw/runs/verified-a/torch-correctness.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/torch-correctness.log"
+      },
+      "bytes": 73,
+      "sha256": "7657f73434d554b9b4f11dcbdea410eb0776aebf9571612ff4cdb0207da145ef",
+      "compressed_bytes": 132,
+      "compressed_sha256": "23ce180b2ec7c5a93f85fef78d12e9e0952f393da3bfe1c5055b574f740346b5"
+    },
+    {
+      "archive": "raw/runs/verified-a/torch-reference-shapes.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/torch-reference-shapes.log"
+      },
+      "bytes": 213,
+      "sha256": "6bffc6535a67e4e0f57d1b3201295abea93db5e55e6d287cae7c61b8dc20a0dc",
+      "compressed_bytes": 168,
+      "compressed_sha256": "8c06d6e4e4336642ba4c7bad16a6be7de3d24166aff507ec24c58f1e081d071e"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-autograd.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-autograd.json"
+      },
+      "bytes": 1153,
+      "sha256": "b096f49c1825ced19e65fb4c8396a810286f11714091348b23fcce799bc3cbd5",
+      "compressed_bytes": 668,
+      "compressed_sha256": "fe2b551e48372e78d2084392024a9f614583646e39bd2f2676bcbf278e0d83e4"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-autograd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-autograd.log"
+      },
+      "bytes": 143,
+      "sha256": "c0e63f327a087a879b8aebbb43e976f7f08616226c9ed60c0d6b9c99efcf8481",
+      "compressed_bytes": 192,
+      "compressed_sha256": "70ca93d45ba70ddeeaa72c7e644598c0ba8f6a942d23585f219a49975643b0ce"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-client-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-client-build.log"
+      },
+      "bytes": 111925,
+      "sha256": "c252baf7143c6065437c9589dbf1be5566277b1349033269a3097caa0df81ef5",
+      "compressed_bytes": 3488,
+      "compressed_sha256": "6061dae3ea5e25d191d9a748d6117ee17357b211f736654ea34a44f318a61c12"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-cpu-check.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-cpu-check.log"
+      },
+      "bytes": 757,
+      "sha256": "c36fdf412e1df838d3221606bbcb629e9770c5962762a1efa9a18aabaa0a8205",
+      "compressed_bytes": 300,
+      "compressed_sha256": "53bcace1faa33ead3e5fe094a9ae57ba24240821b3744a5a96aca517efbfedd4"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-example-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-example-build.log"
+      },
+      "bytes": 111779,
+      "sha256": "f20cbe60ddc0213f6e2cdd5ab062c9b2e0fa4810b8d0a56596c4e0a3fd415fa2",
+      "compressed_bytes": 3472,
+      "compressed_sha256": "a7d31a40757001910bedc0090637100744a7a98e3d2da6389e24269f995fca53"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-forward.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-forward.json"
+      },
+      "bytes": 698481,
+      "sha256": "d289ae405879650039f82a6edeaef0364be117a7bb826debb9795fbd91573aab",
+      "compressed_bytes": 6980,
+      "compressed_sha256": "c0df29e05292a6e849abdb07e22dd2a008bf1f9ab7484f301aa4aa21d2d33522"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-forward.log"
+      },
+      "bytes": 153,
+      "sha256": "1c62c47a8f6dc8c8f9bcf5ce2b1e91c7664718d17254c72708ac4344c9e11981",
+      "compressed_bytes": 200,
+      "compressed_sha256": "ec4f3c5f61b6e32c3be7b4fca7e0283eb35de0d6729ed36583ac89296001bb44"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-fusion.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-fusion.json"
+      },
+      "bytes": 7805,
+      "sha256": "cf1016febfde209e1f3d918e3054e6b658d509e61489c319590e870372a34df9",
+      "compressed_bytes": 1348,
+      "compressed_sha256": "09fe44464932d9baa5be0eca70e49094877a8ba186cd77d76226e0fb174c1c7d"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-fusion.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-fusion.log"
+      },
+      "bytes": 151,
+      "sha256": "d04bec00503a4cd5948c43cba63cd29aca0adab3c4c00f4eb6491f2022528fa2",
+      "compressed_bytes": 200,
+      "compressed_sha256": "3eee5e9b37dc8371ad5cb01b122efe72e116a9372e66ca3fb2bd06c94600b0e9"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-learner.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-learner.json"
+      },
+      "bytes": 1421,
+      "sha256": "af38455acd8cff4480ac8beea2d5e03a9ca6a239260a78bfcedbc57e7573bb5e",
+      "compressed_bytes": 760,
+      "compressed_sha256": "267199e04400a9e898e9b5092b8a96de5eead83579d73004978b6f69d114d018"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-learner.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-learner.log"
+      },
+      "bytes": 152,
+      "sha256": "d16e9ac4aa629e9ed387455aeb236618d86e6bac37cd9d8abcc74aadcf11294f",
+      "compressed_bytes": 200,
+      "compressed_sha256": "3d6bb0cde7a00b943f76afc01e4e3030c448f584517358055092f9ebfc4c6f5f"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-pointwise.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-pointwise.json"
+      },
+      "bytes": 1081,
+      "sha256": "31d0eb7bc548f136846d83af883d825bc9a27fb2e07d441cab4f029aedc635f1",
+      "compressed_bytes": 628,
+      "compressed_sha256": "a776b893209f1d3b44924ad8eedea125e427a9c5dcd3d86b3c2a79311ef87558"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-pointwise.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/wasm-pointwise.log"
+      },
+      "bytes": 144,
+      "sha256": "3985c167a63332e58ca741398fbde78e0b255f0c7a245bda214989e4a4442e5a",
+      "compressed_bytes": 196,
+      "compressed_sha256": "673972843e9df49ff0b716ef32717acf76bb58a3424c8c87f9e5c04af6e82b60"
+    },
+    {
+      "archive": "raw/runs/verify_selected.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verify_selected.py"
+      },
+      "bytes": 7297,
+      "sha256": "1cbc0aab97eb55f4c6c4f0969889fb09231d1ef20f71b2acc68757d58a1b00c2",
+      "compressed_bytes": 2868,
+      "compressed_sha256": "5ac375b32ef137a221a6a56dd69fc09bac67856b2ba252ba3a882053774adbe2"
+    },
+    {
+      "archive": "raw/source/baseline/crates/st-backend-wgpu/src/resident_tensor.rs.xz",
+      "origin": {
+        "git_commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor.rs"
+      },
+      "bytes": 20810,
+      "sha256": "26b3fe84d791f89950971cc2c3d186817fdc0f975d4ebf8e278ae0cc51a676e7",
+      "compressed_bytes": 4980,
+      "compressed_sha256": "5d4f539184ba3c2e9fc7b78c0b07b59835a4e8f6d9a6a4a1156d2103df3e6bf5"
+    },
+    {
+      "archive": "raw/source/baseline/crates/st-backend-wgpu/src/resident_tensor/tests.rs.xz",
+      "origin": {
+        "git_commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/tests.rs"
+      },
+      "bytes": 3761,
+      "sha256": "816ce162b3921689eb194017702c9f40de77ffd1dda6c22f65340cd21392f9e7",
+      "compressed_bytes": 1496,
+      "compressed_sha256": "7dbf2b19f35a25ae8b1b65f39dba2c06442fc1d1529a6c06d61b5372da64df0c"
+    },
+    {
+      "archive": "raw/source/baseline/crates/st-backend-wgpu/src/runtime.rs.xz",
+      "origin": {
+        "git_commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+        "git_path": "crates/st-backend-wgpu/src/runtime.rs"
+      },
+      "bytes": 35187,
+      "sha256": "ee902ab1402a3b258dd1cea0837c4cc155ab3b727385b812d23988ff8f949137",
+      "compressed_bytes": 7748,
+      "compressed_sha256": "3f2c05aba694793ebf74645e79662bd8b37bae6f9192b1b21bbf91781beb91ee"
+    },
+    {
+      "archive": "raw/source/one_slot/crates/st-backend-wgpu/src/resident_tensor.rs.xz",
+      "origin": {
+        "git_commit": "aaf4d4a91805878bacccb2750e818671366c1adf",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor.rs"
+      },
+      "bytes": 21104,
+      "sha256": "2ded0205927681894eec47069628269effd95f7838ebb3c3e93fc9413f186ae3",
+      "compressed_bytes": 5104,
+      "compressed_sha256": "4498ca7e19061dbf259318254b11ca59a03d47f87f1f1e86b5fa9ab6661fa6ba"
+    },
+    {
+      "archive": "raw/source/one_slot/crates/st-backend-wgpu/src/resident_tensor/tests.rs.xz",
+      "origin": {
+        "git_commit": "aaf4d4a91805878bacccb2750e818671366c1adf",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/tests.rs"
+      },
+      "bytes": 5633,
+      "sha256": "78bf7379ea0888ff2518c7240e753583d6285b48f2c6d0bd8b1cdcb8dfdb666d",
+      "compressed_bytes": 1792,
+      "compressed_sha256": "f826be5535fd51f7bef5015bd08abd2412168a6f4a973d20cc5d9c0e811b858c"
+    },
+    {
+      "archive": "raw/source/one_slot/crates/st-backend-wgpu/src/runtime.rs.xz",
+      "origin": {
+        "git_commit": "aaf4d4a91805878bacccb2750e818671366c1adf",
+        "git_path": "crates/st-backend-wgpu/src/runtime.rs"
+      },
+      "bytes": 39561,
+      "sha256": "01b42d4b9d88c91f6ed37cc2ef335542ec05b19a29ef194a2d47b42d5bdf810a",
+      "compressed_bytes": 8360,
+      "compressed_sha256": "1be298f496bb3f62df698d5eb7e7bf451d006469754e3fb746caa342e4500b6c"
+    },
+    {
+      "archive": "raw/source/selected/crates/st-backend-wgpu/src/resident_tensor.rs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor.rs"
+      },
+      "bytes": 20810,
+      "sha256": "26b3fe84d791f89950971cc2c3d186817fdc0f975d4ebf8e278ae0cc51a676e7",
+      "compressed_bytes": 4980,
+      "compressed_sha256": "5d4f539184ba3c2e9fc7b78c0b07b59835a4e8f6d9a6a4a1156d2103df3e6bf5"
+    },
+    {
+      "archive": "raw/source/selected/crates/st-backend-wgpu/src/resident_tensor/tests.rs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/tests.rs"
+      },
+      "bytes": 5994,
+      "sha256": "e7f6b588afbd896bbe9ec7c464356348f7f9f3bcd8a2d786f2b4fea40819516c",
+      "compressed_bytes": 1820,
+      "compressed_sha256": "10716aa4e045e0e5ca00f72a9dd0e1ab1666cbb5e3e072cc5609d7775f641526"
+    },
+    {
+      "archive": "raw/source/selected/crates/st-backend-wgpu/src/runtime.rs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "crates/st-backend-wgpu/src/runtime.rs"
+      },
+      "bytes": 35187,
+      "sha256": "ee902ab1402a3b258dd1cea0837c4cc155ab3b727385b812d23988ff8f949137",
+      "compressed_bytes": 7748,
+      "compressed_sha256": "3f2c05aba694793ebf74645e79662bd8b37bae6f9192b1b21bbf91781beb91ee"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-py/tests/test_nn_module_resident_forward.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-py/tests/test_nn_module_resident_forward.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 11668,
+      "sha256": "5336e5f86c5a9c747fbf1b937eced3faafe88912b14cf6828c32aa03779b1576",
+      "compressed_bytes": 3308,
+      "compressed_sha256": "f84f841e7b91c0edf1672b1eeb0ef5101e7c323c55d3fa726ef1b9b352f36140"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-py/tests/test_wgpu_tensor.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-py/tests/test_wgpu_tensor.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 5932,
+      "sha256": "f6f6ccc94edbbddbae01102a080f232ad8f1d6b4b6a6fcb05de1634af4b9cb77",
+      "compressed_bytes": 1836,
+      "compressed_sha256": "04e5e9a6be43c14c2781f31e6c4f82dadd4423fa4e3b0f2926489e4593bd6b65"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-wasm/tests/module_resident_forward.html.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-wasm/tests/module_resident_forward.html",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 12872,
+      "sha256": "4ad31f91eace72b1efed07d31f49fa31e9fd953d61a0614022e3f4a195a37dbe",
+      "compressed_bytes": 3908,
+      "compressed_sha256": "9fded1013c0658caa8f440948a6f572f1c49e56e79a5a6d273ee514b47560679"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-wasm/tests/module_resident_intervals.html.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-wasm/tests/module_resident_intervals.html",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 7847,
+      "sha256": "28d66c71ea8d2bd4e092f5d10e6170ef88cd53c82a193497feb396dd31737a47",
+      "compressed_bytes": 2868,
+      "compressed_sha256": "d9264b0c7e6fae1bbfb922829430f819f5ac79c51e916dc9124008a1e7211cae"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-wasm/tests/module_resident_intervals.mjs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-wasm/tests/module_resident_intervals.mjs",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 1719,
+      "sha256": "99c8471e6b6345b580e53817c9505203de58d156f1a45cf96f366b6f4b3943c6",
+      "compressed_bytes": 824,
+      "compressed_sha256": "fcce40618b3ad78619bf72ce892523b373722e4e36c865ad4e53048ff43de079"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-wasm/tests/module_resident_matched.html.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-wasm/tests/module_resident_matched.html",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 5656,
+      "sha256": "b73ce02d1d6ab85268b2d062e140830f759b4fa5452af6506f1250b55f06ae18",
+      "compressed_bytes": 2392,
+      "compressed_sha256": "ea8a016a9719b0a28f02b215632881f9ae0ab594973655837b8c0b26c793c736"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-wasm/tests/resident_nd_tensor.html.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-wasm/tests/resident_nd_tensor.html",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 1908,
+      "sha256": "a3bd56a428bd381c321e0f3a78d910d72c35f344b32600a40cb4cefde1474a8b",
+      "compressed_bytes": 984,
+      "compressed_sha256": "0db1be44bacce23d3780687df6b372e810dfa30fe88ac125fbafab6e98476c94"
+    },
+    {
+      "archive": "raw/source/shared/bindings/st-wasm/tests/resident_types.cjs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "bindings/st-wasm/tests/resident_types.cjs",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 13075,
+      "sha256": "ee4ef317163c713512c4411bf20bd55d660683c3d49cbbae008ab0e246d1954e",
+      "compressed_bytes": 2760,
+      "compressed_sha256": "9e3b5ab92ce4ce50f671a62a7b83f484218c101351f56e111ffd23f6bc7bdb56"
+    },
+    {
+      "archive": "raw/source/shared/crates/st-nn/examples/support/resident_nd_tensor.rs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "crates/st-nn/examples/support/resident_nd_tensor.rs",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 19159,
+      "sha256": "aaaf9410656c57eee2d6920b2f77dbbc29be4d59ba897bf100b00698d173d91a",
+      "compressed_bytes": 4996,
+      "compressed_sha256": "42b6ebdb144bc7bef858e459d42c3fb497c6d1d865ea50c5a8df943ecb0f8298"
+    },
+    {
+      "archive": "raw/source/shared/crates/st-nn/examples/support/resident_tensor_snapshots.rs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "crates/st-nn/examples/support/resident_tensor_snapshots.rs",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 3404,
+      "sha256": "506aad98171b434ca4e86a8b1fd4bd37e653a2f9dd457982a172f151c5dd8a5c",
+      "compressed_bytes": 1368,
+      "compressed_sha256": "01881916e9a536a1cfca4fb319baf94fa92a7d42adf181771a5801bce0cce5d0"
+    },
+    {
+      "archive": "raw/source/shared/tests/test_graph_forward_paths.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tests/test_graph_forward_paths.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 6689,
+      "sha256": "2db1e3da4a5e734f20106183543cfffd50ea3bf944fc5fe136215d93dc035a21",
+      "compressed_bytes": 2304,
+      "compressed_sha256": "ed4c2caa67ae1e739d131a7ebac1010767f31b1f9aafbb1cf4af33c41fe4634e"
+    },
+    {
+      "archive": "raw/source/shared/tools/bench_graph_forward_paths.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/bench_graph_forward_paths.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 16265,
+      "sha256": "215a5854fe1913ec818685085acbb198665bd148554970be5cb449f112711c54",
+      "compressed_bytes": 5224,
+      "compressed_sha256": "a83df7b676b46a212ae171d1c28a587e221c1064045e7bcbdc6852e1e6f172fc"
+    },
+    {
+      "archive": "raw/source/shared/tools/bench_resident_nn_vs_torch.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/bench_resident_nn_vs_torch.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 10394,
+      "sha256": "2a096dc5eb62ea2e62279f6b92fb4399bad48839ffa3e5221a744bca105d74a1",
+      "compressed_bytes": 3564,
+      "compressed_sha256": "55b659a8f23288a9fea82e079f1a3e132d36efb88ad4c4facff06d5b7197bba9"
+    },
+    {
+      "archive": "raw/source/shared/tools/resident_module_handoff_fixture.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/resident_module_handoff_fixture.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 4289,
+      "sha256": "b693bf0c4f7e9a88a94c8ab3c84dd9863757e59e4159ad648ecf9608cb84db5d",
+      "compressed_bytes": 1732,
+      "compressed_sha256": "6ef1ed528c9b2e9d3f766209d4cb7717375fb1e7a6997ed5086772ba74eb591e"
+    },
+    {
+      "archive": "raw/source/shared/tools/test_module_direct_io.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/test_module_direct_io.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 3090,
+      "sha256": "e93a719a38319055ee4ed1d0e58295e07e1ba82f262dc6d138cc759ea3d57065",
+      "compressed_bytes": 1328,
+      "compressed_sha256": "bbd1f9f0c1b52f0a62cddece8df7d3ce768e228f12d09d7c0825100cdec80f48"
+    },
+    {
+      "archive": "raw/source/shared/tools/test_module_forward_reference.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/test_module_forward_reference.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 1546,
+      "sha256": "37e9c25c29a7dd8ea15b0ff4bb1ed15cef0fe56e3b85f565c9b6712a4dab0ac0",
+      "compressed_bytes": 808,
+      "compressed_sha256": "55a48a4e256eec800af8dd44a4f7fd4dd25f57d7e4a1c727d0933d5ace1f6787"
+    },
+    {
+      "archive": "raw/source/shared/tools/test_module_interval_validation.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/test_module_interval_validation.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 9534,
+      "sha256": "dc199d7db11b18c63b0900bf9910b8751775cc00060f4af63ca492c9fcadf8ed",
+      "compressed_bytes": 2668,
+      "compressed_sha256": "fb25027862d34839cdcb966fe0497761486f3ea580b5bf036b4e3218ae142cde"
+    },
+    {
+      "archive": "raw/source/shared/tools/test_module_resident_intervals.mjs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/test_module_resident_intervals.mjs",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 3598,
+      "sha256": "8ced1d09e6f5c67e9861fef072f08d295abc4b5510dd096233aff5b5e2a58a71",
+      "compressed_bytes": 1416,
+      "compressed_sha256": "07552aa98ec3e351725c6ca8aabe1d3666030b57c47c7beb0c5225ef0f5e9a0e"
+    },
+    {
+      "archive": "raw/source/shared/tools/test_resident_browser.cjs.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/test_resident_browser.cjs",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 13949,
+      "sha256": "6e0bf253659ea58528b74f8982161e8c447fe3fb77c261b6487db2173f0f9a1d",
+      "compressed_bytes": 3692,
+      "compressed_sha256": "b2c5f1828a66e321c8b45928be00bd0fab2c8921e44d1d7d7de45f7abb276120"
+    },
+    {
+      "archive": "raw/source/shared/tools/validate_module_direct_io.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/validate_module_direct_io.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 5892,
+      "sha256": "190f337cf3072c3f941a1e7b22c8cb5fdda4638d9bea93817ab4d18b98d40144",
+      "compressed_bytes": 2188,
+      "compressed_sha256": "272b2fac62b292c2ecdd9be77999211250d9f250e176814af87a41440c8c2ebd"
+    },
+    {
+      "archive": "raw/source/shared/tools/validate_module_forward_paths.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/validate_module_forward_paths.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 6188,
+      "sha256": "5863353be3bcbb55d833c065fa5a7c7f2dd4cf032f25cfae883c56a4aa9dff0c",
+      "compressed_bytes": 2308,
+      "compressed_sha256": "0259d4dc95de8d0653a89d6492c8729ad758e6b5cbfd4219fef86331b608fa1b"
+    },
+    {
+      "archive": "raw/source/shared/tools/validate_module_resident_intervals.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/validate_module_resident_intervals.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 12259,
+      "sha256": "a2c124d0547ebce560abd6a397a6cd37a9fe56705ffe9e42395c54c2dd020eea",
+      "compressed_bytes": 3776,
+      "compressed_sha256": "3ed88abbc2cc39ae4934ac08c69bfc82f1c9828b0578a2af813dad1867b3d562"
+    },
+    {
+      "archive": "raw/source/shared/tools/validate_resident_graph_training_vs_torch.py.xz",
+      "origin": {
+        "git_commit": "350493470acac03d23ad357472a02017d602494f",
+        "git_path": "tools/validate_resident_graph_training_vs_torch.py",
+        "identical_at": [
+          "aaf4d4a91805878bacccb2750e818671366c1adf",
+          "67b6cdad40cea9c348b2b434a77d80d61b47c71a"
+        ]
+      },
+      "bytes": 12715,
+      "sha256": "ae5b39711f6fc2c978c1899ef7313081381130acda5c6676e65bdd86ffb61099",
+      "compressed_bytes": 3388,
+      "compressed_sha256": "aa375637d69a1a4dfcc5fc86914774a7937155fcf45d51c8f2a4a02d27165cab"
+    },
+    {
+      "archive": "raw/source/two_slots/crates/st-backend-wgpu/src/resident_tensor.rs.xz",
+      "origin": {
+        "git_commit": "67b6cdad40cea9c348b2b434a77d80d61b47c71a",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor.rs"
+      },
+      "bytes": 21103,
+      "sha256": "9a0dcfd8113b8147f78df7d373f0b97d0014417c67b8d3858c2c35ca53eb9115",
+      "compressed_bytes": 5108,
+      "compressed_sha256": "c5be28a9779911f8c9be7c221dd18eb02c5480627a18b46b51c36484ca0d5e84"
+    },
+    {
+      "archive": "raw/source/two_slots/crates/st-backend-wgpu/src/resident_tensor/tests.rs.xz",
+      "origin": {
+        "git_commit": "67b6cdad40cea9c348b2b434a77d80d61b47c71a",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/tests.rs"
+      },
+      "bytes": 6206,
+      "sha256": "ec8944a45af9af22d9acb2d083f17c5f1e54bce6562411ca0c7a5163defd53ca",
+      "compressed_bytes": 1836,
+      "compressed_sha256": "86a356fdcf7a9e8876903d70743755b48527b98a5135c11b35c6aa02cc74830f"
+    },
+    {
+      "archive": "raw/source/two_slots/crates/st-backend-wgpu/src/runtime.rs.xz",
+      "origin": {
+        "git_commit": "67b6cdad40cea9c348b2b434a77d80d61b47c71a",
+        "git_path": "crates/st-backend-wgpu/src/runtime.rs"
+      },
+      "bytes": 40205,
+      "sha256": "6ae0351c6471eb83de6418d60b89a4660e17a80ab0559d1e54d1eaa39613d8e9",
+      "compressed_bytes": 8540,
+      "compressed_sha256": "62a36358fbd6d349c5be20af85306f67b882056aa3811386cfb1af0ca2998cb4"
+    }
+  ],
+  "raw_bytes": 145655708,
+  "compressed_bytes": 2538300
+}

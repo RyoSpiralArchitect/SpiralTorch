@@ -1,0 +1,962 @@
+{
+  "schema": "spiraltorch.tensor_readback_cache_record.v1",
+  "status": "passed",
+  "decision": "Reject both staging caches; restore original production library source and keep stronger ownership/cancellation tests.",
+  "sources": {
+    "baseline": {
+      "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+      "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+    },
+    "one_slot": {
+      "commit": "aaf4d4a91805878bacccb2750e818671366c1adf",
+      "tree": "5e75523100b33001df0c5aa7497d043b4452a739"
+    },
+    "two_slots": {
+      "commit": "67b6cdad40cea9c348b2b434a77d80d61b47c71a",
+      "tree": "c9d87b9a7d89fc9ec6e494becb4352c4b3f97af2"
+    },
+    "selected": {
+      "commit": "350493470acac03d23ad357472a02017d602494f",
+      "tree": "60a973fe83423533166912edff18b663d23818a9"
+    }
+  },
+  "selected_library_source": {
+    "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+    "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+  },
+  "production_cache_enabled": false,
+  "verification": {
+    "one_slot_full": {
+      "source": {
+        "commit": "aaf4d4a91805878bacccb2750e818671366c1adf",
+        "tree": "5e75523100b33001df0c5aa7497d043b4452a739"
+      },
+      "steps": 55,
+      "seconds": 557.2377741669989
+    },
+    "one_slot_measurement": {
+      "source": {
+        "commit": "aaf4d4a91805878bacccb2750e818671366c1adf",
+        "tree": "5e75523100b33001df0c5aa7497d043b4452a739"
+      },
+      "steps": 14,
+      "seconds": 240.11780270800227
+    },
+    "two_slot_screen": {
+      "source": {
+        "commit": "67b6cdad40cea9c348b2b434a77d80d61b47c71a",
+        "tree": "c9d87b9a7d89fc9ec6e494becb4352c4b3f97af2"
+      },
+      "steps": 10,
+      "seconds": 283.1313300840011
+    },
+    "selected": {
+      "source": {
+        "commit": "350493470acac03d23ad357472a02017d602494f",
+        "tree": "60a973fe83423533166912edff18b663d23818a9"
+      },
+      "steps": 13,
+      "seconds": 93.7235883329995
+    }
+  },
+  "qualification_boundaries": {
+    "two_slots": "backend/WASM screen only; full native/Python suite not run for this candidate",
+    "selected": "Selected source restores the original library implementation and manifests exactly. Freshly built backend and native/browser N-D regression fixtures; original source-bound frozen Python/WASM/CPU libraries run the strengthened client tests. This is not a new selected performance measurement or a claim that rejected staging caches shipped."
+  },
+  "runtime_sha256": {
+    "crates/st-backend-wgpu/src/runtime.rs": "ee902ab1402a3b258dd1cea0837c4cc155ab3b727385b812d23988ff8f949137",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "26b3fe84d791f89950971cc2c3d186817fdc0f975d4ebf8e278ae0cc51a676e7"
+  },
+  "test_counts": {
+    "one_slot": {
+      "python-cpu-handoff.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 4
+      },
+      "interval-admission-tests.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 8
+      },
+      "python-graph_autograd.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 3
+      },
+      "contracts.log": {
+        "rust_passed": 23,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "python-module-forward.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 9
+      },
+      "admission-tests.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 3
+      },
+      "nn-cpu.log": {
+        "rust_passed": 707,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "python-pointwise.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 5
+      },
+      "python-module_update.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 5
+      },
+      "integration.log": {
+        "rust_passed": 6,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "python-cpu-module-forward.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 2
+      },
+      "backend-serial.log": {
+        "rust_passed": 133,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "descriptor-cpu.log": {
+        "rust_passed": 4,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "descriptor-wgpu.log": {
+        "rust_passed": 4,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "python-tests.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 35
+      },
+      "tensor-wgpu.log": {
+        "rust_passed": 497,
+        "rust_ignored": 1,
+        "python_ran": 0
+      },
+      "nn-serial.log": {
+        "rust_passed": 759,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "tensor-cpu.log": {
+        "rust_passed": 449,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "python-graph_learner.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 3
+      },
+      "torch-reference-shapes.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 1
+      }
+    },
+    "two_slots": {
+      "backend.log": {
+        "rust_passed": 133,
+        "rust_ignored": 0,
+        "python_ran": 0
+      }
+    },
+    "selected": {
+      "backend.log": {
+        "rust_passed": 132,
+        "rust_ignored": 0,
+        "python_ran": 0
+      },
+      "cpu-tensor-surface.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 2
+      },
+      "python-module-forward.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 9
+      },
+      "cpu-handoff-surface.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 4
+      },
+      "python-tests.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 35
+      },
+      "cpu-module-surface.log": {
+        "rust_passed": 0,
+        "rust_ignored": 0,
+        "python_ran": 2
+      }
+    }
+  },
+  "browser_checks": {
+    "one_slot": {
+      "module_assertions": 210,
+      "tensor_snapshots": {
+        "cancelled_pending_maps": 4,
+        "different_shapes_and_negative_zero": true,
+        "discard_and_reuse_cycles": 48,
+        "held_snapshots": 24,
+        "retained_guard_failures": 2,
+        "status": "passed",
+        "survives_tensor_device_drop": true
+      }
+    },
+    "two_slots": {
+      "module_assertions": 210,
+      "tensor_snapshots": {
+        "cancelled_pending_maps": 4,
+        "different_shapes_and_negative_zero": true,
+        "discard_and_reuse_cycles": 48,
+        "held_snapshots": 24,
+        "retained_guard_failures": 2,
+        "status": "passed",
+        "survives_tensor_device_drop": true
+      }
+    },
+    "selected": {
+      "module_assertions": 210,
+      "tensor_snapshots": {
+        "cancelled_pending_maps": 4,
+        "different_shapes_and_negative_zero": true,
+        "discard_and_reuse_cycles": 48,
+        "held_snapshots": 24,
+        "retained_guard_failures": 2,
+        "status": "passed",
+        "survives_tensor_device_drop": true
+      }
+    }
+  },
+  "torch_correctness": {
+    "version": "2.12.1",
+    "cases": 120,
+    "comparisons": 17136,
+    "max_abs_error": 5.7220458984375e-06,
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "scope": "correctness only; eager Torch; no fallback"
+  },
+  "sustained_browser": {
+    "one_slot": {
+      "source": {
+        "commit": "aaf4d4a91805878bacccb2750e818671366c1adf",
+        "tree": "5e75523100b33001df0c5aa7497d043b4452a739"
+      },
+      "protocol": {
+        "matrices": 4,
+        "warmup": 2,
+        "samples": 9,
+        "forwards": 256
+      },
+      "aggregates": [
+        {
+          "shape": [
+            2,
+            3,
+            7
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0139968895567566,
+            "min_ratio": 0.9967213114876239,
+            "max_ratio": 1.0216049383058499,
+            "regressions": 11,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0115546369233526
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0023547880749497,
+            "min_ratio": 1.0015576324219826,
+            "max_ratio": 1.0098684210776239,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0036545710864297
+          }
+        },
+        {
+          "shape": [
+            2,
+            8,
+            64
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0194269108473457,
+            "min_ratio": 1.008678881374314,
+            "max_ratio": 1.0272904483509362,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0229225333197838
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0029330093608335,
+            "min_ratio": 0.9980620155110815,
+            "max_ratio": 1.0087293889281947,
+            "regressions": 10,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0082415854105427
+          }
+        },
+        {
+          "shape": [
+            4,
+            8,
+            128
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.00404448937755,
+            "min_ratio": 0.9959738298905483,
+            "max_ratio": 1.039050131918258,
+            "regressions": 10,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.00882590792047
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0053608067384152,
+            "min_ratio": 0.9680741503641672,
+            "max_ratio": 1.0102933608016262,
+            "regressions": 7,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.9954011337618326
+          }
+        }
+      ],
+      "checked_forwards_including_warmup": 405504,
+      "checked_values_including_warmup": 697737216,
+      "max_abs_error": 2.384185791015625e-07,
+      "minimum_interval_ms": 59,
+      "clock_minimum_positive_delta_ms": 0.09999999776482582,
+      "minimum_interval_over_observed_clock_delta": 590.000013187528,
+      "browser_version": "152.0.7977.84",
+      "cross_origin_isolated": false,
+      "adapters": {
+        "baseline": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        },
+        "candidate": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        }
+      },
+      "validation_sha256": "b9a204414e19bfda21e53c6e535d04fee61523b527135e6e2c2b9a32ac20b262",
+      "disposition": "rejected; retain original fresh Tensor staging"
+    },
+    "two_slots": {
+      "source": {
+        "commit": "67b6cdad40cea9c348b2b434a77d80d61b47c71a",
+        "tree": "c9d87b9a7d89fc9ec6e494becb4352c4b3f97af2"
+      },
+      "protocol": {
+        "matrices": 4,
+        "warmup": 2,
+        "samples": 9,
+        "forwards": 256
+      },
+      "aggregates": [
+        {
+          "shape": [
+            2,
+            3,
+            7
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0125000000116415,
+            "min_ratio": 1.0062015503644943,
+            "max_ratio": 1.0204081632772413,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.007622364644124
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.003182761926684,
+            "min_ratio": 0.99843260185754,
+            "max_ratio": 1.0094043887379798,
+            "regressions": 10,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0106709080383423
+          }
+        },
+        {
+          "shape": [
+            2,
+            8,
+            64
+          ],
+          "module": {
+            "median_of_case_median_ratios": 1.0170163527147302,
+            "min_ratio": 1.003910068411603,
+            "max_ratio": 1.0214634146268775,
+            "regressions": 12,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0214559386976467
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 1.0019408068171956,
+            "min_ratio": 0.9951171875001066,
+            "max_ratio": 1.0058536585147788,
+            "regressions": 7,
+            "total_cases": 12,
+            "pooled_total_ratio": 1.0075569460270706
+          }
+        },
+        {
+          "shape": [
+            4,
+            8,
+            128
+          ],
+          "module": {
+            "median_of_case_median_ratios": 0.9992439516016458,
+            "min_ratio": 0.9596570852245591,
+            "max_ratio": 1.0070742799317538,
+            "regressions": 5,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.9999953664444777
+          },
+          "scalar": {
+            "median_of_case_median_ratios": 0.9997448979648856,
+            "min_ratio": 0.9763981529102104,
+            "max_ratio": 1.0045848191467472,
+            "regressions": 5,
+            "total_cases": 12,
+            "pooled_total_ratio": 0.9972717180663867
+          }
+        }
+      ],
+      "checked_forwards_including_warmup": 405504,
+      "checked_values_including_warmup": 697737216,
+      "max_abs_error": 2.384185791015625e-07,
+      "minimum_interval_ms": 59.30000000074506,
+      "clock_minimum_positive_delta_ms": 0.09999999776482582,
+      "minimum_interval_over_observed_clock_delta": 593.0000132620338,
+      "browser_version": "152.0.7977.84",
+      "cross_origin_isolated": false,
+      "adapters": {
+        "baseline": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        },
+        "candidate": {
+          "backend": "BrowserWebGpu",
+          "device_type": "Other",
+          "name": ""
+        }
+      },
+      "validation_sha256": "471e2d0cc4b10b51859db937d143d3cd7486708c23009549d85907f8b14ec1c8",
+      "disposition": "rejected; retain original fresh Tensor staging"
+    }
+  },
+  "short_one_slot_aggregates": {
+    "python": [
+      {
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "routes": {
+          "module_resident_d2h": {
+            "median_of_case_median_ratios": 0.992481364545194,
+            "min_ratio": 0.6325401043668817,
+            "max_ratio": 1.552157102009786,
+            "regressions": 4,
+            "total_cases": 12
+          },
+          "module_resident_burst": {
+            "median_of_case_median_ratios": 1.0190802597244861,
+            "min_ratio": 0.6550250240569018,
+            "max_ratio": 1.4513833993275485,
+            "regressions": 8,
+            "total_cases": 12
+          },
+          "python_scalar_burst": {
+            "median_of_case_median_ratios": 1.0067035350972193,
+            "min_ratio": 0.6510323054970674,
+            "max_ratio": 1.6304713457151085,
+            "regressions": 8,
+            "total_cases": 12
+          },
+          "torch_mps_burst": {
+            "median_of_case_median_ratios": 0.9921528732377831,
+            "min_ratio": 0.7844933825558019,
+            "max_ratio": 1.2675734062638004,
+            "regressions": 4,
+            "total_cases": 12
+          }
+        }
+      },
+      {
+        "shape": [
+          2,
+          8,
+          64
+        ],
+        "routes": {
+          "module_resident_d2h": {
+            "median_of_case_median_ratios": 0.9889843619955636,
+            "min_ratio": 0.9295816825141722,
+            "max_ratio": 1.006057557176899,
+            "regressions": 1,
+            "total_cases": 12
+          },
+          "module_resident_burst": {
+            "median_of_case_median_ratios": 0.9957104752530523,
+            "min_ratio": 0.9823243076066119,
+            "max_ratio": 1.0103234073158767,
+            "regressions": 2,
+            "total_cases": 12
+          },
+          "python_scalar_burst": {
+            "median_of_case_median_ratios": 1.0062571481381946,
+            "min_ratio": 0.9820129075152841,
+            "max_ratio": 1.0144435004878347,
+            "regressions": 8,
+            "total_cases": 12
+          },
+          "torch_mps_burst": {
+            "median_of_case_median_ratios": 0.9929252268637392,
+            "min_ratio": 0.9006868736312644,
+            "max_ratio": 1.008634444121973,
+            "regressions": 3,
+            "total_cases": 12
+          }
+        }
+      },
+      {
+        "shape": [
+          4,
+          8,
+          128
+        ],
+        "routes": {
+          "module_resident_d2h": {
+            "median_of_case_median_ratios": 0.986993512442699,
+            "min_ratio": 0.9689225407897134,
+            "max_ratio": 1.0577028073753056,
+            "regressions": 1,
+            "total_cases": 12
+          },
+          "module_resident_burst": {
+            "median_of_case_median_ratios": 0.9967770379557785,
+            "min_ratio": 0.9868562040224622,
+            "max_ratio": 1.0416019694778518,
+            "regressions": 4,
+            "total_cases": 12
+          },
+          "python_scalar_burst": {
+            "median_of_case_median_ratios": 0.998616723727946,
+            "min_ratio": 0.9905806037376117,
+            "max_ratio": 1.0061461846555584,
+            "regressions": 5,
+            "total_cases": 12
+          },
+          "torch_mps_burst": {
+            "median_of_case_median_ratios": 0.9782434677623655,
+            "min_ratio": 0.9062436290368525,
+            "max_ratio": 1.0199343222346553,
+            "regressions": 2,
+            "total_cases": 12
+          }
+        }
+      }
+    ],
+    "browser": [
+      {
+        "shape": [
+          2,
+          3,
+          7
+        ],
+        "routes": {
+          "module_d2h": {
+            "median_of_case_median_ratios": 1.0,
+            "min_ratio": 0.6666666625274552,
+            "max_ratio": 1.5000000093132257,
+            "regressions": 3,
+            "total_cases": 12
+          },
+          "module_burst": {
+            "median_of_case_median_ratios": 1.0,
+            "min_ratio": 0.8333333312637277,
+            "max_ratio": 1.2000000029802322,
+            "regressions": 4,
+            "total_cases": 12
+          },
+          "scalar_burst": {
+            "median_of_case_median_ratios": 0.9999999968955915,
+            "min_ratio": 0.8333333312637277,
+            "max_ratio": 1.2000000029802322,
+            "regressions": 4,
+            "total_cases": 12
+          }
+        }
+      },
+      {
+        "shape": [
+          2,
+          8,
+          64
+        ],
+        "routes": {
+          "module_d2h": {
+            "median_of_case_median_ratios": 0.9999999953433871,
+            "min_ratio": 0.8000000044703484,
+            "max_ratio": 1.2500000046566129,
+            "regressions": 2,
+            "total_cases": 12
+          },
+          "module_burst": {
+            "median_of_case_median_ratios": 1.0,
+            "min_ratio": 0.9230769246199427,
+            "max_ratio": 1.083333334626837,
+            "regressions": 4,
+            "total_cases": 12
+          },
+          "scalar_burst": {
+            "median_of_case_median_ratios": 1.0,
+            "min_ratio": 0.9999999968955914,
+            "max_ratio": 1.0000000031044085,
+            "regressions": 1,
+            "total_cases": 12
+          }
+        }
+      },
+      {
+        "shape": [
+          4,
+          8,
+          128
+        ],
+        "routes": {
+          "module_d2h": {
+            "median_of_case_median_ratios": 1.0000000020696058,
+            "min_ratio": 0.8888888875091517,
+            "max_ratio": 1.1250000017462298,
+            "regressions": 6,
+            "total_cases": 12
+          },
+          "module_burst": {
+            "median_of_case_median_ratios": 1.0,
+            "min_ratio": 0.971428571002824,
+            "max_ratio": 1.0294117640291427,
+            "regressions": 3,
+            "total_cases": 12
+          },
+          "scalar_burst": {
+            "median_of_case_median_ratios": 1.0,
+            "min_ratio": 0.971428571002824,
+            "max_ratio": 1.030303029618863,
+            "regressions": 3,
+            "total_cases": 12
+          }
+        }
+      }
+    ]
+  },
+  "short_protocol_boundary": "Four fixed paired matrices; isolated completed-read and eight-forward/final-read-only burst are separate endpoints, not the sustained interval protocol. No samples filtered or retries. Small native results are noisy; no universal speedup.",
+  "experimental_interval_reads": 811008,
+  "experimental_interval_values": 1395474432,
+  "baseline_and_one_slot_fixture_semantics_equal": true,
+  "frozen_products_checked": 54,
+  "products": [
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-release.dylib",
+      "sha256": "c6544678b00afcecfe44839a85c32317c7ef7aea9cf505ac3bd3f582c4debff9"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "3d3c1eb619496d1c7458db917d57ffeaea9c05b7a91d132ec886825b4fb6c937"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "6b9c57a978ce857751a82a90a2596c04dc621a04411e6d01760a601a6d2efb8b"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "3663ecb040ee6b8af9dd22b5377f6b430a3c850f63f1f1c1b3f0a889d1809c73"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "6803b4786e4436cf4e5cf6d6077160125ea7ee54b0ac40719d82a6d56faa858c"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward",
+      "sha256": "b0669f7e4e77860cb32f3e5413dcb46c6df36e9acc24332336040b31d0269600"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_training",
+      "sha256": "124c6602f3bf55ea2e5cfd5a1dc189609c6da04bb3effdc4214923b459539515"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "3cc89c6d0bea8943ef6ce3368f8fc200e222819525c34d48888b7e210bdea3f5"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "76984253b45c5dbe28a59402e8a751dc2de3d8a66ffa5ff3946ec9f21341b1c3"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "2264079518fb70d52d64cf0227abea64e00389ff188cecd78ca743bedc56ba16"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "68231735b5a022d765056231c0966cdd7c67db1c17ac5d080a417ffb950e6cca"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "bc4d287e29b1d736795bd988340b2b951107609c8767d98364fceeabef37d83e"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097"
+    },
+    {
+      "version": "baseline",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/python-cpu.dylib",
+      "sha256": "6197378462134c8580e8107b144fdf5a8c7c057c63c8d1eb3f13cb71d2325835"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-release.dylib",
+      "sha256": "6b81c5765a3b866cbb00b9abcb5ca8301e35a146de3195e0a4e84a7e34549697"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/spiraltorch_wasm.d.ts",
+      "sha256": "bf28bea3b2a9275eebdd699aedbf802726377ec8f914103cfcaec1fd7dec1f75"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/spiraltorch_wasm.js",
+      "sha256": "7399e352b272d43dbf5518ef67c1258df0d47b74c602a7149d5fc8ca6c536869"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "93a804c2af03053e4bff64dca4d3c338309be0932b1bce47c35e2001ffbaa33d"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "d4cdab9aec8d8d0fa75c5030914698d325277aaf097b9a0bf60ffd9a924f44cc"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/handoff-fixture.json",
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/resident_graph_forward",
+      "sha256": "747fbb2f9452540d9d5f81812bc768d4fdd3f8ef386d9937d1c283f491bc0179"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/resident_graph_training",
+      "sha256": "899adf6f4dd976a1a902c6c36a6a963c9900869c3e38e5605de9dbd2d8a9ea72"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/resident_graph_forward_bench",
+      "sha256": "c14edf516eba76e80c174aa5e16d80bd24b611f05115c96a06496dc80135c1e3"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/resident_nd_tensor",
+      "sha256": "b22e1baa273897c722cb81688903c131ce57c1f0c73e325938882b8013c1a40a"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/forward-fixture.json",
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness/spiraltorch_wasm.d.ts",
+      "sha256": "ef4763e3e328ff360a7b84604d940f53086b683c4ea857d1df00b51c12117879"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness/spiraltorch_wasm.js",
+      "sha256": "a4f87c3e923713d3f3ff0d37cfc83071e56e0508bcd2a56a0de5453761570e7a"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "1876ff1dc7f05ee31e75f3b09b16a9347f3ce003754c5b884f0da7481474f360"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm",
+      "sha256": "7c915396780424ccf309c6ba6b24b9ceb54f9b61ef326a685949654fac2f1fab"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd/spiraltorch_wasm.d.ts",
+      "sha256": "1be325218d3fbe059e341c24914b528fe38bba43531db029ede543eb5f9d3264"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd/spiraltorch_wasm.js",
+      "sha256": "aef892a7d480aa6c60d92ac3617181cebe9e56aa9556ec13da5226b740783429"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "0e57bf5f56670d79f197e0245b948736515308ba8d283ce96887583836b609d6"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm",
+      "sha256": "7751217d780609b1ca2cd4eba3296b6c118e91067bd92f5d96916de4fa872375"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/client/forward-bench-fixture.json",
+      "sha256": "4c4181c66408fb4ef6c58f7be9f2a5eee897a9a016cd8ee61b037bb713e74477"
+    },
+    {
+      "version": "one_slot",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/verified-a/python-cpu.dylib",
+      "sha256": "6197378462134c8580e8107b144fdf5a8c7c057c63c8d1eb3f13cb71d2325835"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/spiraltorch_wasm.d.ts",
+      "sha256": "657f090aa42ca473ff10378c42f5e2847fc70c1fcd204c97627e3c411c7d452c"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/spiraltorch_wasm.js",
+      "sha256": "d1d930498d270a0097b879a29ff97a9dbc2a6ff21532e27aee427ae990de60c2"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "a96231a8c7174bb0a1a0ce5f821cd79dd1814439582d49b219f3847ce8cb2030"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/spiraltorch_wasm_bg.wasm",
+      "sha256": "ee22384ab5b71c09859cacc684a432e6065f01f9243ea4f4bfd9cef18d8cb9f0"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/client/forward-bench-fixture.json",
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd/spiraltorch_wasm.d.ts",
+      "sha256": "1be325218d3fbe059e341c24914b528fe38bba43531db029ede543eb5f9d3264"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd/spiraltorch_wasm.js",
+      "sha256": "9beb5023d5c3c747979675ff77c577b0a3f8e9979262209f7fcd8c708f84b656"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "0e57bf5f56670d79f197e0245b948736515308ba8d283ce96887583836b609d6"
+    },
+    {
+      "version": "two_slots",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/two-slot/nd/spiraltorch_wasm_bg.wasm",
+      "sha256": "39d2a4b492a7a1e9d98fb7df5e840849de7d562255ce3656ff006a8da0b45a53"
+    },
+    {
+      "version": "selected",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/frozen-products/resident_nd_tensor",
+      "sha256": "6396b725aec63cb99c0b2a541f2a9b08c259f928db22a176fda4f8dbc287ff05"
+    },
+    {
+      "version": "selected",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd/spiraltorch_wasm.d.ts",
+      "sha256": "05018e96851988c91df92a82f42e1cd52d9920d1f5b4b25aaa97b842a2f874a8"
+    },
+    {
+      "version": "selected",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd/spiraltorch_wasm.js",
+      "sha256": "338350ff3abb0ec433dc24f48c55125a3f125afe117f710b47f5b36cc8f8f088"
+    },
+    {
+      "version": "selected",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd/spiraltorch_wasm_bg.wasm.d.ts",
+      "sha256": "b03aa22f3b62b0b1e60fd0d105650ef20018b2d9eb760130b102c1739b6add46"
+    },
+    {
+      "version": "selected",
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/tensor-readback-cache-20260912/selected/nd/spiraltorch_wasm_bg.wasm",
+      "sha256": "e8d7610e26cf3f1fb8078b5e3d95186d48273f5e668569ddcdfeb8dcd33ffc0a"
+    }
+  ],
+  "raw_records": 218,
+  "manifest_sha256": "23faceb807a6c6082ab0f50cc49c4897071c08003864160fe0370a5e30a7e2b4",
+  "boundary": "Native Apple M4/Metal, no MPS CPU fallback. Browser physical GPU and host exclusivity UNKNOWN. One-slot and two-slot are separate comparisons against the same original runtime, not a simultaneous three-way trial. No selected-source new timing, CUDA/Furnace, package release or push.",
+  "next_candidate": "Combine terminal forward and snapshot copy in one submission through an explicit API; not implemented or measured here. Cache regressions do not establish the causal bottleneck."
+}

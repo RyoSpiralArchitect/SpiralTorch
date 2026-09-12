@@ -1,0 +1,346 @@
+{
+  "schema": "spiraltorch.graph_training_forward_pass.evidence.v1",
+  "status": "bounded_training_optimization_validated",
+  "baseline": {
+    "commit": "367f194a2f50011bb5b6469ce30a954d8d26691f",
+    "tree": "93f617e4d77a4a384f88e48f723da3ee49427652"
+  },
+  "candidate": {
+    "commit": "6ef40783e5a4c368558bdc44fb0b45d8db8749a5",
+    "tree": "082891a04f54b9250b4e21b19afcdc2b94d9a6c7"
+  },
+  "harness_source": "9e687b56bfbc6b1c00de3a482e4f9f60ff09b960",
+  "matrices": {
+    "standard": {
+      "native_immediate": {
+        "baseline_over_candidate_geomean": 1.1710947675779524,
+        "range": [
+          0.7715594554536304,
+          1.6329808573800302
+        ],
+        "faster_cases": 16,
+        "paired_case_medians": 18,
+        "torch_over_candidate_geomean": 0.832729551111231,
+        "torch_over_candidate_range": [
+          0.5209805278996846,
+          1.2561313848565052
+        ]
+      },
+      "native_deferred": {
+        "baseline_over_candidate_geomean": 1.2098582852001933,
+        "range": [
+          0.929687419747465,
+          1.3148376543395703
+        ],
+        "faster_cases": 17,
+        "paired_case_medians": 18,
+        "torch_over_candidate_geomean": 0.8522048831502056,
+        "torch_over_candidate_range": [
+          0.6985565375866217,
+          1.0773782949247708
+        ]
+      },
+      "browser_immediate": {
+        "baseline_over_candidate_geomean": 1.0110676426841068,
+        "range": [
+          0.9545454555460491,
+          1.0348837205776495
+        ],
+        "faster_cases": 15,
+        "paired_case_medians": 18
+      },
+      "browser_deferred": {
+        "baseline_over_candidate_geomean": 0.977396072060427,
+        "range": [
+          0.6521739124801074,
+          1.6136363617891123
+        ],
+        "faster_cases": 8,
+        "paired_case_medians": 18
+      },
+      "per_shape_median_ms_per_step": [
+        {
+          "shape": [
+            2,
+            16,
+            32
+          ],
+          "depth": 2,
+          "measurements": {
+            "native_immediate": {
+              "baseline": 0.8260325312500072,
+              "candidate": 0.7123476562500457,
+              "torch": 0.8539062189356628
+            },
+            "native_deferred": {
+              "baseline": 0.7527343750000135,
+              "candidate": 0.6667942500000663,
+              "torch": 0.5188034060665814
+            },
+            "browser_immediate": {
+              "baseline": 0.5531249998603016,
+              "candidate": 0.5499999998137355
+            },
+            "browser_deferred": {
+              "baseline": 0.2781250001862645,
+              "candidate": 0.3125
+            }
+          }
+        },
+        {
+          "shape": [
+            2,
+            129,
+            32
+          ],
+          "depth": 4,
+          "measurements": {
+            "native_immediate": {
+              "baseline": 1.805558562500039,
+              "candidate": 1.4772226250000244,
+              "torch": 1.2092890308395
+            },
+            "native_deferred": {
+              "baseline": 1.3150299687500535,
+              "candidate": 1.019917968749965,
+              "torch": 0.8181055004570226
+            },
+            "browser_immediate": {
+              "baseline": 1.3593749997671694,
+              "candidate": 1.3281250002328306
+            },
+            "browser_deferred": {
+              "baseline": 0.8249999994877726,
+              "candidate": 0.8187500000931323
+            }
+          }
+        },
+        {
+          "shape": [
+            4,
+            32,
+            64
+          ],
+          "depth": 8,
+          "measurements": {
+            "native_immediate": {
+              "baseline": 3.4471340937499946,
+              "candidate": 2.9369922187500492,
+              "torch": 1.8863333439185226
+            },
+            "native_deferred": {
+              "baseline": 1.9343841249999514,
+              "candidate": 1.5650194999998348,
+              "torch": 1.4817578125985165
+            },
+            "browser_immediate": {
+              "baseline": 2.0562499999068677,
+              "candidate": 2.037500000325963
+            },
+            "browser_deferred": {
+              "baseline": 1.2312499999534339,
+              "candidate": 1.2250000000931323
+            }
+          }
+        }
+      ],
+      "loss_decreased_cases": 18
+    },
+    "wide": {
+      "native_immediate": {
+        "baseline_over_candidate_geomean": 1.09298171829581,
+        "range": [
+          0.9666638908730969,
+          1.3815250727183617
+        ],
+        "faster_cases": 16,
+        "paired_case_medians": 18,
+        "torch_over_candidate_geomean": 0.4658238827804774,
+        "torch_over_candidate_range": [
+          0.31950455000801575,
+          0.7070803844443987
+        ]
+      },
+      "native_deferred": {
+        "baseline_over_candidate_geomean": 1.1042545398908914,
+        "range": [
+          0.9975364865658862,
+          1.1723741460413444
+        ],
+        "faster_cases": 17,
+        "paired_case_medians": 18,
+        "torch_over_candidate_geomean": 0.48731519556262703,
+        "torch_over_candidate_range": [
+          0.3784792209675601,
+          0.7316750317940053
+        ]
+      },
+      "browser_immediate": {
+        "baseline_over_candidate_geomean": 1.0055055441692813,
+        "range": [
+          0.9620253164267036,
+          1.1821631877323842
+        ],
+        "faster_cases": 10,
+        "paired_case_medians": 18
+      },
+      "browser_deferred": {
+        "baseline_over_candidate_geomean": 0.9991810519661549,
+        "range": [
+          0.8414414414738537,
+          1.128099173445581
+        ],
+        "faster_cases": 10,
+        "paired_case_medians": 18
+      },
+      "per_shape_median_ms_per_step": [
+        {
+          "shape": [
+            2,
+            64,
+            256
+          ],
+          "depth": 4,
+          "measurements": {
+            "native_immediate": {
+              "baseline": 4.557193999999981,
+              "candidate": 4.432511718749936,
+              "torch": 1.9078880311553803
+            },
+            "native_deferred": {
+              "baseline": 3.66715362500031,
+              "candidate": 3.507697906250769,
+              "torch": 1.3754101562426513
+            },
+            "browser_immediate": {
+              "baseline": 3.3374999999068677,
+              "candidate": 3.2968750002328306
+            },
+            "browser_deferred": {
+              "baseline": 3.2687499998137355,
+              "candidate": 3.2781250001862645
+            }
+          }
+        },
+        {
+          "shape": [
+            2,
+            128,
+            128
+          ],
+          "depth": 8,
+          "measurements": {
+            "native_immediate": {
+              "baseline": 5.614152312500096,
+              "candidate": 5.252303406250007,
+              "torch": 2.0845455310336547
+            },
+            "native_deferred": {
+              "baseline": 4.453074218749919,
+              "candidate": 3.874677125000062,
+              "torch": 1.5915181875243434
+            },
+            "browser_immediate": {
+              "baseline": 4.25,
+              "candidate": 4.243750000139698
+            },
+            "browser_deferred": {
+              "baseline": 3.2875000005587935,
+              "candidate": 3.287500000325963
+            }
+          }
+        },
+        {
+          "shape": [
+            4,
+            64,
+            64
+          ],
+          "depth": 8,
+          "measurements": {
+            "native_immediate": {
+              "baseline": 3.832795593750074,
+              "candidate": 3.299291687500178,
+              "torch": 1.9364401252914831
+            },
+            "native_deferred": {
+              "baseline": 2.394606781250147,
+              "candidate": 2.1215117187499573,
+              "torch": 1.533631531174251
+            },
+            "browser_immediate": {
+              "baseline": 2.65625,
+              "candidate": 2.6468750000931323
+            },
+            "browser_deferred": {
+              "baseline": 1.9249999998137355,
+              "candidate": 1.9125000005587935
+            }
+          }
+        }
+      ],
+      "loss_decreased_cases": 18
+    }
+  },
+  "change": "Batch mixed graph forward on Metal/BrowserWebGpu; unchanged loss, VJP, unbroadcast, validation copy, prepare/vote/commit and specialized dense training.",
+  "source_files_at_candidate": {
+    "bindings/st-wasm/tests/resident_training_bench.html": "0a19de337708e3219aeefda9b76e7ce99fa7807ac313c49ab378da639a37e292",
+    "crates/st-backend-wgpu/src/resident_training/graph.rs": "3551632f3414cba2c42c9bf827cf51dc3d75c11c7fdac63f2d85af6a0c224cf8",
+    "crates/st-nn/examples/support/resident_graph_training.rs": "f18386d297d5c8c334d2d832aa778e0db851ccd2223c952a967018ac1243d43b",
+    "docs/resident_graph_training.md": "d8237f8e00d9df327daa69da7b7218b609a874e0b1f5614afd744146e613c1a9",
+    "tests/test_resident_training_bench.py": "8a5afd032a5f71b549c2acdd98ac2767038d2efbb56f983b7fe461e25b28f96d",
+    "tools/bench_resident_training_browser.cjs": "5473309f6aef73f375634966d9d25a0c0938517e15401eeafeaf320fcd157f90",
+    "tools/bench_resident_training_vs_torch.py": "bbc99c5ba7961ef73ab6571af25b83420086085ffbc1f52ef3ab5ad34d50edc8",
+    "tools/validate_resident_training_bench.py": "b7d3f8d47d9525e79cdc773e4fdb87390f2722ca052518f6168c0a385c70cca8"
+  },
+  "max_abs_benchmark_error": 1.4901161193847656e-08,
+  "native_device": {
+    "device": "mps",
+    "name": "Apple M4",
+    "contention": "unknown: macOS does not expose CUDA-style GPU process accounting; diagnostic only"
+  },
+  "browser_physical_gpu": "UNKNOWN",
+  "gpu_contention": "UNKNOWN",
+  "torch": {
+    "version": "2.12.1",
+    "device": "mps"
+  },
+  "browser_version": "152.0.7977.83",
+  "counts": {
+    "reports": 8,
+    "raw_intervals": 3600,
+    "retained_intervals": 2880,
+    "real_sgd_updates_in_all_timed_intervals": 28800
+  },
+  "validation": {
+    "backend_serial_tests": 112,
+    "nn_serial_tests": 733,
+    "python_gpu_tests": 30,
+    "python_gpu_skips": 0,
+    "native_and_browser_masked_fault_cases": 64,
+    "torch_replays": 24,
+    "torch_comparisons": 5184,
+    "max_abs_torch_replay_error": 1.1920928955078125e-07,
+    "admission_tests": 10,
+    "backend_strict_clippy": [
+      "native",
+      "wasm32"
+    ],
+    "cpu_feature_check": "passed"
+  },
+  "failures_preserved": [
+    "Test fixture E0502 borrow error before runtime, fixed; summarized in development-notes.md.",
+    "Browser admission page expected four guards instead of the new 36; original failed receipt/report retained; no timing had started.",
+    "Prior one-off default-parallel GPU VJP failure remains UNKNOWN, not fixed or proven pre-existing.",
+    "Prior broad NN strict Clippy failure on 22 unchanged library lints was not re-run or fixed in this slice."
+  ],
+  "boundaries": [
+    "Fixed diagnostic mixed MLPs, not an application learning-quality comparison or automatic ModuleTrainer route.",
+    "Each interval resets to the same frozen weights; eight SGD updates, not one continuous long run.",
+    "Two warmup and eight retained rotated blocks per cadence, three seeds, two full rounds; samples are correlated.",
+    "Immediate reads each loss; deferred reads all owning loss snapshots after enqueue; uploads, setup and final VJP probes excluded.",
+    "Torch eager MPS has no equivalent per-stage finite checks or graph-atomic rollback; no fastest-Torch claim or Torch CPU timing.",
+    "Native and browser wall times are not a direct cross-client performance comparison.",
+    "No CUDA measurement, unmeasured backends changed, push, merge or release."
+  ]
+}

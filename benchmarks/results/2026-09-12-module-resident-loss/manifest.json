@@ -1,0 +1,1902 @@
+{
+  "schema": "spiraltorch.source_archive.v1",
+  "status": "passed",
+  "records": [
+    {
+      "archive": "raw/inputs/baseline-native-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/native-forward-bench.json"
+      },
+      "bytes": 12542107,
+      "sha256": "7fb4cf668a2ad954279480a232c279ca7e7faa647f8ea45191e76caadde47097",
+      "compressed_bytes": 80064,
+      "compressed_sha256": "ecf613aa2a43bf5b747e53182cecaddf1be633d3a8f26ec86b90e6e10cc2ae37"
+    },
+    {
+      "archive": "raw/inputs/baseline-receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-inline-guard-20260912/verified-a/receipt.json"
+      },
+      "bytes": 31038,
+      "sha256": "1829fa786cace01ff062f35c9b4dc2fdfe23f40a323b5b24876e663ba09be2ec",
+      "compressed_bytes": 3824,
+      "compressed_sha256": "2573b29728f17fcb766051d48b82fd02a5fc972f55b3d0963abd8d3d7efe37fa"
+    },
+    {
+      "archive": "raw/inputs/cpu_probe.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-parameter-handoff-20260912/cpu_probe.py"
+      },
+      "bytes": 517,
+      "sha256": "37e621ed8a3d99ea703153fcd5f495b4fa06581567dc252975c166f1ccb56ce4",
+      "compressed_bytes": 416,
+      "compressed_sha256": "bf18537730bd0b44a66a8dc48de1764ef52d73feddd2272e6b1ea13d8c2f62cd"
+    },
+    {
+      "archive": "raw/inputs/python-client.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py"
+      },
+      "bytes": 1902,
+      "sha256": "b1997314bfd3cc08014549d99eae1836e01a9e50e7aa337509c3dba4e386b4c6",
+      "compressed_bytes": 928,
+      "compressed_sha256": "469057ee6c57b0e0f21abdc210b9b9061340d4cc79a75f092fa40877a2c84024"
+    },
+    {
+      "archive": "raw/runs/archive.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/archive.py"
+      },
+      "bytes": 9079,
+      "sha256": "9b11e54dd9f8840c3a0b52644a2d21f41047c11a553df3df53d5afe7208bf038",
+      "compressed_bytes": 3484,
+      "compressed_sha256": "3490ddbbfc60ca410681e37f925059674fa51001734757784ad289e1088eebfc"
+    },
+    {
+      "archive": "raw/runs/format-final.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/format-final.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/format-freeze.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/format-freeze.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/format.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/format.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/initial-backend.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/initial-backend.log"
+      },
+      "bytes": 114672,
+      "sha256": "218c53a312323f09d4bc446e2d4a832a2f70d0ae0336b0bb2612b242a52b15f4",
+      "compressed_bytes": 3860,
+      "compressed_sha256": "d65cee2f681df394c88ab8de8b0414c229242e840ec8868eb8b513c468c92ef3"
+    },
+    {
+      "archive": "raw/runs/initial-nn.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/initial-nn.log"
+      },
+      "bytes": 115368,
+      "sha256": "bde55f0cb86968cdb9e3b229fdff6074152e033e020dd52b58ca771b8d9d91b8",
+      "compressed_bytes": 3876,
+      "compressed_sha256": "847a0795dc5c14acf0c2d4ac159fce36ccb9797538a5bceb12a896974cec4e3e"
+    },
+    {
+      "archive": "raw/runs/run.py.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/run.py"
+      },
+      "bytes": 13833,
+      "sha256": "6c8b8a3eaddd50d7de3dd46f6bd4d337229bc79a6d031dbebeef21bd9eb92ca6",
+      "compressed_bytes": 4164,
+      "compressed_sha256": "f3b0cc5772d7d7ba94b30c9bf7c8b750fd98570c1b3567f9d5102bd62366eb98"
+    },
+    {
+      "archive": "raw/runs/verified-a.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a.log"
+      },
+      "bytes": 2742,
+      "sha256": "e9e84212ca30beae3992e0dcb65031ee738547e9486c924c981f3c106d222dad",
+      "compressed_bytes": 656,
+      "compressed_sha256": "5bffa91359712661276e97d98fc1734c9288d3b5cb358eccf3e7d51522dddef9"
+    },
+    {
+      "archive": "raw/runs/verified-a/admission-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/admission-tests.log"
+      },
+      "bytes": 358,
+      "sha256": "59e3da9c1d64c292b6916de04994d7cf72306b48f16a013dc0edfb53caa68347",
+      "compressed_bytes": 204,
+      "compressed_sha256": "5a70a893af0643ffe37c9f9dc01a6d07d72b85684f23eed64c9d8b378d6102d1"
+    },
+    {
+      "archive": "raw/runs/verified-a/backend-serial.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/backend-serial.log"
+      },
+      "bytes": 126769,
+      "sha256": "a6df4898de12b9540badaa1cb812108338ee73e8c019ad9b2c448af2fbcc69c0",
+      "compressed_bytes": 6748,
+      "compressed_sha256": "682cea5e7fd4cb44814c60fb9c28daa7d1752b563e70c3661bf9704cf99307bb"
+    },
+    {
+      "archive": "raw/runs/verified-a/baseline-module-bench.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/baseline-module-bench.json"
+      },
+      "bytes": 2549925,
+      "sha256": "027dabeaedef7b3f2e8ded77d780c4ef523c48e77f523ea91cc3bdb2a1883091",
+      "compressed_bytes": 98792,
+      "compressed_sha256": "17cdc68673e748725a64cb2c8e7785305341b992933af76488aded84eb6122b0"
+    },
+    {
+      "archive": "raw/runs/verified-a/baseline-module-bench.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/baseline-module-bench.log"
+      },
+      "bytes": 17932,
+      "sha256": "ae8b62a927bcef4ff916278d7f3a7489e77b4ca4d7ba3c66c6ecc996441726b8",
+      "compressed_bytes": 2904,
+      "compressed_sha256": "4476676cc71630287ed3ec20f4c42b4c2298bb5c0bdf0624955c55155e2d4104"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-correctness.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-correctness.json"
+      },
+      "bytes": 15942140,
+      "sha256": "3813470502cebbe0c3487856123bcd424ccd31204e198b881a1953d2220b5c8b",
+      "compressed_bytes": 707104,
+      "compressed_sha256": "f2defd36424c8a0131fae0daed9b2c900d8046957ed4ec86f3e00691e8931324"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-correctness.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-correctness.log"
+      },
+      "bytes": 158,
+      "sha256": "08158c13067ed509294f165df819498ceaa176341e7f7a2cdb8606363c336e9d",
+      "compressed_bytes": 204,
+      "compressed_sha256": "969a253ffc6573aef88ea645dbcc9258bbda246a3e7b7ee0b9d64dc46350336d"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-handoff.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-handoff.json"
+      },
+      "bytes": 9864,
+      "sha256": "3caf0cd1b714749acd564b151e50fd3ab34c88e95c7de8b83e15b8ba7efc0827",
+      "compressed_bytes": 1692,
+      "compressed_sha256": "8b2af816959f246d13612752fb465155239e3c5bc80cbdb9dddc40a73c66503a"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-handoff.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-handoff.log"
+      },
+      "bytes": 154,
+      "sha256": "aff889965521a45aa8f02569ad9f8b62ab72c95d0166e059c61da8869258c75b",
+      "compressed_bytes": 204,
+      "compressed_sha256": "1bda2f7061104a06c6c53f262c16c2b99c2beabb39df4177652a4a37f8d0fb42"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-forward.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-module-forward.json"
+      },
+      "bytes": 62131,
+      "sha256": "432f0d16f24fadd7cab2b7e7c9adabdbfdf218eb338346199c550fc14774be65",
+      "compressed_bytes": 6912,
+      "compressed_sha256": "0bc1a75340e99ddf04a5e4a347a16b01a009c6f8d674afab8ba54444612fc806"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-module-forward.log"
+      },
+      "bytes": 161,
+      "sha256": "55cc192cb53759457742fad1d03d9fd82420176df884000e780aef73ff3c82bc",
+      "compressed_bytes": 204,
+      "compressed_sha256": "f0af6aa3c29da2df8a9f3bef1ae3e214484df495d83b418345e1a3ecdf312714"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-matched.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-module-matched.json"
+      },
+      "bytes": 2421878,
+      "sha256": "34f04c416b4a1865216dcd9ff4f649570dc2cce3e967adc846e59f5e8d73c071",
+      "compressed_bytes": 42240,
+      "compressed_sha256": "7fa58134d269fa6a6e7cd51bd88c27a0c0aa050060c802e054b840bec698f36f"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-module-matched.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-module-matched.log"
+      },
+      "bytes": 161,
+      "sha256": "e28db3bc680247654e82b15a88ec6f18546fb1fe2b02423e909c41ccfead0b35",
+      "compressed_bytes": 204,
+      "compressed_sha256": "3514a6c1acb317a106ca32b43aa70133a5ab2187a0f5906c49767a27687ede9d"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-nd.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-nd.json"
+      },
+      "bytes": 6219927,
+      "sha256": "742ee13389f18e4c51f4aa71cc378eafe5aa83f52e9d826fc62b3f2ceb1ddd4d",
+      "compressed_bytes": 26392,
+      "compressed_sha256": "cc5534771c2d3640f68e019d93c77c1d42ca724c0136396ca3295f2fd3ece684"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-nd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-nd.log"
+      },
+      "bytes": 149,
+      "sha256": "07db78fd7e05382524855cd24b4cea57f8ac10475da5c60d13c2464a87edd304",
+      "compressed_bytes": 200,
+      "compressed_sha256": "07084a55d9edd5b4f7eabc9ac34f9a4eaa2c96ba88d57920c85960e36890ad81"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-resident-loss.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-resident-loss.json"
+      },
+      "bytes": 1511,
+      "sha256": "dbaa668c7a7fe67c5db7d03cb82c77bbc262e258a22ee11755e59ef1439c1783",
+      "compressed_bytes": 780,
+      "compressed_sha256": "93176ed9779862c929252ceb5b50ac302cb0cd4166263947ed49b48c8a23c11a"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-resident-loss.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-resident-loss.log"
+      },
+      "bytes": 160,
+      "sha256": "efcbb7fea7f64a0448c9c1e0df46307da3936b46d10db56bdb8a9bf1deac9f70",
+      "compressed_bytes": 200,
+      "compressed_sha256": "7e7300afaec006c33ae88ef5b472ec8598126d13122ef9ae0b3c900df4f14cdf"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-cpu-python.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-to-cpu-python.json"
+      },
+      "bytes": 900,
+      "sha256": "011ffbf16224fc2b1d22b46678dd093f4c21388a42ba951181d5d9351d375f2b",
+      "compressed_bytes": 372,
+      "compressed_sha256": "6ab8430826c22764e1f8ca88234fc08e9ef45ec8895f1b1eaf00e5715152196f"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-cpu-python.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-to-cpu-python.log"
+      },
+      "bytes": 153,
+      "sha256": "5bc81c931a1e2ed475f5a970bc7d2a93432b1ba5b137b26ca1873c90a7d6c8fd",
+      "compressed_bytes": 200,
+      "compressed_sha256": "5b5f25366963a90d4053c6e02c808c8baf041ff9302bcf5d8e775c7a0f5a6732"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-python.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-to-python.json"
+      },
+      "bytes": 900,
+      "sha256": "011ffbf16224fc2b1d22b46678dd093f4c21388a42ba951181d5d9351d375f2b",
+      "compressed_bytes": 372,
+      "compressed_sha256": "6ab8430826c22764e1f8ca88234fc08e9ef45ec8895f1b1eaf00e5715152196f"
+    },
+    {
+      "archive": "raw/runs/verified-a/browser-to-python.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/browser-to-python.log"
+      },
+      "bytes": 149,
+      "sha256": "94c7437e7b2badbb1e89c09c433d291389592f34bfda83907309c37421743d24",
+      "compressed_bytes": 196,
+      "compressed_sha256": "2d6fb22e12b262ddebf47e12d30eaebb166332f72bce94f0a8d51759656a8592"
+    },
+    {
+      "archive": "raw/runs/verified-a/client-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/client-types.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client-types.log"
+      },
+      "bytes": 316,
+      "sha256": "50c95105c4e2d5453d343330a499af8fdf3081fbdc095056c7344b9a6a972324",
+      "compressed_bytes": 160,
+      "compressed_sha256": "231d46c3980f39c5bfe75b7cf1de3184c9fbfecfcad9509236ccf16a2263a362"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/forward-bench-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/forward-bench-fixture.json"
+      },
+      "bytes": 12542147,
+      "sha256": "381f2c921df99f1c5e953863d0785bf84e88e3e8e84abbf0ed4a73125bd743a2",
+      "compressed_bytes": 80220,
+      "compressed_sha256": "538bb1cddf7da1d808a06c6588f864a1a3b79276fad4403341dd3767a58623c0"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/forward-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/forward-fixture.json"
+      },
+      "bytes": 699371,
+      "sha256": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0",
+      "compressed_bytes": 6808,
+      "compressed_sha256": "dc51b1391f66b23febf4be5110779debcfe07b2cf0d42a4a20cd61bd8a41a047"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/handoff-fixture.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/handoff-fixture.json"
+      },
+      "bytes": 1219,
+      "sha256": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1",
+      "compressed_bytes": 452,
+      "compressed_sha256": "cd58cd6689a76a24adfb9ed442fc68ffcbf2cecfe0c7420f80c8aba372768c7a"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js"
+      },
+      "bytes": 4526,
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "compressed_bytes": 1084,
+      "compressed_sha256": "368ef83d5315e8ba31ed274687c72446c8f760dad9122a83587c21fdee6a2a18"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 129618,
+      "sha256": "33237f0b9e91512ec05071ec9f612b26487295325da0cec94757cf2169d4c7fd",
+      "compressed_bytes": 15260,
+      "compressed_sha256": "7bcf3e476a73b0170d2bd841208da000a8ab557591c7078b52cb406fdec0e561"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/spiraltorch_wasm.js"
+      },
+      "bytes": 377904,
+      "sha256": "c667e8337fa798af07e2cfbf5fc7f0b1adea6e105ca47a974e8491ac640e485a",
+      "compressed_bytes": 30932,
+      "compressed_sha256": "b657416171f1f5f14a3de4bcd50087de6a6fe62da4a6721acdbc9c8189db10e3"
+    },
+    {
+      "archive": "raw/runs/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/client/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 72928,
+      "sha256": "e67d6138825b63e45bb0194cc0e5df35c4c648169a6ebccf1118958fdce764d6",
+      "compressed_bytes": 6356,
+      "compressed_sha256": "5362b2486a1428dc8d509b48a69dc0b7a6962952dda7afb1d27e914b9d56b19a"
+    },
+    {
+      "archive": "raw/runs/verified-a/contracts.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/contracts.log"
+      },
+      "bytes": 2241,
+      "sha256": "da43c5ad3874fa7cdb8a0bfccb77d722dac2182b4d15a326a7ebc6499deb3601",
+      "compressed_bytes": 980,
+      "compressed_sha256": "44d52fd999d9aa60acd62a2619cae2994c233c74e96a9c97a2eb7fa7528ee723"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 2984,
+      "sha256": "5fe8790ceb35011b1a862563a02fe593ef8a159d23bf5bd62cf9e7108f488994",
+      "compressed_bytes": 868,
+      "compressed_sha256": "8cbdcfdfa6d64d79d7e0ae7b35f1b7e8c1a2b5dcd05ec8a09bcc4c809e933266"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness/spiraltorch_wasm.js"
+      },
+      "bytes": 44227,
+      "sha256": "b4caf89c51515b45c37cb4034d38aa8a8f0d68e191bfb65cb0e053f0059ec843",
+      "compressed_bytes": 8076,
+      "compressed_sha256": "8b88235fbef3fc75d32419dd4c43fadd44187e50b287b009641eadf3b85413f1"
+    },
+    {
+      "archive": "raw/runs/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/correctness/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 1996,
+      "sha256": "2c248820116ebf0d4deff063db34d84b81c695cafa9b1cb1c4cdc1a72d2683ba",
+      "compressed_bytes": 472,
+      "compressed_sha256": "9340dc1a0992971da9c5c4a549bcbbc62d06baaa1f45fd081620849a9add89df"
+    },
+    {
+      "archive": "raw/runs/verified-a/descriptor-cpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/descriptor-cpu.log"
+      },
+      "bytes": 1529,
+      "sha256": "080e4983a729aff077643ec81c4bd4166c24cfa1058837024b97a3352f7867d0",
+      "compressed_bytes": 680,
+      "compressed_sha256": "5c0e4aefc3906232a83bccca4c5057704091bbac188390d3eb357deea566970b"
+    },
+    {
+      "archive": "raw/runs/verified-a/descriptor-wgpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/descriptor-wgpu.log"
+      },
+      "bytes": 115467,
+      "sha256": "a4c9a1a21bb13024bff5080aa54c219bc552bcb4a7a188656bbf82d9c35b041f",
+      "compressed_bytes": 4028,
+      "compressed_sha256": "651ce01fd2015264c3b65b3fda0d41133d12fef1855908b73a8883eafd95b4d6"
+    },
+    {
+      "archive": "raw/runs/verified-a/direct-io-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/direct-io-validation.json"
+      },
+      "bytes": 77893,
+      "sha256": "126b5c1a93f3e93292d30514721a14f40ced8a2def65bcb1343ad2dc493ebdb4",
+      "compressed_bytes": 7920,
+      "compressed_sha256": "f915a386ab4646834d11f02ad8176232a896183c2fb58c3f8514f8f580d87524"
+    },
+    {
+      "archive": "raw/runs/verified-a/direct-io-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/direct-io-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/format.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/format.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/forward-fixture.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/forward-fixture.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/handoff-fixture.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/handoff-fixture.log"
+      },
+      "bytes": 154,
+      "sha256": "abaed2d9eb8f3a4c55691f9aff0be752a1129a3abc0d456de96d30c4629068b8",
+      "compressed_bytes": 200,
+      "compressed_sha256": "8a63f91f3e20295802b4bd0bb2b8da88be18edea25215038bccdcb4a85ebd383"
+    },
+    {
+      "archive": "raw/runs/verified-a/integration.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/integration.log"
+      },
+      "bytes": 115816,
+      "sha256": "faaedca455873899df09f120f1384e29c6ff90095cdd6ac68912839324104560",
+      "compressed_bytes": 4036,
+      "compressed_sha256": "bd640d0e904aa0bfba577f512fef8f5f265cb36184454fb6744c25c6df8fd3f3"
+    },
+    {
+      "archive": "raw/runs/verified-a/interval-admission-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/interval-admission-tests.log"
+      },
+      "bytes": 1507,
+      "sha256": "ca2e006a47d7e1a853a9aac323dee493cf13e66a374d3a4c026e9800849ef5e0",
+      "compressed_bytes": 520,
+      "compressed_sha256": "71dad26e8787b368b0710cca0e74224084e8e031fe8bf9d036c64ea03aaa7304"
+    },
+    {
+      "archive": "raw/runs/verified-a/interval-cadence-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/interval-cadence-tests.log"
+      },
+      "bytes": 583,
+      "sha256": "bb1e80eb0ac55d57b6a77872605ac5e3c33dbf6dc8dd2f49ad66b03d2eaf19a6",
+      "compressed_bytes": 432,
+      "compressed_sha256": "053c59a45fd2e7f3c175951b9216b329fd385c43355dda0323e6e9f6f74a5f46"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-bench.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/module-forward-bench.json"
+      },
+      "bytes": 2549890,
+      "sha256": "ed0cb702b94a603cc198a86429397efe97696e85c75485469d2dbf93143851d4",
+      "compressed_bytes": 98788,
+      "compressed_sha256": "d9dd8bf7ecdf24641c9bc8072823ad45f052ca85a5ea7b92463c0ef9414e8e14"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-bench.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/module-forward-bench.log"
+      },
+      "bytes": 17933,
+      "sha256": "dda10edc8a8c3581c0172af5f12330edd4f154494b26d877c700bb5ac9efc6d1",
+      "compressed_bytes": 2908,
+      "compressed_sha256": "99b750fa47ae2c4be2646f37784d7166d5f951e463652d99989d0b99333732f4"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-validation.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/module-forward-validation.json"
+      },
+      "bytes": 27960,
+      "sha256": "748f716bd53d68641d4eebaf2ac58bcc08157ee04396b64f7f37a88826b7ee2f",
+      "compressed_bytes": 3820,
+      "compressed_sha256": "50173dd6fbb7ac7183cfc96f600195aaffa3f661777ce954ddbb0322b0520132"
+    },
+    {
+      "archive": "raw/runs/verified-a/module-forward-validation.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/module-forward-validation.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/native-build.log"
+      },
+      "bytes": 114679,
+      "sha256": "47c7b31f9f0bdf72f788936d69a7db68ebd0486149494466b9ee386dd41c9016",
+      "compressed_bytes": 3668,
+      "compressed_sha256": "7d59ff43a6b404a5aca7ed75627da9dfe6bbe9bc7b22d69ddabe4f5263eabcfa"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-correctness.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/native-correctness.json"
+      },
+      "bytes": 15837123,
+      "sha256": "6dcf6cd1a9c2f3324b328bb63328961d581ef43fe1e9686957be2638d847bffe",
+      "compressed_bytes": 708288,
+      "compressed_sha256": "24fa8b3077535edeb2c770c2aec7c76d3dff5d02ee149c80665ba3753804df49"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-correctness.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/native-correctness.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-forward-bench.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/native-forward-bench.json"
+      },
+      "bytes": 12542147,
+      "sha256": "381f2c921df99f1c5e953863d0785bf84e88e3e8e84abbf0ed4a73125bd743a2",
+      "compressed_bytes": 80220,
+      "compressed_sha256": "538bb1cddf7da1d808a06c6588f864a1a3b79276fad4403341dd3767a58623c0"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-forward-bench.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/native-forward-bench.log"
+      },
+      "bytes": 580,
+      "sha256": "b9d8fa6f625add09eafc78e488866a3ea9d5b759bef3f09fd51c5d4e2bc6bfa4",
+      "compressed_bytes": 248,
+      "compressed_sha256": "2933522de769f064e9c0836f8d45ad44a2a3469a5924084d19ae07cdfde080a3"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-nd.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/native-nd.json"
+      },
+      "bytes": 2738383,
+      "sha256": "0a99fbc0ae15e00562c70cec50a113630f69c8adc831c1f062be30ba1b28b03e",
+      "compressed_bytes": 24328,
+      "compressed_sha256": "6d2dc0aaefd063ba1e555638effe03e905b2b16233b2b8016b530c15725f5c12"
+    },
+    {
+      "archive": "raw/runs/verified-a/native-nd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/native-nd.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd-bindgen.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd-bindgen.log"
+      },
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_bytes": 32,
+      "compressed_sha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd/spiraltorch_wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd/spiraltorch_wasm.d.ts"
+      },
+      "bytes": 2974,
+      "sha256": "156fc74f2e29fc498034d7fc1be171a3b4548628264c38c3c6256e85479ddd85",
+      "compressed_bytes": 864,
+      "compressed_sha256": "ca7c6f848d8aea11c9ea87bf32759fa8f0a515b7442f18e3869aeb9580d1345b"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd/spiraltorch_wasm.js.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd/spiraltorch_wasm.js"
+      },
+      "bytes": 44217,
+      "sha256": "3fe52f005ce57408f145812e2e67400780e455f792fcdb99f03513b0d31c60aa",
+      "compressed_bytes": 8072,
+      "compressed_sha256": "236ae2c446aabbdbdf431a8f6d6c49a89b74c282a9349d4de2094bf82c948b9e"
+    },
+    {
+      "archive": "raw/runs/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nd/spiraltorch_wasm_bg.wasm.d.ts"
+      },
+      "bytes": 1991,
+      "sha256": "c508a792fa4af736fa86ec3c08562a8fd6ed93589b77d0d4987ee0df207f979c",
+      "compressed_bytes": 468,
+      "compressed_sha256": "04add7f54f8b137b37da2ac9213228f1d49ab63531e9443c9ac45fc975e8288f"
+    },
+    {
+      "archive": "raw/runs/verified-a/nn-cpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nn-cpu.log"
+      },
+      "bytes": 61537,
+      "sha256": "44cacf4bac8f42862a048fa7cccefa6cc7f8ede3eabc749d473ce6669ef6bd33",
+      "compressed_bytes": 10396,
+      "compressed_sha256": "1c84264eac032357166854b5e33630ddf5e4b085126580cb4f13080fc3deb48c"
+    },
+    {
+      "archive": "raw/runs/verified-a/nn-serial.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/nn-serial.log"
+      },
+      "bytes": 181101,
+      "sha256": "37eaefa29b7a7b10445b71a4b07b800f4b24158b5a7f6212dc4d33a5d6689509",
+      "compressed_bytes": 14460,
+      "compressed_sha256": "e09da8d985257ac7b8db9342f90162396046c7ce52a920a34cdd9ecafb6e3ae6"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-build.log"
+      },
+      "bytes": 115962,
+      "sha256": "7d549ec2dc1e96ce8b460cdd77bc4f65c63020f92e9c3af82eb7886a7af3fd8b",
+      "compressed_bytes": 3780,
+      "compressed_sha256": "1454aa38cc311ad9983e5c39c9157daca4a6d1587bee8f82b2fd3cbded09cf38"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-cpu-build.log"
+      },
+      "bytes": 1738,
+      "sha256": "44b0ecaa054eb3f64500667b29bb7e65b2ad8f7e929263f4a9347d65cf218512",
+      "compressed_bytes": 380,
+      "compressed_sha256": "5de27e2ee582e4d58a84628715f4fed2d317fdd623f0a6bc49683e2faaa48b2d"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-handoff.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-cpu-handoff.log"
+      },
+      "bytes": 644,
+      "sha256": "8d024920b11ef18cc14c030272474a9c0c20001d556c9e912798ac4087ed97cf",
+      "compressed_bytes": 308,
+      "compressed_sha256": "b7cfe53ce0d8721fb78447759c229fd8725a9c9681c4f70a0627814318b24f81"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-module-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-cpu-module-forward.log"
+      },
+      "bytes": 334,
+      "sha256": "7faf7757a93ee769528720b109aa27648ce4b664c459adbd1ec1d42a86cb843a",
+      "compressed_bytes": 208,
+      "compressed_sha256": "d2a86914aa92bdbc429d8706b3e7961e44e2e36eb80504be597d7282162e0c23"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-probe.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-cpu-probe.json"
+      },
+      "bytes": 727,
+      "sha256": "81b3e03732b6a3e3875b9b9d8a7419ea932768acc925d7c6a34c97e6d502f10a",
+      "compressed_bytes": 416,
+      "compressed_sha256": "0e18b633d504a922061cdce8e9a3e1e99dffe83cf858436aeabfafdf29594446"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-probe.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-cpu-probe.log"
+      },
+      "bytes": 570,
+      "sha256": "1b0df3cf7c14dc372167d052ec8c1872ffc10f73d016899a911980b562aeaa8e",
+      "compressed_bytes": 400,
+      "compressed_sha256": "cdd08dbc63a3533d47144c94c3f3158aa42278928fa1413de3d097aabb3047b7"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-cpu-resident-loss.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-cpu-resident-loss.log"
+      },
+      "bytes": 221,
+      "sha256": "c7da05e8de43f7b92cfb1e34871fa72623c0de9d07d8b53ddd52a168c042ecd9",
+      "compressed_bytes": 172,
+      "compressed_sha256": "b06190ae21032c5c563fa5ff6132e2992a53293ecad6c9d9801015318b865e18"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-graph_autograd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-graph_autograd.log"
+      },
+      "bytes": 450,
+      "sha256": "acd6f1517b3fc484a5fb9dd5c4d0522db7e6295e2a0395310cf59b80182db2fc",
+      "compressed_bytes": 252,
+      "compressed_sha256": "d4bd913778e77397de9b174fd483b612ca3949f2199cb881ab439fbd8f04a5c7"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-graph_learner.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-graph_learner.log"
+      },
+      "bytes": 462,
+      "sha256": "9a5bc0abf971ec6e9ed5631ad66a6f029d738303eeac97a5e3c8427f3270dbbe",
+      "compressed_bytes": 252,
+      "compressed_sha256": "ebdfbe2a8704422f72b9dcf615a644583587d125bdf589a2826ea84fe4d14c14"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-module-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-module-forward.log"
+      },
+      "bytes": 1527,
+      "sha256": "c17bb0b51053b22bdb882c2b3a452c65f0a53ab79ddc5698c843cd454b32b3d7",
+      "compressed_bytes": 516,
+      "compressed_sha256": "478c458440cb1159a855ca2710b1081479f78c1a6cd3ed4e0ece7ae501f38458"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-module_update.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-module_update.log"
+      },
+      "bytes": 804,
+      "sha256": "ea1028152f4b9c5497945c9bd8ea00d8e14846284b5722f80643aed1e80d3f94",
+      "compressed_bytes": 356,
+      "compressed_sha256": "4af48f41e3e06c83d105437a24b91762dca3b510a9936fd39832ca8630da2235"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-pointwise.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-pointwise.log"
+      },
+      "bytes": 628,
+      "sha256": "a98577aef0550fa5f24be33224248fb7d17864fec1f1be9b180badede1014c31",
+      "compressed_bytes": 296,
+      "compressed_sha256": "58d1a7eaab08add5a95975b64bf453c03c001a376cac440e9a08cb5222c135b2"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-resident-loss.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-resident-loss.log"
+      },
+      "bytes": 472,
+      "sha256": "01783b0cff6527418f5f0192fd087b4f716ce208bdefc383dfbf3bb0c6549a26",
+      "compressed_bytes": 252,
+      "compressed_sha256": "6db5379c687827448196d524222c1db703e7e1865d06bf02ced6cd56c1d091b4"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-tests.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-tests.json"
+      },
+      "bytes": 787,
+      "sha256": "fe3dde1ca56b65309928e662561f594b61b65b03204c4107b4c777b43fdb2373",
+      "compressed_bytes": 444,
+      "compressed_sha256": "d6ac2953efc12deed18ba294bbf139e0ac960258449b04fc07f4739a25d52323"
+    },
+    {
+      "archive": "raw/runs/verified-a/python-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/python-tests.log"
+      },
+      "bytes": 5926,
+      "sha256": "4650baaf5a2ff8a31e16173ffe6b66256802c54f1d962b122cc1f2e3e0c82979",
+      "compressed_bytes": 1540,
+      "compressed_sha256": "1cb560f44bdeeb0e3e74ea3264b162185c7291bf20089af619ca21433a63f171"
+    },
+    {
+      "archive": "raw/runs/verified-a/receipt.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/receipt.json"
+      },
+      "bytes": 35958,
+      "sha256": "43f7eb1a263f1cc81d1f3d46538a35b9b6a7900708368ff0abb279973cafceda",
+      "compressed_bytes": 4320,
+      "compressed_sha256": "a5d3568089f0d4fe70d935c343e30a0a643454e15920eb9746b0df4705803c4e"
+    },
+    {
+      "archive": "raw/runs/verified-a/tensor-cpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/tensor-cpu.log"
+      },
+      "bytes": 37051,
+      "sha256": "1738aec430daa70610b5211e34136f5df20ede77e4023b176de08c6915d795fa",
+      "compressed_bytes": 6860,
+      "compressed_sha256": "1a9f5d523698d7decc4b6b55b4c5bb986819c2960665726a8a6d2c010fb1e032"
+    },
+    {
+      "archive": "raw/runs/verified-a/tensor-wgpu.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/tensor-wgpu.log"
+      },
+      "bytes": 155655,
+      "sha256": "0b69617794f1962989a88807579de01ba00fab981ffdc7f3bab4a20e131f2d40",
+      "compressed_bytes": 10836,
+      "compressed_sha256": "47d82caf8c330264d7ba16cffe97601af8d238575c0c3aa2fc5b26d4b3d13fa3"
+    },
+    {
+      "archive": "raw/runs/verified-a/terminal-admission-tests.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/terminal-admission-tests.log"
+      },
+      "bytes": 529,
+      "sha256": "356127a232c72eb0702242533d1d109cc624da8ca8e9f6d51a96e70b1701e7a3",
+      "compressed_bytes": 268,
+      "compressed_sha256": "220950729c19ba1b35fbe228f55fb49b7c40cf20f492c31e49ce271ef1e2fbde"
+    },
+    {
+      "archive": "raw/runs/verified-a/torch-correctness.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/torch-correctness.json"
+      },
+      "bytes": 74967,
+      "sha256": "e0960f67966cf63c0a4d7bb701ecd532ecdd99011ad2cb41ddd4736d11934435",
+      "compressed_bytes": 1996,
+      "compressed_sha256": "5bbb1852e1e3cac98da17f1ca1df25b60155c7e32cb51149110b0522630fcf18"
+    },
+    {
+      "archive": "raw/runs/verified-a/torch-correctness.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/torch-correctness.log"
+      },
+      "bytes": 73,
+      "sha256": "5ddc2f5948c9bf099a949836d5318d2da47116e28bf9770daca6f09cdd942763",
+      "compressed_bytes": 132,
+      "compressed_sha256": "3471c490d28ea9c6964a114c2911cc1330463d4d3b51496c5a29141993f26438"
+    },
+    {
+      "archive": "raw/runs/verified-a/torch-reference-shapes.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/torch-reference-shapes.log"
+      },
+      "bytes": 213,
+      "sha256": "6a8e1dacf790babf6b4fb1d34d6135ca92630b1651b472c1b6c5175eb378083f",
+      "compressed_bytes": 168,
+      "compressed_sha256": "0c96d7720dda1b582eb657e9b296ce0118a345955678d02566635b58aa6d9555"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-autograd.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-autograd.json"
+      },
+      "bytes": 1153,
+      "sha256": "cbc28ef105119f5b8a2eef6153150eaf5d5ce74e153d9aff040021d8ef36d80e",
+      "compressed_bytes": 668,
+      "compressed_sha256": "e30ea063f8767e45dc8d7e2f838a65282ef648b31de8a9b44469bf03069d1828"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-autograd.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-autograd.log"
+      },
+      "bytes": 142,
+      "sha256": "e475c7e2c47edd989aed79c40b4235c0743a16f43999731bb7b6a91da3ca83e5",
+      "compressed_bytes": 192,
+      "compressed_sha256": "0e98525612ba1e056ce7778b919404cc226a573363d01aaf3dc1fea2c8f415d2"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-client-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-client-build.log"
+      },
+      "bytes": 111925,
+      "sha256": "2ea96aa25abc6bcdb68acf38d95fced1854f8b93c9167fce05e9253e52717da2",
+      "compressed_bytes": 3488,
+      "compressed_sha256": "0e7a29c7d980aa36f5f035902f7a4f15d5f48c813d60c35e8b545be474e48855"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-cpu-check.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-cpu-check.log"
+      },
+      "bytes": 757,
+      "sha256": "ef398349610265e0d58b2b02cbcb3bdd6c84ec910fd08fa4e968fce14e65c689",
+      "compressed_bytes": 300,
+      "compressed_sha256": "5ef8154bfbd46816b08e68755ea66d6563b926059651942b8962b6d09151dc9d"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-example-build.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-example-build.log"
+      },
+      "bytes": 111779,
+      "sha256": "d159d07b13f131bfa070e940a924845725a0603ab227456c0ce9479849cfa256",
+      "compressed_bytes": 3472,
+      "compressed_sha256": "d5d4c632938bb7da7106935977e4132653254f71e6daacbe23e19e3f399130e8"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-forward.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-forward.json"
+      },
+      "bytes": 698481,
+      "sha256": "9155c51352b75b326a2cf895e5f79ca74ad017ef048db3b20a9d3e461d170273",
+      "compressed_bytes": 6980,
+      "compressed_sha256": "d7d4aa68206649ce701d8897c25f6fec1be81012c8ecd77896434085cf7aef8c"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-forward.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-forward.log"
+      },
+      "bytes": 152,
+      "sha256": "82a0dd35a66dd9006040af9501a88e9a95b34e6bd69ab190c5864465b97fd717",
+      "compressed_bytes": 200,
+      "compressed_sha256": "619c5f76238149d3a2155121443084029b074524da07fe91a4b5127872c57864"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-fusion.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-fusion.json"
+      },
+      "bytes": 7805,
+      "sha256": "45677a81bccc027ba8834ec97219b8512a876cfc60b75ccdb5d483efafaba090",
+      "compressed_bytes": 1348,
+      "compressed_sha256": "5f68beccd13d450b2c436cf89e39e14e9ac6616d2d98ba271b150f2b94da974a"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-fusion.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-fusion.log"
+      },
+      "bytes": 150,
+      "sha256": "3264dad3e3b541770196c5c9a123cac9f72df3ed2d220f80f3caf4b44e773225",
+      "compressed_bytes": 200,
+      "compressed_sha256": "e9fc6cbcd34e6786fc854794e4cdd93beb95a65550778afa8bdc5ac2e6268513"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-learner.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-learner.json"
+      },
+      "bytes": 1421,
+      "sha256": "affc350318858fbeed1e4eed12a762a78012fd34bc2659276f0b1f90a765d0a0",
+      "compressed_bytes": 760,
+      "compressed_sha256": "90d1477a085457710bcb9be104c3c3339b98c94ab37535fa12c12f1fcc513cbf"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-learner.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-learner.log"
+      },
+      "bytes": 151,
+      "sha256": "ac11e7e13b067c7f29bc578ec0affb9ab595cdcb723a57e8a238cda376f9462c",
+      "compressed_bytes": 200,
+      "compressed_sha256": "61bb7acdfb000328f726922a3baa2a9c9b12a922e0180b8a0a1b9cbd5b94a9f4"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-pointwise.json.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-pointwise.json"
+      },
+      "bytes": 1081,
+      "sha256": "988e5f6a4d12c6e543f86ce197a20df37a026f432524b30816a07b975f62f0b4",
+      "compressed_bytes": 632,
+      "compressed_sha256": "6c5630aca0a21e1476d46caf2426c0438a3d4b19f22e8c83f90a33f41789477f"
+    },
+    {
+      "archive": "raw/runs/verified-a/wasm-pointwise.log.xz",
+      "origin": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-loss-20260912/verified-a/wasm-pointwise.log"
+      },
+      "bytes": 143,
+      "sha256": "cf284c4ccd91c2ead73252547fb2e54ab444db917e35d3f53c1bb41d29aff395",
+      "compressed_bytes": 192,
+      "compressed_sha256": "d4a8f1d61b898bb9a1b889af2691c834b085aff0284b86930c918dd16cd702cc"
+    },
+    {
+      "archive": "raw/source/candidate/Cargo.lock.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "Cargo.lock"
+      },
+      "bytes": 119585,
+      "sha256": "be4caf7effab0b701df099996f215b32af2ccbe99f9d2bd4bee1443d9d3e4b1e",
+      "compressed_bytes": 24880,
+      "compressed_sha256": "443ea913fbb82e39d8e8e67ddbfd0d79a5757d38f0ad90a38b7588c80a92d3c0"
+    },
+    {
+      "archive": "raw/source/candidate/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "Cargo.toml"
+      },
+      "bytes": 1488,
+      "sha256": "0a756da3b71ab178232acdac4e08bd29222d17530e645857edc143f03df3cc05",
+      "compressed_bytes": 476,
+      "compressed_sha256": "d0a956a29b40f01c5ee4761d65741d01d7ca5caf722a1e24d82489d1068ed634"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-py/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-py/Cargo.toml"
+      },
+      "bytes": 3600,
+      "sha256": "86b312650dde53f44f724856aaf26960f761bf8eb87bb004f5b76207b5dca1b3",
+      "compressed_bytes": 1180,
+      "compressed_sha256": "0cdd36cbea4539ce430ddbe77d60596b1ea79463ddc8f0678bf81a64dbc204a0"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-py/spiraltorch/__init__.pyi.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-py/spiraltorch/__init__.pyi"
+      },
+      "bytes": 408782,
+      "sha256": "a8b2b64465a320bf72dbe2e97af4de43d72ffc768deee539954ec8426f2b9d8f",
+      "compressed_bytes": 43940,
+      "compressed_sha256": "0b7c9b916c3596ca680f4c0882f7a8fedfbe5144d1bb92ad3fa63d9008a98b24"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-py/src/nn.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-py/src/nn.rs"
+      },
+      "bytes": 352318,
+      "sha256": "4c0a5025a8dc14cdc96e22772c43e04b7b4a5d8b87d81317ec7104bb1fc9133d",
+      "compressed_bytes": 34628,
+      "compressed_sha256": "5f74e40c680a6bdcb0829d8fa1249ea6260074110d5a757b2a4a6d37fc393f1a"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-py/src/nn_resident.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-py/src/nn_resident.rs"
+      },
+      "bytes": 18073,
+      "sha256": "25446b82c48b21c3467de2d8fd5fffd8a61deb13f0e936c0895745c40c04f9ab",
+      "compressed_bytes": 3916,
+      "compressed_sha256": "838a9615ea2f22ff68d0cc8bbf788211d235022fa38fdcbbda9136dde177963a"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-py/src/nn_resident/loss.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-py/src/nn_resident/loss.rs"
+      },
+      "bytes": 1783,
+      "sha256": "ae42b8ce5ca361d397988b6d752953271cd75eb33b31422df4f4a9ee1c5dc430",
+      "compressed_bytes": 776,
+      "compressed_sha256": "f25cd079570ef6ab40ed964249d0ef36931427c3b35dfb0f1795fb409575fead"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-py/tests/test_nn_resident_loss.py.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-py/tests/test_nn_resident_loss.py"
+      },
+      "bytes": 5270,
+      "sha256": "baa5c71764dbd58779589651930d2dc09a01d72327dd1323f9472ade4d972143",
+      "compressed_bytes": 1768,
+      "compressed_sha256": "b4486e31fc95f39ed911c9bae3d5731d3f101200b076b034d83f7d9b97cfd31f"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-wasm/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-wasm/Cargo.toml"
+      },
+      "bytes": 1430,
+      "sha256": "01714f057aa91e70e426887b9993f3c98d6e4aee12e0012be542f7fa8f48a31b",
+      "compressed_bytes": 704,
+      "compressed_sha256": "dcfb06c1519377687b56ef11a570be30de30c04545da613297e98265e6a72e59"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-wasm/src/nn_resident.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-wasm/src/nn_resident.rs"
+      },
+      "bytes": 15533,
+      "sha256": "6f8869a1ff00c70f60e3026b6d9a6ec595567dfedbdddc56b6da63e2abcf3258",
+      "compressed_bytes": 3028,
+      "compressed_sha256": "1c79333ea7dbc684b8414ef418741c0ac4d95fb1a87689a6ceb7760934af9ed6"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-wasm/src/nn_resident/loss.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-wasm/src/nn_resident/loss.rs"
+      },
+      "bytes": 1609,
+      "sha256": "72ec0ba71344df35d2cf4260d9168aebea1674e07565a1042883eeb82cb72a0f",
+      "compressed_bytes": 600,
+      "compressed_sha256": "6e6557cabc6be72c11ad7002a8aaf5b1db750a5d4085752e3329ceca56f9766a"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-wasm/tests/resident_graph_training.html.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-wasm/tests/resident_graph_training.html"
+      },
+      "bytes": 2763,
+      "sha256": "f1e283fa9e8b39d718ca69e2ee62703831ea3cb3113356e785dadbbf64cce901",
+      "compressed_bytes": 1296,
+      "compressed_sha256": "dd911ebf0804c81065bcdb148dfe8a58701e31a0390e5d2eab1c9248c1348f72"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-wasm/tests/resident_loss_clients.html.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-wasm/tests/resident_loss_clients.html"
+      },
+      "bytes": 5546,
+      "sha256": "e340e345fd02941d50159249df37abf59efe16a2963193e317a5fca955be05ef",
+      "compressed_bytes": 2176,
+      "compressed_sha256": "a6c1d5f04f16394757b0e691e062e98a0e575e6c18b2abdb33e4e0383f97f8d2"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-wasm/tests/resident_types.cjs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-wasm/tests/resident_types.cjs"
+      },
+      "bytes": 13557,
+      "sha256": "863e261e08bef9a97fa7be6a0a43630c4adf42f013e02e3280e0e6a061f80ffa",
+      "compressed_bytes": 2844,
+      "compressed_sha256": "c49ac45b9fae070fca5f58dcdd78ad6f583dfe80a3ed3d42e8ad780432f18d2e"
+    },
+    {
+      "archive": "raw/source/candidate/bindings/st-wasm/types/spiraltorch-wasm.d.ts.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "bindings/st-wasm/types/spiraltorch-wasm.d.ts"
+      },
+      "bytes": 190989,
+      "sha256": "95e7b144305c30288401408f600e6c6cb1a1738ed9fb969089831801e6ae3b39",
+      "compressed_bytes": 26236,
+      "compressed_sha256": "ada6e591327795c6f8d84a453b55315431c97425727e216aca8e5c801f2c40ff"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/Cargo.toml"
+      },
+      "bytes": 741,
+      "sha256": "2d1b4b3c9d87d16ce2039146ac8d13d3e2ba084afde3413f32f11bb7a64f6fa0",
+      "compressed_bytes": 508,
+      "compressed_sha256": "b953a83a7c8ac5a00733946208ec54b646df9fe6e9e33772ea775ced709cd709"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/src/resident_tensor.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor.rs"
+      },
+      "bytes": 21347,
+      "sha256": "02fc53d49a5a9a31b0d5698553a0682fd8fea163d9c0f385c42ea0adb44e8c68",
+      "compressed_bytes": 5132,
+      "compressed_sha256": "814a7bbbaf3227f625c42fbecef6ecaa008a26ed038ae2565bdc930e5ce931c2"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/src/resident_tensor/guard_capture.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/guard_capture.rs"
+      },
+      "bytes": 3096,
+      "sha256": "71808f3b50e9e03d657d4cfa17f756a610dbbb5f2642967ff58b676ffd8ec05d",
+      "compressed_bytes": 1116,
+      "compressed_sha256": "d811a53b973e7f9f2efff847fff533aade81956a81442726b756cdce4a8887be"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/src/resident_tensor/loss.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/loss.rs"
+      },
+      "bytes": 8647,
+      "sha256": "9e890fe1692004a5f875f08818de3adbcc11e9433f457ac04917c8fa80b74120",
+      "compressed_bytes": 2432,
+      "compressed_sha256": "1df1a3b6d06ef026c2266acba733be4fceed8f2291c7faf04854698ba45775a6"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/src/resident_tensor/loss/tests.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/loss/tests.rs"
+      },
+      "bytes": 4825,
+      "sha256": "08cba4f371249b2f36637b3169774b2e6d4a6572d80b4e9c34765cf543bad92a",
+      "compressed_bytes": 1532,
+      "compressed_sha256": "237dd5594996085cd60991a37e7423aed5c5e50df6387f4eb6f33bf56b118004"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/src/resident_training.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/src/resident_training.rs"
+      },
+      "bytes": 35283,
+      "sha256": "f3ec93ddc1509c329e52436196bfab48b31476c98f1e11ffbf847c681cdea403",
+      "compressed_bytes": 7652,
+      "compressed_sha256": "fc810d63d61c9b24ff8e093d6d7849a94311d2600ae44b6ad3f4b83705f89ccd"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/src/runtime.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/src/runtime.rs"
+      },
+      "bytes": 35187,
+      "sha256": "ee902ab1402a3b258dd1cea0837c4cc155ab3b727385b812d23988ff8f949137",
+      "compressed_bytes": 7748,
+      "compressed_sha256": "3f2c05aba694793ebf74645e79662bd8b37bae6f9192b1b21bbf91781beb91ee"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-backend-wgpu/src/shaders/dense_training.wgsl.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-backend-wgpu/src/shaders/dense_training.wgsl"
+      },
+      "bytes": 4471,
+      "sha256": "c098ce1acb312483a29aa9d9e8a4a29f10a395090267f131b3164ba5968e61c2",
+      "compressed_bytes": 1316,
+      "compressed_sha256": "8018a4d351628322c20d67baecca68154bf73cbcab4e29ada70aaec6ec872470"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/Cargo.toml"
+      },
+      "bytes": 5244,
+      "sha256": "3d81ba710390536d98c0b1e617a531a0d7ae0b2d967a0e4b33c6aa46ef794aff",
+      "compressed_bytes": 1312,
+      "compressed_sha256": "93d0e029b6a08ece3076ae4cd5b5bf7643b492d31d3f7b16c51df66215df462c"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/examples/resident_graph_training.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/examples/resident_graph_training.rs"
+      },
+      "bytes": 757,
+      "sha256": "b93d9c37eb1dee0a40d8c10a403f108991a63e3ec84467af4bcbe131dd44ce8a",
+      "compressed_bytes": 496,
+      "compressed_sha256": "ac1239c93d5266369cdeecda96cb2c6fc6564e46f7ff6d300a55fb316088153f"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/examples/resident_graph_training_browser.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/examples/resident_graph_training_browser.rs"
+      },
+      "bytes": 600,
+      "sha256": "01f6e726594f8546b29960d17b8b4bc1fbb85d2e1727e79bbdcf9409011c9cb0",
+      "compressed_bytes": 384,
+      "compressed_sha256": "4a22cea7fbf60cf394a9742a4ab1440311eeae0464f76955bd7509260573ca4c"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/examples/support/resident_graph_training.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/examples/support/resident_graph_training.rs"
+      },
+      "bytes": 23014,
+      "sha256": "56ab4fb7e7ac969d4783aa358f6f4254b887c4ef28d9fbfc28b2e9d3aa00020d",
+      "compressed_bytes": 5696,
+      "compressed_sha256": "a60459121cfc95cd5ceeb0cfc422ba52376a5d5c694a6f8a310dce9fb02c08a8"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/examples/support/resident_graph_training/resident_loss.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/examples/support/resident_graph_training/resident_loss.rs"
+      },
+      "bytes": 8928,
+      "sha256": "4adf6de1529a368b68851f530968e5dddfb6a14b129df231742d10513b72ae96",
+      "compressed_bytes": 2528,
+      "compressed_sha256": "8cbafb1a85db992690e61643a59b7dc9a93160539f54cd672a867dcbe7c58bb9"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/src/loss/mean_squared_error.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/src/loss/mean_squared_error.rs"
+      },
+      "bytes": 11156,
+      "sha256": "7fc3062528361f71f48c26aff2ee987bf9214a0b41a08835249ef817ffcc1f53",
+      "compressed_bytes": 2240,
+      "compressed_sha256": "1bafef9d7947b69f16f93f9591dd1a50ccf92199fac97df5c2c84f1e25ea4bb0"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/src/loss/mod.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/src/loss/mod.rs"
+      },
+      "bytes": 11409,
+      "sha256": "6e465f9c8177f683557519ebb061179022f1a3ed2537d1833d07e317e10ca6fd",
+      "compressed_bytes": 2852,
+      "compressed_sha256": "aef8e47bf49472cdcbf8727565c947824f47193de2f16a61cb9284cbedc42655"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/src/resident.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/src/resident.rs"
+      },
+      "bytes": 20153,
+      "sha256": "1e808ca7245d2af43cec770689cd75578cf113480d758b3e87953c05241b9055",
+      "compressed_bytes": 4624,
+      "compressed_sha256": "9b2909178d506c4fa8608b392d1f302395344c6defc728dccddadedbfca83b15"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/src/resident/module_forward/tests.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/src/resident/module_forward/tests.rs"
+      },
+      "bytes": 25378,
+      "sha256": "4405e1cad2e1db1e059ecb02de187384ef873ea263f1b84ad481757bac9e1e17",
+      "compressed_bytes": 4980,
+      "compressed_sha256": "9a7300e3a79470b06c9a536d62ea29e51e24d2bc724f886377b780c557d5b769"
+    },
+    {
+      "archive": "raw/source/candidate/crates/st-nn/tests/resident_graph_training.rs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "crates/st-nn/tests/resident_graph_training.rs"
+      },
+      "bytes": 511,
+      "sha256": "394ab280997b1e690b181d93728879576318f2eb76e5945390fc126a25a13f59",
+      "compressed_bytes": 428,
+      "compressed_sha256": "2ef3145f953b910a606512048d79fb6b7cefa3a366e7d261dce595e9519fb2c2"
+    },
+    {
+      "archive": "raw/source/candidate/docs/module_resident_forward.md.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "docs/module_resident_forward.md"
+      },
+      "bytes": 18393,
+      "sha256": "1173e0fbdd14065a7e12885f189e30bc875e2b23529349a2dddfd75aeec3a00e",
+      "compressed_bytes": 6976,
+      "compressed_sha256": "e1bd18bb79ad387ba469a24931c0ee7c981bfcd72b6bfb8518d48e69d00ce859"
+    },
+    {
+      "archive": "raw/source/candidate/docs/module_resident_loss.md.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "docs/module_resident_loss.md"
+      },
+      "bytes": 4355,
+      "sha256": "0d6aa0b964ab541c9812d3bedd5a046534868f50d8087d8cfbf1bb5ba906340c",
+      "compressed_bytes": 2188,
+      "compressed_sha256": "08ce0b14ad2d365f96f1378df84aa37cd4cc5d89eae4ca889ac343d88e04cd4c"
+    },
+    {
+      "archive": "raw/source/candidate/tools/bench_graph_forward_paths.py.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "tools/bench_graph_forward_paths.py"
+      },
+      "bytes": 17289,
+      "sha256": "12ddc192da066de38e1a238b9e57199ae6b343c3ae4ba6dbb4cb54266cf4de95",
+      "compressed_bytes": 5444,
+      "compressed_sha256": "16b616e1580280504bf9f9556349753221beb7459d5371adfa489e78775353c2"
+    },
+    {
+      "archive": "raw/source/candidate/tools/resident_module_handoff_fixture.py.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "tools/resident_module_handoff_fixture.py"
+      },
+      "bytes": 4289,
+      "sha256": "b693bf0c4f7e9a88a94c8ab3c84dd9863757e59e4159ad648ecf9608cb84db5d",
+      "compressed_bytes": 1732,
+      "compressed_sha256": "6ef1ed528c9b2e9d3f766209d4cb7717375fb1e7a6997ed5086772ba74eb591e"
+    },
+    {
+      "archive": "raw/source/candidate/tools/test_resident_browser.cjs.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "tools/test_resident_browser.cjs"
+      },
+      "bytes": 14496,
+      "sha256": "601c047ec602a8bd1136608189f91eeec0a4fb4a6f69e5974fa8f5cba748ffc5",
+      "compressed_bytes": 3764,
+      "compressed_sha256": "4a7dc42ffdaf2a86fe40e34a632c2b335863d1357c2bf40034262e949f8ccf1a"
+    },
+    {
+      "archive": "raw/source/candidate/tools/validate_module_direct_io.py.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "tools/validate_module_direct_io.py"
+      },
+      "bytes": 5892,
+      "sha256": "190f337cf3072c3f941a1e7b22c8cb5fdda4638d9bea93817ab4d18b98d40144",
+      "compressed_bytes": 2188,
+      "compressed_sha256": "272b2fac62b292c2ecdd9be77999211250d9f250e176814af87a41440c8c2ebd"
+    },
+    {
+      "archive": "raw/source/candidate/tools/validate_module_forward_paths.py.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "tools/validate_module_forward_paths.py"
+      },
+      "bytes": 6627,
+      "sha256": "f0904a53baf22d5f025c4c06c0bb8584c9dfed512b71f1ef48d887715b985280",
+      "compressed_bytes": 2408,
+      "compressed_sha256": "c77d98205d4a5cd1155c41256a0b2261a22db3da1dc250946f4bbc203e1a64d5"
+    },
+    {
+      "archive": "raw/source/candidate/tools/validate_resident_graph_training_vs_torch.py.xz",
+      "origin": {
+        "git_commit": "635acccadc437e7aca0cc5c5e18b52f564f58f5d",
+        "git_path": "tools/validate_resident_graph_training_vs_torch.py"
+      },
+      "bytes": 15548,
+      "sha256": "0e36dcddaa6c6dbff5a8a961cdc1e08b47165a2ffc4e642a8f1a028ceb381982",
+      "compressed_bytes": 3896,
+      "compressed_sha256": "3f418bbc8e055f254ee83ce748cce83300219d0d79a2974175a227e2dd3fa894"
+    },
+    {
+      "archive": "raw/source/parent/Cargo.lock.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "Cargo.lock"
+      },
+      "bytes": 119585,
+      "sha256": "be4caf7effab0b701df099996f215b32af2ccbe99f9d2bd4bee1443d9d3e4b1e",
+      "compressed_bytes": 24880,
+      "compressed_sha256": "443ea913fbb82e39d8e8e67ddbfd0d79a5757d38f0ad90a38b7588c80a92d3c0"
+    },
+    {
+      "archive": "raw/source/parent/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "Cargo.toml"
+      },
+      "bytes": 1488,
+      "sha256": "0a756da3b71ab178232acdac4e08bd29222d17530e645857edc143f03df3cc05",
+      "compressed_bytes": 476,
+      "compressed_sha256": "d0a956a29b40f01c5ee4761d65741d01d7ca5caf722a1e24d82489d1068ed634"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-py/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-py/Cargo.toml"
+      },
+      "bytes": 3600,
+      "sha256": "86b312650dde53f44f724856aaf26960f761bf8eb87bb004f5b76207b5dca1b3",
+      "compressed_bytes": 1180,
+      "compressed_sha256": "0cdd36cbea4539ce430ddbe77d60596b1ea79463ddc8f0678bf81a64dbc204a0"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-py/spiraltorch/__init__.pyi.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-py/spiraltorch/__init__.pyi"
+      },
+      "bytes": 408511,
+      "sha256": "59717aa558b23f87848ad81b72843538f50491262cac9f6886b83673b09cfbed",
+      "compressed_bytes": 43908,
+      "compressed_sha256": "d3a79e23d6714836fec8549264d508c74526a570840ab71437a9bb4a9d90c111"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-py/src/nn.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-py/src/nn.rs"
+      },
+      "bytes": 351971,
+      "sha256": "be630fc09b6dbd5e741e4992def14d987ac6dc7a08b7cac959e2433aca8d075d",
+      "compressed_bytes": 34548,
+      "compressed_sha256": "f04eaf3865815379a70b205ec6a2cd35f1dd027cb15ca0f9f368bc8211e34abc"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-py/src/nn_resident.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-py/src/nn_resident.rs"
+      },
+      "bytes": 17890,
+      "sha256": "b173738f164e3fded23bd2f6eaac7816079ea7ddef7cb92bee24af6f6c8326ba",
+      "compressed_bytes": 3876,
+      "compressed_sha256": "64d933e058d4f8240dabd99cd90bac75515fe2a44bb5e156a2e8af7493737c57"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-wasm/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-wasm/Cargo.toml"
+      },
+      "bytes": 1430,
+      "sha256": "01714f057aa91e70e426887b9993f3c98d6e4aee12e0012be542f7fa8f48a31b",
+      "compressed_bytes": 704,
+      "compressed_sha256": "dcfb06c1519377687b56ef11a570be30de30c04545da613297e98265e6a72e59"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-wasm/src/nn_resident.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-wasm/src/nn_resident.rs"
+      },
+      "bytes": 15413,
+      "sha256": "816212a44438e5e7fe04e27ab41f3db05685344286ff79a3e581c756ec158b17",
+      "compressed_bytes": 3000,
+      "compressed_sha256": "040b0c894ad7d0c4ff21b4447c508f61b379974db67f922c6e428a0423f74fd2"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-wasm/tests/resident_graph_training.html.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-wasm/tests/resident_graph_training.html"
+      },
+      "bytes": 2412,
+      "sha256": "5be76a22bc3d4f43b2152c984680997526c7927fe42736bd1a063287475303f7",
+      "compressed_bytes": 1184,
+      "compressed_sha256": "9a96683a9d750082bd5b8f9958e7e9a524b11d428ae505c69065eef203f7a9bd"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-wasm/tests/resident_types.cjs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-wasm/tests/resident_types.cjs"
+      },
+      "bytes": 13250,
+      "sha256": "e90ed2a60ade195eb390a2c57714fa169f7d856b0aa6de9f2fee5cbd31109e70",
+      "compressed_bytes": 2772,
+      "compressed_sha256": "8dff1e60862b20072281a69c0517d8abac0e0813e86ec809a4d99d328ddd5368"
+    },
+    {
+      "archive": "raw/source/parent/bindings/st-wasm/types/spiraltorch-wasm.d.ts.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "bindings/st-wasm/types/spiraltorch-wasm.d.ts"
+      },
+      "bytes": 190553,
+      "sha256": "93ce73f35d2fc8d9c3bdecc9b145ca2e56c26a332e56407c376d2bda1ab24b0f",
+      "compressed_bytes": 26172,
+      "compressed_sha256": "74ef4c42a5e6108feeb2b639b3b7804ce34c4de0e92096e199ae5dd4cba04b0f"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-backend-wgpu/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-backend-wgpu/Cargo.toml"
+      },
+      "bytes": 741,
+      "sha256": "2d1b4b3c9d87d16ce2039146ac8d13d3e2ba084afde3413f32f11bb7a64f6fa0",
+      "compressed_bytes": 508,
+      "compressed_sha256": "b953a83a7c8ac5a00733946208ec54b646df9fe6e9e33772ea775ced709cd709"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-backend-wgpu/src/resident_tensor.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor.rs"
+      },
+      "bytes": 21147,
+      "sha256": "d70970d701fb45eea27878310b1c29b16f47a39c78ac2cacd6579e8c7fd84410",
+      "compressed_bytes": 5060,
+      "compressed_sha256": "723153c482e581efbb1374f99462780cd5fcd644d239c29bb1387569cdcefa61"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-backend-wgpu/src/resident_tensor/guard_capture.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-backend-wgpu/src/resident_tensor/guard_capture.rs"
+      },
+      "bytes": 3079,
+      "sha256": "6d8c4ff6a4ed2d161afd7f0ecf272a03964c29606ba6d1da5781500973c61394",
+      "compressed_bytes": 1100,
+      "compressed_sha256": "5fe4f9435ceb6a52ce11877902a7ae46bcde04b37f299891e530c16f3cfe4631"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-backend-wgpu/src/resident_training.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-backend-wgpu/src/resident_training.rs"
+      },
+      "bytes": 34961,
+      "sha256": "7fff7127d784550bd4cff5f38930ce87160e63d3868259d1b296477b0fd9aa3d",
+      "compressed_bytes": 7572,
+      "compressed_sha256": "883ec1de67779ab1a637d0857e53c0a269bcb665493ddacb6169cd0bb4eb7194"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-backend-wgpu/src/runtime.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-backend-wgpu/src/runtime.rs"
+      },
+      "bytes": 35187,
+      "sha256": "ee902ab1402a3b258dd1cea0837c4cc155ab3b727385b812d23988ff8f949137",
+      "compressed_bytes": 7748,
+      "compressed_sha256": "3f2c05aba694793ebf74645e79662bd8b37bae6f9192b1b21bbf91781beb91ee"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-backend-wgpu/src/shaders/dense_training.wgsl.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-backend-wgpu/src/shaders/dense_training.wgsl"
+      },
+      "bytes": 4471,
+      "sha256": "c098ce1acb312483a29aa9d9e8a4a29f10a395090267f131b3164ba5968e61c2",
+      "compressed_bytes": 1316,
+      "compressed_sha256": "8018a4d351628322c20d67baecca68154bf73cbcab4e29ada70aaec6ec872470"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/Cargo.toml.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/Cargo.toml"
+      },
+      "bytes": 5244,
+      "sha256": "3d81ba710390536d98c0b1e617a531a0d7ae0b2d967a0e4b33c6aa46ef794aff",
+      "compressed_bytes": 1312,
+      "compressed_sha256": "93d0e029b6a08ece3076ae4cd5b5bf7643b492d31d3f7b16c51df66215df462c"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/examples/resident_graph_training.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/examples/resident_graph_training.rs"
+      },
+      "bytes": 757,
+      "sha256": "b93d9c37eb1dee0a40d8c10a403f108991a63e3ec84467af4bcbe131dd44ce8a",
+      "compressed_bytes": 496,
+      "compressed_sha256": "ac1239c93d5266369cdeecda96cb2c6fc6564e46f7ff6d300a55fb316088153f"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/examples/resident_graph_training_browser.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/examples/resident_graph_training_browser.rs"
+      },
+      "bytes": 600,
+      "sha256": "01f6e726594f8546b29960d17b8b4bc1fbb85d2e1727e79bbdcf9409011c9cb0",
+      "compressed_bytes": 384,
+      "compressed_sha256": "4a22cea7fbf60cf394a9742a4ab1440311eeae0464f76955bd7509260573ca4c"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/examples/support/resident_graph_training.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/examples/support/resident_graph_training.rs"
+      },
+      "bytes": 22874,
+      "sha256": "d64ca02e1579a78a175a444eb8983c7a9debba9248840760a22371d3a1dedc89",
+      "compressed_bytes": 5676,
+      "compressed_sha256": "e35866c585741a121b7a1e028816f84372693de1be5fb68a67bec5f3e782895e"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/src/loss/mean_squared_error.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/src/loss/mean_squared_error.rs"
+      },
+      "bytes": 10722,
+      "sha256": "f89eb898beea74bf405f3ef413c54ef7d89daef8365893ce6d6ff535bc8ca541",
+      "compressed_bytes": 2124,
+      "compressed_sha256": "0549708041908d6e04034d31243d0b35d656c872fe1f6ca0d810bd61a937e301"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/src/loss/mod.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/src/loss/mod.rs"
+      },
+      "bytes": 10719,
+      "sha256": "21afc10e314d8e077a9b4b21380da8662237ba45cd53d11b6507b1ea65f37aa0",
+      "compressed_bytes": 2600,
+      "compressed_sha256": "ea9393fdd5cbec30e93a08a33f5da46129ff89cac1b56b4291aee088902ae4ee"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/src/resident.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/src/resident.rs"
+      },
+      "bytes": 19888,
+      "sha256": "df64e3641af2deee578072f0c90abf0bb780d879a9d7ffff721f83da2bf3ccbb",
+      "compressed_bytes": 4572,
+      "compressed_sha256": "44db153bcce45437836d09aad85ba290ae080ccc31e196ba1e76951e081d6378"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/src/resident/module_forward/tests.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/src/resident/module_forward/tests.rs"
+      },
+      "bytes": 24819,
+      "sha256": "abab3e2dbee65c7072d3f267261db38eb30e1fdd8c4af17a651f5710fc61dfb8",
+      "compressed_bytes": 4884,
+      "compressed_sha256": "6535c1b3bc8d549c4c1223197890fa75e18cce0e813c1481a77d53bf010b5a7c"
+    },
+    {
+      "archive": "raw/source/parent/crates/st-nn/tests/resident_graph_training.rs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "crates/st-nn/tests/resident_graph_training.rs"
+      },
+      "bytes": 511,
+      "sha256": "394ab280997b1e690b181d93728879576318f2eb76e5945390fc126a25a13f59",
+      "compressed_bytes": 428,
+      "compressed_sha256": "2ef3145f953b910a606512048d79fb6b7cefa3a366e7d261dce595e9519fb2c2"
+    },
+    {
+      "archive": "raw/source/parent/docs/module_resident_forward.md.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "docs/module_resident_forward.md"
+      },
+      "bytes": 18147,
+      "sha256": "f167173b40e0097f3fc7cc4c7f631a3ca29ce039c777702f5485cfbc55e0bf7b",
+      "compressed_bytes": 6884,
+      "compressed_sha256": "8fb75e9f84f79396331610a0695d117a7c4f66cf1303131642141d227984b840"
+    },
+    {
+      "archive": "raw/source/parent/tools/bench_graph_forward_paths.py.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "tools/bench_graph_forward_paths.py"
+      },
+      "bytes": 17289,
+      "sha256": "12ddc192da066de38e1a238b9e57199ae6b343c3ae4ba6dbb4cb54266cf4de95",
+      "compressed_bytes": 5444,
+      "compressed_sha256": "16b616e1580280504bf9f9556349753221beb7459d5371adfa489e78775353c2"
+    },
+    {
+      "archive": "raw/source/parent/tools/resident_module_handoff_fixture.py.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "tools/resident_module_handoff_fixture.py"
+      },
+      "bytes": 4289,
+      "sha256": "b693bf0c4f7e9a88a94c8ab3c84dd9863757e59e4159ad648ecf9608cb84db5d",
+      "compressed_bytes": 1732,
+      "compressed_sha256": "6ef1ed528c9b2e9d3f766209d4cb7717375fb1e7a6997ed5086772ba74eb591e"
+    },
+    {
+      "archive": "raw/source/parent/tools/test_resident_browser.cjs.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "tools/test_resident_browser.cjs"
+      },
+      "bytes": 14330,
+      "sha256": "39eb8c1153c509d24fe1f30a5b220ebb859bc2663811902bcf229b34084df48a",
+      "compressed_bytes": 3756,
+      "compressed_sha256": "7d591ee92dd1ad567849e9a4840953c6609e04d1f41e6bdaf11ec34e85d50f26"
+    },
+    {
+      "archive": "raw/source/parent/tools/validate_module_direct_io.py.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "tools/validate_module_direct_io.py"
+      },
+      "bytes": 5892,
+      "sha256": "190f337cf3072c3f941a1e7b22c8cb5fdda4638d9bea93817ab4d18b98d40144",
+      "compressed_bytes": 2188,
+      "compressed_sha256": "272b2fac62b292c2ecdd9be77999211250d9f250e176814af87a41440c8c2ebd"
+    },
+    {
+      "archive": "raw/source/parent/tools/validate_module_forward_paths.py.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "tools/validate_module_forward_paths.py"
+      },
+      "bytes": 6627,
+      "sha256": "f0904a53baf22d5f025c4c06c0bb8584c9dfed512b71f1ef48d887715b985280",
+      "compressed_bytes": 2408,
+      "compressed_sha256": "c77d98205d4a5cd1155c41256a0b2261a22db3da1dc250946f4bbc203e1a64d5"
+    },
+    {
+      "archive": "raw/source/parent/tools/validate_resident_graph_training_vs_torch.py.xz",
+      "origin": {
+        "git_commit": "9b584197aa4c5e56234483b9978e246067cffa14",
+        "git_path": "tools/validate_resident_graph_training_vs_torch.py"
+      },
+      "bytes": 12715,
+      "sha256": "ae5b39711f6fc2c978c1899ef7313081381130acda5c6676e65bdd86ffb61099",
+      "compressed_bytes": 3388,
+      "compressed_sha256": "aa375637d69a1a4dfcc5fc86914774a7937155fcf45d51c8f2a4a02d27165cab"
+    }
+  ],
+  "raw_bytes": 92721591,
+  "compressed_bytes": 2620876
+}

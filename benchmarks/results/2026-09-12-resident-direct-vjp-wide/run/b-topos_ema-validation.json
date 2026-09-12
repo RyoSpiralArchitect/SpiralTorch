@@ -1,0 +1,1232 @@
+{
+  "schema": "spiraltorch.resident_training_comparison.validation.v1",
+  "status": "passed",
+  "cases": [
+    {
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 42.67233299999987,
+              "min_ms": 41.06225000000006,
+              "max_ms": 48.65129100000013,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 43.01470850000004,
+              "min_ms": 40.97629199999983,
+              "max_ms": 49.327749999999924,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 27.12539599451702,
+              "min_ms": 25.75562499987427,
+              "max_ms": 33.585333003429696,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.99204050168095,
+          "torch_over_candidate": 0.6306074582492404
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.45058349999999,
+              "min_ms": 35.77887499999997,
+              "max_ms": 44.000042000000576,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.69291700000031,
+              "min_ms": 35.773708000000624,
+              "max_ms": 41.36645799999951,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 22.502083498693537,
+              "min_ms": 21.83770800183993,
+              "max_ms": 24.023124999075662,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9935708478067561,
+          "torch_over_candidate": 0.5969844015705484
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 32.100000001490116,
+              "min_ms": 31.5,
+              "max_ms": 40.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.599999997764826,
+              "min_ms": 30.299999997019768,
+              "max_ms": 35.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0490196079684595
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.649999998509884,
+              "min_ms": 28.200000002980232,
+              "max_ms": 28.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.5,
+              "min_ms": 27,
+              "max_ms": 27.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0418181817639958
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 2.0489096641540527e-08,
+        "native_immediate_candidate": 2.0489096641540527e-08,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 2.0489096641540527e-08,
+        "native_deferred_candidate": 2.0489096641540527e-08,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 2.0489096641540527e-08,
+        "browser_immediate_candidate": 2.0489096641540527e-08,
+        "browser_deferred_baseline": 2.0489096641540527e-08,
+        "browser_deferred_candidate": 2.0489096641540527e-08
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 62.2593539999998,
+              "min_ms": 61.47295800000211,
+              "max_ms": 66.39779200000066,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 61.13520849999895,
+              "min_ms": 60.565958000002865,
+              "max_ms": 62.84166600000026,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 27.527583501068875,
+              "min_ms": 26.709124998888,
+              "max_ms": 33.23879100207705,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0183878574651606,
+          "torch_over_candidate": 0.4502738140014579
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 59.25816649999797,
+              "min_ms": 57.69262499999968,
+              "max_ms": 68.38504099999955,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 59.85466649999944,
+              "min_ms": 56.36995800000295,
+              "max_ms": 63.46879199999967,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.201395997806685,
+              "min_ms": 23.372457995719742,
+              "max_ms": 29.43629200308351,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9900341939086491,
+          "torch_over_candidate": 0.40433599271339876
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.400000002235174,
+              "min_ms": 48.30000000447035,
+              "max_ms": 57.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.899999998509884,
+              "min_ms": 47.399999998509884,
+              "max_ms": 48.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0313152401622536
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.5,
+              "min_ms": 45.29999999701977,
+              "max_ms": 46.100000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.349999997764826,
+              "min_ms": 43.79999999701977,
+              "max_ms": 45.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.02593010151732
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 9.313225746154785e-10,
+        "native_immediate_candidate": 9.313225746154785e-10,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 9.313225746154785e-10,
+        "native_deferred_candidate": 9.313225746154785e-10,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 9.313225746154785e-10,
+        "browser_immediate_candidate": 9.313225746154785e-10,
+        "browser_deferred_baseline": 9.313225746154785e-10,
+        "browser_deferred_candidate": 9.313225746154785e-10
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.81768750000265,
+              "min_ms": 52.44979200000307,
+              "max_ms": 72.1729579999992,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.051916500000516,
+              "min_ms": 50.54395799999838,
+              "max_ms": 54.431917000001704,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.083562500891276,
+              "min_ms": 17.034625001542736,
+              "max_ms": 27.631625001959037,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.108681672225773,
+          "torch_over_candidate": 0.4539621580097119
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.51008300000285,
+              "min_ms": 42.84862499999508,
+              "max_ms": 51.025125000000116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 45.01243700000305,
+              "min_ms": 42.80279200000223,
+              "max_ms": 49.372166000001016,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 13.728812500630738,
+              "min_ms": 12.288541998714209,
+              "max_ms": 15.268625000317115,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0777039910102972,
+          "torch_over_candidate": 0.3050004268960112
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 39.05000000074506,
+              "min_ms": 38.19999999552965,
+              "max_ms": 41.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 40.05000000074506,
+              "min_ms": 37.19999999552965,
+              "max_ms": 44.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9750312109867316
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.19999999925494,
+              "min_ms": 34.70000000298023,
+              "max_ms": 38.5,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.80000000074506,
+              "min_ms": 34,
+              "max_ms": 43,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.038043478219607
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 7.450580596923828e-09,
+        "native_immediate_candidate": 7.450580596923828e-09,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 7.450580596923828e-09,
+        "native_deferred_candidate": 7.450580596923828e-09,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 7.450580596923828e-09,
+        "browser_immediate_candidate": 7.450580596923828e-09,
+        "browser_deferred_baseline": 7.450580596923828e-09,
+        "browser_deferred_candidate": 7.450580596923828e-09
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 47.4367085000049,
+              "min_ms": 39.65216700000019,
+              "max_ms": 51.32616699999926,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.73760400000174,
+              "min_ms": 42.24975000000268,
+              "max_ms": 49.646333999997296,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.150041500339285,
+              "min_ms": 27.06779099389678,
+              "max_ms": 33.94824999850243,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9733081769880031,
+          "torch_over_candidate": 0.5775836149093065
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 42.32097900000008,
+              "min_ms": 41.71283299999777,
+              "max_ms": 44.018583999997645,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.62647899999865,
+              "min_ms": 41.69087500000023,
+              "max_ms": 44.304041999996116,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.409958499541972,
+              "min_ms": 23.081290994014125,
+              "max_ms": 23.98008300224319,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9928330932517653,
+          "torch_over_candidate": 0.5491881818233852
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 31.599999997764826,
+              "min_ms": 31.5,
+              "max_ms": 32,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 30.25,
+              "min_ms": 30,
+              "max_ms": 30.600000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0446280990996637
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.649999998509884,
+              "min_ms": 28.399999998509884,
+              "max_ms": 28.899999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.550000000745058,
+              "min_ms": 27.5,
+              "max_ms": 27.80000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.039927404636482
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 2.1420419216156006e-08,
+        "native_immediate_candidate": 2.1420419216156006e-08,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 2.1420419216156006e-08,
+        "native_deferred_candidate": 2.1420419216156006e-08,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 2.1420419216156006e-08,
+        "browser_immediate_candidate": 2.1420419216156006e-08,
+        "browser_deferred_baseline": 2.1420419216156006e-08,
+        "browser_deferred_candidate": 2.1420419216156006e-08
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 64.8541665000048,
+              "min_ms": 61.7961670000077,
+              "max_ms": 71.17724999999336,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 65.83643749999828,
+              "min_ms": 60.74104100000113,
+              "max_ms": 70.39704199999687,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 31.4783335015818,
+              "min_ms": 27.027791998989414,
+              "max_ms": 34.020874998532236,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9850801313483356,
+          "torch_over_candidate": 0.47812935658285916
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 58.08056249999572,
+              "min_ms": 57.67945799999143,
+              "max_ms": 58.57725000000937,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.61689599999954,
+              "min_ms": 55.61450000000332,
+              "max_ms": 57.14233399999648,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 24.036229500779882,
+              "min_ms": 23.30745799554279,
+              "max_ms": 24.450124998111278,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0258521148880397,
+          "torch_over_candidate": 0.42454163330995887
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 48.600000001490116,
+              "min_ms": 48.29999999701977,
+              "max_ms": 49.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.55000000074506,
+              "min_ms": 47.30000000447035,
+              "max_ms": 48.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0220820189427677
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.350000001490116,
+              "min_ms": 45,
+              "max_ms": 46.70000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.29999999701977,
+              "min_ms": 44,
+              "max_ms": 45,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0237020317052141
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 7.916241884231567e-08,
+        "native_immediate_candidate": 7.916241884231567e-08,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 7.916241884231567e-08,
+        "native_deferred_candidate": 7.916241884231567e-08,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 7.916241884231567e-08,
+        "browser_immediate_candidate": 7.916241884231567e-08,
+        "browser_deferred_baseline": 7.916241884231567e-08,
+        "browser_deferred_candidate": 7.916241884231567e-08
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 52.048000499999034,
+              "min_ms": 49.79908299999806,
+              "max_ms": 53.355374999999185,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 53.83697899999606,
+              "min_ms": 49.685542000006535,
+              "max_ms": 56.887084000009054,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.03872899938142,
+              "min_ms": 17.413082998245955,
+              "max_ms": 23.949666996486485,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9667704515887275,
+          "torch_over_candidate": 0.42793502583759585
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.030541499996616,
+              "min_ms": 43.06608299999789,
+              "max_ms": 48.89650000000256,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 47.4594994999934,
+              "min_ms": 43.035957999993116,
+              "max_ms": 51.11433300000499,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 14.720562496222556,
+              "min_ms": 12.75379099388374,
+              "max_ms": 16.83795799908694,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9488204042270374,
+          "torch_over_candidate": 0.3101710437596293
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 39.29999999701977,
+              "min_ms": 38.399999998509884,
+              "max_ms": 42.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 40.55000000074506,
+              "min_ms": 37.29999999701977,
+              "max_ms": 41.69999999552965,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 0.9691738593414964
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.69999999925494,
+              "min_ms": 34.5,
+              "max_ms": 39.399999998509884,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 34.75,
+              "min_ms": 34.29999999701977,
+              "max_ms": 39.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0273381294749624
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 9.313225746154785e-09,
+        "native_immediate_candidate": 9.313225746154785e-09,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 9.313225746154785e-09,
+        "native_deferred_candidate": 9.313225746154785e-09,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 9.313225746154785e-09,
+        "browser_immediate_candidate": 9.313225746154785e-09,
+        "browser_deferred_baseline": 9.313225746154785e-09,
+        "browser_deferred_candidate": 9.313225746154785e-09
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          4,
+          64,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.09764599999471,
+              "min_ms": 42.22262500000943,
+              "max_ms": 49.88324999999895,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 42.17912499999511,
+              "min_ms": 40.25695800001267,
+              "max_ms": 48.470624999987194,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 26.74460399794043,
+              "min_ms": 26.109041995368898,
+              "max_ms": 33.683458001178224,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0691934932268021,
+          "torch_over_candidate": 0.6340720438829286
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 38.859936999993806,
+              "min_ms": 35.69487500000105,
+              "max_ms": 48.664457999999286,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 37.79483349998918,
+              "min_ms": 36.04595800000243,
+              "max_ms": 41.37145799999416,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.37793749757111,
+              "min_ms": 22.514791002322454,
+              "max_ms": 24.15308399940841,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0281811930724587,
+          "torch_over_candidate": 0.6185484981056419
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 35.55000000074506,
+              "min_ms": 31.399999998509884,
+              "max_ms": 43.600000001490116,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 33.350000001490116,
+              "min_ms": 30.100000001490116,
+              "max_ms": 37,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.065967016466466
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 28.350000001490116,
+              "min_ms": 27.700000002980232,
+              "max_ms": 30.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 27.849999997764826,
+              "min_ms": 26.700000002980232,
+              "max_ms": 31.5,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.017953321499656
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 4.6566128730773926e-09,
+        "native_immediate_candidate": 4.6566128730773926e-09,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 4.6566128730773926e-09,
+        "native_deferred_candidate": 4.6566128730773926e-09,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 4.6566128730773926e-09,
+        "browser_immediate_candidate": 4.6566128730773926e-09,
+        "browser_deferred_baseline": 4.6566128730773926e-09,
+        "browser_deferred_candidate": 4.6566128730773926e-09
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          2,
+          128,
+          128
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 67.05664550000074,
+              "min_ms": 61.60329199998523,
+              "max_ms": 82.48208299999533,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 62.15289549999579,
+              "min_ms": 61.06575000000885,
+              "max_ms": 66.73737499999697,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 28.044124999723863,
+              "min_ms": 26.783082998008467,
+              "max_ms": 34.42329200333916,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0788981745831179,
+          "torch_over_candidate": 0.45121188279515895
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 57.88933300001372,
+              "min_ms": 57.2833329999994,
+              "max_ms": 60.821415999991586,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 56.624541999997746,
+              "min_ms": 56.255082999996375,
+              "max_ms": 62.27049999999872,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 23.78366700213519,
+              "min_ms": 23.030625001410954,
+              "max_ms": 25.936041995009873,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.022336445564823,
+          "torch_over_candidate": 0.42002400658951267
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 49.649999998509884,
+              "min_ms": 48.70000000298023,
+              "max_ms": 51.80000000447035,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 48.650000002235174,
+              "min_ms": 47.70000000298023,
+              "max_ms": 49.80000000447035,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0205549845062438
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 45.850000001490116,
+              "min_ms": 45.29999999701977,
+              "max_ms": 48.69999999552965,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.25,
+              "min_ms": 43.899999998509884,
+              "max_ms": 44.70000000298023,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0361581921240703
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 4.190951585769653e-08,
+        "native_immediate_candidate": 4.190951585769653e-08,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 4.190951585769653e-08,
+        "native_deferred_candidate": 4.190951585769653e-08,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 4.190951585769653e-08,
+        "browser_immediate_candidate": 4.190951585769653e-08,
+        "browser_deferred_baseline": 4.190951585769653e-08,
+        "browser_deferred_candidate": 4.190951585769653e-08
+      },
+      "losses": []
+    },
+    {
+      "config": {
+        "shape": [
+          2,
+          64,
+          256
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "native": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 52.54377050000039,
+              "min_ms": 49.669332999998005,
+              "max_ms": 54.89300000001094,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 51.42414599999756,
+              "min_ms": 48.04179099999601,
+              "max_ms": 54.77254200000607,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 21.78070849913638,
+              "min_ms": 16.961084002105054,
+              "max_ms": 23.49987500201678,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0217723498996538,
+          "torch_over_candidate": 0.42355022286879423
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 50.529624999995576,
+              "min_ms": 47.29179100001056,
+              "max_ms": 52.10466599998472,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 44.544187500010594,
+              "min_ms": 43.0807080000086,
+              "max_ms": 50.99437500000931,
+              "retained": 8
+            },
+            "torch": {
+              "median_ms": 13.854166500095744,
+              "min_ms": 13.025207997998223,
+              "max_ms": 18.564415993751027,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.1343707863115375,
+          "torch_over_candidate": 0.31102074765854576
+        }
+      },
+      "browser": {
+        "immediate": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 41.75,
+              "min_ms": 38.900000005960464,
+              "max_ms": 44.70000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 41.05000000074506,
+              "min_ms": 37.70000000298023,
+              "max_ms": 45.100000001490116,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.0170523751337939
+        },
+        "deferred": {
+          "lanes": {
+            "baseline": {
+              "median_ms": 37.149999998509884,
+              "min_ms": 34.69999999552965,
+              "max_ms": 41.20000000298023,
+              "retained": 8
+            },
+            "candidate": {
+              "median_ms": 36.69999999925494,
+              "min_ms": 34.30000000447035,
+              "max_ms": 38.400000005960464,
+              "retained": 8
+            }
+          },
+          "baseline_over_candidate": 1.012261580361419
+        }
+      },
+      "max_abs_errors": {
+        "native_immediate_baseline": 2.7008354663848877e-08,
+        "native_immediate_candidate": 2.7008354663848877e-08,
+        "native_immediate_torch": 0.0,
+        "native_deferred_baseline": 2.7008354663848877e-08,
+        "native_deferred_candidate": 2.7008354663848877e-08,
+        "native_deferred_torch": 0.0,
+        "browser_immediate_baseline": 2.7008354663848877e-08,
+        "browser_immediate_candidate": 2.7008354663848877e-08,
+        "browser_deferred_baseline": 2.7008354663848877e-08,
+        "browser_deferred_candidate": 2.7008354663848877e-08
+      },
+      "losses": []
+    }
+  ],
+  "boundary": "read-only full captured-state comparison to recorded independent torch reference; every timing reaggregated, all browser interval fingerprints checked; fingerprints are consistency receipts, not independent state rehashes or device attestation; no selective retries or universal speed claim",
+  "inputs": [
+    {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-topos_ema-native.json",
+      "sha256": "b58c246b0309b2c9f7a20c1d6d6d5728233a2a4f04a58be6fe7612551e22ed4d",
+      "device": 16777230,
+      "inode": 99869189,
+      "size": 1208409166,
+      "mtime_ns": 1789209146089842822,
+      "mode": 33188
+    },
+    {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-topos_ema-browser.json",
+      "sha256": "fa5e542586222dc8bd1fd39ea0bb2e291e9a5139234714ef2d01930a8bbd4e0a",
+      "device": 16777230,
+      "inode": 99873644,
+      "size": 370509285,
+      "mtime_ns": 1789209200504650751,
+      "mode": 33188
+    },
+    {
+      "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-wide-direct-vjp-20260912/measurement-a/b-topos_ema-browser.json.progress.jsonl",
+      "sha256": "b6c3f19f419a6f52cda5349abd823c75526f8fd2b594d5998ed28392a7409870",
+      "device": 16777230,
+      "inode": 99873645,
+      "size": 204775,
+      "mtime_ns": 1789209198385242736,
+      "mode": 33188
+    }
+  ],
+  "learner_seed_fusion": false,
+  "workload": "learner",
+  "learner_optimizer": "topos_ema",
+  "matrix": "wide",
+  "pointwise_fusion": false,
+  "native_products": {
+    "baseline": {
+      "file": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-capture-pool-20260912/candidate-a/resident_training_bench",
+        "sha256": "7fd5fedea70bb66ef9c4be43e9212b688b8b59db6d1ab416669f126f49b2107b",
+        "device": 16777230,
+        "inode": 99779221,
+        "size": 8495744,
+        "mtime_ns": 1789201129422000106,
+        "mode": 33133
+      },
+      "identity": {
+        "build_fingerprint": "sha256:6537698890cf68d3c28e7874c9dcc1bef396d29210f2c7d5e363e4b13ab02a05",
+        "manifest": {
+          "git": {
+            "commit": "5fddb415bfbb0f64366db6d45b7675db17a16f61",
+            "describe": "v0.4.27-288-g5fddb415",
+            "dirty": false,
+            "tree": "1bcb92ea916ee0d63ef2b10732e8b4d771bcab6b"
+          },
+          "host": "unknown-host",
+          "id": "Ryo-ST-ryospiralarchitect-2026-09-12T08:17:50.115Z-234f5e7bc8574d25a9060d93aa4f34ee",
+          "pkg": {
+            "name": "st-core",
+            "version": "1.10.0"
+          },
+          "profile": "release",
+          "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+          "seed": "234f5e7bc8574d25a9060d93aa4f34ee",
+          "target": {
+            "arch": "aarch64",
+            "os": "macos",
+            "triple": "aarch64-apple-darwin"
+          },
+          "timestamp": "2026-09-12T08:17:50.115Z",
+          "user": "ryospiralarchitect"
+        },
+        "schema": "spiraltorch.native_build_identity.v1"
+      },
+      "binding": {
+        "valid": true,
+        "checks": {
+          "schema_matches": true,
+          "package_matches": true,
+          "commit_matches": true,
+          "tree_matches": true,
+          "build_was_clean": true,
+          "source_is_clean": true
+        },
+        "embedded_commit": "5fddb415bfbb0f64366db6d45b7675db17a16f61",
+        "embedded_tree": "1bcb92ea916ee0d63ef2b10732e8b4d771bcab6b",
+        "source_commit": "5fddb415bfbb0f64366db6d45b7675db17a16f61",
+        "source_tree": "1bcb92ea916ee0d63ef2b10732e8b4d771bcab6b"
+      }
+    },
+    "candidate": {
+      "file": {
+        "path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-direct-vjp-20260912/candidate-a/resident_training_bench",
+        "sha256": "bbd8f62848746dae9724866cda8dbe268d42d8b5dec36ee0df0285981827b9b7",
+        "device": 16777230,
+        "inode": 99824689,
+        "size": 8519424,
+        "mtime_ns": 1789205771668445553,
+        "mode": 33133
+      },
+      "identity": {
+        "build_fingerprint": "sha256:e3db1c399f8a9a8047bf37708c8158183db01c53ca4a8016116442fa6b7fe2cb",
+        "manifest": {
+          "git": {
+            "commit": "23542255c9a988d476a4f60a6a9ba416973897d5",
+            "describe": "v0.4.27-290-g23542255",
+            "dirty": false,
+            "tree": "37fc6575357e6932876156382d0582c1b0aa381b"
+          },
+          "host": "unknown-host",
+          "id": "Ryo-ST-ryospiralarchitect-2026-09-12T09:35:19.481Z-2891178cde4e42f78ee73a65ead664cf",
+          "pkg": {
+            "name": "st-core",
+            "version": "1.10.0"
+          },
+          "profile": "release",
+          "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+          "seed": "2891178cde4e42f78ee73a65ead664cf",
+          "target": {
+            "arch": "aarch64",
+            "os": "macos",
+            "triple": "aarch64-apple-darwin"
+          },
+          "timestamp": "2026-09-12T09:35:19.481Z",
+          "user": "ryospiralarchitect"
+        },
+        "schema": "spiraltorch.native_build_identity.v1"
+      },
+      "binding": {
+        "valid": true,
+        "checks": {
+          "schema_matches": true,
+          "package_matches": true,
+          "commit_matches": true,
+          "tree_matches": true,
+          "build_was_clean": true,
+          "source_is_clean": true
+        },
+        "embedded_commit": "23542255c9a988d476a4f60a6a9ba416973897d5",
+        "embedded_tree": "37fc6575357e6932876156382d0582c1b0aa381b",
+        "source_commit": "23542255c9a988d476a4f60a6a9ba416973897d5",
+        "source_tree": "37fc6575357e6932876156382d0582c1b0aa381b"
+      }
+    }
+  },
+  "source_bindings": {
+    "baseline": {
+      "valid": true,
+      "checks": {
+        "schema_matches": true,
+        "package_matches": true,
+        "commit_matches": true,
+        "tree_matches": true,
+        "build_was_clean": true,
+        "source_is_clean": true
+      },
+      "embedded_commit": "5fddb415bfbb0f64366db6d45b7675db17a16f61",
+      "embedded_tree": "1bcb92ea916ee0d63ef2b10732e8b4d771bcab6b",
+      "source_commit": "5fddb415bfbb0f64366db6d45b7675db17a16f61",
+      "source_tree": "1bcb92ea916ee0d63ef2b10732e8b4d771bcab6b"
+    },
+    "candidate": {
+      "valid": true,
+      "checks": {
+        "schema_matches": true,
+        "package_matches": true,
+        "commit_matches": true,
+        "tree_matches": true,
+        "build_was_clean": true,
+        "source_is_clean": true
+      },
+      "embedded_commit": "23542255c9a988d476a4f60a6a9ba416973897d5",
+      "embedded_tree": "37fc6575357e6932876156382d0582c1b0aa381b",
+      "source_commit": "23542255c9a988d476a4f60a6a9ba416973897d5",
+      "source_tree": "37fc6575357e6932876156382d0582c1b0aa381b"
+    }
+  },
+  "browser_harness_source": {
+    "commit": "d0a64825fcee6dcfc956b76478e5b92615974cf0",
+    "tree": "15176de8a907dce39d8c5b8434d93c9554ec8992",
+    "tracked_dirty": false
+  },
+  "browser_assets": {
+    "/": "0785f701724beb892eea8107030b3da064a6eccf74430f15ac84e5ffdf8b4abc",
+    "/baseline/snippets/st-nn-f975d31addace2e2/inline0.js": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b",
+    "/baseline/spiraltorch_wasm.js": "efd10006d105f910e3a0701b7abc8b68ad87544b7d96c01be0389d49a451d961",
+    "/baseline/spiraltorch_wasm_bg.wasm": "dc5dbc9cd726cf38fc7d659563e1949b9693c61347a5041faddb782344fbb4d7",
+    "/candidate/snippets/st-nn-f975d31addace2e2/inline0.js": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b",
+    "/candidate/spiraltorch_wasm.js": "6473915f5611902cfa10ee82ddc1765e340f171e925a4763ed8ba401b341d53c",
+    "/candidate/spiraltorch_wasm_bg.wasm": "da71a5abc931b7a1c66072ebae2fe5954b1ff2170890597bbf201b40e4cd75fb"
+  },
+  "browser_version": "152.0.7977.84",
+  "browser_adapter_probe": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "description": "",
+    "isFallbackAdapter": false,
+    "boundary": "separate navigator adapter observation; not the Rust workspaces' device receipt"
+  },
+  "device_admission": {
+    "device": "mps",
+    "name": "Apple M4",
+    "contention": "unknown: macOS does not expose CUDA-style GPU process accounting; diagnostic only"
+  },
+  "torch": {
+    "version": "2.12.1",
+    "device": "mps"
+  },
+  "browser_intervals_revalidated": 360
+}

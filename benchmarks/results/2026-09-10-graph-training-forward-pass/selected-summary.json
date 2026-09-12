@@ -1,0 +1,122 @@
+{
+  "schema": "spiraltorch.graph_training_forward_pass.selected.v1",
+  "status": "passed",
+  "source": "df64ed06ce99c61ba8e974ffc22d6a7bb005ec52",
+  "policy": "Metal forward batched; BrowserWebGpu and unmeasured backends retain one forward dispatch per pass",
+  "matrices": {
+    "standard": {
+      "native_immediate": {
+        "baseline_over_selected_geomean": 1.2630981945726691,
+        "range": [
+          1.0732401246549395,
+          1.6176540968572426
+        ],
+        "faster_cases": 9,
+        "paired_case_medians": 9,
+        "torch_over_selected_geomean": 0.8648734493764528
+      },
+      "native_deferred": {
+        "baseline_over_selected_geomean": 1.277399124553146,
+        "range": [
+          1.0752968451021179,
+          1.4233141660726405
+        ],
+        "faster_cases": 9,
+        "paired_case_medians": 9,
+        "torch_over_selected_geomean": 0.8780167899749933
+      },
+      "browser_immediate": {
+        "baseline_over_selected_geomean": 1.00294493680316,
+        "range": [
+          0.9770642205221205,
+          1.023255814308086
+        ],
+        "faster_cases": 5,
+        "paired_case_medians": 9
+      },
+      "browser_deferred": {
+        "baseline_over_selected_geomean": 0.9999654671790121,
+        "range": [
+          0.9782608676638405,
+          1.0454545426836683
+        ],
+        "faster_cases": 4,
+        "paired_case_medians": 9
+      },
+      "max_abs_error": 1.4901161193847656e-08,
+      "loss_decreased_cases": 9
+    },
+    "wide": {
+      "native_immediate": {
+        "baseline_over_selected_geomean": 1.0667018749075934,
+        "range": [
+          0.9656872654183263,
+          1.191805526014824
+        ],
+        "faster_cases": 8,
+        "paired_case_medians": 9,
+        "torch_over_selected_geomean": 0.46810575665075993
+      },
+      "native_deferred": {
+        "baseline_over_selected_geomean": 1.111279095220919,
+        "range": [
+          0.9917818850766723,
+          1.175235708429566
+        ],
+        "faster_cases": 8,
+        "paired_case_medians": 9,
+        "torch_over_selected_geomean": 0.48970911547783985
+      },
+      "browser_immediate": {
+        "baseline_over_selected_geomean": 1.0095832599676873,
+        "range": [
+          0.9836065574800249,
+          1.0451263537918274
+        ],
+        "faster_cases": 6,
+        "paired_case_medians": 9
+      },
+      "browser_deferred": {
+        "baseline_over_selected_geomean": 0.988076601457619,
+        "range": [
+          0.8291366907631683,
+          1.1342975208192294
+        ],
+        "faster_cases": 4,
+        "paired_case_medians": 9
+      },
+      "max_abs_error": 1.4901161193847656e-08,
+      "loss_decreased_cases": 9
+    }
+  },
+  "correctness": {
+    "backend_serial_tests": 112,
+    "nn_unit_tests": 733,
+    "native_integration_tests": 6,
+    "python_gpu_tests": 30,
+    "python_skips": 0,
+    "torch_replays": 24,
+    "torch_comparisons": 5184,
+    "masked_guard_cases": 64,
+    "max_abs_torch_error": 1.1920928955078125e-07,
+    "backend_strict_clippy": [
+      "native",
+      "wasm32"
+    ],
+    "admission_tests": 10
+  },
+  "raw_intervals": 1800,
+  "retained_intervals": 1440,
+  "real_sgd_updates_in_timed_intervals": 14400,
+  "source_files": {
+    "crates/st-backend-wgpu/src/resident_training/graph.rs": "32576af4b9f055f08d68a2a2c0da61789fa0378625265b64117c2bf49285b437",
+    "crates/st-nn/examples/support/resident_graph_training.rs": "f18386d297d5c8c334d2d832aa778e0db851ccd2223c952a967018ac1243d43b",
+    "bindings/st-wasm/tests/resident_graph_training.html": "72d0ba6bf6e43b9b0539e409cd5e292bfc78bd3f650073f390b1875f731fa203",
+    "tools/bench_resident_training_vs_torch.py": "bbc99c5ba7961ef73ab6571af25b83420086085ffbc1f52ef3ab5ad34d50edc8",
+    "tools/bench_resident_training_browser.cjs": "5473309f6aef73f375634966d9d25a0c0938517e15401eeafeaf320fcd157f90",
+    "tools/validate_resident_training_bench.py": "b7d3f8d47d9525e79cdc773e4fdb87390f2722ca052518f6168c0a385c70cca8",
+    "bindings/st-wasm/tests/resident_training_bench.html": "0a19de337708e3219aeefda9b76e7ce99fa7807ac313c49ab378da639a37e292",
+    "tests/test_resident_training_bench.py": "8a5afd032a5f71b549c2acdd98ac2767038d2efbb56f983b7fe461e25b28f96d"
+  },
+  "boundary": "Fresh products of the selected revision; one further full round, separate from the two exploratory rounds. No automatic ModuleTrainer route or application-quality claim."
+}

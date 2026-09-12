@@ -1,0 +1,447 @@
+{
+  "schema": "spiraltorch.forward_single_pass.evidence.v1",
+  "status": "bounded_forward_optimization_validated",
+  "base": "83e2eeeb6fd3ce02450b0ebbf87af678515c94dc",
+  "source_files": {
+    "bindings/st-wasm/tests/resident_graph_forward_bench.html": "ac6ff1451681e13c2c62fbabfa938043e1719d99ea180b1c24efaaccd915e2e4",
+    "crates/st-nn/examples/resident_graph_forward_bench.rs": "36a3943bf8d695397a29ea961376a94d283a5976e18b11fb3bdba2cb8c57d267",
+    "tests/test_graph_forward_paths.py": "2db1e3da4a5e734f20106183543cfffd50ea3bf944fc5fe136215d93dc035a21",
+    "tools/bench_graph_forward_paths.py": "f8b250804f02c84bef9e877751d6d457d8a35585c551657205cf72caac077eda",
+    "tools/validate_graph_forward_paths.py": "1f55d165080051ff0845a914e28811eb1a9b4550c5516e904d15e1a75b7fdfdf",
+    ".github/workflows/ci.yml": "2bf09479c67f8a856601f947e69ea98937955311436995bccc2fe5b2fd6777b1",
+    "crates/st-backend-wgpu/src/resident_dense.rs": "dbace022635eee85ec36ad6ab66376913a242dbf1350c2680965e89ab8b5ae1b",
+    "crates/st-backend-wgpu/src/resident_graph.rs": "bf2cf3f8bab11320ccb9de94f929853a5b8336f88236c1c7d051ccbe9987e43f",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise.rs": "c61a3b04c467006588bf2d3ca3ab1a38892b8bb870b1ceef5db3d66897a9d6fd",
+    "crates/st-nn/Cargo.toml": "e2e8c2b75c0e323eaf5dc9039e9b777827111bd14d7550bc1fa91ca896a31e26",
+    "crates/st-nn/tests/resident_graph_forward.rs": "87e15053ef1a546236d55030d04c64151692d5d16287261ee6676de94f9cfc5b",
+    "docs/resident_graph_forward.md": "0175af9116d5bd67c8a1f50fc92159a98ee04a62b32fe38180350820a4cc0c11",
+    "tools/test_resident_browser.cjs": "80528d21578d125d847107c7b8c28b2a5d3c2f54231d24518965671bdc8694bb"
+  },
+  "source_form": "working-tree patch bound by SHA-256",
+  "change": "Same shaders and stage semantics; private pointwise flags cleared before and captured after one mixed-graph compute pass.",
+  "native_adapter": {
+    "backend": "Metal",
+    "device_type": "IntegratedGpu",
+    "name": "Apple M4"
+  },
+  "browser_adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "browser_physical_gpu": "UNKNOWN",
+  "macos_gpu_contention": "UNKNOWN",
+  "torch": "2.12.1",
+  "torch_devices": [
+    "cpu",
+    "mps"
+  ],
+  "mps_fallback": "explicitly disabled",
+  "initial_comparison": "candidate/comparison.json",
+  "primary_repeat_orders": [
+    [
+      "baseline",
+      "candidate"
+    ],
+    [
+      "candidate",
+      "baseline"
+    ]
+  ],
+  "primary_table_definition": "Median of six per-case medians: three seeds times two AB/BA repeat rounds. H2H and burst kept separate.",
+  "primary_table": [
+    {
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "depth": 2,
+      "paired_observations": 6,
+      "measurements": {
+        "native:1": {
+          "baseline_ms_per_forward": 0.5271459999999999,
+          "candidate_ms_per_forward": 0.2433755,
+          "candidate_over_baseline_range": [
+            0.4567056685134555,
+            0.5533811320754717
+          ]
+        },
+        "python:python_scalar_h2h": {
+          "baseline_ms_per_forward": 0.5533755029318854,
+          "candidate_ms_per_forward": 0.254854003287619,
+          "candidate_over_baseline_range": [
+            0.4389664545445091,
+            0.5647395843134013
+          ]
+        },
+        "browser:scalar_h2h": {
+          "baseline_ms_per_forward": 0.5,
+          "candidate_ms_per_forward": 0.30000000447034836,
+          "candidate_over_baseline_range": [
+            0.5999999940395355,
+            0.7999999970197678
+          ]
+        },
+        "python:python_scalar_burst": {
+          "baseline_ms_per_forward": 0.30821612517684116,
+          "candidate_ms_per_forward": 0.0883151246853231,
+          "candidate_over_baseline_range": [
+            0.2736179035016935,
+            0.3292250736695988
+          ]
+        },
+        "python:torch_mps_h2h": {
+          "baseline_ms_per_forward": 0.3727289986272808,
+          "candidate_ms_per_forward": 0.30485399838653393,
+          "candidate_over_baseline_range": [
+            0.7289879613056645,
+            0.9347183359489184
+          ]
+        },
+        "python:torch_cpu_h2h": {
+          "baseline_ms_per_forward": 0.03479149745544419,
+          "candidate_ms_per_forward": 0.021915999241173267,
+          "candidate_over_baseline_range": [
+            0.3990261605468483,
+            1.1214376820821719
+          ]
+        }
+      }
+    },
+    {
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "depth": 8,
+      "paired_observations": 6,
+      "measurements": {
+        "native:1": {
+          "baseline_ms_per_forward": 1.620021,
+          "candidate_ms_per_forward": 0.423917,
+          "candidate_over_baseline_range": [
+            0.2571606186344776,
+            0.26430584097794535
+          ]
+        },
+        "python:python_scalar_h2h": {
+          "baseline_ms_per_forward": 1.6815000017231796,
+          "candidate_ms_per_forward": 0.45616649731528014,
+          "candidate_over_baseline_range": [
+            0.26494033337025075,
+            0.27987091903650624
+          ]
+        },
+        "browser:scalar_h2h": {
+          "baseline_ms_per_forward": 1.2999999970197678,
+          "candidate_ms_per_forward": 0.4000000059604645,
+          "candidate_over_baseline_range": [
+            0.3076923072514449,
+            0.41666666563186383
+          ]
+        },
+        "python:python_scalar_burst": {
+          "baseline_ms_per_forward": 1.1232317497160693,
+          "candidate_ms_per_forward": 0.1842213750933297,
+          "candidate_over_baseline_range": [
+            0.15764234370276822,
+            0.16649375977904354
+          ]
+        },
+        "python:torch_mps_h2h": {
+          "baseline_ms_per_forward": 0.7049999985611066,
+          "candidate_ms_per_forward": 0.6399579979188275,
+          "candidate_over_baseline_range": [
+            0.8564900397055812,
+            0.9366252949751375
+          ]
+        },
+        "python:torch_cpu_h2h": {
+          "baseline_ms_per_forward": 0.13495849998435006,
+          "candidate_ms_per_forward": 0.10254199878545478,
+          "candidate_over_baseline_range": [
+            0.6880733788179018,
+            0.8013460225986476
+          ]
+        }
+      }
+    },
+    {
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "depth": 16,
+      "paired_observations": 6,
+      "measurements": {
+        "native:1": {
+          "baseline_ms_per_forward": 3.285896,
+          "candidate_ms_per_forward": 0.838917,
+          "candidate_over_baseline_range": [
+            0.2531466010225336,
+            0.2620591956267083
+          ]
+        },
+        "python:python_scalar_h2h": {
+          "baseline_ms_per_forward": 3.453020501183346,
+          "candidate_ms_per_forward": 0.9131039987551048,
+          "candidate_over_baseline_range": [
+            0.2573557841920777,
+            0.2798111413689102
+          ]
+        },
+        "browser:scalar_h2h": {
+          "baseline_ms_per_forward": 3.4500000029802322,
+          "candidate_ms_per_forward": 0.8999999985098839,
+          "candidate_over_baseline_range": [
+            0.25,
+            0.29999999950329465
+          ]
+        },
+        "python:python_scalar_burst": {
+          "baseline_ms_per_forward": 2.3715520624136843,
+          "candidate_ms_per_forward": 0.5284478747853427,
+          "candidate_over_baseline_range": [
+            0.19967163249533088,
+            0.23241178590042802
+          ]
+        },
+        "python:torch_mps_h2h": {
+          "baseline_ms_per_forward": 1.03791649962659,
+          "candidate_ms_per_forward": 0.9148120007012039,
+          "candidate_over_baseline_range": [
+            0.8438713183934151,
+            1.0585777769963136
+          ]
+        },
+        "python:torch_cpu_h2h": {
+          "baseline_ms_per_forward": 0.4159794953011442,
+          "candidate_ms_per_forward": 0.379979501303751,
+          "candidate_over_baseline_range": [
+            0.8937839451747763,
+            0.9920322781060712
+          ]
+        }
+      }
+    }
+  ],
+  "recipes": 9,
+  "retained_timing_rows": 8262,
+  "primary_repeat_timing_rows": 5508,
+  "max_abs_error": 4.172325134277344e-07,
+  "validation": {
+    "candidate_steps": 19,
+    "repeat_steps": 14,
+    "backend_serial_tests": 111,
+    "nn_serial_tests": 733,
+    "initial_native_integration_tests": 6,
+    "targeted_graph_tests": 2,
+    "targeted_fault_positions": 8,
+    "python_gpu_tests": 30,
+    "python_gpu_skips": 0,
+    "browser_assertions": 536,
+    "admission_tests": 6
+  },
+  "initial_admission_failure": {
+    "path": "raw/python-torch.json.xz",
+    "cause": "Comparing shortest f32 JSON decimals as exact f64 values.",
+    "fix": "Bitwise f32 admission; no tolerance relaxation; one-ULP mutation rejection tested."
+  },
+  "unresolved_parallel_failure": {
+    "status": "UNKNOWN",
+    "prior_archive": "../2026-09-10-resident-graph-forward/README.md",
+    "note": "The earlier one-off default-parallel training test failure is not fixed or proven pre-existing by these serial checks."
+  },
+  "boundaries": [
+    "Forward-only microbenchmarks, not training throughput, model quality or autoregressive decode.",
+    "Scalar/sequential and register-2x2/compensated results retained separately; no global fastest-kernel selection.",
+    "Torch eager addmm/tanh-GELU, single CPU thread, no torch.compile or fastest-PyTorch claim.",
+    "All measured models remain faster on the tested Torch CPU path than on these GPU paths.",
+    "Native legacy Module retains its ordinary host caches and behavior; its difference is not transfer cost alone.",
+    "Host representations differ: native Vec<f32>, Python lists, WASM Float32Array. Python/Torch both include list conversion.",
+    "No automatic Module::forward/autograd routing, CUDA execution, push, merge or PyPI release."
+  ],
+  "additional_nn_lint": {
+    "status": "strict_st_nn_failed_on_unchanged_sources",
+    "strict_exit_code": 101,
+    "advisory_exit_code": 0,
+    "strict_findings": [
+      {
+        "message": "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+        "file": "crates/st-nn/src/language/automation.rs",
+        "line": 359
+      },
+      {
+        "message": "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+        "file": "crates/st-nn/src/language/automation.rs",
+        "line": 388
+      },
+      {
+        "message": "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+        "file": "crates/st-nn/src/language/gw.rs",
+        "line": 372
+      },
+      {
+        "message": "this function has too many arguments (10/7)",
+        "file": "crates/st-nn/src/layers/activation.rs",
+        "line": 31
+      },
+      {
+        "message": "this function has too many arguments (10/7)",
+        "file": "crates/st-nn/src/layers/continuous_wavelet.rs",
+        "line": 12
+      },
+      {
+        "message": "the loop variable `c` is used to index `profile`",
+        "file": "crates/st-nn/src/layers/continuous_wavelet.rs",
+        "line": 173
+      },
+      {
+        "message": "this function has too many arguments (9/7)",
+        "file": "crates/st-nn/src/layers/dropout.rs",
+        "line": 33
+      },
+      {
+        "message": "derefed type is same as origin",
+        "file": "crates/st-nn/src/layers/embedding.rs",
+        "line": 83
+      },
+      {
+        "message": "this function has too many arguments (13/7)",
+        "file": "crates/st-nn/src/layers/embedding.rs",
+        "line": 145
+      },
+      {
+        "message": "this function has too many arguments (28/7)",
+        "file": "crates/st-nn/src/layers/lstm.rs",
+        "line": 116
+      },
+      {
+        "message": "this function has too many arguments (13/7)",
+        "file": "crates/st-nn/src/layers/non_liner.rs",
+        "line": 262
+      },
+      {
+        "message": "the loop variable `col` is used to index `gain`",
+        "file": "crates/st-nn/src/layers/non_liner.rs",
+        "line": 1021
+      },
+      {
+        "message": "the loop variable `col` is used to index `gain`",
+        "file": "crates/st-nn/src/layers/non_liner.rs",
+        "line": 1043
+      },
+      {
+        "message": "this function has too many arguments (11/7)",
+        "file": "crates/st-nn/src/layers/normalization.rs",
+        "line": 23
+      },
+      {
+        "message": "this function has too many arguments (8/7)",
+        "file": "crates/st-nn/src/layers/normalization.rs",
+        "line": 176
+      },
+      {
+        "message": "this function has too many arguments (13/7)",
+        "file": "crates/st-nn/src/layers/wave_gate.rs",
+        "line": 71
+      },
+      {
+        "message": "this function has too many arguments (9/7)",
+        "file": "crates/st-nn/src/layers/zspace_projector.rs",
+        "line": 20
+      },
+      {
+        "message": "this function has too many arguments (8/7)",
+        "file": "crates/st-nn/src/z_rba/cov_head.rs",
+        "line": 263
+      },
+      {
+        "message": "this function has too many arguments (8/7)",
+        "file": "crates/st-nn/src/zspace_coherence/sequencer.rs",
+        "line": 1812
+      },
+      {
+        "message": "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+        "file": "crates/st-nn/src/zspace_coherence/sequencer.rs",
+        "line": 2481
+      },
+      {
+        "message": "this `impl` can be derived",
+        "file": "crates/st-nn/src/zspace_coherence/vae.rs",
+        "line": 128
+      },
+      {
+        "message": "this function has too many arguments (9/7)",
+        "file": "crates/st-nn/src/zspace_coherence/vae.rs",
+        "line": 224
+      }
+    ],
+    "unchanged_files": {
+      "crates/st-nn/examples/support/resident_graph_forward.rs": {
+        "base_sha256": "fdf867c3c07bff49cdc2beea2a33eb3fd9dbe3b606da10c3db26b1a79016953f",
+        "current_sha256": "fdf867c3c07bff49cdc2beea2a33eb3fd9dbe3b606da10c3db26b1a79016953f"
+      },
+      "crates/st-nn/src/language/automation.rs": {
+        "base_sha256": "512af737b764a457f09cf93a6653375304c7b4b73757f5be2f604db5a57f3e8a",
+        "current_sha256": "512af737b764a457f09cf93a6653375304c7b4b73757f5be2f604db5a57f3e8a"
+      },
+      "crates/st-nn/src/language/gw.rs": {
+        "base_sha256": "06c50f67740212f9021c25105d09caf825c4fe54a07255c2a1ace07debcee501",
+        "current_sha256": "06c50f67740212f9021c25105d09caf825c4fe54a07255c2a1ace07debcee501"
+      },
+      "crates/st-nn/src/layers/activation.rs": {
+        "base_sha256": "18a134b6719ebb65d3a7f27ac31d6f9df9fdcf5c084c2b07f1bef169de2854de",
+        "current_sha256": "18a134b6719ebb65d3a7f27ac31d6f9df9fdcf5c084c2b07f1bef169de2854de"
+      },
+      "crates/st-nn/src/layers/continuous_wavelet.rs": {
+        "base_sha256": "0bfd930d800c1c2e1a1598a814417aaed4006928a862596cad574f780dfa1e5a",
+        "current_sha256": "0bfd930d800c1c2e1a1598a814417aaed4006928a862596cad574f780dfa1e5a"
+      },
+      "crates/st-nn/src/layers/dropout.rs": {
+        "base_sha256": "a3bd25992b85f4ea94c80c6e5170176d0f504d5e0b8734feea0149aee1b3f9dd",
+        "current_sha256": "a3bd25992b85f4ea94c80c6e5170176d0f504d5e0b8734feea0149aee1b3f9dd"
+      },
+      "crates/st-nn/src/layers/embedding.rs": {
+        "base_sha256": "ba74ed3f13020b63205ddf09dbffbf24ff20a9fd61e9d702f9bb2dc3da05a7d7",
+        "current_sha256": "ba74ed3f13020b63205ddf09dbffbf24ff20a9fd61e9d702f9bb2dc3da05a7d7"
+      },
+      "crates/st-nn/src/layers/lstm.rs": {
+        "base_sha256": "5553fb87d434c644313ce65334460cea9460095ecc17367797e6b113d0ded5d8",
+        "current_sha256": "5553fb87d434c644313ce65334460cea9460095ecc17367797e6b113d0ded5d8"
+      },
+      "crates/st-nn/src/layers/non_liner.rs": {
+        "base_sha256": "1841186902f4bfb8136ce3d9ab88179a8e3332b2561a492bd35c35e90c7852c0",
+        "current_sha256": "1841186902f4bfb8136ce3d9ab88179a8e3332b2561a492bd35c35e90c7852c0"
+      },
+      "crates/st-nn/src/layers/normalization.rs": {
+        "base_sha256": "f564a852ff24e5c45d96802b725e7937f745a0b382ad6d148ed24bc64b6701f5",
+        "current_sha256": "f564a852ff24e5c45d96802b725e7937f745a0b382ad6d148ed24bc64b6701f5"
+      },
+      "crates/st-nn/src/layers/wave_gate.rs": {
+        "base_sha256": "402270dae8effa358d8be362965be2437c00cf77ff68a153c70aeabcf429dc74",
+        "current_sha256": "402270dae8effa358d8be362965be2437c00cf77ff68a153c70aeabcf429dc74"
+      },
+      "crates/st-nn/src/layers/zspace_projector.rs": {
+        "base_sha256": "bd1e8d4facd2825ae114db4cfdfd3d76b1afd1fcbb9b80a8503c4dbe160ea7c0",
+        "current_sha256": "bd1e8d4facd2825ae114db4cfdfd3d76b1afd1fcbb9b80a8503c4dbe160ea7c0"
+      },
+      "crates/st-nn/src/z_rba/cov_head.rs": {
+        "base_sha256": "379081fc954f0e28f5755bb3b30e5bfb22e05d5cb39e37afee5dca120cb8b631",
+        "current_sha256": "379081fc954f0e28f5755bb3b30e5bfb22e05d5cb39e37afee5dca120cb8b631"
+      },
+      "crates/st-nn/src/zspace_coherence/sequencer.rs": {
+        "base_sha256": "c05543b4b8ca48c21a933ac8aac0e1acbdb8380cf9f9fcef2741e60b86b9f766",
+        "current_sha256": "c05543b4b8ca48c21a933ac8aac0e1acbdb8380cf9f9fcef2741e60b86b9f766"
+      },
+      "crates/st-nn/src/zspace_coherence/vae.rs": {
+        "base_sha256": "6a7c47c96504f29d6507d841997e7d147aeeca2b3f395eda70d7002a79561d96",
+        "current_sha256": "6a7c47c96504f29d6507d841997e7d147aeeca2b3f395eda70d7002a79561d96"
+      }
+    },
+    "scope": "The strict st-nn command did not pass. Advisory compilation completed with the same library lints and one unchanged shared-fixture warning. This is separate from the successful strict backend library check."
+  }
+}

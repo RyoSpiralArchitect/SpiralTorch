@@ -1,0 +1,395 @@
+{
+  "schema": "spiraltorch.resident_module_handoff_evidence.v1",
+  "status": "passed",
+  "source": {
+    "commit": "a0428e6ccd83e9eba47bb4c3b16e4ef8ab75c2ce",
+    "tree": "815415c147d5ec5397e2e41ab42a32d0bdbec174"
+  },
+  "adopted": "verified-b",
+  "verification": {
+    "steps": 37,
+    "frozen_products": 15
+  },
+  "scope": "Explicit original Module -> resident graph learning -> checked original Module weight handoff -> fresh ModuleTrainer phase. Rust owns policy, Python exposes it, WASM exports the common portable plan.",
+  "fixes": [
+    "All role bindings are checked against actual visited Parameter identities, names, shapes, program and bitwise baseline values before mutation. Known pointwise fusion is normalized in Rust. Attached parameter optimizer state requires explicit reset.",
+    "Handoff invalidates both forward and transpose parameter packs and preserves supported host layouts.",
+    "Column-major Tensor transpose formerly read raw bytes as row-major, corrupting Linear input VJPs. CPU and explicit WGPU transpose now preserve logical values. Protected snapshots share; writable/foreign paths do not expose transpose inputs via a mutable DLPack result alias.",
+    "Python plan rejection keeps the existing InferencePlan ValueError mapping; its shipped typing declaration is checked against the native signature."
+  ],
+  "boundaries": [
+    "Weights only, not optimizer-state continuation, trainer-level reset, automatic ModuleTrainer GPU dispatch, or generic pure::Tensor/autograd migration.",
+    "No new CUDA/Furnace run, wheel release, push or merge. No new latency/throughput or model-quality evidence.",
+    "The explicit handoff fixture is a small deterministic integration case, not a model-quality experiment. Gradient policies remain explicit and distinct.",
+    "Module commit relies on the pre-existing stable parameter visitor contract. Duplicate names/tied slots are unsupported; compatibility is not object identity, lineage or authorization.",
+    "Native WGPU uses Apple M4 Metal; Chrome reports BrowserWebGpu, not an attestation of its exact physical adapter. Owned GPU work serial; host contention UNKNOWN.",
+    "Prior mixed benchmark timings and the old parallel GPU VJP failure remain unresolved; passing serial tests does not resolve them.",
+    "DLPack remains contiguous row-major CPU f32 only. These tests do not certify all tensor/optimizer layout combinations."
+  ],
+  "exploratory_failures": [
+    {
+      "paths": [
+        "exploratory-cpu.log",
+        "exploratory-cpu-values.log"
+      ],
+      "cause": "Pre-fix column-major Linear backward input-gradient mismatch. Forward matched. Kept exact comparison and corrected Tensor transpose rather than relaxing tolerance."
+    },
+    {
+      "paths": [
+        "verified-a/receipt.json",
+        "verified-a/python-module_update.log"
+      ],
+      "cause": "Source-bound initial verification stopped after native training passed but three Python negative tests received RuntimeError instead of the plan ValueError contract. Fixed the binding to preserve the typed plan error."
+    },
+    {
+      "paths": [
+        "exploratory-dlpack.log"
+      ],
+      "cause": "New regression fixture incorrectly tried column-major DLPack export, which is unsupported. Rewrote the test using the actual public row-major transpose-result export; no DLPack feature expansion was made."
+    }
+  ],
+  "exploratory_boundary": "Exploratory logs are intermediate dirty-source tests, not frozen performance baselines. The failed source-bound verification is separate from the adopted complete run.",
+  "rust_tests": {
+    "contracts": {
+      "passed": 23,
+      "ignored": 0
+    },
+    "tensor-cpu": {
+      "passed": 440,
+      "ignored": 0
+    },
+    "tensor-wgpu": {
+      "passed": 488,
+      "ignored": 1,
+      "ignored_boundary": "Existing fractional GL live-adapter test is marked ignored; not part of the transpose or handoff changes."
+    },
+    "nn-cpu-handoff": {
+      "passed": 7,
+      "ignored": 0
+    },
+    "nn-serial": {
+      "passed": 742,
+      "ignored": 0
+    },
+    "backend-serial": {
+      "passed": 117,
+      "ignored": 0
+    },
+    "integration": {
+      "passed": 6,
+      "ignored": 0
+    }
+  },
+  "python": {
+    "existing": {
+      "status": "passed",
+      "tests": 32,
+      "skipped": 0,
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-parameter-handoff-20260912/verified-b/python-release.dylib",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "wgpu_available": true
+    },
+    "python-graph_autograd": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "python-graph_learner": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "python-module_update": {
+      "tests": 5,
+      "status": "passed"
+    },
+    "python-pointwise": {
+      "tests": 5,
+      "status": "passed"
+    },
+    "python-cpu-handoff": {
+      "tests": 4,
+      "status": "passed"
+    },
+    "cpu_build": {
+      "status": "passed",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": false,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-parameter-handoff-20260912/verified-b/python-cpu.dylib"
+    }
+  },
+  "handoff": {
+    "browser": {
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "cases": [
+        {
+          "policy": "exact",
+          "fused": false,
+          "updates": 16,
+          "submitted_steps": 17,
+          "first_pre_update_loss": 0.9979310035705566,
+          "last_pre_update_loss": 0.15114744007587433,
+          "prediction": [
+            0.6418247222900391,
+            0.6422871947288513,
+            0.6418247222900391,
+            0.6422871947288513,
+            0.6418247222900391,
+            0.6422871947288513,
+            0.6418247222900391,
+            0.6422871947288513
+          ]
+        },
+        {
+          "policy": "exact",
+          "fused": true,
+          "updates": 16,
+          "submitted_steps": 17,
+          "first_pre_update_loss": 0.9979310035705566,
+          "last_pre_update_loss": 0.15114744007587433,
+          "prediction": [
+            0.6418247222900391,
+            0.6422871947288513,
+            0.6418247222900391,
+            0.6422871947288513,
+            0.6418247222900391,
+            0.6422871947288513,
+            0.6418247222900391,
+            0.6422871947288513
+          ]
+        },
+        {
+          "policy": "module_compatible",
+          "fused": false,
+          "updates": 16,
+          "submitted_steps": 17,
+          "first_pre_update_loss": 0.9979310035705566,
+          "last_pre_update_loss": 0.19564607739448547,
+          "prediction": [
+            0.5829064249992371,
+            0.5833171606063843,
+            0.5829064249992371,
+            0.5833171606063843,
+            0.5829064249992371,
+            0.5833171606063843,
+            0.5829064249992371,
+            0.5833171606063843
+          ]
+        },
+        {
+          "policy": "module_compatible",
+          "fused": true,
+          "updates": 16,
+          "submitted_steps": 17,
+          "first_pre_update_loss": 0.9979310035705566,
+          "last_pre_update_loss": 0.19564607739448547,
+          "prediction": [
+            0.5829064249992371,
+            0.5833171606063843,
+            0.5829064249992371,
+            0.5833171606063843,
+            0.5829064249992371,
+            0.5833171606063843,
+            0.5829064249992371,
+            0.5833171606063843
+          ]
+        }
+      ]
+    },
+    "browser-to-python": {
+      "status": "passed",
+      "schema": "spiraltorch.resident_module_handoff.v1",
+      "cases": [
+        {
+          "policy": "exact",
+          "fused": false,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        },
+        {
+          "policy": "exact",
+          "fused": true,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        },
+        {
+          "policy": "module_compatible",
+          "fused": false,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        },
+        {
+          "policy": "module_compatible",
+          "fused": true,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        }
+      ],
+      "boundary": "Weight handoff, not optimizer-state continuation. Browser model/SGD and the new host ModuleTrainer phase have distinct explicit optimizer semantics."
+    },
+    "browser-to-cpu-python": {
+      "status": "passed",
+      "schema": "spiraltorch.resident_module_handoff.v1",
+      "cases": [
+        {
+          "policy": "exact",
+          "fused": false,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        },
+        {
+          "policy": "exact",
+          "fused": true,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        },
+        {
+          "policy": "module_compatible",
+          "fused": false,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        },
+        {
+          "policy": "module_compatible",
+          "fused": true,
+          "parameters": 6,
+          "max_abs_error": 0.0,
+          "new_module_trainer_phase": "passed"
+        }
+      ],
+      "boundary": "Weight handoff, not optimizer-state continuation. Browser model/SGD and the new host ModuleTrainer phase have distinct explicit optimizer semantics."
+    }
+  },
+  "regression": {
+    "native": {
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "learner_cases": 12,
+      "accepted_learning_updates": 768,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08
+    },
+    "browser": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "learner_cases": 12,
+      "accepted_learning_updates": 768,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08
+    },
+    "wasm-pointwise": {
+      "status": "passed",
+      "assertions": 38,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "custom_loss_update": "passed"
+    },
+    "wasm-learner": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2
+    },
+    "wasm-autograd": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-fusion": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2
+    },
+    "wasm-forward": {
+      "status": "passed",
+      "assertions": 536,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 12
+    },
+    "torch": {
+      "version": "2.12.1",
+      "cases": 120,
+      "comparisons": 17136,
+      "max_abs_error": 5.7220458984375e-06,
+      "boundary": "Independent CPU/MPS numerical replay of existing graph/autograd/learner fixtures, not a new performance benchmark."
+    }
+  },
+  "artifacts": 82,
+  "compressed_bytes": 810116,
+  "raw_bytes": 18361763
+}

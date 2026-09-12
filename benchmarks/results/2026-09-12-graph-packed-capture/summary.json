@@ -1,0 +1,945 @@
+{
+  "schema": "spiraltorch.graph_packed_capture_evidence.v1",
+  "status": "passed",
+  "source": {
+    "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+    "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+  },
+  "adopted": "verified-b",
+  "correctness": {
+    "native": {
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "learner_cases": 12,
+      "learner_guards": 8,
+      "learning_updates": 768,
+      "retained_checkpoints": 60,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08,
+      "cases": [
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        }
+      ],
+      "composition_reuse": {
+        "case": "composition_reuse",
+        "max_abs_error": 0.0,
+        "passed": true,
+        "terms": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          17,
+          256,
+          1,
+          5
+        ],
+        "width": 257
+      },
+      "autograd_cases": 6,
+      "autograd_guards": 12,
+      "capture_reuse": {
+        "captured_vjps": 4,
+        "case": "queued_capture_tail_shapes_detached_guard_recovery",
+        "input_shape": [
+          2,
+          3,
+          257
+        ],
+        "observation": "after_workspace_drop",
+        "passed": true
+      },
+      "prior_fusion_cases": 6
+    },
+    "browser": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "learner_cases": 12,
+      "learner_guards": 8,
+      "learning_updates": 768,
+      "retained_checkpoints": 60,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08,
+      "cases": [
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        }
+      ],
+      "composition_reuse": {
+        "case": "composition_reuse",
+        "max_abs_error": 0,
+        "passed": true,
+        "terms": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          17,
+          256,
+          1,
+          5
+        ],
+        "width": 257
+      },
+      "autograd_cases": 6,
+      "autograd_guards": 12,
+      "capture_reuse": {
+        "captured_vjps": 4,
+        "case": "queued_capture_tail_shapes_detached_guard_recovery",
+        "input_shape": [
+          2,
+          3,
+          257
+        ],
+        "observation": "after_workspace_drop",
+        "passed": true
+      },
+      "prior_fusion_cases": 6
+    },
+    "torch": {
+      "version": "2.12.1",
+      "cases": 120,
+      "comparisons": 17136,
+      "max_abs": 5.7220458984375e-06,
+      "weighted_learning": {
+        "cases": 48,
+        "updates": 3072,
+        "comparisons": 5904,
+        "max_abs": 5.960464477539063e-08
+      }
+    },
+    "python_existing": {
+      "status": "passed",
+      "tests": 32,
+      "skipped": 0,
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/graph-packed-capture-20260912/verified-b/python-release.dylib",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "wgpu_available": true
+    },
+    "python-autograd": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "python-learner": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "wasm-learner": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2,
+      "cases": [
+        {
+          "policy": "exact",
+          "updates": 32,
+          "gain": 1.0702553610510797,
+          "resume": "bit_identical"
+        },
+        {
+          "policy": "module_compatible",
+          "updates": 32,
+          "gain": 1.4896127003921353,
+          "resume": "bit_identical"
+        }
+      ]
+    },
+    "wasm-autograd": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-fusion": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2
+    },
+    "wasm-forward": {
+      "status": "passed",
+      "assertions": 536,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 12
+    }
+  },
+  "rounds": [
+    {
+      "name": "timing",
+      "workload": "learner",
+      "comparison": "baseline/candidate A/B",
+      "baseline": {
+        "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+        "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+      },
+      "candidate": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "max_abs": 1.7695128917694092e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.3225468728318586,
+          "min_ratio": 1.239906775385036,
+          "max_ratio": 1.4439869484777463,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.5574677341819856
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.3172156451330248,
+          "min_ratio": 1.2426638658244404,
+          "max_ratio": 1.3689950061105505,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.5715809542028442
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.5926455224786022,
+          "min_ratio": 1.3620178041401978,
+          "max_ratio": 1.9475982532271587,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.5759729787758536,
+          "min_ratio": 1.32669322723946,
+          "max_ratio": 1.9182561308900379,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    },
+    {
+      "name": "timing-b",
+      "workload": "learner",
+      "comparison": "baseline/candidate A/B",
+      "baseline": {
+        "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+        "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+      },
+      "candidate": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "max_abs": 1.7695128917694092e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.2659144406502716,
+          "min_ratio": 1.1166204938670181,
+          "max_ratio": 1.3975261047328735,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.534639287181074
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.2516257637698858,
+          "min_ratio": 1.1754600299881952,
+          "max_ratio": 1.301422873895353,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.5447375715313583
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.5887562566628952,
+          "min_ratio": 1.333333333439467,
+          "max_ratio": 1.926160337477632,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.5824704968296575,
+          "min_ratio": 1.338709677499307,
+          "max_ratio": 1.9671232876916454,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    },
+    {
+      "name": "control",
+      "workload": "graph",
+      "comparison": "baseline/candidate A/B",
+      "baseline": {
+        "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+        "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+      },
+      "candidate": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "max_abs": 1.4901161193847656e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.9134110219872729,
+          "min_ratio": 0.658667901201528,
+          "max_ratio": 1.0656385604028278,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.7991434217175563
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 0.9963618513681197,
+          "min_ratio": 0.8577588830346528,
+          "max_ratio": 1.0688735028653154,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8640191456823454
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.9899114761813967,
+          "min_ratio": 0.9648093841837654,
+          "max_ratio": 1.01063829803255,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.003994423657643,
+          "min_ratio": 0.956521740890969,
+          "max_ratio": 1.0888888876563236,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    },
+    {
+      "name": "control-b",
+      "workload": "graph",
+      "comparison": "baseline/candidate A/B",
+      "baseline": {
+        "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+        "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+      },
+      "candidate": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "max_abs": 1.4901161193847656e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 0.9778172620360273,
+          "min_ratio": 0.7321554635938163,
+          "max_ratio": 1.081471482982431,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8495808884421578
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 0.9763896482161618,
+          "min_ratio": 0.7347050123768315,
+          "max_ratio": 1.0908407432941094,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8151570864827622
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.004792690767617,
+          "min_ratio": 0.9849397592585318,
+          "max_ratio": 1.0227272726406829,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 0.9984966913793751,
+          "min_ratio": 0.9777777774650374,
+          "max_ratio": 1.021739129941833,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    },
+    {
+      "name": "control-aa",
+      "workload": "graph",
+      "comparison": "same-product A/A",
+      "baseline": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "candidate": {
+        "commit": "fd4147fb0a6de3687a251b71728558ff7d3dbf85",
+        "tree": "efc705b7b0e8c47a22395d525d9d28b6cfd5971e"
+      },
+      "max_abs": 1.4901161193847656e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0344976192559594,
+          "min_ratio": 0.7464085990610537,
+          "max_ratio": 1.4226138612591612,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8526366056264761
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0591126153388193,
+          "min_ratio": 0.9890751403230214,
+          "max_ratio": 1.235548273431659,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8677624745821002
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0015945628797307,
+          "min_ratio": 0.9795918368122718,
+          "max_ratio": 1.0326086961539263,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.079067436777139,
+          "min_ratio": 0.9852941177034538,
+          "max_ratio": 1.840909091024544,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      },
+      "same_native_sha256": "005009392fc10f56f8bdde27dba21596cf94c954e9796a9982e857af3bf2ad27",
+      "same_browser_assets": {
+        "snippets/st-nn-f975d31addace2e2/inline0.js": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b",
+        "spiraltorch_wasm.js": "431890b7b2bb35b067b59765e03652e22b1c5ee944431cd93f298f67e370fcd1",
+        "spiraltorch_wasm_bg.wasm": "0014c0747cafa0828fb772ab0f584c26404a590fdf23cd7726f5cfd7474420fb"
+      }
+    }
+  ],
+  "scope": "Prepared contiguous VJP captures retain fixed source/shape bindings, a single copy pass, independent value buffers, and a new shared whole-VJP finite guard on each call. No per-output metadata/guard allocation; immutable value allocations and copies remain. Python/WASM use the same Rust core.",
+  "performance_scope": "End-to-end custom learner performance: GPU quadratic/quartic seeds, two exact VJPs, weighted SGD and all update acceptance receipts. Initial/final loss/state probes outside timing. Ordinary MSE control is separate. Pointwise fusion disabled in all timing lanes.",
+  "boundaries": [
+    "No ModuleTrainer, generic autograd or pure::Tensor migration. No Adam, momentum, cross-forward accumulation or mixed precision.",
+    "Learning fixture uses three seed/shape pairs, not an independent crossed seed-by-shape sweep. Bounded numerical learning, not model quality.",
+    "Submitted updates are attempts; only their individual captured receipts establish acceptance.",
+    "Owned GPU work serial; host contention UNKNOWN. Prior parallel GPU VJP one-off remains UNKNOWN.",
+    "Native Apple M4 Metal/MPS; Chrome WebGPU does not attest an exact physical browser adapter.",
+    "Eager Torch only, not torch.compile or the fastest possible Torch. No CUDA/Furnace, push, merge or wheel release."
+  ],
+  "exploratory_failures": [
+    {
+      "path": "verified/receipt.json",
+      "phase": "browser-correctness",
+      "cause": "Browser admission still required eleven autograd guards; new fixture has twelve. Kept failed receipt/page hash and updated admission to require the new detached-capture case. Adopted verification is verified-b."
+    }
+  ],
+  "test_counts": {
+    "contracts": 22,
+    "nn-serial": 734,
+    "backend-serial": 116,
+    "integration": 6
+  },
+  "measurement_counts": {
+    "raw_intervals": 4500,
+    "retained_intervals": 3600,
+    "nonzero_sgd_updates": 36000
+  },
+  "artifacts": 114,
+  "compressed_bytes": 49710300,
+  "raw_bytes": 851265082
+}

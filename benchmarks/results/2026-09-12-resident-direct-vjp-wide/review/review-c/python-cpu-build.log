@@ -1,0 +1,17 @@
+   Compiling st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-frac)
+   Compiling faer v0.23.2
+   Compiling st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-kdsl)
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-core)
+   Compiling spiraltorch-py v0.4.27 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/bindings/st-py)
+   Compiling pyo3 v0.29.2
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-tensor)
+   Compiling st-robotics v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-robotics)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-logic)
+   Compiling st-spiral-rl v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-spiral-rl)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-vision)
+   Compiling spiral-selfsup v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/spiral-selfsup)
+   Compiling st-qr-studio v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-qr-studio)
+   Compiling st-rec v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-nn-integration-v1/crates/st-rec)
+    Finished `release` profile [optimized] target(s) in 2m 44s

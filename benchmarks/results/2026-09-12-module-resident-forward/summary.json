@@ -1,0 +1,1072 @@
+{
+  "schema": "spiraltorch.module_resident_forward_evidence.v1",
+  "status": "passed",
+  "source": {
+    "commit": "c5349790398d406d1a5a39566cf5d3d22db20181",
+    "tree": "d94114158a89609975886d2197aa570749d91549"
+  },
+  "adopted": "verified-c",
+  "steps": 44,
+  "products": {
+    "python-release.dylib": "c2e4538431395303d0f7a643df665dea57bc81a31ca1b9825da629272718cf11",
+    "client/spiraltorch_wasm.d.ts": "3903ad650e86f5a8e51d457c3d3ecfa26f1ec97825bf197140581e0e9e654fbe",
+    "client/spiraltorch_wasm.js": "d6dbf38def1560f2ee9299db3a67dc82e8c4c446a6ba11ece1e918383ca0fb47",
+    "client/spiraltorch_wasm_bg.wasm.d.ts": "1d49c0b4509eb48349cb5351de47e789214ca2e3bc64ab3910b664bf070f0045",
+    "client/spiraltorch_wasm_bg.wasm": "03ebdbf9e0f3749b5cad39bf5910f808e3c09fb6b2fe5f8fc651d6d4636b13e0",
+    "client/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+    "client/handoff-fixture.json": "fe6ab2b9732cc89d82de7989ae98ff393f9e8c8098ddeade66c01a7aae4315b1",
+    "resident_graph_forward": "d2bdc64dec8fb0ee6c4fbd2a26623e463c4bedcf208b30aa3967ce83704b16e9",
+    "resident_graph_training": "c19acadf234c4d1e84318d3eb5bc78558bc328a0f7557881ed6f4f0880d8f01c",
+    "resident_graph_forward_bench": "3ad39b8868d92e9e01bc4cbb7d8b6658d486babf5c977bf84c6b8783c2fa5e95",
+    "client/forward-fixture.json": "6f029bed2413ff6caac3576eea38bf25b6577c84e1e2d130e7351404ada8b6f0",
+    "correctness/spiraltorch_wasm.d.ts": "bfdcd3e873afc7ea5a2f5f6343ca42804c174f461ca4018b1ecf3457a44ac4ac",
+    "correctness/spiraltorch_wasm.js": "055872e8c4ede157a9aee1ae03a16640b13cb191f7a5f1b97768953e8015276e",
+    "correctness/spiraltorch_wasm_bg.wasm.d.ts": "2d417b5db4de7bd02f1332b2eeddbe7dac5ce2f954b22b4e32c9f83cf4d6687f",
+    "correctness/spiraltorch_wasm_bg.wasm": "f0927ca055491225501026e1939e7369aa3dd4fab9f496033b6f8e03420d2c72",
+    "python-cpu.dylib": "767157f2a91a4df8cb434fe91b970098fb71d7c18d9bd60966a1220030d1b7ce"
+  },
+  "capabilities": [
+    "Original Rust Module forwarding with GPU-resident N-D inputs/outputs and a bounded exact-match graph cache.",
+    "Same Python model.forward(x)/model(x) chooses host Tensor or WgpuTensor by explicit input type.",
+    "Browser Sequential owns the same Rust Module; checked training parameter handoff rebuilds its graph.",
+    "Mutable/foreign parameter changes, device identity, layouts, shape/program changes, output ownership, inherited invalid values and active tensor plan bindings are checked."
+  ],
+  "boundaries": [
+    "GPU input/output bridge copies and O(parameter values) host comparison remain; not zero-copy.",
+    "No implicit host transfer, unsupported-layer fallback, generic autograd or ModuleTrainer GPU migration.",
+    "Cache counters are host compilation/selection/submission counts, not GPU completion receipts.",
+    "Native WGPU Metal/MPS identify Apple M4; browser physical adapter and host contention UNKNOWN.",
+    "Bounded eager Torch controls, not fastest-PyTorch, torch.compile, universal speedup or training-quality evidence.",
+    "No CUDA/Furnace, release, push or merge in this slice."
+  ],
+  "negatives": [
+    {
+      "path": "browser-preflight.json",
+      "kind": "exploratory_unscaled_feedback",
+      "explanation": "Unscaled initialized dense models were fed their outputs twenty times. The second width produced non-finite output and failed validation; this is not throughput or stability success. Retained unchanged. Adopted correctness fixture uses explicit bounded diagonal weights and is independently replayed in Torch."
+    },
+    {
+      "path": "verified-a/receipt.json",
+      "kind": "interrupted_for_guard_fix",
+      "explanation": "Stopped the owned process group after source review found the guard checked only the upper NN policy. Now it reads the active st-tensor binding and tests direct binding plus nested uncommitted policy. Interrupted receipt is not a completed test result."
+    },
+    {
+      "path": "verified-b/receipt.json",
+      "kind": "reference_shape_error",
+      "explanation": "The full benchmark completed but browser replay used an old square-only Torch helper that reshaped rectangular output back to input width. Fixed the reference, added CPU/MPS shape tests and reran the complete pipeline. Production kernel math and tolerances were unchanged; all earlier timings retained."
+    }
+  ],
+  "verification": {
+    "contracts": {
+      "passed": 23,
+      "ignored": 0
+    },
+    "tensor-cpu": {
+      "passed": 440,
+      "ignored": 0
+    },
+    "tensor-wgpu": {
+      "passed": 488,
+      "ignored": 1
+    },
+    "nn-cpu-handoff": {
+      "passed": 7,
+      "ignored": 0
+    },
+    "nn-serial": {
+      "passed": 750,
+      "ignored": 0
+    },
+    "backend-serial": {
+      "passed": 117,
+      "ignored": 0
+    },
+    "integration": {
+      "passed": 6,
+      "ignored": 0
+    },
+    "ignored_boundary": "Existing fractional GL live-adapter test remains ignored.",
+    "python_existing": {
+      "status": "passed",
+      "tests": 32,
+      "skipped": 0,
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-forward-20260912/verified-c/python-release.dylib",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "wgpu_available": true
+    },
+    "python-graph_autograd": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "python-graph_learner": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "python-module_update": {
+      "tests": 5,
+      "status": "passed"
+    },
+    "python-pointwise": {
+      "tests": 5,
+      "status": "passed"
+    },
+    "python-module-forward": {
+      "tests": 5,
+      "status": "passed"
+    },
+    "python-cpu-handoff": {
+      "tests": 4,
+      "status": "passed"
+    },
+    "python-cpu-module-forward": {
+      "tests": 2,
+      "status": "passed"
+    },
+    "cpu_build": {
+      "status": "passed",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": false,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/module-resident-forward-20260912/verified-c/python-cpu.dylib"
+    },
+    "browser-handoff": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "cases": 4
+    },
+    "browser-module-forward": {
+      "schema": "spiraltorch.module_resident_forward.v1",
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "assertions": 49,
+      "cases": 3
+    },
+    "browser-to-python": {
+      "status": "passed",
+      "schema": "spiraltorch.resident_module_handoff.v1",
+      "cases": 4
+    },
+    "browser-to-cpu-python": {
+      "status": "passed",
+      "schema": "spiraltorch.resident_module_handoff.v1",
+      "cases": 4
+    },
+    "wasm-pointwise": {
+      "status": "passed",
+      "assertions": 38,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-learner": {
+      "status": "passed",
+      "schema": "spiraltorch.graph_learner_clients.v1",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "cases": 2
+    },
+    "wasm-autograd": {
+      "status": "passed",
+      "schema": "spiraltorch.graph_autograd_clients.v1",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-fusion": {
+      "status": "passed",
+      "schema": "spiraltorch.pointwise_fusion_clients.v1",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "cases": 2
+    },
+    "wasm-forward": {
+      "schema": "spiraltorch.resident_graph_forward_client.v1",
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "assertions": 536,
+      "cases": 12
+    },
+    "torch-correctness": {
+      "schema": "spiraltorch.graph_training_torch_replay.v1",
+      "status": "passed",
+      "cases": 120,
+      "comparisons": 17136,
+      "max_abs_error": 5.7220458984375e-06
+    }
+  },
+  "browser_replay": [
+    {
+      "width": 3,
+      "device": "cpu",
+      "comparisons": 54,
+      "max_abs_error": 2.9802322387695312e-08
+    },
+    {
+      "width": 3,
+      "device": "mps",
+      "comparisons": 54,
+      "max_abs_error": 0.0
+    },
+    {
+      "width": 7,
+      "device": "cpu",
+      "comparisons": 126,
+      "max_abs_error": 5.960464477539063e-08
+    },
+    {
+      "width": 7,
+      "device": "mps",
+      "comparisons": 126,
+      "max_abs_error": 5.960464477539063e-08
+    },
+    {
+      "width": 16,
+      "device": "cpu",
+      "comparisons": 288,
+      "max_abs_error": 5.960464477539063e-08
+    },
+    {
+      "width": 16,
+      "device": "mps",
+      "comparisons": 288,
+      "max_abs_error": 1.1920928955078125e-07
+    }
+  ],
+  "timing": [
+    {
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "depth": 2,
+      "seed": 17,
+      "module_cold_ms": 2.2423749996960396,
+      "summary": {
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.3092089991696412,
+          "min_ms_per_forward": 0.24820799990266096,
+          "max_ms_per_forward": 0.42345800102339126
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.10723962509473495,
+          "min_ms_per_forward": 0.08383324984606588,
+          "max_ms_per_forward": 0.1236041248375841
+        },
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.29933299992990214,
+          "min_ms_per_forward": 0.29312500009837095,
+          "max_ms_per_forward": 0.5602080000244314
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.09426562496628321,
+          "min_ms_per_forward": 0.08983337511381251,
+          "max_ms_per_forward": 0.28694787488348084
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.019375000192667358,
+          "min_ms_per_forward": 0.017458000002079643,
+          "max_ms_per_forward": 25.44070900148654
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.009406250001120497,
+          "min_ms_per_forward": 0.009093749895328074,
+          "max_ms_per_forward": 0.010359374982726877
+        },
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.3427500014367979,
+          "min_ms_per_forward": 0.25054199977603275,
+          "max_ms_per_forward": 0.6130000001576263
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.13596874987342744,
+          "min_ms_per_forward": 0.11923950000891637,
+          "max_ms_per_forward": 0.19914062499992724
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.3589590014598798,
+          "min_ms_per_forward": 0.3426669991313247,
+          "max_ms_per_forward": 0.4537919994618278
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.18236974983665277,
+          "min_ms_per_forward": 0.17243749994122481,
+          "max_ms_per_forward": 0.22512500004268077
+        }
+      },
+      "module_burst_over_torch_mps": 1.341262238613062,
+      "module_burst_over_precompiled_scalar": 1.700581754883498
+    },
+    {
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "module_cold_ms": 4.641708999770344,
+      "summary": {
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.4456669994397089,
+          "min_ms_per_forward": 0.4363749994809041,
+          "max_ms_per_forward": 0.4577089985104976
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.18230737509838946,
+          "min_ms_per_forward": 0.17882812517200364,
+          "max_ms_per_forward": 0.20787499988728086
+        },
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 1.1300000005576294,
+          "min_ms_per_forward": 1.1145420012326213,
+          "max_ms_per_forward": 1.1378330000297865
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.9451458749936137,
+          "min_ms_per_forward": 0.9024113751365803,
+          "max_ms_per_forward": 0.9578853748735128
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.09574999967298936,
+          "min_ms_per_forward": 0.08812499982013833,
+          "max_ms_per_forward": 0.11229199844819959
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.0726406249214051,
+          "min_ms_per_forward": 0.07162500014601392,
+          "max_ms_per_forward": 0.07499999992433004
+        },
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.6230000017239945,
+          "min_ms_per_forward": 0.5764589986938518,
+          "max_ms_per_forward": 0.7164580001699505
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.33306775003438815,
+          "min_ms_per_forward": 0.3256927498114237,
+          "max_ms_per_forward": 0.3418021249217418
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.5266660009510815,
+          "min_ms_per_forward": 0.5155830003786832,
+          "max_ms_per_forward": 0.5959999998594867
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.2175416248064721,
+          "min_ms_per_forward": 0.2015988750372344,
+          "max_ms_per_forward": 0.22917187493476376
+        }
+      },
+      "module_burst_over_torch_mps": 0.6531452678441898,
+      "module_burst_over_precompiled_scalar": 1.1932683726539701
+    },
+    {
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "depth": 16,
+      "seed": 17,
+      "module_cold_ms": 10.087957998621278,
+      "summary": {
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.9195420007017674,
+          "min_ms_per_forward": 0.9037910003826255,
+          "max_ms_per_forward": 0.9510840009170352
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.535588499815276,
+          "min_ms_per_forward": 0.46784899996055174,
+          "max_ms_per_forward": 0.5409843749930587
+        },
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 3.7895000004937174,
+          "min_ms_per_forward": 3.7529170003836043,
+          "max_ms_per_forward": 3.815000000031432
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 3.4591562500736472,
+          "min_ms_per_forward": 3.3944948747830495,
+          "max_ms_per_forward": 3.4884896249423036
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.38883299930603243,
+          "min_ms_per_forward": 0.3582919998734724,
+          "max_ms_per_forward": 0.4507079993345542
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.30822400003671646,
+          "min_ms_per_forward": 0.30618749997302075,
+          "max_ms_per_forward": 0.3265207499225653
+        },
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.9365839996462455,
+          "min_ms_per_forward": 0.9144590003415942,
+          "max_ms_per_forward": 1.0942909993900685
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.6802760001392016,
+          "min_ms_per_forward": 0.657536375001655,
+          "max_ms_per_forward": 0.7164322501012066
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 1.02037500073493,
+          "min_ms_per_forward": 0.9845000004133908,
+          "max_ms_per_forward": 1.1289590001979377
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.5411355000433105,
+          "min_ms_per_forward": 0.5282447500576382,
+          "max_ms_per_forward": 0.55388537498402
+        }
+      },
+      "module_burst_over_torch_mps": 0.795464634843182,
+      "module_burst_over_precompiled_scalar": 1.0103568322134393
+    },
+    {
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "depth": 2,
+      "seed": 29,
+      "module_cold_ms": 4.124291999687557,
+      "summary": {
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.30212499950721394,
+          "min_ms_per_forward": 0.2668330016604159,
+          "max_ms_per_forward": 0.4077499997947598
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.09676562513050158,
+          "min_ms_per_forward": 0.08832812500259024,
+          "max_ms_per_forward": 0.09882287508844456
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.017207999917445704,
+          "min_ms_per_forward": 0.015207999240374193,
+          "max_ms_per_forward": 0.019915998564101756
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.008973999911177089,
+          "min_ms_per_forward": 0.0087916250777198,
+          "max_ms_per_forward": 0.009817749969442957
+        },
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.2868330011551734,
+          "min_ms_per_forward": 0.2549169985286426,
+          "max_ms_per_forward": 0.298041000860394
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.1214843750858563,
+          "min_ms_per_forward": 0.1190000000406144,
+          "max_ms_per_forward": 0.1344791251085553
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.3639169990492519,
+          "min_ms_per_forward": 0.3144999991491204,
+          "max_ms_per_forward": 0.48570899889455177
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.17543225021654507,
+          "min_ms_per_forward": 0.16745312495913822,
+          "max_ms_per_forward": 0.18983849986398127
+        },
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.306792000628775,
+          "min_ms_per_forward": 0.2574160007497994,
+          "max_ms_per_forward": 0.31833399953029584
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.08701037495484343,
+          "min_ms_per_forward": 0.08408337498622132,
+          "max_ms_per_forward": 0.08948437493927486
+        }
+      },
+      "module_burst_over_torch_mps": 1.444072540954854,
+      "module_burst_over_precompiled_scalar": 2.0162222069217695
+    },
+    {
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "module_cold_ms": 4.229665999446297,
+      "summary": {
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 1.1461670001153834,
+          "min_ms_per_forward": 1.1132079998787958,
+          "max_ms_per_forward": 1.2161250015196856
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.9566771250320016,
+          "min_ms_per_forward": 0.9354895000797114,
+          "max_ms_per_forward": 1.008197875080441
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.09495800077274907,
+          "min_ms_per_forward": 0.09095799941860605,
+          "max_ms_per_forward": 0.11162500049977098
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.07277600002453255,
+          "min_ms_per_forward": 0.07196874980763823,
+          "max_ms_per_forward": 0.07462500002475281
+        },
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.6117499997344567,
+          "min_ms_per_forward": 0.5919169998378493,
+          "max_ms_per_forward": 0.6363749998854473
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.3338281248943531,
+          "min_ms_per_forward": 0.32544274995416345,
+          "max_ms_per_forward": 0.35447400000521156
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.5283330010570353,
+          "min_ms_per_forward": 0.4978750002919696,
+          "max_ms_per_forward": 0.561250000828295
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.20846350003012049,
+          "min_ms_per_forward": 0.20110412515350617,
+          "max_ms_per_forward": 0.21619274980366754
+        },
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.44741700003214646,
+          "min_ms_per_forward": 0.44337500003166497,
+          "max_ms_per_forward": 0.584375000471482
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.18565624986877083,
+          "min_ms_per_forward": 0.18131762499251636,
+          "max_ms_per_forward": 0.19645837505777308
+        }
+      },
+      "module_burst_over_torch_mps": 0.6244635621881564,
+      "module_burst_over_precompiled_scalar": 1.1228466597675582
+    },
+    {
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "depth": 16,
+      "seed": 29,
+      "module_cold_ms": 11.0766669986333,
+      "summary": {
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 3.770666000491474,
+          "min_ms_per_forward": 3.7342919986258494,
+          "max_ms_per_forward": 4.463958999622264
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 3.4200728750874987,
+          "min_ms_per_forward": 3.388927125115515,
+          "max_ms_per_forward": 3.475651124972501
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.38750000021536835,
+          "min_ms_per_forward": 0.3716669998539146,
+          "max_ms_per_forward": 0.4147500003455207
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.30910937493899837,
+          "min_ms_per_forward": 0.3076146249441081,
+          "max_ms_per_forward": 0.3178228751039569
+        },
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.9508750008535571,
+          "min_ms_per_forward": 0.88470800073992,
+          "max_ms_per_forward": 0.9939579995261738
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.6516614998872683,
+          "min_ms_per_forward": 0.6346353750359413,
+          "max_ms_per_forward": 0.6832083749941376
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 1.0223339995718561,
+          "min_ms_per_forward": 0.9800000007089693,
+          "max_ms_per_forward": 1.110584000343806
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.5361978749078844,
+          "min_ms_per_forward": 0.5233488750491233,
+          "max_ms_per_forward": 0.5591978751908755
+        },
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.9125420001510065,
+          "min_ms_per_forward": 0.8920000000216532,
+          "max_ms_per_forward": 1.0453749982843874
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.5349218749870488,
+          "min_ms_per_forward": 0.4820156250389118,
+          "max_ms_per_forward": 0.5512603750048584
+        }
+      },
+      "module_burst_over_torch_mps": 0.822816561973727,
+      "module_burst_over_precompiled_scalar": 1.0023853949155968
+    },
+    {
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "depth": 2,
+      "seed": 43,
+      "module_cold_ms": 3.7489170008484507,
+      "summary": {
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.2877080005418975,
+          "min_ms_per_forward": 0.2539590004744241,
+          "max_ms_per_forward": 0.32854200071597006
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.12348962513897277,
+          "min_ms_per_forward": 0.11964062491642835,
+          "max_ms_per_forward": 0.1274636249490868
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.31858299917075783,
+          "min_ms_per_forward": 0.31312499959312845,
+          "max_ms_per_forward": 0.48404100016341545
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.18088024989992846,
+          "min_ms_per_forward": 0.16930724996200297,
+          "max_ms_per_forward": 0.18263537504026317
+        },
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.3019579999090638,
+          "min_ms_per_forward": 0.244166998527362,
+          "max_ms_per_forward": 0.31233300069288816
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.0871822501267161,
+          "min_ms_per_forward": 0.08554162513974006,
+          "max_ms_per_forward": 0.09985412498281221
+        },
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.30333299946505576,
+          "min_ms_per_forward": 0.30133300060697366,
+          "max_ms_per_forward": 0.38708299871359486
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.09680737503003911,
+          "min_ms_per_forward": 0.08894787492863543,
+          "max_ms_per_forward": 0.10480200012352725
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.018165999790653586,
+          "min_ms_per_forward": 0.015457999325008132,
+          "max_ms_per_forward": 0.02325000059499871
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.009296875077779987,
+          "min_ms_per_forward": 0.009000000090964022,
+          "max_ms_per_forward": 0.009749999890118488
+        }
+      },
+      "module_burst_over_torch_mps": 1.4647404565069286,
+      "module_burst_over_precompiled_scalar": 2.074737112623566
+    },
+    {
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "module_cold_ms": 4.524959000264062,
+      "summary": {
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.6029579999449197,
+          "min_ms_per_forward": 0.5750410000473494,
+          "max_ms_per_forward": 0.6673749994661193
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.330156250129221,
+          "min_ms_per_forward": 0.3258021249621379,
+          "max_ms_per_forward": 0.34546875008345523
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.5292920013744151,
+          "min_ms_per_forward": 0.5069170001661405,
+          "max_ms_per_forward": 0.6007079991832143
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.2120521251072205,
+          "min_ms_per_forward": 0.20206762519592303,
+          "max_ms_per_forward": 0.23121875005926995
+        },
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.44999999954598024,
+          "min_ms_per_forward": 0.43766700036940165,
+          "max_ms_per_forward": 0.5574579990934581
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.18557299995336507,
+          "min_ms_per_forward": 0.1731666250179842,
+          "max_ms_per_forward": 0.21243225000944221
+        },
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 1.1393749991839286,
+          "min_ms_per_forward": 1.1236659993301146,
+          "max_ms_per_forward": 1.149292000263813
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.9623021248899022,
+          "min_ms_per_forward": 0.9182812500512227,
+          "max_ms_per_forward": 0.9754738748597447
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.09787499948288314,
+          "min_ms_per_forward": 0.09066600068763364,
+          "max_ms_per_forward": 0.10516700058360584
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.07171350011958566,
+          "min_ms_per_forward": 0.07148437498472049,
+          "max_ms_per_forward": 0.07453124999301508
+        }
+      },
+      "module_burst_over_torch_mps": 0.642278088099876,
+      "module_burst_over_precompiled_scalar": 1.1426884576986398
+    },
+    {
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "depth": 16,
+      "seed": 43,
+      "module_cold_ms": 11.306917000183603,
+      "summary": {
+        "torch_mps_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.9241249990736833,
+          "min_ms_per_forward": 0.9074160007003229,
+          "max_ms_per_forward": 1.029125000059139
+        },
+        "torch_mps_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.6697603748762049,
+          "min_ms_per_forward": 0.6587761249647883,
+          "max_ms_per_forward": 0.686864500039519
+        },
+        "module_resident_d2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 1.0274159994878573,
+          "min_ms_per_forward": 0.9591660000296542,
+          "max_ms_per_forward": 1.1127500001748558
+        },
+        "module_resident_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.5357082500268007,
+          "min_ms_per_forward": 0.5079478751213173,
+          "max_ms_per_forward": 0.5535312498068379
+        },
+        "python_scalar_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.9138340010395041,
+          "min_ms_per_forward": 0.9017920001497259,
+          "max_ms_per_forward": 0.9205829992424697
+        },
+        "python_scalar_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.47979162513911433,
+          "min_ms_per_forward": 0.46879687488399213,
+          "max_ms_per_forward": 0.5434011250144977
+        },
+        "python_register_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 3.757832999326638,
+          "min_ms_per_forward": 3.702666999743087,
+          "max_ms_per_forward": 4.462040998987504
+        },
+        "python_register_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 3.4423646250161255,
+          "min_ms_per_forward": 3.382916750069853,
+          "max_ms_per_forward": 3.464937499984444
+        },
+        "torch_cpu_h2h": {
+          "samples": 9,
+          "forwards_per_sample": 1,
+          "median_ms_per_forward": 0.3817079996224493,
+          "min_ms_per_forward": 0.3644579992396757,
+          "max_ms_per_forward": 0.40733400055614766
+        },
+        "torch_cpu_burst": {
+          "samples": 9,
+          "forwards_per_sample": 8,
+          "median_ms_per_forward": 0.3091406249495776,
+          "min_ms_per_forward": 0.3073384998515394,
+          "max_ms_per_forward": 0.3111926250767283
+        }
+      },
+      "module_burst_over_torch_mps": 0.7998506184033629,
+      "module_burst_over_precompiled_scalar": 1.116543561741982
+    }
+  ],
+  "archive": {
+    "files": 147,
+    "raw_bytes": 66235962,
+    "compressed_bytes": 1424248
+  }
+}

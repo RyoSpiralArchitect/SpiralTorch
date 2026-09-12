@@ -1,0 +1,23 @@
+{
+  "status": "passed",
+  "scope": "Independent archive and source/product integrity check; not a second runtime run",
+  "source": {
+    "commit": "32414050677e97a3e365f7d0f5e971eedb4e8fa5",
+    "tree": "00babb974c34afed756ecdb9f8928c99001ca66e"
+  },
+  "records": 216,
+  "origins": {
+    "local": 125,
+    "git": 91
+  },
+  "products": 39,
+  "manifest_sha256": "3e50efe3d319cbac1423aecd73950010dab09075c94f6296e7307ad7598df9b7",
+  "raw_bytes": 124325983,
+  "compressed_bytes": 6723360,
+  "runtime_steps": 69,
+  "torch_cases": 408,
+  "torch_comparisons": 159504,
+  "gradient_clip_cases": 24,
+  "gradient_clip_comparisons": 34104,
+  "separate_reference_gaps": 4
+}

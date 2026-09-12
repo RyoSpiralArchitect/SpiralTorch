@@ -1,0 +1,123 @@
+{
+  "schema": "spiraltorch.module_completed_intervals_record.v1",
+  "status": "passed",
+  "harness_source": {
+    "commit": "ef607370681b9ff68e28e1b7082dc42af05f4394",
+    "tree": "45f11e4bea2fa63cba58fdbc1e70ee956850e59c"
+  },
+  "baseline_source": {
+    "commit": "04fec016ad1ee8871d2a786974e94caeb556b84b",
+    "tree": "c23a390ab6cfe9aae20d83a1a70ed33ae4726b97"
+  },
+  "candidate_source": {
+    "commit": "6703df35e8389c3ebb9ddf5eb099f440995a930d",
+    "tree": "cbc7dcef11c87dc9674f80d701d10f8ff7fd417f"
+  },
+  "runtime_changed": false,
+  "protocol": {
+    "matrices": 4,
+    "warmup": 2,
+    "samples": 9,
+    "forwards": 256
+  },
+  "aggregates": [
+    {
+      "shape": [
+        2,
+        3,
+        7
+      ],
+      "module": {
+        "median_of_case_median_ratios": 0.9984435788007586,
+        "min_ratio": 0.9905063291491788,
+        "max_ratio": 1.0046728971496237,
+        "regressions": 3,
+        "total_cases": 12,
+        "pooled_total_ratio": 0.9904965281195087
+      },
+      "scalar": {
+        "median_of_case_median_ratios": 1.0078186130673839,
+        "min_ratio": 1.001584786077554,
+        "max_ratio": 1.0125588697135701,
+        "regressions": 12,
+        "total_cases": 12,
+        "pooled_total_ratio": 1.0035928317973377
+      }
+    },
+    {
+      "shape": [
+        2,
+        8,
+        64
+      ],
+      "module": {
+        "median_of_case_median_ratios": 0.9990347454589736,
+        "min_ratio": 0.9932170542348836,
+        "max_ratio": 1.007804878019705,
+        "regressions": 4,
+        "total_cases": 12,
+        "pooled_total_ratio": 1.0048953605534234
+      },
+      "scalar": {
+        "median_of_case_median_ratios": 1.0033986428240114,
+        "min_ratio": 0.9960591133151736,
+        "max_ratio": 1.0068965517167974,
+        "regressions": 9,
+        "total_cases": 12,
+        "pooled_total_ratio": 1.0004455414652162
+      }
+    },
+    {
+      "shape": [
+        4,
+        8,
+        128
+      ],
+      "module": {
+        "median_of_case_median_ratios": 0.9984901854515439,
+        "min_ratio": 0.986613782849455,
+        "max_ratio": 1.004990019941435,
+        "regressions": 5,
+        "total_cases": 12,
+        "pooled_total_ratio": 1.0061304379946683
+      },
+      "scalar": {
+        "median_of_case_median_ratios": 1.0015297030953056,
+        "min_ratio": 0.9939117199240428,
+        "max_ratio": 1.0081841432110732,
+        "regressions": 7,
+        "total_cases": 12,
+        "pooled_total_ratio": 0.9989107267469
+      }
+    }
+  ],
+  "checked_forwards_including_warmup": 405504,
+  "checked_values_including_warmup": 697737216,
+  "max_abs_error": 2.384185791015625e-07,
+  "minimum_interval_ms": 59,
+  "clock_minimum_positive_delta_ms": 0.09999999776482582,
+  "minimum_interval_over_observed_clock_delta": 590.000013187528,
+  "browser_version": "152.0.7977.84",
+  "cross_origin_isolated": false,
+  "adapters": {
+    "baseline": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    },
+    "candidate": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    }
+  },
+  "validation_steps": 10,
+  "verification_seconds": 203.7322142919984,
+  "frozen_products_checked": 34,
+  "raw_records": 37,
+  "manifest_sha256": "7f621a93e33f5ef17f5697736e4e854c2a8052cc7991f5ea8d9579feface7aec",
+  "validation_sha256": "f0038232a50467679f1949610d0be3ba7ce95cf56e5b0e985891c77950706eb0",
+  "decision": "Keep in-pass guard grouping: this sustained completed-read browser workload has no material consistent speed change; no browser speedup or universal regression-free claim. Earlier isolated-call results remain separate evidence. No platform-specific fallback selected.",
+  "next_candidate": "ResidentTensor::snapshot still allocates an unpooled readback buffer, whereas graph snapshots reuse a bounded pool. This is an implementation difference, not yet a measured bottleneck or a demonstrated optimization.",
+  "boundary": "Primary endpoint is median of 12 case-median candidate/baseline ratios per shape; all intervals retained. Pooled totals and explicit-dispatch controls remain separate. The clock probe describes observed granularity, not an uncertainty bound. This longer-interval completed-read workload does not replace the earlier single-call evidence or prove fastest-Torch/browser hardware performance."
+}

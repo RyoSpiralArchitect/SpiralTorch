@@ -1,0 +1,738 @@
+{
+  "schema": "spiraltorch.graph_weighted_composition_evidence.v1",
+  "status": "passed",
+  "source": {
+    "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+    "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+  },
+  "adopted": "verified",
+  "correctness": {
+    "native": {
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "learner_cases": 12,
+      "learner_guards": 8,
+      "learning_updates": 768,
+      "retained_checkpoints": 60,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08,
+      "cases": [
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        }
+      ],
+      "composition_reuse": {
+        "case": "composition_reuse",
+        "max_abs_error": 0.0,
+        "passed": true,
+        "terms": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          17,
+          256,
+          1,
+          5
+        ],
+        "width": 257
+      },
+      "prior_autograd_cases": 6,
+      "prior_fusion_cases": 6
+    },
+    "browser": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "learner_cases": 12,
+      "learner_guards": 8,
+      "learning_updates": 768,
+      "retained_checkpoints": 60,
+      "max_abs_error_vs_rust_module": 5.960464477539063e-08,
+      "cases": [
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 17,
+          "shape": [
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.04439958930015564,
+          "final_loss": 0.00013335191761143506,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014504955150187016,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 29,
+          "shape": [
+            3,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.0487646758556366,
+          "final_loss": 0.014217403717339039,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "exact",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.021049341186881065,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": false,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        },
+        {
+          "seed": 43,
+          "shape": [
+            2,
+            129,
+            4
+          ],
+          "policy": "module_compatible",
+          "fused": true,
+          "initial_loss": 0.038602620363235474,
+          "final_loss": 0.02098679542541504,
+          "resume": "bit_identical"
+        }
+      ],
+      "composition_reuse": {
+        "case": "composition_reuse",
+        "max_abs_error": 0,
+        "passed": true,
+        "terms": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          17,
+          256,
+          1,
+          5
+        ],
+        "width": 257
+      },
+      "prior_autograd_cases": 6,
+      "prior_fusion_cases": 6
+    },
+    "torch": {
+      "version": "2.12.1",
+      "cases": 120,
+      "comparisons": 17136,
+      "max_abs": 5.7220458984375e-06,
+      "weighted_learning": {
+        "cases": 48,
+        "updates": 3072,
+        "comparisons": 5904,
+        "max_abs": 5.960464477539063e-08
+      }
+    },
+    "python_existing": {
+      "status": "passed",
+      "tests": 32,
+      "skipped": 0,
+      "native_path": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/graph-weighted-composition-20260912/verified/python-release.dylib",
+      "build_info": {
+        "package": "spiraltorch-py",
+        "version": "0.4.27",
+        "profile": "release",
+        "target": {
+          "arch": "aarch64",
+          "os": "macos",
+          "family": "unix",
+          "pointer_width": 64
+        },
+        "features": {
+          "cpu": false,
+          "wgpu": true,
+          "wgpu-rt": false,
+          "mps": false,
+          "cuda": false,
+          "hip": false,
+          "hip-real": false,
+          "logic": false,
+          "logic-learn": false,
+          "kdsl": true,
+          "nn": true,
+          "rec": true,
+          "text": true,
+          "selfsup": true,
+          "robotics": true
+        }
+      },
+      "wgpu_available": true
+    },
+    "python-autograd": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "python-learner": {
+      "tests": 3,
+      "status": "passed"
+    },
+    "wasm-learner": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2,
+      "cases": [
+        {
+          "policy": "exact",
+          "updates": 32,
+          "gain": 1.0702553610510797,
+          "resume": "bit_identical"
+        },
+        {
+          "policy": "module_compatible",
+          "updates": 32,
+          "gain": 1.4896127003921353,
+          "resume": "bit_identical"
+        }
+      ]
+    },
+    "wasm-autograd": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      }
+    },
+    "wasm-fusion": {
+      "status": "passed",
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 2
+    },
+    "wasm-forward": {
+      "status": "passed",
+      "assertions": 536,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "case_count": 12
+    }
+  },
+  "rounds": [
+    {
+      "name": "timing",
+      "workload": "learner",
+      "baseline": {
+        "commit": "d0b3923f4964d774e35687ca290d3fdaea35527d",
+        "tree": "dee9764b033ec0cf55d843e69651c8874680cff5"
+      },
+      "candidate": {
+        "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+        "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+      },
+      "max_abs": 1.7695128917694092e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.246780827892807,
+          "min_ratio": 1.1635529783743725,
+          "max_ratio": 1.400222221262718,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.39015237460380653
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.241456551633466,
+          "min_ratio": 1.2069028322540511,
+          "max_ratio": 1.2833790219472427,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.4054536240639332
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.3751482011397993,
+          "min_ratio": 1.148825065251803,
+          "max_ratio": 1.5690259285191233,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.583625345285121,
+          "min_ratio": 1.4766355137600136,
+          "max_ratio": 1.7740963856493066,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    },
+    {
+      "name": "timing-b",
+      "workload": "learner",
+      "baseline": {
+        "commit": "d0b3923f4964d774e35687ca290d3fdaea35527d",
+        "tree": "dee9764b033ec0cf55d843e69651c8874680cff5"
+      },
+      "candidate": {
+        "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+        "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+      },
+      "max_abs": 1.7695128917694092e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.2328871115862075,
+          "min_ratio": 1.086423654547905,
+          "max_ratio": 1.3457728551229626,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.37269339967425374
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.2423769527555386,
+          "min_ratio": 1.2062079272128372,
+          "max_ratio": 1.2950821970803417,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.39853715696440517
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.3679230711588857,
+          "min_ratio": 1.2692569870497656,
+          "max_ratio": 1.506079027417831,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.5795206384115508,
+          "min_ratio": 1.4731064764275257,
+          "max_ratio": 1.7648809523248565,
+          "worst_config": {
+            "shape": [
+              4,
+              32,
+              64
+            ],
+            "depth": 8,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    },
+    {
+      "name": "control",
+      "workload": "graph",
+      "baseline": {
+        "commit": "d0b3923f4964d774e35687ca290d3fdaea35527d",
+        "tree": "dee9764b033ec0cf55d843e69651c8874680cff5"
+      },
+      "candidate": {
+        "commit": "f1215d1e228517bf4a63778a64796f1f9daf7bae",
+        "tree": "205cdc2ef66e21a6857a5ba430516f325f3e15f5"
+      },
+      "max_abs": 1.4901161193847656e-08,
+      "native": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0124097975284185,
+          "min_ratio": 0.8629526110610953,
+          "max_ratio": 1.230825302647855,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8645657997662256
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 0.9845809638129244,
+          "min_ratio": 0.8291925541291476,
+          "max_ratio": 1.0384386507522958,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 43,
+            "steps": 8,
+            "graph": true
+          },
+          "torch_over_candidate_geomean": 0.8432460910361308
+        }
+      },
+      "browser": {
+        "immediate": {
+          "baseline_over_candidate_geomean": 1.0000420501984342,
+          "min_ratio": 0.9787234043312079,
+          "max_ratio": 1.0206185574018243,
+          "worst_config": {
+            "shape": [
+              2,
+              16,
+              32
+            ],
+            "depth": 2,
+            "seed": 17,
+            "steps": 8,
+            "graph": true
+          }
+        },
+        "deferred": {
+          "baseline_over_candidate_geomean": 1.0294918018725896,
+          "min_ratio": 0.9852941174295354,
+          "max_ratio": 1.1875000013581787,
+          "worst_config": {
+            "shape": [
+              2,
+              129,
+              32
+            ],
+            "depth": 4,
+            "seed": 29,
+            "steps": 8,
+            "graph": true
+          }
+        }
+      }
+    }
+  ],
+  "scope": "Prepared four-source weighted composition writes directly into resident graph gradients. Weight/flag/shape buffers persist; unit-weight single-source copy fast path retained. Shared finite checks preserve ordered products/sums and atomic SGD; Python/WASM use the Rust core.",
+  "performance_scope": "End-to-end custom learner performance: GPU quadratic/quartic seeds, two exact VJPs, weighted SGD and all update acceptance receipts. Initial/final loss/state probes outside timing. Ordinary MSE control is separate. Pointwise fusion disabled in all timing lanes.",
+  "boundaries": [
+    "No ModuleTrainer, generic autograd or pure::Tensor migration. No Adam, momentum, cross-forward accumulation or mixed precision.",
+    "Learning fixture uses three seed/shape pairs, not an independent crossed seed-by-shape sweep. Bounded numerical learning, not model quality.",
+    "Submitted updates are attempts; only their individual captured receipts establish acceptance.",
+    "Owned GPU work serial; host contention UNKNOWN. Prior parallel GPU VJP one-off remains UNKNOWN.",
+    "Native Apple M4 Metal/MPS; Chrome WebGPU does not attest an exact physical browser adapter.",
+    "Eager Torch only, not torch.compile or the fastest possible Torch. No CUDA/Furnace, push, merge or wheel release."
+  ],
+  "exploratory_failures": [],
+  "test_counts": {
+    "contracts": 22,
+    "nn-serial": 734,
+    "backend-serial": 114,
+    "integration": 6
+  },
+  "measurement_counts": {
+    "raw_intervals": 2700,
+    "retained_intervals": 2160,
+    "nonzero_sgd_updates": 21600
+  },
+  "artifacts": 92,
+  "compressed_bytes": 34084208,
+  "raw_bytes": 544146159
+}
