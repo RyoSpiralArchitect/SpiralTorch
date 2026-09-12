@@ -1,0 +1,128 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Completed-read original Module intervals</title>
+<pre id="result" data-status="running">Loading frozen WASM modules</pre>
+<script type="module">
+import initCandidate, * as candidate from "./module/spiraltorch_wasm.js";
+import initBaseline, * as baseline from "./baseline/spiraltorch_wasm.js";
+import {protocol, routes, routeOrder, completedReads, clockProbe} from "./module_resident_intervals.mjs";
+
+const result = document.querySelector("#result");
+const report = {schema: "spiraltorch.module_completed_intervals.v1", status: "error",
+  protocol, routes, cases: [],
+  boundary: "Fixed 4 matrices, 9 shape/seed cases, 2 warmup and 9 retained intervals per route. Each interval contains 256 independent fixed-input forwards, each followed by a completed host read and output release. One outer clock, no per-call clocks; typed outputs retained until interval end and then all checked. Setup/upload/cold compilation and numerical comparison excluded. Same page, separate frozen WASM/device contexts; alternating context creation order and rotated routes. No trimming, retry, final-read-only burst, GPU timestamp, physical browser GPU or exclusive-host claim."};
+window.moduleIntervalReport = report;
+const owned = new Set(), keep = value => (owned.add(value), value);
+const free = value => {owned.delete(value); value.free();};
+const check = (ok, message) => {if (!ok) throw Error(message);};
+function releaseAll() {for (const value of owned) value.free(); owned.clear();}
+function close(actual, expected) {
+  check(actual.length === expected.length, "output length differs");
+  let maximum = 0;
+  for (let i = 0; i < actual.length; i++) {
+    const error = Math.abs(actual[i] - expected[i]);
+    check(Number.isFinite(actual[i]) && Number.isFinite(expected[i]) &&
+      error <= 2e-5 + 2e-4 * Math.abs(expected[i]), "output differs");
+    maximum = Math.max(maximum, error);
+  }
+  return maximum;
+}
+async function readTensor(tensor) {
+  const snapshot = tensor.snapshot();
+  try {return await snapshot.readValues();}
+  finally {snapshot.free();}
+}
+function cacheInfo(model) {
+  const info = model.residentCacheInfo();
+  try {return {compilations: String(info.compilations), cache_hits: String(info.cacheHits),
+    submitted_forwards: String(info.submittedForwards)};}
+  finally {info.free();}
+}
+async function context(st, c) {
+  const model = keep(new st.Sequential()), width = c.shape.at(-1);
+  for (let i = 0; i < c.depth; i++) {
+    model.addScaler("scale" + i, new Float32Array(c.plan.parameters[3*i].values));
+    model.addLinear("linear" + i, width, width); model.addGelu(); model.addRelu();
+  }
+  const initial = keep(model.inferencePlan(c.shape));
+  const fixed = keep(st.InferencePlan.fromJson(JSON.stringify(c.plan)));
+  check(initial.applyParametersTo(model, fixed) === c.depth * 3, "parameter handoff differs");
+  free(initial);
+  const lowered = keep(model.inferencePlan(c.shape));
+  check(JSON.stringify(JSON.parse(lowered.toJson())) === JSON.stringify(JSON.parse(fixed.toJson())),
+    "model lowering differs");
+  free(lowered);
+  const graph = keep(await fixed.compileGraphWebGpu()), device = keep(graph.tensorDevice());
+  const adapter = graph.adapterInfo();
+  check(adapter.backend === "BrowserWebGpu" && adapter.device_type && adapter.device_type !== "Cpu",
+    "browser GPU required; no CPU fallback");
+  const input = keep(device.upload(c.shape, new Float32Array(c.input)));
+  const cold = keep(model.forward(input)); close(await readTensor(cold), c.reference); free(cold);
+  graph.upload(new Float32Array(c.input)); graph.dispatch();
+  const ready = keep(graph.snapshot()); close(await ready.readValues(), c.reference); free(ready);
+  return {model, graph, device, input, adapter};
+}
+try {
+  check(!!navigator.gpu, "WebGPU required; no CPU fallback");
+  await initBaseline(); await initCandidate();
+  report.clock = clockProbe();
+  report.cross_origin_isolated = crossOriginIsolated;
+  report.user_agent = navigator.userAgent;
+  const fixture = await (await fetch("./fixture.json")).json();
+  check(fixture.status === "passed" && fixture.schema === "spiraltorch.graph_forward_bench.v1" &&
+    fixture.cases.length === 9, "native fixture required");
+  for (let matrix = 0; matrix < protocol.matrices; matrix++) {
+    const setup_order = matrix % 2 ? ["candidate", "baseline"] : ["baseline", "candidate"];
+    const cases = matrix % 2 ? [...fixture.cases].reverse() : fixture.cases;
+    for (const c of cases) {
+      const ctx = {};
+      for (const version of setup_order) ctx[version] = await context({baseline, candidate}[version], c);
+      const row = {matrix, shape: c.shape, depth: c.depth, seed: c.seed, setup_order,
+        samples: [], last_outputs: {}, adapters: {}, cache: {}, scalar_dispatches: {},
+        warmup_completed_reads: {}, warmup_max_abs_error: {}};
+      for (let block = 0; block < protocol.warmup + protocol.samples; block++) {
+        const order = routeOrder(matrix, c.seed, block);
+        for (const route of order) {
+          const [version, family] = route.split("_"), v = ctx[version];
+          const before = family === "module" ? BigInt(cacheInfo(v.model).submitted_forwards) : v.graph.submittedDispatches;
+          const measured = await completedReads(family === "module" ? {
+            forward: () => v.model.forward(v.input), read: readTensor, release: output => output.free(),
+          } : {
+            forward: () => {v.graph.dispatch(); return v.graph.snapshot();},
+            read: snapshot => snapshot.readValues(), release: snapshot => snapshot.free(),
+          });
+          const after = family === "module" ? BigInt(cacheInfo(v.model).submitted_forwards) : v.graph.submittedDispatches;
+          check(after - before === BigInt(protocol.forwards), "submission count differs");
+          check(measured.completed_reads === protocol.forwards, "completed read count differs");
+          let max_abs_error = 0;
+          for (const values of measured.outputs) max_abs_error = Math.max(max_abs_error, close(values, c.reference));
+          row.last_outputs[route] = Array.from(measured.outputs.at(-1));
+          if (block < protocol.warmup) {
+            row.warmup_completed_reads[route] = (row.warmup_completed_reads[route] || 0) + measured.completed_reads;
+            row.warmup_max_abs_error[route] = Math.max(row.warmup_max_abs_error[route] || 0, max_abs_error);
+          } else row.samples.push({block: block - protocol.warmup, route, order,
+            forwards: measured.forwards, completed_reads: measured.completed_reads,
+            submitted_forwards: String(after - before), elapsed_ms: measured.elapsed_ms, max_abs_error});
+        }
+      }
+      const expected = (protocol.warmup + protocol.samples) * protocol.forwards;
+      for (const [version, v] of Object.entries(ctx)) {
+        row.adapters[version] = v.adapter; row.cache[version] = cacheInfo(v.model);
+        row.scalar_dispatches[version] = String(v.graph.submittedDispatches);
+        check(JSON.stringify(row.cache[version]) === JSON.stringify({compilations: "1",
+          cache_hits: String(expected), submitted_forwards: String(expected + 1)}), "cache contract differs");
+        check(row.scalar_dispatches[version] === String(expected + 1), "explicit dispatch count differs");
+      }
+      check(typeof window.publishModuleInterval === "function", "streamed case collector required");
+      await window.publishModuleInterval(JSON.stringify(row));
+      report.cases.push(row);
+      result.textContent = "Completed " + report.cases.length + "/36 shape/seed matrices";
+      releaseAll();
+    }
+  }
+  report.status = "passed";
+} catch (error) {report.error = String(error.stack || error);}
+finally {releaseAll();}
+result.textContent = JSON.stringify(report); result.dataset.status = report.status;
+</script>

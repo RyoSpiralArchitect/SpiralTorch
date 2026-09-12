@@ -162,6 +162,25 @@ graph controls. `tools/validate_module_direct_io.py` checks the full nine-case
 matrix, source/product hashes, captures and cache counters. The native versions
 run in separate processes; browser physical GPU identity remains unknown.
 
+For browser clocks too coarse for one call, `nn-module-intervals` runs a separate
+fixed completed-read protocol: four matrices, the same nine shape/seed cases,
+two warmup intervals and nine retained intervals per route. Each interval times
+256 independent forwards, **each** followed by its own completed read and output
+release. It is not a burst with one terminal read. Both original Module and
+explicit graph routes are rotated across the two frozen WASM packages; context
+creation and case order alternate between matrices. Typed output arrays are
+retained until the interval ends, then every value is checked outside the timer.
+Thus host output allocation/retention and release are included, but upload,
+compilation and numerical comparison are not. This protocol measures sustained
+completed-read calls, not isolated-call latency or GPU-only time.
+
+`tools/validate_module_resident_intervals.py` verifies the streamed cases, frozen
+products, route order, all read/submission counts and cache reuse. Its primary
+endpoint is the median of 12 case-median candidate/baseline ratios per shape;
+pooled totals, explicit-dispatch control drift and all slow intervals are retained
+separately. Observed clock granularity is reported, not treated as an uncertainty
+bound. The earlier single-call and burst measurements remain separate evidence.
+
 The [source-bound first record](../benchmarks/results/2026-09-12-module-resident-forward/README.md)
 includes the small-model slowdown as well as the deeper-model wins, CPU-only
 build checks, independent Torch replay and the rejected exploratory attempts.
