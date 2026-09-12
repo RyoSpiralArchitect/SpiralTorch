@@ -126,6 +126,24 @@ def replay(case, device, *, expected_steps=9):
     }
 
 
+def replay_loss_probe(case, device):
+    shape = case["shape"]
+    prediction = torch.tensor(case["prediction"], dtype=torch.float32, device=device).reshape(shape).requires_grad_()
+    target = torch.tensor(case["target"], dtype=torch.float32, device=device).reshape(shape)
+    # SpiralTorch explicitly defines empty MSE as zero; PyTorch mean(empty) is NaN.
+    objective = (prediction - target).square().mean() if prediction.numel() else prediction.sum() * 0
+    gradient, = torch.autograd.grad(objective, [prediction])
+    maximum = 0.0
+    for actual, expected in [(objective, [case["loss"]]), (gradient, case["gradient"])]:
+        actual = actual.detach().cpu().reshape(-1)
+        expected = torch.tensor(expected, dtype=torch.float32)
+        assert torch.isfinite(actual).all() and torch.isfinite(expected).all()
+        torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-4)
+        maximum = max(maximum, float((actual - expected).abs().max()) if actual.numel() else 0.)
+    return dict(device=device, probe=case["name"], resident_loss=True, comparisons=2,
+                max_abs_error=maximum, empty_contract_override=prediction.numel() == 0)
+
+
 def replay_learning(case, device):
     plan = case["plan"]
     assert plan["schema"] == "spiraltorch.nn.inference_plan.v2"
@@ -194,6 +212,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--require-resident-loss", action="store_true")
     parser.add_argument(
         "--devices", nargs="+", choices=["cpu", "mps", "cuda"], default=["cpu", "mps"]
     )
@@ -225,6 +244,8 @@ def main():
                     == "spiraltorch.resident_graph_training_fixture.v1"
                 )
                 assert fixture["status"] == "passed" and len(fixture["cases"]) == 6
+                if args.require_resident_loss:
+                    assert fixture.get("resident_loss", {}).get("status") == "passed"
                 report["inputs"].append(
                     {
                         "path": str(path.resolve()),
@@ -232,6 +253,25 @@ def main():
                     }
                 )
                 for device in args.devices:
+                    resident_loss = fixture.get("resident_loss")
+                    if resident_loss is not None:
+                        assert resident_loss["status"] == "passed"
+                        assert len(resident_loss["cases"]) == 6
+                        assert [(c["seed"], c["policy"]) for c in resident_loss["cases"]] == [
+                            (seed, policy) for seed in (17,29,43) for policy in ("Exact","ModuleCompatible")]
+                        assert [p["name"] for p in resident_loss["probes"]] == [
+                            "scalar","empty","tail","many_partials","nd","strided","broadcast"]
+                        for case in resident_loss["cases"]:
+                            assert case["observations_after_updates"] == 64 and case["module_parameters_applied"] == 7
+                            assert case["optimizer"] == "explicit_sgd_not_ModuleTrainer"
+                            assert case["final_loss"] < case["steps"][0]["loss"]
+                            result = replay(case, device, expected_steps=64)
+                            result.update(resident_loss=True, input=str(path.resolve()))
+                            report["cases"].append(result)
+                        for probe in resident_loss["probes"]:
+                            result = replay_loss_probe(probe, device)
+                            result["input"] = str(path.resolve())
+                            report["cases"].append(result)
                     fusion = fixture.get("pointwise_fusion")
                     if fusion is not None:
                         assert len(fusion["cases"]) == 6 and len(fusion["guards"]) == 16

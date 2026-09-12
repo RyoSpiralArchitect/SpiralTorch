@@ -55,6 +55,10 @@ function checkNnContract(types, label) {
   };
   const plan = get("InferencePlan"), gpu = get("ResidentInference"), snapshot = get("InferenceSnapshot");
   const module = get("Sequential", true), cache = get("ResidentForwardStats");
+  const mse = get("MeanSquaredError", true), objective = get("ResidentLoss");
+  assert.match(mse, /evaluateResident\(prediction: WgpuTensor, target: WgpuTensor\): ResidentLoss/);
+  assert.match(objective, /lossTensor\(\): WgpuTensor/);
+  assert.match(objective, /predictionGradientTensor\(\): WgpuTensor/);
   assert.match(module, /forwardSnapshot\(input: WgpuTensor\): WgpuTensorSnapshot/);
   assert.match(module, /forward\(input: WgpuTensor\): WgpuTensor/);
   assert.match(module, /inferencePlan\(shape: (?:Array<any>|number\[\])\): InferencePlan/);

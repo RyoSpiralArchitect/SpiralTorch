@@ -189,6 +189,18 @@ declare module "spiraltorch-wasm" {
         predictionTensor(): WgpuTensor;
         free(): void;
     }
+    export class MeanSquaredError {
+        constructor();
+        /** Joint whole-loss-guarded value and exact prediction cotangent; no host read. */
+        evaluateResident(prediction: WgpuTensor, target: WgpuTensor): ResidentLoss;
+        free(): void;
+    }
+    export class ResidentLoss {
+        private constructor();
+        lossTensor(): WgpuTensor;
+        predictionGradientTensor(): WgpuTensor;
+        free(): void;
+    }
     export class GraphGradients {
         private constructor();
         readonly inputGeneration: bigint;

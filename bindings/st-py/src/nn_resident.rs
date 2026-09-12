@@ -15,6 +15,8 @@ mod autograd;
 mod forward;
 mod graph;
 mod learner;
+mod loss;
+pub(crate) use loss::{evaluate_loss, PyResidentLoss};
 mod training;
 
 /// Input type selects an explicit host or resident route. Never upload or read
@@ -110,6 +112,7 @@ fn plan_error(error: InferenceError) -> PyErr {
         InferenceError::Gpu(error) => return gpu_error(error),
         InferenceError::Training(error) => return training::training_error(error),
         InferenceError::GraphGpu(error) => return forward::error(error),
+        InferenceError::ResidentTensor(error) => return crate::wgpu_tensor::error(error),
         _ => {}
     }
     PyValueError::new_err(error.to_string())
@@ -526,5 +529,6 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     forward::register(module)?;
     autograd::register(module)?;
     learner::register(module)?;
+    loss::register(module)?;
     Ok(())
 }

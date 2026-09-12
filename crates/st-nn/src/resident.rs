@@ -18,7 +18,7 @@ mod module_forward;
 mod module_update;
 mod portable;
 #[cfg(feature = "wgpu")]
-pub(crate) use module_forward::{unary_forward, unary_snapshot};
+pub(crate) use module_forward::{require_uncommitted_route, unary_forward, unary_snapshot};
 #[cfg(feature = "wgpu")]
 pub use module_forward::{ResidentForwardCache, ResidentForwardStats};
 pub use module_update::{ModuleOptimizerStatePolicy, ResidentParameterBinding};
@@ -68,6 +68,8 @@ pub enum InferenceError {
     ModuleUpdate(&'static str),
     #[error("module has no resident inference lowering: {0}")]
     UnsupportedModule(&'static str),
+    #[error("loss has no resident value/cotangent implementation: {0}")]
+    UnsupportedLoss(&'static str),
     #[error("inference requires a nonempty contiguous last-axis input at offset zero")]
     InvalidLayout,
     #[error("inference plan contains no operations")]
@@ -100,6 +102,9 @@ pub enum InferenceError {
     #[cfg(feature = "wgpu")]
     #[error(transparent)]
     GraphGpu(#[from] st_backend_wgpu::resident_graph::GraphInferenceError),
+    #[cfg(feature = "wgpu")]
+    #[error(transparent)]
+    ResidentTensor(#[from] st_backend_wgpu::resident_tensor::TensorError),
     #[cfg(feature = "wgpu")]
     #[error(transparent)]
     Training(#[from] st_backend_wgpu::resident_training::TrainingError),

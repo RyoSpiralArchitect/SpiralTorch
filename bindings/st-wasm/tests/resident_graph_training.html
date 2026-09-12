@@ -28,6 +28,10 @@ try {
       report.autograd.cases.some(c=>c.replays.length!==4)||report.autograd.guards.some(g=>g.passed!==true))
     throw Error("Missing arbitrary-cotangent VJP and recovery checks");
   const capture = report.autograd.guards.filter(g=>g.case==="queued_capture_tail_shapes_detached_guard_recovery");
+  if(report.resident_loss?.status!=="passed"||report.resident_loss?.cases?.length!==6||
+      report.resident_loss?.probes?.length!==7||report.resident_loss.cases.some(c=>
+        c.observations_after_updates!==64||c.module_parameters_applied!==7||c.steps.length!==64))
+    throw Error("Missing ordinary Loss to resident VJP/SGD and module handoff");
   if(capture.length!==1||capture[0].captured_vjps!==4||capture[0].observation!=="after_workspace_drop"||
       JSON.stringify(capture[0].input_shape)!=="[2,3,257]")
     throw Error("Missing detached VJP capture and shared-guard recovery checks");

@@ -21,6 +21,10 @@ pub use autograd::{WasmGraphForward, WasmGraphGradients, WasmResidentGraphAutogr
 mod graph;
 mod learner;
 #[cfg(feature = "webgpu")]
+mod loss;
+#[cfg(feature = "webgpu")]
+pub use loss::{WasmMeanSquaredError, WasmResidentLoss};
+#[cfg(feature = "webgpu")]
 mod module;
 pub use forward::{WasmGraphInferenceSnapshot, WasmResidentGraphInference};
 pub use graph::{

@@ -69,7 +69,7 @@ struct Spec {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct Params {
+pub(crate) struct Params {
     rows: u32,
     cols: u32,
     len: u32,
@@ -78,6 +78,21 @@ struct Params {
     gelu: u32,
     groups_x: u32,
     partials: u32,
+}
+
+impl Params {
+    pub(crate) fn standalone_mse(len: u32, groups_x: u32, partials: u32) -> Self {
+        Self {
+            rows: 0,
+            cols: 0,
+            len,
+            stage: 0,
+            stages: 0,
+            gelu: 0,
+            groups_x,
+            partials,
+        }
+    }
 }
 
 struct Pass {
@@ -226,7 +241,7 @@ pub struct ResidentDenseTraining {
     runtime: WgpuRuntime,
 }
 
-fn training_scalar_source() -> String {
+pub(crate) fn training_scalar_source() -> String {
     [
         include_str!("shaders/gelu_derivative.wgsl"),
         include_str!("shaders/dense_training.wgsl"),

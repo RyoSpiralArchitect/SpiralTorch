@@ -4224,6 +4224,15 @@ impl PyMeanSquaredError {
         }
     }
 
+    /// Joint loss and cotangent on the input device; both reads remain explicit.
+    pub fn evaluate_resident(
+        &mut self,
+        prediction: &Bound<'_, PyAny>,
+        target: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::nn_resident::PyResidentLoss> {
+        crate::nn_resident::evaluate_loss(&mut self.inner, prediction, target)
+    }
+
     pub fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
         let output = self
             .inner

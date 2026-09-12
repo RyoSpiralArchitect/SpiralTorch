@@ -46,6 +46,17 @@ fn mse_wgpu_error(op_name: &'static str, message: String) -> TensorError {
 }
 
 impl Loss for MeanSquaredError {
+    #[cfg(feature = "wgpu")]
+    fn evaluate_resident(
+        &mut self,
+        prediction: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        target: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::loss::ResidentLoss, crate::resident::InferenceError>
+    {
+        crate::resident::require_uncommitted_route()?;
+        Ok(prediction.mean_squared_error(target)?)
+    }
+
     fn forward(&mut self, prediction: &Tensor, target: &Tensor) -> PureResult<Tensor> {
         if prediction.shape() != target.shape() {
             return Err(TensorError::ShapeMismatch {

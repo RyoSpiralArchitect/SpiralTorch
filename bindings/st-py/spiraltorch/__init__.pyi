@@ -9158,11 +9158,18 @@ class _NnSequential:
 class _NnMeanSquaredError:
     def __init__(self) -> None: ...
 
+    def evaluate_resident(self, prediction: WgpuTensor, target: WgpuTensor) -> _NnResidentLoss: ...
+
     def forward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
 
     def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
 
     def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+
+class _NnResidentLoss:
+    def loss_tensor(self) -> WgpuTensor: ...
+    def prediction_gradient_tensor(self) -> WgpuTensor: ...
 
 
 class _NnCategoricalCrossEntropy:
@@ -9806,6 +9813,7 @@ class _NnModule(ModuleType):
     ZSpaceBatchNorm1d: type[_NnZSpaceBatchNorm1d]
     Sequential: type[_NnSequential]
     MeanSquaredError: type[_NnMeanSquaredError]
+    ResidentLoss: type[_NnResidentLoss]
     CategoricalCrossEntropy: type[_NnCategoricalCrossEntropy]
     CrossEntropyWithLogits: type[_NnCrossEntropyWithLogits]
     SoftmaxCrossEntropy: type[_NnCategoricalCrossEntropy]

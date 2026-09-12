@@ -1,6 +1,7 @@
 //! Freeze all checked NN stage flags without copying the result values.
 use super::*;
 
+#[derive(Debug)]
 pub(crate) struct GuardCapture {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,

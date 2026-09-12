@@ -95,6 +95,14 @@ fn terminal_forward_uses_the_original_model_and_shared_cache() {
         .permute(&[1, 0, 2])
         .unwrap();
     let host = Tensor::from_vec(6, 3, input.snapshot().unwrap().read().unwrap()).unwrap();
+    assert!(matches!(
+        crate::Loss::evaluate_resident(
+            &mut crate::CrossEntropyWithLogits::default(),
+            &input,
+            &input
+        ),
+        Err(InferenceError::UnsupportedLoss(_))
+    ));
     let modules: Vec<Box<dyn Module>> = vec![
         Box::new(model()),
         Box::new(Linear::new("l", 3, 5).unwrap()),
@@ -635,6 +643,10 @@ fn committed_tensor_plan_is_not_silently_bypassed() {
     net.forward_resident(&x).unwrap();
     let before = net.resident_forward_stats();
     let scope = crate::execution::push_backend_policy(policy);
+    assert!(matches!(
+        crate::Loss::evaluate_resident(&mut crate::MeanSquaredError::new(), &x, &x),
+        Err(InferenceError::ResidentForwardPolicy)
+    ));
     for module in [&net as &dyn Module, &Gelu::new(), &Sequential::new()] {
         assert!(matches!(
             module.forward_resident_snapshot(&x),
@@ -656,6 +668,10 @@ fn committed_tensor_plan_is_not_silently_bypassed() {
     assert_eq!(net.resident_forward_stats(), before);
     let binding = st_tensor::execution::current_execution_plan_binding().unwrap();
     let nested = cpu();
+    assert!(matches!(
+        crate::Loss::evaluate_resident(&mut crate::MeanSquaredError::new(), &x, &x),
+        Err(InferenceError::ResidentForwardPolicy)
+    ));
     assert!(matches!(
         net.forward_resident(&x),
         Err(InferenceError::ResidentForwardPolicy)

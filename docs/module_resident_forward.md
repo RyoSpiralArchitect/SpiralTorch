@@ -1,7 +1,13 @@
 # The Original NN Model On Resident GPU Inputs
 
 The high-level model now owns and reuses the existing Rust resident graph.
-It does not require a second hand-built GPU model:
+It does not require a second hand-built GPU model.
+
+For the learning boundary, the existing `MeanSquaredError` can also
+[produce a resident loss and cotangent](module_resident_loss.md) for the explicit
+GPU learner. This does not attach a backward tape to the forward cache.
+
+The forward route is:
 
 ```text
 explicit upload -> model.forward_resident -> more GPU operations -> explicit read

@@ -10,6 +10,7 @@ use thiserror::Error;
 
 pub(crate) mod capture;
 pub(crate) mod guard_capture;
+pub mod loss;
 pub mod pointwise;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
@@ -31,6 +32,8 @@ pub enum TensorError {
     DeviceMismatch,
     #[error("operation requires a different number of operands")]
     Operands,
+    #[error("loss predictions and targets must have the same logical shape")]
+    LossShape,
     #[error("tensor exceeds portable addressing or device limits: {0}")]
     Limit(&'static str),
     #[error("tensor view addresses outside its storage")]
@@ -44,6 +47,7 @@ struct Kernels {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
     runtime: WgpuRuntime,
+    mse: std::sync::OnceLock<loss::MseKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -180,6 +184,7 @@ impl TensorDevice {
             layout,
             pipeline,
             runtime,
+            mse: std::sync::OnceLock::new(),
         })))
     }
 
