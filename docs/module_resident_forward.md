@@ -196,6 +196,12 @@ are preserved. The current implementation keeps the explicit API but delegates
 to the original forward and snapshot paths; fewer submissions are not assumed
 to be faster.
 
+The [same-API follow-up](../benchmarks/results/2026-09-12-module-terminal-split/README.md)
+measured the split implementation faster than that prototype in all 36 browser
+pairs, with shape medians 1.8-5.7% lower. Relative to the original API, however,
+the terminal medians remained 0.2-0.4% slower. This is recovery from the rejected
+optimization, not a new baseline speedup or a zero-regression claim.
+
 One-slot and two-alternating-slot Tensor staging caches were implemented and
 tested, but neither is enabled in the selected runtime. Both passed correctness
 checks yet regressed the small/middle sustained browser fixtures by about 1-2%.
