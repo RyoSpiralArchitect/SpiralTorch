@@ -209,19 +209,23 @@ fn pointwise_cotangent_masked_failures_guard_all_outputs_and_recover() {
         let f = g.forward().unwrap();
         let p = plan(
             &d,
-            &[&base, &invalid, &zero],
-            &[("add", Some(1)), ("multiply", Some(2))],
+            &[&base, &zero, &invalid],
+            &[("add", Some(2)), ("multiply", Some(1))],
         );
         let inherited = g
-            .backward_pointwise(&f, &p, &[&base, &invalid, &zero])
+            .backward_pointwise(&f, &p, &[&base, &zero, &invalid])
             .unwrap();
+        // Shrink immediately after the failure, before any other seed clears it.
+        let p = plan(&d, &[&base], &[("identity", None)]);
+        let fewer = g.backward_pointwise(&f, &p, &[&base]).unwrap();
+        assert_eq!(values(&fewer)[0], vec![2.; 6]);
         let p = plan(
             &d,
             &[&base, &huge, &neg],
             &[("multiply", Some(1)), ("multiply", Some(2)), ("relu", None)],
         );
         let masked = g.backward_pointwise(&f, &p, &[&base, &huge, &neg]).unwrap();
-        // Shrink arity: stale third-slot invalidity must not poison this VJP.
+        // Producer failures also recover independently of inherited flags.
         let p = plan(&d, &[&base], &[("identity", None)]);
         let good = g.backward_pointwise(&f, &p, &[&base]).unwrap();
         assert_eq!(values(&good)[0], vec![2.; 6]);
