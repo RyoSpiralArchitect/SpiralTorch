@@ -70,3 +70,7 @@ two warmups and eight retained blocks per cadence are the existing bounded
 measurement matrix. Eager Torch remains an independent numerical/timing control,
 not an equivalent finite-guard/rollback implementation. Fewer submissions/copies
 alone do not establish a speedup; inspect the retained results per client.
+
+The [two-round matched results](../benchmarks/results/2026-09-15-resident-pointwise-cotangent/README.md)
+retain all conditions, including regressions. Saved-state validation passed;
+group speed ratios were close to one, so this is not a universal speed win.
