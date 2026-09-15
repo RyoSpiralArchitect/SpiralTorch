@@ -1,5 +1,6 @@
 //! Loss-independent resident VJPs of a frozen graph. No optimizer is executed.
 use super::*;
+mod cotangent;
 mod learner;
 mod outputs;
 pub use learner::{
@@ -79,6 +80,7 @@ pub struct ResidentGraphAutograd {
     graph: ResidentGraphTraining,
     outputs: outputs::GradientOutputs,
     forward_validation: wgpu::Buffer,
+    cotangent_inherited: Option<wgpu::Buffer>,
     input_source: Option<ResidentTensor>,
     current: Option<Shared<ForwardIdentity>>,
     parameters: ParameterState,
@@ -116,6 +118,7 @@ impl ResidentGraphAutograd {
             graph,
             outputs,
             forward_validation,
+            cotangent_inherited: None,
             input_source: None,
             current: None,
             parameters: ParameterState {
@@ -273,35 +276,14 @@ impl ResidentGraphAutograd {
         forward: &GraphForward,
         cotangent: &ResidentTensor,
     ) -> Result<GraphGradients, TrainingError> {
-        if !self
-            .current
-            .as_ref()
-            .is_some_and(|id| Shared::ptr_eq(id, &forward.identity))
-        {
-            return Err(TrainingError::StaleForward);
-        }
+        let submission = self.check_backward(forward)?;
         let g = &self.graph;
-        let context = g.device.runtime().context();
-        cotangent.require_context(context)?;
+        cotangent.require_context(g.device.runtime().context())?;
         if cotangent.layout().shape() != self.output_layout().shape() {
             return Err(DenseError::InvalidLayout.into());
         }
-        let submission = self
-            .backwards
-            .checked_add(1)
-            .ok_or(TrainingError::Overflow)?;
         let cotangent = cotangent.contiguous()?;
-        let mut encoder = context.device().create_command_encoder(&Default::default());
-        // Restore forward-only guards: a bad seed must not poison future VJPs,
-        // and a good seed must never mask an already-invalid forward.
-        encoder.copy_buffer_to_buffer(
-            &self.forward_validation,
-            0,
-            &g.validation,
-            0,
-            g.validation.size(),
-        );
-        encoder.clear_buffer(&g.pointwise_flags, 0, None);
+        let mut encoder = self.begin_backward();
         encoder.copy_buffer_to_buffer(
             cotangent.flags(),
             0,
@@ -316,10 +298,52 @@ impl ResidentGraphAutograd {
             0,
             g.output_layout().len() as u64 * 4,
         );
+        self.submit_backward(forward, submission, encoder)
+    }
+
+    fn check_backward(&self, forward: &GraphForward) -> Result<u64, TrainingError> {
+        if !self
+            .current
+            .as_ref()
+            .is_some_and(|id| Shared::ptr_eq(id, &forward.identity))
+        {
+            return Err(TrainingError::StaleForward);
+        }
+        self.backwards.checked_add(1).ok_or(TrainingError::Overflow)
+    }
+
+    fn begin_backward(&self) -> wgpu::CommandEncoder {
+        let g = &self.graph;
+        let context = g.device.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        // Restore forward-only guards: a bad seed must not poison future VJPs,
+        // and a good seed must never mask an already-invalid forward.
+        encoder.copy_buffer_to_buffer(
+            &self.forward_validation,
+            0,
+            &g.validation,
+            0,
+            g.validation.size(),
+        );
+        encoder.clear_buffer(&g.pointwise_flags, 0, None);
+        encoder
+    }
+
+    fn submit_backward(
+        &mut self,
+        forward: &GraphForward,
+        submission: u64,
+        mut encoder: wgpu::CommandEncoder,
+    ) -> Result<GraphGradients, TrainingError> {
+        let g = &self.graph;
         let mut captured = self.outputs.encode(g, &mut encoder)?.into_iter();
         let input = captured.next().expect("prepared input gradient capture");
         let parameters = captured.collect();
-        context.queue().submit(Some(encoder.finish()));
+        g.device
+            .runtime()
+            .context()
+            .queue()
+            .submit(Some(encoder.finish()));
         self.backwards = submission;
         Ok(GraphGradients {
             input,

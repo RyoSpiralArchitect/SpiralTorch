@@ -78,5 +78,20 @@ mod browser {
                 .map(|v| v.to_string())
                 .map_err(|e| JsValue::from_str(&e.to_string()))
         }
+        #[wasm_bindgen(js_name = learnPointwise)]
+        pub async fn learn_pointwise(
+            &self,
+            cadence: String,
+            capture: bool,
+            direct: bool,
+        ) -> Result<String, JsValue> {
+            let cadence =
+                serde_json::from_str(&cadence).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            self.inner
+                .learn_pointwise(cadence, capture, direct, now)
+                .await
+                .map(|v| v.to_string())
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
     }
 }

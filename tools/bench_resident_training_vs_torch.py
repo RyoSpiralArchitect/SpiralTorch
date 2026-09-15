@@ -136,9 +136,15 @@ def torch_sample(torch, fixture, device, cadence, synchronize):
                 losses=losses,initial_loss=initial["loss"],state=state)
 
 
-def validate_sample(value, cadence, steps, *, learner=False, lane=None, seed_fusion=False, learner_optimizer=None):
+def validate_sample(value, cadence, steps, *, learner=False, lane=None, seed_fusion=False, learner_optimizer=None,
+                    pointwise_route=None):
     if "host_profile" in value:
         raise ValueError("instrumented host profile is not an ordinary throughput interval")
+    if pointwise_route not in (None, "materialized", "direct") or (
+            pointwise_route is not None and (not learner or lane == "torch" or seed_fusion)):
+        raise ValueError("pointwise cotangent route requires an unfused Rust learner interval")
+    if value.get("pointwise_cotangent_route") != pointwise_route:
+        raise ValueError("incorrect pointwise cotangent route")
     damping, clip = optimizer_settings(learner_optimizer)
     if learner_optimizer is not None and not learner:
         raise ValueError("optimizer requires a learner interval")
@@ -192,6 +198,7 @@ def run(args, result, baseline_stderr, candidate_stderr):
     graph = getattr(args, "graph", False)
     learner = getattr(args, "learner", False)
     seed_fusion = getattr(args, "fuse_learner_seeds", False)
+    direct_seeds = getattr(args, "direct_learner_seeds", False)
     learner_optimizer = getattr(args, "learner_optimizer", None)
     compare = learner_reference.compare if learner else (graph_reference.compare if graph else reference.compare)
     sample_torch = learner_reference.torch_sample if learner else (graph_reference.torch_sample if graph else torch_sample)
@@ -246,10 +253,16 @@ def run(args, result, baseline_stderr, candidate_stderr):
                         if lane == "torch":
                             value=sample_torch(torch,fixture,args.device,cadence,synchronize)
                         else:
-                            value=workers[lane].request(dict(op="learn" if learner else "sample",cadence=cadence,capture=lane not in captured))
+                            request = dict(op="learn" if learner else "sample",cadence=cadence,capture=lane not in captured)
+                            if direct_seeds:
+                                request.update(op="learn_pointwise", direct=lane == "candidate")
+                            value=workers[lane].request(request)
                             fingerprint=row["fingerprints"].setdefault(lane,value["state_sha256"])
                             if value["state_sha256"] != fingerprint: raise ValueError("native state changed across identical reset trajectories")
-                        validate_sample(value,cadence,config["steps"],learner=learner,lane=lane,seed_fusion=seed_fusion and lane=="candidate",learner_optimizer=learner_optimizer)
+                        route = ("direct" if lane == "candidate" else "materialized") if direct_seeds and lane != "torch" else None
+                        validate_sample(value,cadence,config["steps"],learner=learner,lane=lane,seed_fusion=seed_fusion and lane=="candidate",learner_optimizer=learner_optimizer,pointwise_route=route)
+                        if direct_seeds:
+                            sample.setdefault("pointwise_cotangent_routes", {})[lane] = value.get("pointwise_cotangent_route")
                         sample["learner_optimizers"][lane] = value.get("learner_optimizer")
                         sample["fused_learner_seeds"][lane] = value.get("fused_learner_seeds", False)
                         if lane not in captured: captured[lane]=value
@@ -286,6 +299,7 @@ def main():
     parser.add_argument("--learner-optimizer",choices=("topos_ema","clipped_topos_ema"),
                         help="same zero-initialized EMA in every lane: damping 0.5, optional norm limit 1/1024")
     parser.add_argument("--fuse-learner-seeds",action="store_true",help="candidate-only reusable cubic-cotangent fusion; unchanged graph and optimizer")
+    parser.add_argument("--direct-learner-seeds",action="store_true",help="same fused seed programs in both lanes; candidate writes directly into the VJP tape")
     parser.add_argument("--fuse-pointwise",action="store_true",help="opt in to candidate graph fusion; preserve and structurally compare both plans")
     parser.add_argument("--matrix",choices=("standard","wide"),default="standard",
                         help="wide: graph-only 64/128/256 feature widths, same eight SGD updates")
@@ -299,6 +313,8 @@ def main():
         parser.error("--learner requires --graph and disallows changing fusion between lanes")
     if args.fuse_learner_seeds and not args.learner:
         parser.error("--fuse-learner-seeds requires --learner")
+    if args.direct_learner_seeds and (not args.learner or args.fuse_learner_seeds):
+        parser.error("--direct-learner-seeds requires --learner without --fuse-learner-seeds")
     if args.learner_optimizer and not args.learner:
         parser.error("--learner-optimizer requires --learner")
     result=dict(schema="spiraltorch.resident_training_comparison.v1",status="error",cases=[],
@@ -306,6 +322,7 @@ def main():
         matrix=args.matrix,
         pointwise_fusion=args.fuse_pointwise,
         learner_seed_fusion=args.fuse_learner_seeds,
+        direct_learner_seeds=args.direct_learner_seeds,
         learner_optimizer=args.learner_optimizer,
         boundary="rotating native A/B and eager torch; f32 tanh-GELU mean-MSE plain SGD; device-persistent batch/weights; 8 updates, all losses read; 2 warmups+8 retained samples per cadence; reset/probes excluded; no fastest-PyTorch/quality claim",
         safety_difference="Rust validates every intermediate and commits parameters transactionally; eager torch has no matching per-stage finite/rollback checks for these fixed finite fixtures",

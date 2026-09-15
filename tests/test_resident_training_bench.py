@@ -18,6 +18,23 @@ spec.loader.exec_module(host_profile)
 
 
 class Admission(unittest.TestCase):
+    def test_pointwise_seed_route_cannot_be_omitted_or_relabelled(self):
+        value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
+            accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],initial_loss=.2,final_loss=.1,elapsed_ms=1.)
+        for route in ("materialized", "direct"):
+            selected=dict(value,pointwise_cotangent_route=route)
+            bench.validate_sample(selected,"deferred",8,learner=True,lane="candidate",pointwise_route=route)
+            for wrong in (None, True, "sequential", "direct" if route == "materialized" else "materialized"):
+                with self.assertRaises(ValueError):
+                    bench.validate_sample(selected,"deferred",8,learner=True,lane="candidate",pointwise_route=wrong)
+            with self.assertRaises(ValueError):
+                bench.validate_sample(value,"deferred",8,learner=True,lane="candidate",pointwise_route=route)
+            for changes in (dict(learner=False), dict(lane="torch"), dict(seed_fusion=True)):
+                kwargs=dict(learner=True,lane="candidate",pointwise_route=route)
+                kwargs.update(changes)
+                with self.assertRaises(ValueError):
+                    bench.validate_sample(selected,"deferred",8,**kwargs)
+
     def test_host_profile_requires_complete_bounded_host_only_measurements(self):
         value=dict(status="passed",learner=True,cadence="deferred",steps=8,completed_updates=8,
             accepted_updates=list(range(2,10)),acceptance="guarded_receipts",losses=[],initial_loss=.2,final_loss=.1,elapsed_ms=9.,
@@ -176,6 +193,12 @@ class Admission(unittest.TestCase):
 
 
 class Revalidation(unittest.TestCase):
+    def test_per_interval_cotangent_route_cannot_be_relabelled(self):
+        row=self.row()
+        row["samples"][4]["pointwise_cotangent_routes"]={"baseline":"materialized","candidate":"direct"}
+        with self.assertRaisesRegex(ValueError,"cotangent"):
+            validation.summarize_case(row,row["config"],("baseline","candidate"))
+
     def test_per_interval_optimizer_cannot_be_relabelled(self):
         row=self.row()
         row["samples"][4]["learner_optimizers"]={"baseline":None,"candidate":"topos_ema"}

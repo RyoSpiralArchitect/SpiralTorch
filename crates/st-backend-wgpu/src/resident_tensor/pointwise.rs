@@ -267,6 +267,11 @@ impl PointwisePlan {
         inputs: &[&ResidentTensor],
         execution: PointwiseExecution,
     ) -> Result<ResidentTensor, TensorError> {
+        self.validate_inputs(inputs)?;
+        self.run_validated(inputs, execution)
+    }
+
+    pub(crate) fn validate_inputs(&self, inputs: &[&ResidentTensor]) -> Result<(), TensorError> {
         if inputs.len() != self.layouts.len() {
             return Err(PointwiseError::Operands.into());
         }
@@ -276,6 +281,28 @@ impl PointwisePlan {
                 return Err(PointwiseError::LayoutMismatch.into());
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn require_output(
+        &self,
+        context: &WgpuContext,
+        layout: &NdLayout,
+    ) -> Result<(), TensorError> {
+        if !self.device.runtime().context().shares_handles_with(context) {
+            return Err(TensorError::DeviceMismatch);
+        }
+        if self.layouts[0].shape() != layout.shape() {
+            return Err(PointwiseError::LayoutMismatch.into());
+        }
+        Ok(())
+    }
+
+    fn run_validated(
+        &self,
+        inputs: &[&ResidentTensor],
+        execution: PointwiseExecution,
+    ) -> Result<ResidentTensor, TensorError> {
         if execution == PointwiseExecution::Sequential {
             let mut current = inputs[0].clone();
             for step in self.chain.steps() {

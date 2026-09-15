@@ -5,7 +5,7 @@ use st_tensor::{PointwiseChain, PointwiseStep};
 #[wasm_bindgen(js_name = WgpuPointwiseInputs)]
 #[derive(Default)]
 pub struct WasmPointwiseInputs {
-    inner: PointwiseInputs,
+    pub(crate) inner: PointwiseInputs,
 }
 #[wasm_bindgen(js_class = WgpuPointwiseInputs)]
 impl WasmPointwiseInputs {
@@ -45,7 +45,7 @@ impl WasmPointwiseInputs {
 
 #[wasm_bindgen(js_name = WgpuPointwisePlan)]
 pub struct WasmPointwisePlan {
-    inner: PointwisePlan,
+    pub(crate) inner: PointwisePlan,
 }
 #[wasm_bindgen(js_class = WgpuPointwisePlan)]
 impl WasmPointwisePlan {

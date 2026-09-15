@@ -33,6 +33,11 @@ fn main() -> fixture::Result<()> {
             cadence: fixture::Cadence,
             capture: bool,
         },
+        LearnPointwise {
+            cadence: fixture::Cadence,
+            capture: bool,
+            direct: bool,
+        },
         LearnHostProfile {
             cadence: fixture::Cadence,
             capture: bool,
@@ -86,6 +91,16 @@ fn main() -> fixture::Result<()> {
                     .as_ref()
                     .ok_or("initialize a graph first")?
                     .learn_host_profile(cadence, capture, now),
+            )?,
+            Request::LearnPointwise {
+                cadence,
+                capture,
+                direct,
+            } => futures::executor::block_on(
+                benchmark
+                    .as_ref()
+                    .ok_or("initialize a graph first")?
+                    .learn_pointwise(cadence, capture, direct, now),
             )?,
         };
         println!("{result}");
