@@ -22,6 +22,23 @@ pub struct TensorInfoNCEResult {
     pub batch: usize,
 }
 
+struct PreparedInfoNCE {
+    loss: f32,
+    logits: Vec<f32>,
+    batch: usize,
+}
+
+impl PreparedInfoNCE {
+    fn into_result(self) -> InfoNCEResult {
+        InfoNCEResult {
+            loss: self.loss,
+            logits: self.logits,
+            labels: (0..self.batch).collect(),
+            batch: self.batch,
+        }
+    }
+}
+
 fn validate_batches(a: &[Vec<f32>], b: &[Vec<f32>]) -> Result<(usize, usize)> {
     if a.is_empty() || b.is_empty() {
         return Err(ObjectiveError::InvalidArgument(
@@ -111,6 +128,7 @@ pub fn info_nce_loss(
         temperature,
         normalize,
     )
+    .map(PreparedInfoNCE::into_result)
 }
 
 /// Compute the InfoNCE loss for batches expressed as [`Tensor`]s.
@@ -120,14 +138,10 @@ pub fn info_nce_loss_tensor(
     temperature: f32,
     normalize: bool,
 ) -> Result<TensorInfoNCEResult> {
-    let result = info_nce_loss_tensor_as_result(anchors, positives, temperature, normalize)?;
+    let result = prepare_tensor_inputs(anchors, positives, temperature, normalize)?;
     let batch = result.batch;
     let logits = Tensor::from_vec(batch, batch, result.logits)?;
-    let labels = result
-        .labels
-        .into_iter()
-        .map(|value| value as f32)
-        .collect();
+    let labels = (0..batch).map(|value| value as f32).collect();
     let labels = Tensor::from_vec(batch, 1, labels)?;
     Ok(TensorInfoNCEResult {
         loss: result.loss,
@@ -153,7 +167,7 @@ fn info_nce_prepared(
     feature_dim: usize,
     temperature: f32,
     normalize: bool,
-) -> Result<InfoNCEResult> {
+) -> Result<PreparedInfoNCE> {
     let mut logits = compute_logits(anchors_flat, positives_t, batch, feature_dim)?;
     if normalize {
         let anchor_norms: Vec<_> = anchors_flat
@@ -186,10 +200,9 @@ fn info_nce_prepared(
     }
     loss /= batch as f32;
 
-    Ok(InfoNCEResult {
+    Ok(PreparedInfoNCE {
         loss,
         logits,
-        labels: (0..batch).collect(),
         batch,
     })
 }
@@ -263,6 +276,16 @@ pub fn info_nce_loss_tensor_as_result(
     temperature: f32,
     normalize: bool,
 ) -> Result<InfoNCEResult> {
+    prepare_tensor_inputs(anchors, positives, temperature, normalize)
+        .map(PreparedInfoNCE::into_result)
+}
+
+fn prepare_tensor_inputs(
+    anchors: &Tensor,
+    positives: &Tensor,
+    temperature: f32,
+    normalize: bool,
+) -> Result<PreparedInfoNCE> {
     validate_temperature(temperature)?;
     let (batch, feature_dim) = validate_tensor_batches(anchors, positives)?;
     let anchors_rm = anchors.to_layout(Layout::RowMajor)?;

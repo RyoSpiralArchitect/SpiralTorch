@@ -182,6 +182,7 @@ fn compute_with_packed_block(
     col_start: usize,
     width: usize,
     packed_block: &[f32],
+    serial_scratch: &mut Vec<f32>,
 ) {
     debug_assert_eq!(packed_block.len(), width * inner);
 
@@ -197,14 +198,13 @@ fn compute_with_packed_block(
             let dst_prefix = &mut dst[..prefix_rows * cols];
             let row_tile = row_tile_size(prefix_rows, inner, tm);
 
-            let apply = |(dst_chunk, lhs_chunk): (&mut [f32], &[f32])| {
+            let apply = |dst_chunk: &mut [f32], lhs_chunk: &[f32], packed_a: &mut [f32]| {
                 let local_rows = lhs_chunk.len() / inner;
                 debug_assert_eq!(local_rows % tm, 0);
-                let mut packed_a = vec![0.0f32; tm * inner];
 
                 for offset in (0..local_rows).step_by(tm) {
                     let lhs_panel = &lhs_chunk[offset * inner..(offset + tm) * inner];
-                    pack_a_block(lhs_panel, inner, tm, &mut packed_a);
+                    pack_a_block(lhs_panel, inner, tm, packed_a);
                     // SAFETY: `packed_a` is exactly `tm * inner` elements arranged as expected by
                     // the microkernel, `packed_block` contains `tn * inner` packed rhs elements,
                     // and `dst_chunk` covers `local_rows * cols` elements with
@@ -223,16 +223,23 @@ fn compute_with_packed_block(
                 }
             };
 
-            if determinism::lock_reduction_order() {
-                dst_prefix
+            if prefix_rows <= row_tile || determinism::lock_reduction_order() {
+                // One bounded panel per call, reused across row tiles and RHS blocks.
+                serial_scratch.resize(tm * inner, 0.0);
+                for (dst_chunk, lhs_chunk) in dst_prefix
                     .chunks_mut(cols * row_tile)
                     .zip(lhs_prefix.chunks(row_tile * inner))
-                    .for_each(|(dst_chunk, lhs_chunk)| apply((dst_chunk, lhs_chunk)));
+                {
+                    apply(dst_chunk, lhs_chunk, serial_scratch);
+                }
             } else {
                 dst_prefix
                     .par_chunks_mut(cols * row_tile)
                     .zip(lhs_prefix.par_chunks(row_tile * inner))
-                    .for_each(|(dst_chunk, lhs_chunk)| apply((dst_chunk, lhs_chunk)));
+                    .for_each(|(dst_chunk, lhs_chunk)| {
+                        let mut packed_a = vec![0.0f32; tm * inner];
+                        apply(dst_chunk, lhs_chunk, &mut packed_a);
+                    });
             }
         }
 
@@ -478,6 +485,7 @@ fn matmul_with_kernel_spec(
 ) {
     let tn = spec.tn;
     let mut packed_panel = vec![0.0f32; tn * inner];
+    let mut serial_scratch = Vec::new();
     let full_blocks = cols.checked_div(tn).unwrap_or(0);
     let tail = cols.checked_rem(tn).unwrap_or(cols);
 
@@ -494,6 +502,7 @@ fn matmul_with_kernel_spec(
             col_start,
             tn,
             packed_panel.as_slice(),
+            &mut serial_scratch,
         );
     }
 
@@ -517,6 +526,7 @@ fn matmul_with_kernel_spec(
             col_start,
             tail,
             &packed_panel[..tail * inner],
+            &mut serial_scratch,
         );
     }
 }
@@ -531,6 +541,7 @@ fn matmul_packed_with_kernel_spec(
     cols: usize,
 ) {
     let tn = spec.tn;
+    let mut serial_scratch = Vec::new();
     let full_blocks = cols.checked_div(tn).unwrap_or(0);
     let tail = cols.checked_rem(tn).unwrap_or(cols);
 
@@ -547,6 +558,7 @@ fn matmul_packed_with_kernel_spec(
             col_start,
             tn,
             packed_block,
+            &mut serial_scratch,
         );
     }
 
@@ -563,6 +575,7 @@ fn matmul_packed_with_kernel_spec(
             col_start,
             tail,
             packed_block,
+            &mut serial_scratch,
         );
     }
 }
@@ -582,8 +595,51 @@ pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
         .map(|kernel| kernel.tn)
         .min()
         .unwrap_or(1);
-    let volume = rows * inner * cols;
+    let volume = rows.saturating_mul(inner).saturating_mul(cols);
     volume >= min_tm * min_tn * 4 && rows >= min_tm && inner >= min_tm && cols >= min_tn
+}
+
+fn matrix_len(rows: usize, cols: usize, name: &str) -> Result<usize, String> {
+    rows.checked_mul(cols)
+        .ok_or_else(|| format!("{name} dimensions overflow: {rows}x{cols}"))
+}
+
+fn validate_matmul_lengths(
+    dst: &[f32],
+    lhs: &[f32],
+    rhs: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    rhs_name: &str,
+) -> Result<(), String> {
+    for (name, actual, expected) in [
+        (
+            "destination",
+            dst.len(),
+            matrix_len(rows, cols, "destination")?,
+        ),
+        ("lhs", lhs.len(), matrix_len(rows, inner, "lhs")?),
+        (rhs_name, rhs.len(), matrix_len(inner, cols, rhs_name)?),
+    ] {
+        if actual != expected {
+            return Err(format!(
+                "{name} length mismatch: expected {expected} elements, got {actual}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn matmul_direct(dst: &mut [f32], lhs: &[f32], rhs: &[f32], inner: usize, cols: usize) {
+    // Vectorize independent output columns without reassociating the K reduction.
+    for (out, row) in dst.chunks_exact_mut(cols).zip(lhs.chunks_exact(inner)) {
+        for (&a, rhs_row) in row.iter().zip(rhs.chunks_exact(cols)) {
+            for (out, &b) in out.iter_mut().zip(rhs_row) {
+                *out += a * b;
+            }
+        }
+    }
 }
 
 pub fn matmul_into(
@@ -594,29 +650,7 @@ pub fn matmul_into(
     inner: usize,
     cols: usize,
 ) -> Result<(), String> {
-    if dst.len() != rows * cols {
-        return Err(format!(
-            "destination length mismatch: expected {} elements, got {}",
-            rows * cols,
-            dst.len()
-        ));
-    }
-
-    if lhs.len() != rows * inner {
-        return Err(format!(
-            "lhs length mismatch: expected {} elements, got {}",
-            rows * inner,
-            lhs.len()
-        ));
-    }
-
-    if rhs.len() != inner * cols {
-        return Err(format!(
-            "rhs length mismatch: expected {} elements, got {}",
-            inner * cols,
-            rhs.len()
-        ));
-    }
+    validate_matmul_lengths(dst, lhs, rhs, rows, inner, cols, "rhs")?;
 
     if rows == 0 || cols == 0 || inner == 0 {
         dst.fill(0.0);
@@ -625,8 +659,16 @@ pub fn matmul_into(
 
     dst.fill(0.0);
 
+    if !should_use(rows, inner, cols) {
+        matmul_direct(dst, lhs, rhs, inner, cols);
+        return Ok(());
+    }
     let kernel = select_microkernel(rows, inner, cols);
-    matmul_with_kernel_spec(kernel, dst, lhs, rhs, rows, inner, cols);
+    if rows < kernel.tm || cols < kernel.tn {
+        matmul_direct(dst, lhs, rhs, inner, cols);
+    } else {
+        matmul_with_kernel_spec(kernel, dst, lhs, rhs, rows, inner, cols);
+    }
 
     Ok(())
 }
@@ -639,29 +681,7 @@ pub fn matmul_packed_into(
     inner: usize,
     cols: usize,
 ) -> Result<(), String> {
-    if dst.len() != rows * cols {
-        return Err(format!(
-            "destination length mismatch: expected {} elements, got {}",
-            rows * cols,
-            dst.len()
-        ));
-    }
-
-    if lhs.len() != rows * inner {
-        return Err(format!(
-            "lhs length mismatch: expected {} elements, got {}",
-            rows * inner,
-            lhs.len()
-        ));
-    }
-
-    if packed_rhs.len() != inner * cols {
-        return Err(format!(
-            "packed rhs length mismatch: expected {} elements, got {}",
-            inner * cols,
-            packed_rhs.len()
-        ));
-    }
+    validate_matmul_lengths(dst, lhs, packed_rhs, rows, inner, cols, "packed rhs")?;
 
     if rows == 0 || cols == 0 || inner == 0 {
         dst.fill(0.0);
@@ -670,6 +690,10 @@ pub fn matmul_packed_into(
 
     dst.fill(0.0);
 
+    if !should_use(rows, inner, cols) {
+        scalar_block_with_packed(dst, lhs, inner, cols, 0, rows, 0, cols, packed_rhs);
+        return Ok(());
+    }
     let kernel = select_microkernel(rows, inner, cols);
     matmul_packed_with_kernel_spec(kernel, dst, lhs, packed_rhs, rows, inner, cols);
 
@@ -677,15 +701,19 @@ pub fn matmul_packed_into(
 }
 
 pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, String> {
-    if rhs.len() != inner * cols {
+    let len = matrix_len(inner, cols, "rhs")?;
+    if rhs.len() != len {
         return Err(format!(
             "rhs length mismatch: expected {} elements, got {}",
-            inner * cols,
+            len,
             rhs.len()
         ));
     }
 
-    let mut packed = vec![0.0f32; inner * cols];
+    let mut packed = vec![0.0f32; len];
+    if len == 0 {
+        return Ok(packed);
+    }
     for col in 0..cols {
         for k in 0..inner {
             packed[col * inner + k] = rhs[k * cols + col];
@@ -695,7 +723,7 @@ pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, S
     Ok(packed)
 }
 
-const CPU_AUTOTUNE_REVISION: u64 = 2;
+const CPU_AUTOTUNE_REVISION: u64 = 3;
 const CPU_AUTOTUNE_MIN_VOLUME: usize = 64 * 64 * 32;
 const CPU_AUTOTUNE_SAMPLE_MAX_DIM: usize = 2048;
 const CPU_AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -1185,5 +1213,116 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn public_paths_preserve_sequential_reduction_and_overwrite_destination() {
+        for (rows, inner, cols) in [
+            (1, 31, 8),
+            (3, 37, 13),
+            (4, 5, 16),
+            (7, 31, 8),
+            (8, 31, 8),
+            (8, 7, 12),
+            (17, 37, 29),
+            (32, 64, 32),
+            (96, 128, 96),
+            (65, 257, 49),
+            (129, 129, 97),
+            (129, 1025, 33),
+            (1, 4096, 1),
+            (16, 0, 12),
+            (0, 31, 8),
+            (3, 17, 0),
+        ] {
+            let lhs: Vec<_> = (0..rows * inner)
+                .map(|i| ((i * 17 % 127) as f32 - 63.0) / 31.0)
+                .collect();
+            let rhs: Vec<_> = (0..inner * cols)
+                .map(|i| ((i * 29 % 131) as f32 - 65.0) / 37.0)
+                .collect();
+            let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+            let packed = unwrap_ok(prepack_rhs(&rhs, inner, cols));
+            for use_packed in [false, true] {
+                let mut dst = vec![f32::NAN; rows * cols];
+                for _ in 0..2 {
+                    if use_packed {
+                        unwrap_ok(matmul_packed_into(
+                            &mut dst, &lhs, &packed, rows, inner, cols,
+                        ));
+                    } else {
+                        unwrap_ok(matmul_into(&mut dst, &lhs, &rhs, rows, inner, cols));
+                    }
+                    assert_eq!(
+                        dst.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        "{rows}x{inner}x{cols}, packed={use_packed}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_lengths_and_overflow_are_errors_before_writing() {
+        for (rows, inner, cols) in [(usize::MAX, 2, 0), (0, usize::MAX, 2), (usize::MAX, 0, 2)] {
+            let mut dst = [19.0];
+            assert!(matmul_into(&mut dst, &[], &[], rows, inner, cols)
+                .unwrap_err()
+                .contains("overflow"));
+            assert!(matmul_packed_into(&mut dst, &[], &[], rows, inner, cols)
+                .unwrap_err()
+                .contains("overflow"));
+            assert_eq!(dst, [19.0]);
+        }
+        assert!(prepack_rhs(&[], usize::MAX, 2)
+            .unwrap_err()
+            .contains("overflow"));
+        assert!(should_use(usize::MAX, usize::MAX, usize::MAX));
+        assert!(unwrap_ok(prepack_rhs(&[], 0, usize::MAX)).is_empty());
+        for (a, b) in [(vec![1.0], vec![1.0; 4]), (vec![1.0; 4], vec![1.0])] {
+            let mut dst = [19.0; 4];
+            assert!(matmul_into(&mut dst, &a, &b, 2, 2, 2).is_err());
+            assert!(matmul_packed_into(&mut dst, &a, &b, 2, 2, 2).is_err());
+            assert_eq!(dst, [19.0; 4]);
+        }
+    }
+
+    #[test]
+    fn serial_panel_storage_is_reused_between_rhs_blocks() {
+        let (rows, inner, cols) = (8, 7, 24);
+        let lhs = vec![1.0; rows * inner];
+        let rhs = vec![1.0; 12 * inner];
+        let mut dst = vec![0.0; rows * cols];
+        let mut scratch = Vec::new();
+        compute_with_packed_block(
+            default_kernel(),
+            &mut dst,
+            &lhs,
+            rows,
+            inner,
+            cols,
+            0,
+            12,
+            &rhs,
+            &mut scratch,
+        );
+        let pointer = scratch.as_ptr();
+        let capacity = scratch.capacity();
+        compute_with_packed_block(
+            default_kernel(),
+            &mut dst,
+            &lhs,
+            rows,
+            inner,
+            cols,
+            12,
+            12,
+            &rhs,
+            &mut scratch,
+        );
+        assert_eq!(scratch.as_ptr(), pointer);
+        assert_eq!(scratch.capacity(), capacity);
+        assert_eq!(dst, vec![7.0; rows * cols]);
     }
 }
