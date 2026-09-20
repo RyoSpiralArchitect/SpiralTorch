@@ -112,10 +112,9 @@ impl FractalFieldGenerator {
 
     /// Adds a fractal branching field on top of an existing Mellin grid.
     pub fn weave_with_grid(&self, base: &MellinLogGrid) -> FractalFieldResult<MellinLogGrid> {
-        let mut samples = base.samples().to_vec();
-        let branch = self.branching_field(base.log_start(), base.log_step(), base.len())?;
-        for (sample, perturbation) in samples.iter_mut().zip(branch.iter()) {
-            *sample += *perturbation;
+        let mut samples = self.branching_field(base.log_start(), base.log_step(), base.len())?;
+        for (sample, original) in samples.iter_mut().zip(base.samples()) {
+            *sample = *original + *sample;
         }
         Ok(MellinLogGrid::new(
             base.log_start(),
