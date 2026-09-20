@@ -599,11 +599,13 @@ pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
     volume >= min_tm * min_tn * 4 && rows >= min_tm && inner >= min_tm && cols >= min_tn
 }
 
+#[inline]
 fn matrix_len(rows: usize, cols: usize, name: &str) -> Result<usize, String> {
     rows.checked_mul(cols)
         .ok_or_else(|| format!("{name} dimensions overflow: {rows}x{cols}"))
 }
 
+#[inline]
 fn validate_matmul_lengths(
     dst: &[f32],
     lhs: &[f32],
@@ -631,13 +633,42 @@ fn validate_matmul_lengths(
     Ok(())
 }
 
+#[inline]
+fn direct_panel<const WIDTH: usize>(
+    out: &mut [f32],
+    row: &[f32],
+    rhs: &[f32],
+    cols: usize,
+    col: usize,
+) {
+    // Fixed lanes keep partial sums local; each lane still reduces K in order.
+    let mut sums = [0.0f32; WIDTH];
+    for (&a, rhs_row) in row.iter().zip(rhs.chunks_exact(cols)) {
+        for (sum, &b) in sums.iter_mut().zip(&rhs_row[col..col + WIDTH]) {
+            *sum += a * b;
+        }
+    }
+    out[col..col + WIDTH].copy_from_slice(&sums);
+}
+
 fn matmul_direct(dst: &mut [f32], lhs: &[f32], rhs: &[f32], inner: usize, cols: usize) {
-    // Vectorize independent output columns without reassociating the K reduction.
     for (out, row) in dst.chunks_exact_mut(cols).zip(lhs.chunks_exact(inner)) {
-        for (&a, rhs_row) in row.iter().zip(rhs.chunks_exact(cols)) {
-            for (out, &b) in out.iter_mut().zip(rhs_row) {
-                *out += a * b;
+        let end = cols / 8 * 8;
+        for col in (0..end).step_by(8) {
+            direct_panel::<8>(out, row, rhs, cols, col);
+        }
+        let tail = if cols - end >= 4 {
+            direct_panel::<4>(out, row, rhs, cols, end);
+            end + 4
+        } else {
+            end
+        };
+        for (col, value) in out.iter_mut().enumerate().skip(tail) {
+            let mut sum = 0.0f32;
+            for (&a, rhs_row) in row.iter().zip(rhs.chunks_exact(cols)) {
+                sum += a * rhs_row[col];
             }
+            *value = sum;
         }
     }
 }
@@ -690,10 +721,6 @@ pub fn matmul_packed_into(
 
     dst.fill(0.0);
 
-    if !should_use(rows, inner, cols) {
-        scalar_block_with_packed(dst, lhs, inner, cols, 0, rows, 0, cols, packed_rhs);
-        return Ok(());
-    }
     let kernel = select_microkernel(rows, inner, cols);
     matmul_packed_with_kernel_spec(kernel, dst, lhs, packed_rhs, rows, inner, cols);
 
@@ -1324,5 +1351,28 @@ mod tests {
         assert_eq!(scratch.as_ptr(), pointer);
         assert_eq!(scratch.capacity(), capacity);
         assert_eq!(dst, vec![7.0; rows * cols]);
+    }
+
+    #[test]
+    fn direct_panels_preserve_every_small_width_and_tail() {
+        for rows in [1, 3, 7] {
+            for inner in [1, 3, 17] {
+                for cols in 1..=33 {
+                    let lhs: Vec<_> = (0..rows * inner)
+                        .map(|i| (i % 19) as f32 / 7.0 - 1.0)
+                        .collect();
+                    let rhs: Vec<_> = (0..inner * cols)
+                        .map(|i| (i % 23) as f32 / 11.0 - 1.0)
+                        .collect();
+                    let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+                    let mut dst = vec![f32::NAN; rows * cols];
+                    matmul_direct(&mut dst, &lhs, &rhs, inner, cols);
+                    assert_eq!(
+                        dst.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
     }
 }
