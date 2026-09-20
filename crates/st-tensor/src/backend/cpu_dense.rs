@@ -606,16 +606,6 @@ fn matrix_len(rows: usize, cols: usize, name: &str) -> Result<usize, String> {
 }
 
 #[inline]
-fn validate_length(actual: usize, expected: usize, name: &str) -> Result<(), String> {
-    if actual != expected {
-        return Err(format!(
-            "{name} length mismatch: expected {expected} elements, got {actual}"
-        ));
-    }
-    Ok(())
-}
-
-#[inline]
 fn validate_matmul_lengths(
     dst: &[f32],
     lhs: &[f32],
@@ -625,12 +615,22 @@ fn validate_matmul_lengths(
     cols: usize,
     rhs_name: &str,
 ) -> Result<(), String> {
-    let dst_len = matrix_len(rows, cols, "destination")?;
-    let lhs_len = matrix_len(rows, inner, "lhs")?;
-    let rhs_len = matrix_len(inner, cols, rhs_name)?;
-    validate_length(dst.len(), dst_len, "destination")?;
-    validate_length(lhs.len(), lhs_len, "lhs")?;
-    validate_length(rhs.len(), rhs_len, rhs_name)
+    for (name, actual, expected) in [
+        (
+            "destination",
+            dst.len(),
+            matrix_len(rows, cols, "destination")?,
+        ),
+        ("lhs", lhs.len(), matrix_len(rows, inner, "lhs")?),
+        (rhs_name, rhs.len(), matrix_len(inner, cols, rhs_name)?),
+    ] {
+        if actual != expected {
+            return Err(format!(
+                "{name} length mismatch: expected {expected} elements, got {actual}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[inline]
