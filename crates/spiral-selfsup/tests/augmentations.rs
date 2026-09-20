@@ -99,13 +99,17 @@ fn info_nce_batcher_produces_tensor_batches() {
     let anchor_rows: Vec<Vec<f32>> = batch
         .anchors
         .data()
-        .chunks_exact(12)
+        .as_chunks::<12>()
+        .0
+        .iter()
         .map(|chunk| chunk.to_vec())
         .collect();
     let positive_rows: Vec<Vec<f32>> = batch
         .positives
         .data()
-        .chunks_exact(12)
+        .as_chunks::<12>()
+        .0
+        .iter()
         .map(|chunk| chunk.to_vec())
         .collect();
     let vector_loss = info_nce_loss(
