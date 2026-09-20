@@ -210,4 +210,32 @@ mod tests {
             .collect();
         assert!(diff.iter().any(|v| *v > 0.0));
     }
+
+    #[test]
+    fn weave_matches_separate_branch_bit_for_bit_without_mutating_base() {
+        for len in [1, 7, 257] {
+            for (octaves, iterations) in [(1, 1), (4, 16)] {
+                let base = MellinLogGrid::from_function(-1.5, 0.03125, len, |x| {
+                    ComplexScalar::new(x.sin(), -x.cos())
+                })
+                .unwrap();
+                let original = base.samples().to_vec();
+                let generator = FractalFieldGenerator::new(octaves, 2.0, 0.5, iterations).unwrap();
+                let branch = generator
+                    .branching_field(base.log_start(), base.log_step(), len)
+                    .unwrap();
+                let woven = generator.weave_with_grid(&base).unwrap();
+                assert_eq!(woven.log_start(), base.log_start());
+                assert_eq!(woven.log_step(), base.log_step());
+                assert_eq!(base.samples(), original);
+                for ((&actual, &base), &branch) in
+                    woven.samples().iter().zip(&original).zip(&branch)
+                {
+                    let expected = base + branch;
+                    assert_eq!(actual.re.to_bits(), expected.re.to_bits());
+                    assert_eq!(actual.im.to_bits(), expected.im.to_bits());
+                }
+            }
+        }
+    }
 }
