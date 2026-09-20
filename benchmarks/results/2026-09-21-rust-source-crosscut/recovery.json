@@ -1,0 +1,23 @@
+{
+  "authorization": "Restore only necessary missing files from Git",
+  "source": "bf8cc8ea",
+  "reason": "Both parts are necessary to reconstruct the previously published resident-NN raw archive",
+  "total_bytes": 100663296,
+  "files": [
+    {
+      "path": "benchmarks/results/2026-09-08-resident-nn-training-throughput/raw.tar.xz.part-aa",
+      "bytes": 50331648,
+      "expected_git_blob": "dbf700520b03b146815636b0411ce6b0d6c6c784",
+      "restored_git_blob": "dbf700520b03b146815636b0411ce6b0d6c6c784"
+    },
+    {
+      "path": "benchmarks/results/2026-09-08-resident-nn-training-throughput/raw.tar.xz.part-ab",
+      "bytes": 50331648,
+      "expected_git_blob": "6ce63160d87b7665b714326d46f506aa4135c58a",
+      "restored_git_blob": "6ce63160d87b7665b714326d46f506aa4135c58a"
+    }
+  ],
+  "git_status_after": "clean",
+  "caches_restored": false,
+  "numerical_replay_claim": false
+}

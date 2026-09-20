@@ -1,0 +1,82 @@
+   Compiling num-traits v0.2.19
+   Compiling typenum v1.19.0
+   Compiling syn v2.0.106
+   Compiling version_check v0.9.5
+   Compiling wasm-bindgen v0.2.104
+   Compiling generic-array v0.14.9
+   Compiling serde_core v1.0.229
+    Checking num-integer v0.1.46
+    Checking num-complex v0.4.6
+   Compiling wasm-bindgen-backend v0.2.104
+   Compiling matrixmultiply v0.3.10
+   Compiling libc v0.2.189
+   Compiling wasm-bindgen-macro-support v0.2.104
+   Compiling crossbeam-utils v0.8.21
+   Compiling paste v1.0.15
+   Compiling wasm-bindgen-macro v0.2.104
+   Compiling syn v3.0.4
+   Compiling crossbeam-epoch v0.9.20
+   Compiling find-msvc-tools v0.1.9
+   Compiling shlex v2.0.1
+   Compiling serde v1.0.229
+   Compiling cc v1.2.63
+    Checking js-sys v0.3.81
+   Compiling serde_derive v1.0.229
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror-impl v2.0.17
+    Checking approx v0.5.1
+   Compiling getrandom v0.4.2
+   Compiling syn v1.0.109
+    Checking getrandom v0.2.17
+    Checking thiserror v2.0.17
+    Checking rand_core v0.6.4
+    Checking rand_chacha v0.3.1
+    Checking rand v0.8.8
+    Checking serde_json v1.0.151
+    Checking tracing v0.1.44
+   Compiling blake3 v1.8.7
+   Compiling crypto-common v0.1.6
+   Compiling block-buffer v0.10.4
+   Compiling zmij v1.0.21
+   Compiling rayon-core v1.13.0
+   Compiling core-foundation-sys v0.8.7
+   Compiling iana-time-zone v0.1.64
+    Checking tracing-subscriber v0.3.23
+   Compiling digest v0.10.7
+    Checking crossbeam-deque v0.8.6
+    Checking rand_distr v0.4.3
+   Compiling cpufeatures v0.2.17
+   Compiling thiserror-impl v1.0.69
+    Checking num-rational v0.4.2
+   Compiling memchr v2.7.6
+    Checking thiserror v1.0.69
+   Compiling sha2 v0.10.9
+   Compiling uuid v1.26.0
+   Compiling chrono v0.4.45
+    Checking tracing-chrome v0.7.2
+    Checking simba v0.6.0
+    Checking ndarray v0.15.6
+   Compiling nalgebra-macros v0.1.0
+   Compiling anyhow v1.0.104
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+    Checking st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+    Checking transpose v0.2.3
+    Checking rayon v1.12.0
+    Checking spiral-config v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config)
+    Checking st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kdsl)
+    Checking st-kernel-contracts v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kernel-contracts)
+    Checking simba v0.8.1
+   Compiling nalgebra-macros v0.2.2
+    Checking serde_spanned v1.1.1
+    Checking nalgebra v0.29.0
+    Checking toml_datetime v0.7.5+spec-1.1.0
+    Checking primal-check v0.3.4
+    Checking toml v0.9.12+spec-1.1.0
+    Checking rustfft v6.4.1
+    Checking st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Checking nalgebra v0.32.6
+    Checking num-bigint v0.4.8
+    Checking st-softlogic v0.2.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-softlogic)
+    Checking statrs v0.16.1
+    Checking st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 44.74s

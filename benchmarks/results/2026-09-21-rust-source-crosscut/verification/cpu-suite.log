@@ -1,0 +1,367 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+   Compiling spiral-selfsup v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-selfsup)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.76s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/spiral_selfsup-3223b23af5d17fab)
+
+running 20 tests
+test metrics::tests::epoch_metrics_convert_to_values ... ok
+test metrics::tests::registering_descriptors_is_idempotent ... ok
+test trainer::distributed::st_distributed::tests::dropping_the_last_session_removes_the_group_registry_entry ... ok
+test trainer::distributed::st_distributed::tests::non_finite_reduction_is_reported_to_every_connected_rank ... ok
+test trainer::device::policy_commit_tests::mean_scale_failure_is_rejected_by_every_rank_without_local_rollback ... ok
+test trainer::distributed::st_distributed::tests::non_finite_input_is_reported_to_every_connected_rank ... ok
+test trainer::distributed::st_distributed::tests::poisoned_group_lock_is_recovered_before_collective_execution ... ok
+test trainer::tests::distributed_accumulator_checkpoint_verifies_provider_state ... ok
+test trainer::tests::cpu_accumulator_checkpoint_has_a_verifiable_provider_identity ... ok
+test trainer::tests::distributed_device_detects_duplicate_rank ... ok
+test trainer::tests::distributed_device_rejects_invalid_world_size ... ok
+test trainer::tests::distributed_device_aggregates_metrics ... ok
+test trainer::tests::distributed_device_all_reduce_averages_gradients ... ok
+test trainer::tests::distributed_device_implements_accumulator_synchronizer_bridge ... ok
+test trainer::tests::distributed_device_reports_buffer_mismatch ... ok
+test trainer::distributed::st_distributed::tests::rank_drop_aborts_an_active_collective ... ok
+test trainer::distributed::st_distributed::tests::duplicate_contribution_is_rejected_without_aborting_the_round ... ok
+test trainer::tests::distributed_device_collective_timeout_is_configurable ... ok
+test trainer::distributed::st_distributed::tests::missing_rank_times_out_without_mutating_the_caller_buffer ... ok
+test trainer::distributed::st_distributed::tests::repeated_collectives_do_not_overwrite_unconsumed_rounds ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/augmentations.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/augmentations-e9ce8a6bcc213793)
+
+running 3 tests
+test augmentation_pipeline_matches_manual_transform ... ok
+test info_nce_config_from_toml ... ok
+test info_nce_batcher_produces_tensor_batches ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/distributed_selfsup.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/distributed_selfsup-0efb1668bc1ccfc6)
+
+running 3 tests
+test gradients_are_synchronized_via_all_reduce ... ignored
+test metrics_are_aggregated_across_workers ... ignored
+test sum_reduction_keeps_total_metric ... ignored
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/info_nce_tensor.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/info_nce_tensor-cc827f15bd581d5d)
+
+running 6 tests
+test vector_result_rejects_empty_tensor_without_panicking ... ok
+test entry_points_reject_invalid_temperatures_and_shapes ... ok
+test cpu_backend_matches_reference ... ok
+test tensor_wrapper_matches_vector_api ... ok
+test tensor_layouts_preserve_logical_rows ... ok
+test shared_backend_matches_independent_float64_objective ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/module_trainer_accumulators.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/module_trainer_accumulators-553a9ac13ee55a3a)
+
+running 1 test
+test module_trainer_step_matches_averaged_distributed_accumulators ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/repro.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/repro-5feb751e229d420a)
+
+running 2 tests
+test masked_mse_reproducible_with_identical_seed ... ok
+test info_nce_reproducible_across_seeds ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_frac-965b04b51720e7e6)
+
+running 97 tests
+test fft::tests::fft_mixed_radix2_radix4 ... ok
+test fft::tests::fft_roundtrip_radix4 ... ok
+test fractal_field::tests::generates_branching_field ... ok
+test cosmology::tests::series_rejects_invalid_inputs ... ok
+test cosmology::tests::log_lattice_z_points_matches_manual ... ok
+test cosmology::tests::series_projects_with_expected_weights ... ok
+test cosmology::tests::assemble_pzeta_matches_constant_background ... ok
+test fractal_field::tests::weaves_with_existing_grid ... ok
+test cosmology::tests::assemble_pzeta_rejects_incompatible_series ... ok
+test mellin::tests::direct_mellin_transform_rejects_non_finite_abscissa ... ok
+test mellin::tests::log_samples_match_z_bridge ... ok
+test mellin::tests::mellin_eval_plan_derivative_matches_grid_plan_api ... ok
+test mellin::tests::mellin_eval_plan_reports_prefactor_overflow_index ... ok
+test mellin::tests::mellin_grid_rejects_derivative_overflow_after_finite_series ... ok
+test mellin::tests::mellin_grid_rejects_unrepresentable_magnitude ... ok
+test mellin::tests::mellin_eval_plan_mesh_matches_grid_evaluate_mesh ... ok
+test mellin::tests::mellin_eval_plan_rejects_internal_length_mismatch ... ok
+test mellin::tests::mellin_hilbert_product_rejects_overflow ... ok
+test mellin::tests::mellin_eval_plan_stable_matches_direct ... ok
+test mellin::tests::mellin_log_grid_derivative_matches_direct_series ... ok
+test mellin::tests::log_samples_agree_with_function_integration ... ok
+test mellin::tests::mellin_log_grid_many_reuses_samples ... ok
+test mellin::tests::mellin_log_grid_hilbert_inner_product_matches_closed_form ... ok
+test mellin::tests::mellin_log_grid_matches_free_function_path ... ok
+test mellin::tests::mellin_log_grid_mesh_magnitude_matches_complex_norm ... ok
+test mellin::tests::mellin_log_grid_window_preserves_constant_integral ... ok
+test mellin::tests::mellin_log_grid_weighted_series_matches_api ... ok
+test mellin::tests::mellin_log_grid_vertical_line_matches_batch ... ok
+test mellin::tests::mellin_training_complex_gradient_matches_finite_difference ... ok
+test mellin::tests::mellin_training_rejects_non_finite_loss ... ok
+test mellin::tests::mellin_training_loss_matches_grids_with_different_windows ... ok
+test mellin::tests::mellin_training_step_commits_samples_and_weights_together ... ok
+test mellin::tests::mellin_training_step_is_transactional_on_overflow ... ok
+test mellin::tests::mellin_training_step_is_transactional_on_weighted_overflow ... ok
+test mellin::tests::mellin_log_grid_mesh_matches_pointwise ... ok
+test fractal_field::tests::weave_matches_separate_branch_bit_for_bit_without_mutating_base ... ok
+test mellin::tests::sample_log_uniform_exp_decay_scaled_matches_rate_one ... ok
+test mellin::tests::sample_log_uniform_matches_manual_sampling ... ok
+test scale_stack::tests::semantic_field_with_invalid_axis_rejected ... ok
+test scale_stack::tests::invalid_scales_rejected ... ok
+test scale_stack::tests::coherence_break_scale_reports_threshold ... ok
+test tests::adaptive_coeffs_truncates ... ok
+test scale_stack::tests::semantic_stack_marks_interface_transition ... ok
+test tests::alpha_derivative_matches_central_difference_for_every_padding_mode ... ok
+test scale_stack::tests::semantic_stack_supports_cosine_metric ... ok
+test tests::clamped_edge_index_clamps_bounds ... ok
+test tests::coefficient_alpha_derivative_matches_central_difference ... ok
+test tests::coefficient_capacity_overflow_is_an_error ... ok
+test tests::constant_pad_applies_to_right_edge ... ok
+test tests::constant_pad_behaves ... ok
+test scale_stack::tests::boundary_dimension_recovers_planar_interface ... ok
+test scale_stack::tests::persistence_mass_matches_gate_limit ... ok
+test tests::edge_pad_clamps_to_boundary ... ok
+test tests::finite_inputs_cannot_silently_overflow_to_zero ... ok
+test tests::first_order_gl_matches_the_backward_difference ... ok
+test tests::fracdiff_1d_matches_nd ... ok
+test tests::gl_contract_rejects_invalid_parameters_and_samples ... ok
+test tests::fracdiff_nd_backward_handles_strided_lanes ... ok
+test tests::gl_step_scale_is_shared_and_checked ... ok
+test tests::nd_config_is_the_shared_forward_and_vjp_contract ... ok
+test tests::sample_with_pad_handles_right_constant ... ok
+test tests::nd_precomputed_entry_points_match_order_entry_points ... ok
+test tests::fracdiff_nd_handles_strided_lanes ... ok
+test tests::reflected_index_handles_far_offsets ... ok
+test tests::sample_with_pad_handles_wrap ... ok
+test tests::reflect_pad_mirrors_left_edge ... ok
+test tests::reflected_index_wraps_right_edge ... ok
+test tests::sample_with_pad_handles_edge ... ok
+test tests::smoke ... ok
+test tests::sample_with_pad_reflect_handles_extreme_indices ... ok
+test tests::reflected_index_matches_naive_small_ranges ... ok
+test tests::wrap_index_handles_large_displacements ... ok
+test tests::step_scaled_config_alpha_derivative_includes_scale_derivative ... ok
+test tests::wrap_pad_cycles_through_signal ... ok
+test tests::vjp_is_the_exact_adjoint_for_every_padding_mode ... ok
+test zspace::tests::batch_evaluators_report_the_overflowing_z_index ... ok
+test mellin::tests::hilbert_inner_product_positive_definite ... ok
+test zspace::tests::derivative_evaluator_rejects_overflow_when_value_cancels ... ok
+test zspace::tests::evaluate_rejects_nonfinite_coeff ... ok
+test zspace::tests::evaluate_rejects_nonfinite_z ... ok
+test zspace::tests::every_series_evaluator_rejects_empty_coefficients ... ok
+test zspace::tests::evaluators_reject_finite_inputs_that_overflow_value ... ok
+test zspace::tests::inverse_and_stable_series_match_direct_for_large_z ... ok
+test zspace::tests::inverse_derivative_at_zero_uses_first_two_coefficients ... ok
+test zspace::tests::mellin_mapping_rejects_non_finite_abscissa_and_overflow ... ok
+test zspace::tests::mellin_transform_rejects_finite_final_product_overflow ... ok
+test zspace::tests::mellin_via_z_derivative_matches_direct_series ... ok
+test zspace::tests::mellin_via_z_matches_direct_series ... ok
+test zspace::tests::prepare_rejects_finite_inputs_that_overflow_weighted_coefficient ... ok
+test zspace::tests::prepare_rejects_nonfinite_inputs ... ok
+test zspace::tests::trapezoidal_weights_match_manual ... ok
+test zspace::tests::trapezoidal_weights_windowed_preserve_sum_matches_expected ... ok
+test zspace::tests::weighted_series_derivative_len1_is_zero ... ok
+test zspace::tests::weighted_series_derivative_matches_manual_polynomial ... ok
+test zspace::tests::weighted_z_transform_many_matches_single_path ... ok
+test zspace::tests::weighted_z_transform_reduces_to_polynomial ... ok
+test mellin::tests::mellin_transform_matches_gamma_on_real_axis ... ok
+
+test result: ok. 97 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/fft_numerics.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/fft_numerics-2d441910f9c391f7)
+
+running 8 tests
+test circular_convolution_agrees_with_direct_time_domain_filtering ... ok
+test invalid_lengths_are_rejected_without_mutation ... ok
+test forward_four_point_ramp_has_standard_frequency_order_and_sign ... ok
+test standalone_radix4_uses_forward_sign_and_input_order ... ok
+test singleton_is_identity_in_both_directions ... ok
+test shifted_impulses_and_complex_tones_keep_their_phase ... ok
+test arbitrary_complex_roundtrips_preserve_every_sample ... ok
+test forward_and_inverse_match_independent_dft_for_mixed_radices ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_logic-3afe19b966413f66)
+
+running 32 tests
+test contextual_observation::tests::lifting_respects_gauge_choice ... ok
+test contextual_observation::tests::meaning_projection_combines_label_and_spectrum ... ok
+test contextual_observation::tests::contextual_signature_tracks_cluster_imbalance ... ok
+test contextual_observation::tests::meaning_basis_extracts_signal_and_spectrum ... ok
+test contextual_observation::tests::lifting_fails_for_balanced_clusters ... ok
+test contextual_observation::tests::lagrangian_gate_emits_contextual_pulse ... ok
+test contextual_observation::tests::meaning_emergence_metrics_capture_flux_and_coherence ... ok
+test contextual_observation::tests::mixed_arrangement_produces_signature ... ok
+test contextual_observation::tests::meaning_transitions_surface_inflections ... ok
+test contextual_observation::tests::meaning_emergence_profile_combines_metrics_and_transitions ... ok
+test contextual_observation::tests::observation_is_swap_invariant ... ok
+test contextual_observation::tests::pure_arrangements_are_hidden ... ok
+test meta_layer::tests::causal_mutation_guard_updates_payload_without_exposing_graph_indices ... ok
+test meta_layer::tests::discarding_an_event_unblocks_its_descendants ... ok
+test meta_layer::tests::causal_set_resolution_is_first_class_history ... ok
+test meta_layer::tests::causal_set_detects_cycles ... ok
+test meta_layer::tests::empty_event_ids_are_rejected_without_mutation ... ok
+test meta_layer::tests::causal_mutation_guard_refreshes_blocked_frontier_entries ... ok
+test meta_layer::tests::engine_respects_dependencies_added_after_reverse_insertion ... ok
+test meta_layer::tests::engine_respects_partial_order ... ok
+test meta_layer::tests::event_ids_and_nodes_are_inspectable_without_mutation ... ok
+test meta_layer::tests::failed_cycle_insertion_leaves_graph_unchanged ... ok
+test meta_layer::tests::meta_layer_resolves_sheaf_tags ... ok
+test meta_layer::tests::meta_layer_respects_zspace_gate ... ok
+test meta_layer::tests::resolved_event_identifiers_cannot_be_reused ... ok
+test meta_layer::tests::resolved_history_can_parent_a_late_arriving_event ... ok
+test meta_layer::tests::validation_detects_an_internally_corrupted_cycle ... ok
+test temporal_dynamics::tests::integrates_drive_volume ... ok
+test quantum_reality::tests::collapse_manifold_reports_cluster_metrics ... ok
+test temporal_dynamics::tests::interpolates_temporal_sequence ... ok
+test meta_layer::tests::predicate_panic_does_not_consume_a_ready_event ... ok
+test meta_layer::tests::reverse_inserted_dense_dag_stays_valid_while_draining ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_vision-91925e80cdc358e0)
+
+running 55 tests
+test analysis::tests::shape_mismatch_reported ... ok
+test datasets::tests::adapter_samples_consistent_batches ... ok
+test datasets::tests::stacking_batches_concatenates_inputs ... ok
+test datasets::tests::adapter_samples_contiguous_span ... ok
+test datasets::tests::weighted_sampling_honours_zero_weights ... ok
+test datasets::tests::random_span_respects_stride_constraints ... ok
+test analysis::tests::feature_map_bridge_detects_boundary ... ok
+test analysis::tests::profile_extracts_dominant_scale ... ok
+test analysis::tests::similarity_detects_alignment ... ok
+test models::tests::compute_all_grad_cam_drains_layers ... ok
+test tests::color_jitter_validates_hue_bounds ... ok
+test tests::blend_sequence_respects_weights ... ok
+test models::tests::integrated_gradients_hook_wraps_metadata ... ok
+test models::tests::hooks_produce_grad_cam_reports ... ok
+test tests::color_jitter_produces_finite_values ... ok
+test tests::diffuser_softens_sharp_transitions ... ok
+test tests::image_tensor_volume_roundtrip ... ok
+test tests::aggregator_telemetry_and_prune_behave ... ok
+test tests::multi_view_biases_respect_orientation_and_baseline ... ok
+test tests::projector_respects_atlas_calibration ... ok
+test tests::projector_multi_view_temporal_projection_matches_manual_smoothing ... ok
+test tests::projector_temporal_projection_matches_manual_smoothing ... ok
+test tests::decoder_is_deterministic_for_seed ... ok
+test tests::resonance_projection_matches_manual_weighting ... ok
+test tests::slice_profile_matches_manual_stats ... ok
+test tests::slice_profile_summary_computes_entropy ... ok
+test tests::stream_frame_aggregator_respects_depth_limit ... ok
+test tests::stream_frame_aggregator_merges_metadata ... ok
+test tests::streamed_volume_telemetry_matches_frame_report ... ok
+test tests::volume_accumulate_performs_temporal_ema ... ok
+test tests::temporal_buffer_applies_decay_and_handles_resets ... ok
+test tests::volume_from_slices_respects_shapes ... ok
+test tests::volume_interpolation_and_upscale_refine_geometry ... ok
+test tests::volume_profile_matches_slice_statistics ... ok
+test tests::volume_zeros_with_temporal_allocates_expected_buffers ... ok
+test tests::dataloader_produces_batches ... ok
+test transforms::audit::tests::summarize_pipeline_counts_gpu_support ... ok
+test transforms::audit::tests::summarize_pipelines_accumulates_unknowns ... ok
+test transforms::audit::tests::pipeline_audit_matches_registered_ops ... ok
+test xai::grad_cam::tests::grad_cam_allows_raw_heatmap ... ok
+test xai::grad_cam::tests::grad_cam_normalises_heatmap ... ok
+test video::tests::pipeline_emits_annotations ... ok
+test xai::integrated_gradients::tests::integrated_gradients_rejects_zero_steps ... ok
+test xai::integrated_gradients::tests::integrated_gradients_identity_matches_difference ... ok
+test xai::tests::overlay_blends_with_base ... ok
+test xai::tests::normalised_overlay_and_stats ... ok
+test xai::tests::smoothing_returns_blurred_map ... ok
+test xai::utils::tests::blend_heatmap_interpolates ... ok
+test xai::utils::tests::normalise_and_threshold ... ok
+test xai::utils::tests::box_blur_applies_local_average ... ok
+test tests::resonance_generator_respects_feedback_history ... ok
+test tests::resonance_generator_produces_projectable_resonance ... ok
+test tests::video_stream_projector_handles_sequences ... ok
+test tests::transform_pipeline_matches_torchvision_basics ... ok
+test tests::simple_cnn_forward_produces_logits ... ok
+
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.30s
+
+     Running tests/backbones.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/backbones-addcb835abcd0ea2)
+
+running 10 tests
+test resnet56_cifar_only_slips_learnable_skips ... ok
+test resnet_config_auto_selects_common_presets ... ok
+test skip_slip_schedule_preview_matches_formula ... ok
+test resnet_skip_slip_stage_progress_updates_per_stage ... ok
+test vit_cls_token_shape_and_json_reload ... ok
+test resnet_skip_slip_scales_learnable_gate_gradients ... ok
+test convnext_stage_shapes_are_consistent ... ok
+test resnet_produces_expected_shape_and_state_roundtrip ... ok
+test resnet_backbone_builds_from_presets ... ok
+test resnet56_skip_gate_accumulates_gradients ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 46.54s
+
+     Running tests/canvas_z_feedback_smoke.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/canvas_z_feedback_smoke-96dbee42f86700a1)
+
+running 2 tests
+test fractal_canvas_exposes_scheduler_and_refresh ... ok
+test canvas_projector_refreshes_rgba_and_vectors ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/nerf_regression.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/nerf_regression-271e3473f4f9a272)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/temporal_channels.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/temporal_channels-436df3e77f51ba89)
+
+running 6 tests
+test channel_shrink_and_regrow_reuse_existing_storage ... ok
+test harmonic_resize_preserves_each_voxel ... ok
+test integration_keeps_voxel_identity_when_drive_adds_channels ... ok
+test interpolation_zero_pads_channels_not_adjacent_voxels ... ok
+test interpolation_handles_a_keyframe_without_harmonics ... ok
+test resize_matches_independent_row_remap_for_all_small_channel_counts ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/video_pipeline.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/video_pipeline-8c22c1b7faae2bb2)
+
+running 1 test
+test pipeline_emits_temporal_z_dynamics ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests spiral_selfsup
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests st_frac
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests st_logic
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests st_vision
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

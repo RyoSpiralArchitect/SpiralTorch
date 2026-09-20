@@ -1,0 +1,12 @@
+{
+  "status": "not_admitted_for_performance_comparison",
+  "completed": ["baseline-a", "candidate-a", "candidate-b", "baseline-b"],
+  "failed_step": "torch_setup",
+  "exception": "RuntimeError: Error: cannot set number of interop threads after parallel work has started or set_num_interop_threads called",
+  "observed_python_sitecustomize": "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/sitecustomize.py",
+  "observed_cpu_autotune": "apply=true, cpu.matmul.v02|aarch64|macos|baseline|96x128x96|runs3",
+  "rayon_thread_count": "not fixed in this preflight",
+  "resolution": "Retain all four Rust results. Rerun the entire unchanged grid with serial Rust reduction, no autotune store path, and isolated -I -S Python with explicit torch package path and verified one-thread pools.",
+  "repaired_global_settings": false,
+  "changed_runtime_code": false
+}

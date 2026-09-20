@@ -1,0 +1,247 @@
+{
+  "source": {
+    "commit": "bf8cc8eabdf011203d065215d163ac618928de74",
+    "tree": "b71eb2b04c6c027ef075b17c59f0f85043d6fb27"
+  },
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 2.11245729100483,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-suite",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "spiral-selfsup",
+        "-p",
+        "st-vision",
+        "-p",
+        "st-logic",
+        "-p",
+        "st-frac"
+      ],
+      "exit_code": 0,
+      "seconds": 66.96408737499587,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "native-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "spiral-selfsup",
+        "-p",
+        "st-vision",
+        "-p",
+        "st-logic",
+        "-p",
+        "st-frac",
+        "-p",
+        "st-bench",
+        "--all-targets",
+        "--no-deps",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 8.45648500000243,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "selfsup-wgpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "spiral-selfsup",
+        "--features",
+        "wgpu",
+        "--test",
+        "info_nce_tensor",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 79.90611212499789,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "frac-wasm-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-frac",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--features",
+        "wgpu",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 20.319692791003035,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "logic-wasm-check",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "-p",
+        "st-logic",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "seconds": 44.96239762500045,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "wasm-check",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "check",
+        "--locked",
+        "-p",
+        "spiraltorch-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "seconds": 37.403902874997584,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "-p",
+        "spiraltorch-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--release"
+      ],
+      "exit_code": 0,
+      "seconds": 89.35825475000456,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "wasm-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm",
+        "--target",
+        "nodejs",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rust-source-crosscut-20260921/verified-b/wasm"
+      ],
+      "exit_code": 0,
+      "seconds": 0.42991954200260807,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "wasm-numerics",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/numeric_boundaries.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rust-source-crosscut-20260921/verified-b/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.23567508300038753,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "python-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "spiraltorch-py",
+        "--no-default-features",
+        "--features",
+        "python-default"
+      ],
+      "exit_code": 0,
+      "seconds": 282.06557204099954,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "python-numerics",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rust-source-crosscut-20260921/verified-b/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_source_crosscut.py"
+      ],
+      "exit_code": 0,
+      "seconds": 5.016480000005686,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "benchmark-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "source_crosscut"
+      ],
+      "exit_code": 0,
+      "seconds": 142.66730466700392,
+      "gpu_opt_in": false
+    }
+  ],
+  "products": {
+    "python-cpu.dylib": "deb5762925b8f4e955698d35be608c09ce63d3e9e7b323c56c928f80e47a667e",
+    "candidate-worker": "c423608a120c7c0184ea807714c8d0d5d1d1a63322277604cd7cf96e560e1aab"
+  },
+  "status": "passed",
+  "unrelated_evidence_deletions": [
+    " D benchmarks/results/2026-09-08-resident-nn-training-throughput/raw.tar.xz.part-aa",
+    " D benchmarks/results/2026-09-08-resident-nn-training-throughput/raw.tar.xz.part-ab"
+  ],
+  "compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n"
+}

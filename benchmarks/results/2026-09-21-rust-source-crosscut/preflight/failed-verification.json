@@ -1,0 +1,76 @@
+{
+  "source": {
+    "commit": "49c46968f9324451da90015b0e212aa34cbec3df",
+    "tree": "1aeafd303fef6f039df291bcb5342915296ad839"
+  },
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 2.229523791997053,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "cpu-suite",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "spiral-selfsup",
+        "-p",
+        "st-vision",
+        "-p",
+        "st-logic",
+        "-p",
+        "st-frac"
+      ],
+      "exit_code": 0,
+      "seconds": 60.00624087500182,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "native-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "spiral-selfsup",
+        "-p",
+        "st-vision",
+        "-p",
+        "st-logic",
+        "-p",
+        "st-frac",
+        "-p",
+        "st-bench",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 101,
+      "seconds": 28.32539841599646,
+      "gpu_opt_in": false
+    }
+  ],
+  "products": {},
+  "status": "failed",
+  "unrelated_evidence_deletions": [
+    " D benchmarks/results/2026-09-08-resident-nn-training-throughput/raw.tar.xz.part-aa",
+    " D benchmarks/results/2026-09-08-resident-nn-training-throughput/raw.tar.xz.part-ab"
+  ],
+  "compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n",
+  "error": "CalledProcessError(101, ['cargo', '+1.98.0', 'clippy', '--locked', '-p', 'spiral-selfsup', '-p', 'st-vision', '-p', 'st-logic', '-p', 'st-frac', '-p', 'st-bench', '--all-targets', '--', '-D', 'warnings'], None, None)"
+}
