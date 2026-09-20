@@ -88,8 +88,8 @@ fn validate_tensor_batches(anchors: &Tensor, positives: &Tensor) -> Result<(usiz
     Ok((anchor_batch, feature_dim))
 }
 
-fn l2_norm(vec: &[f32]) -> f32 {
-    vec.iter().map(|v| (*v as f64).powi(2)).sum::<f64>().sqrt() as f32
+fn l2_norm(values: impl Iterator<Item = f32>) -> f32 {
+    values.map(|v| f64::from(v).powi(2)).sum::<f64>().sqrt() as f32
 }
 
 /// Compute the InfoNCE loss across a batch of anchor and positive representations.
@@ -99,36 +99,75 @@ pub fn info_nce_loss(
     temperature: f32,
     normalize: bool,
 ) -> Result<InfoNCEResult> {
+    validate_temperature(temperature)?;
+    let (batch, feature_dim) = validate_batches(anchors, positives)?;
+    let anchors_flat = flatten_row_major(anchors, feature_dim);
+    let positives_t = transpose_to_row_major(positives, batch, feature_dim);
+    info_nce_prepared(
+        &anchors_flat,
+        &positives_t,
+        batch,
+        feature_dim,
+        temperature,
+        normalize,
+    )
+}
+
+/// Compute the InfoNCE loss for batches expressed as [`Tensor`]s.
+pub fn info_nce_loss_tensor(
+    anchors: &Tensor,
+    positives: &Tensor,
+    temperature: f32,
+    normalize: bool,
+) -> Result<TensorInfoNCEResult> {
+    let result = info_nce_loss_tensor_as_result(anchors, positives, temperature, normalize)?;
+    let batch = result.batch;
+    let logits = Tensor::from_vec(batch, batch, result.logits)?;
+    let labels = result
+        .labels
+        .into_iter()
+        .map(|value| value as f32)
+        .collect();
+    let labels = Tensor::from_vec(batch, 1, labels)?;
+    Ok(TensorInfoNCEResult {
+        loss: result.loss,
+        logits,
+        labels,
+        batch,
+    })
+}
+
+fn validate_temperature(temperature: f32) -> Result<()> {
     if !temperature.is_finite() || temperature <= 0.0 {
         return Err(ObjectiveError::InvalidArgument(format!(
             "temperature must be > 0, got {temperature}"
         )));
     }
+    Ok(())
+}
 
-    let (batch, feature_dim) = validate_batches(anchors, positives)?;
-    let mut anchor_norms = vec![1.0f32; batch];
-    let mut positive_norms = vec![1.0f32; batch];
-
+fn info_nce_prepared(
+    anchors_flat: &[f32],
+    positives_t: &[f32],
+    batch: usize,
+    feature_dim: usize,
+    temperature: f32,
+    normalize: bool,
+) -> Result<InfoNCEResult> {
+    let mut logits = compute_logits(anchors_flat, positives_t, batch, feature_dim)?;
     if normalize {
-        for (idx, vec) in anchors.iter().enumerate() {
-            let norm = l2_norm(vec).max(f32::EPSILON);
-            anchor_norms[idx] = norm;
-        }
-        for (idx, vec) in positives.iter().enumerate() {
-            let norm = l2_norm(vec).max(f32::EPSILON);
-            positive_norms[idx] = norm;
-        }
-    }
-
-    let anchors_flat = flatten_row_major(anchors, feature_dim);
-    let positives_t = transpose_to_row_major(positives, batch, feature_dim);
-
-    let mut logits = compute_logits(&anchors_flat, &positives_t, batch, feature_dim)?;
-
-    if normalize {
+        let anchor_norms: Vec<_> = anchors_flat
+            .chunks_exact(feature_dim)
+            .map(|row| l2_norm(row.iter().copied()).max(f32::EPSILON))
+            .collect();
+        let positive_norms: Vec<_> = (0..batch)
+            .map(|column| {
+                l2_norm((0..feature_dim).map(|row| positives_t[row * batch + column]))
+                    .max(f32::EPSILON)
+            })
+            .collect();
         apply_normalization(&mut logits, &anchor_norms, &positive_norms, batch);
     }
-
     for value in &mut logits {
         *value /= temperature;
     }
@@ -155,78 +194,6 @@ pub fn info_nce_loss(
     })
 }
 
-/// Compute the InfoNCE loss for batches expressed as [`Tensor`]s.
-pub fn info_nce_loss_tensor(
-    anchors: &Tensor,
-    positives: &Tensor,
-    temperature: f32,
-    normalize: bool,
-) -> Result<TensorInfoNCEResult> {
-    if !temperature.is_finite() || temperature <= 0.0 {
-        return Err(ObjectiveError::InvalidArgument(format!(
-            "temperature must be > 0, got {temperature}"
-        )));
-    }
-
-    let (batch, feature_dim) = validate_tensor_batches(anchors, positives)?;
-    let anchor_data = anchors.data();
-    let positive_data = positives.data();
-
-    let mut anchor_norms = vec![1.0f32; batch];
-    let mut positive_norms = vec![1.0f32; batch];
-
-    if normalize {
-        for (idx, chunk) in anchor_data.chunks_exact(feature_dim).enumerate() {
-            let norm = l2_norm(chunk).max(f32::EPSILON);
-            anchor_norms[idx] = norm;
-        }
-        for (idx, chunk) in positive_data.chunks_exact(feature_dim).enumerate() {
-            let norm = l2_norm(chunk).max(f32::EPSILON);
-            positive_norms[idx] = norm;
-        }
-    }
-
-    let mut logits = vec![0.0f32; batch * batch];
-    for i in 0..batch {
-        let anchor_row = &anchor_data[i * feature_dim..(i + 1) * feature_dim];
-        for j in 0..batch {
-            let positive_row = &positive_data[j * feature_dim..(j + 1) * feature_dim];
-            let mut dot = 0.0f32;
-            for k in 0..feature_dim {
-                dot += anchor_row[k] * positive_row[k];
-            }
-            if normalize {
-                dot /= anchor_norms[i] * positive_norms[j];
-            }
-            logits[i * batch + j] = dot / temperature;
-        }
-    }
-
-    let mut loss = 0.0f32;
-    for i in 0..batch {
-        let row = &logits[i * batch..(i + 1) * batch];
-        let max_logit = row.iter().fold(f32::NEG_INFINITY, |acc, &v| acc.max(v));
-        let exp_sum: f32 = row
-            .iter()
-            .map(|&v| ((v - max_logit) as f64).exp() as f32)
-            .sum();
-        let positive_logit = row[i];
-        let log_prob = positive_logit - max_logit - exp_sum.ln();
-        loss += -log_prob;
-    }
-    loss /= batch as f32;
-
-    let logits_tensor = Tensor::from_vec(batch, batch, logits).map_err(ObjectiveError::from)?;
-    let labels = (0..batch).map(|value| value as f32).collect();
-    let labels_tensor = Tensor::from_vec(batch, 1, labels).map_err(ObjectiveError::from)?;
-
-    Ok(TensorInfoNCEResult {
-        loss,
-        logits: logits_tensor,
-        labels: labels_tensor,
-        batch,
-    })
-}
 fn flatten_row_major(rows: &[Vec<f32>], cols: usize) -> Vec<f32> {
     let mut data = Vec::with_capacity(rows.len() * cols);
     for row in rows {
@@ -296,32 +263,18 @@ pub fn info_nce_loss_tensor_as_result(
     temperature: f32,
     normalize: bool,
 ) -> Result<InfoNCEResult> {
-    let (anchor_rows, anchor_cols) = anchors.shape();
-    let (positive_rows, positive_cols) = positives.shape();
-    if anchor_rows != positive_rows || anchor_cols != positive_cols {
-        return Err(ObjectiveError::Shape(format!(
-            "tensor batch mismatch (anchors={}x{}, positives={}x{})",
-            anchor_rows, anchor_cols, positive_rows, positive_cols
-        )));
-    }
-
-    let anchors_rm = anchors
-        .to_layout(Layout::RowMajor)
-        .map_err(|err| ObjectiveError::InvalidArgument(err.to_string()))?;
-    let positives_rm = positives
-        .to_layout(Layout::RowMajor)
-        .map_err(|err| ObjectiveError::InvalidArgument(err.to_string()))?;
-
-    let anchors_vec = anchors_rm
-        .data()
-        .chunks(anchor_cols)
-        .map(|chunk| chunk.to_vec())
-        .collect::<Vec<_>>();
-    let positives_vec = positives_rm
-        .data()
-        .chunks(positive_cols)
-        .map(|chunk| chunk.to_vec())
-        .collect::<Vec<_>>();
-
-    info_nce_loss(&anchors_vec, &positives_vec, temperature, normalize)
+    validate_temperature(temperature)?;
+    let (batch, feature_dim) = validate_tensor_batches(anchors, positives)?;
+    let anchors_rm = anchors.to_layout(Layout::RowMajor)?;
+    // Column-major positive storage is the row-major RHS transpose. Already
+    // compatible Tensor buffers are shared, without allocating per-example Vecs.
+    let positives_t = positives.to_layout(Layout::ColMajor)?;
+    info_nce_prepared(
+        anchors_rm.data(),
+        positives_t.data(),
+        batch,
+        feature_dim,
+        temperature,
+        normalize,
+    )
 }
