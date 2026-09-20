@@ -27,6 +27,7 @@ enum Node {
     Linear {
         forward: Pass,
         backward: Vec<Pass>,
+        preactivation: Box<wgpu::Buffer>,
         delta: wgpu::Buffer,
     },
     Pointwise {
@@ -37,11 +38,16 @@ enum Node {
     },
 }
 
-// Retain the existing binding resources so an owning VJP can replace only the
-// public destinations, without preparing another tape or different kernels.
-struct BackwardResources {
+enum ForwardBinding {
+    Linear(Pass),
+    Pointwise(wgpu::BindGroup),
+}
+
+// Rebind owning predictions/VJPs without preparing another tape or kernels.
+struct StageResources {
     matrix_layout: wgpu::BindGroupLayout,
     element_layout: wgpu::BindGroupLayout,
+    empty_flags: wgpu::Buffer,
     unused_read: wgpu::Buffer,
     unused_out: wgpu::Buffer,
     unused_aux: wgpu::Buffer,
@@ -67,7 +73,7 @@ pub struct ResidentGraphTraining {
     effective_gradients: Vec<wgpu::Buffer>,
     candidates: Vec<wgpu::Buffer>,
     nodes: Vec<Node>,
-    backward_resources: BackwardResources,
+    stage_resources: StageResources,
     loss_passes: Vec<Pass>,
     update_passes: Vec<Pass>,
     target: wgpu::Buffer,
@@ -460,6 +466,7 @@ impl ResidentGraphTraining {
                     Node::Linear {
                         forward,
                         backward,
+                        preactivation: Box::new(preactivation),
                         delta,
                     }
                 }
@@ -604,9 +611,10 @@ impl ResidentGraphTraining {
             effective_gradients,
             candidates,
             nodes,
-            backward_resources: BackwardResources {
+            stage_resources: StageResources {
                 matrix_layout,
                 element_layout,
+                empty_flags,
                 unused_read,
                 unused_out,
                 unused_aux,
@@ -818,22 +826,35 @@ impl ResidentGraphTraining {
         encoder: &mut wgpu::CommandEncoder,
         timestamps: &mut PassTimestampCursor<'_>,
     ) {
+        self.encode_forward_to(encoder, timestamps, None);
+    }
+
+    fn encode_forward_to(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timestamps: &mut PassTimestampCursor<'_>,
+        terminal: Option<&ForwardBinding>,
+    ) {
         // Forward has no intervening copies. Keep the loss/VJP/decision phases
         // separate: their copies and prepare/vote/commit ordering are unchanged.
-        for nodes in self.nodes.chunks(forward_dispatches_per_pass(
-            self.adapter_info().backend,
-            self.nodes.len(),
-        )) {
+        let width = forward_dispatches_per_pass(self.adapter_info().backend, self.nodes.len());
+        for (chunk, nodes) in self.nodes.chunks(width).enumerate() {
             let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("graph.training.forward"),
                 timestamp_writes: timestamps.next(),
             });
-            for node in nodes {
-                match node {
-                    Node::Linear { forward, .. } => forward.encode(&mut compute),
-                    Node::Pointwise { plan, forward, .. } => {
+            for (index, node) in nodes.iter().enumerate() {
+                let output = terminal.filter(|_| chunk * width + index + 1 == self.nodes.len());
+                match (node, output) {
+                    (Node::Linear { forward, .. }, None)
+                    | (Node::Linear { .. }, Some(ForwardBinding::Linear(forward))) => {
+                        forward.encode(&mut compute);
+                    }
+                    (Node::Pointwise { plan, forward, .. }, None)
+                    | (Node::Pointwise { plan, .. }, Some(ForwardBinding::Pointwise(forward))) => {
                         plan.forward().encode_in_pass(&mut compute, forward);
                     }
+                    _ => unreachable!("prepared terminal forward binding"),
                 }
             }
         }

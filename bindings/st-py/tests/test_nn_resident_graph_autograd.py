@@ -1,5 +1,6 @@
 """Public clients use the Rust-owned exact VJP and opaque forward token."""
 import gc
+import json
 import os
 import unittest
 import spiraltorch as st
@@ -30,6 +31,52 @@ class Surface(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class Gpu(unittest.TestCase):
+    def test_prediction_versions_are_owning_across_reuse_and_updates(self):
+        for dense in (False, True):
+            parameters = ([{"role": "weight", "shape": [2, 2], "values": [2., 0., 0., 2.]},
+                           {"role": "bias", "shape": [2], "values": [0., 0.]}] if dense else
+                          [{"role": "gain", "shape": [2], "values": [2., 2.]}])
+            stages = ([{"kind": "linear", "weight": 0, "bias": 1, "gelu": False}] if dense else
+                      [{"kind": "pointwise", "parameters": [0], "steps": [
+                          {"op": "multiply", "rhs": 1}, {"op": "relu", "rhs": None}]}])
+            source = st.nn.InferencePlan.from_json(json.dumps({"schema": "spiraltorch.nn.inference_plan.v2",
+                "input_shape": [1, 3, 2], "parameters": parameters, "stages": stages}))
+            for learning in (False, True):
+                gpu = (source.compile_graph_learner_wgpu(gradient_policy="exact") if learning else
+                       source.compile_graph_autograd_wgpu())
+                device = gpu.tensor_device()
+                gpu.upload_values([1.] * 6)
+                forward = gpu.forward()
+                view = forward.prediction_tensor().reshape([6])
+                pending = view.snapshot()
+                del forward
+                held = []
+                for value in range(2, 8):
+                    gpu.upload_values([float(value)] * 6)
+                    held.append(gpu.forward().prediction_tensor())
+                gpu.upload_values([float.fromhex("0x1.fffffep+127")] * 6)
+                bad = gpu.forward().prediction_tensor().snapshot()
+                for _ in range(12):
+                    gpu.upload_values([1.] * 6)
+                    fresh = gpu.forward()
+                    self.assertEqual(read(fresh.prediction_tensor()), [2.] * 6)
+                    del fresh
+                if learning:
+                    forward = gpu.forward()
+                    gradient = gpu.backward(forward, device.upload([1, 3, 2], [1.] * 6))
+                    gpu.sgd(gradient, .1)
+                    self.assertEqual(gpu.update_snapshot().read(), 1)
+                    self.assertNotEqual(read(gpu.forward().prediction_tensor()), [2.] * 6)
+                    del forward, gradient
+                del gpu, device
+                gc.collect()
+                self.assertEqual(pending.read_values(), [2.] * 6)
+                self.assertEqual(read(view), [2.] * 6)
+                for value, tensor in enumerate(held, 2):
+                    self.assertEqual(read(tensor), [2. * value] * 6)
+                with self.assertRaisesRegex(ValueError, "non-finite"):
+                    bad.read_values()
+
     def test_resident_seed_exact_vjp_repeat_and_ownership(self):
         gpu = plan().compile_graph_autograd_wgpu()
         device = gpu.tensor_device()

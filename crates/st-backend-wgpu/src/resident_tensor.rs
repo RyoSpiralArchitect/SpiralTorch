@@ -369,6 +369,7 @@ impl TensorDevice {
     }
 
     /// Freeze within the caller's submission, retaining every upstream guard.
+    #[cfg(test)]
     pub(crate) fn capture_into(
         &self,
         encoder: &mut wgpu::CommandEncoder,

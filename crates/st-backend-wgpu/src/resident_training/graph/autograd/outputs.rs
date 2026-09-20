@@ -63,7 +63,7 @@ impl GradientOutputs {
         let tensors =
             allocate_whole_outputs(&g.device, &self.layouts, wgpu::BufferUsages::COPY_DST)?;
         let gpu = g.device.runtime().context().device();
-        let resources = &g.backward_resources;
+        let resources = &g.stage_resources;
         let rows = g.input_layout().len() / g.input_layout().shape().last().unwrap();
         let mut bindings = Vec::with_capacity(g.nodes.len());
         for (i, (node, stage)) in g.nodes.iter().zip(g.definition.stages()).enumerate() {
