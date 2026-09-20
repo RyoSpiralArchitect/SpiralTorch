@@ -30,6 +30,62 @@ fn harmonic_resize_preserves_each_voxel() {
 }
 
 #[test]
+fn resize_matches_independent_row_remap_for_all_small_channel_counts() {
+    for voxels in [1, 3, 17] {
+        for old in 0..6 {
+            for new in 0..6 {
+                let mut v = ZSpaceVolume::zeros_with_temporal(1, 1, voxels, old).unwrap();
+                let original: Vec<_> = (0..voxels * old).map(|v| v as f32 + 0.5).collect();
+                v.temporal_harmonics_mut().copy_from_slice(&original);
+                v.ensure_harmonic_channels(new);
+                assert_eq!(v.harmonic_channels(), new);
+                assert_eq!(v.temporal_harmonics().len(), voxels * new);
+                for voxel in 0..voxels {
+                    for channel in 0..new {
+                        let expected = if channel < old {
+                            original[voxel * old + channel]
+                        } else {
+                            0.0
+                        };
+                        assert_eq!(v.temporal_harmonics()[voxel * new + channel], expected);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn channel_shrink_and_regrow_reuse_existing_storage() {
+    let mut v = volume(3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    let original_pointer = v.temporal_harmonics().as_ptr();
+    v.ensure_harmonic_channels(1);
+    assert_eq!(v.temporal_harmonics(), &[1.0, 4.0, 7.0]);
+    assert_eq!(v.temporal_harmonics().as_ptr(), original_pointer);
+    v.ensure_harmonic_channels(2);
+    assert_eq!(v.temporal_harmonics(), &[1.0, 0.0, 4.0, 0.0, 7.0, 0.0]);
+    assert_eq!(v.temporal_harmonics().as_ptr(), original_pointer);
+}
+
+#[test]
+fn interpolation_handles_a_keyframe_without_harmonics() {
+    let empty = volume(0, &[]);
+    let populated = volume(1, &[2.0, 4.0, 8.0]);
+    for (start, end) in [(&empty, &populated), (&populated, &empty)] {
+        let frames = interpolate_temporal_sequence(
+            start,
+            end,
+            TemporalPropagationConfig {
+                steps: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(frames[1].temporal_harmonics(), &[1.0, 2.0, 4.0]);
+    }
+}
+
+#[test]
 fn interpolation_zero_pads_channels_not_adjacent_voxels() {
     let narrow = volume(1, &[1.0, 2.0, 3.0]);
     let wide = volume(2, &[10.0, 100.0, 20.0, 200.0, 30.0, 300.0]);

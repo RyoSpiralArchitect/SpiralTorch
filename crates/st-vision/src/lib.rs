@@ -981,14 +981,35 @@ impl ZSpaceVolume {
         Ok(self.profile()?.summarize())
     }
 
-    /// Ensures the harmonic buffer has the requested channel count, reallocating if required.
+    /// Resizes voxel-major harmonic rows, preserving overlapping channels and zeroing new ones.
     pub fn ensure_harmonic_channels(&mut self, harmonic_channels: usize) {
-        if self.harmonic_channels == harmonic_channels {
+        let old_channels = self.harmonic_channels;
+        if old_channels == harmonic_channels {
             return;
         }
+        let voxels = self.voxel_count();
+        let harmonic_len = voxels.saturating_mul(harmonic_channels);
+        if old_channels == 0 || harmonic_channels == 0 {
+            self.temporal_harmonics.resize(harmonic_len, 0.0);
+        } else if harmonic_channels > old_channels {
+            self.temporal_harmonics.resize(harmonic_len, 0.0);
+            // Move backwards when expanding so later source rows remain intact.
+            for voxel in (0..voxels).rev() {
+                let src = voxel * old_channels;
+                let dst = voxel * harmonic_channels;
+                self.temporal_harmonics
+                    .copy_within(src..src + old_channels, dst);
+                self.temporal_harmonics[dst + old_channels..dst + harmonic_channels].fill(0.0);
+            }
+        } else {
+            for voxel in 0..voxels {
+                let src = voxel * old_channels;
+                self.temporal_harmonics
+                    .copy_within(src..src + harmonic_channels, voxel * harmonic_channels);
+            }
+            self.temporal_harmonics.truncate(harmonic_len);
+        }
         self.harmonic_channels = harmonic_channels;
-        let harmonic_len = self.voxel_count().saturating_mul(harmonic_channels);
-        self.temporal_harmonics.resize(harmonic_len, 0.0);
     }
 
     /// Extracts a slice at the requested depth index.

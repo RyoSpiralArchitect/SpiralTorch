@@ -13,6 +13,7 @@ pub trait TemporalVolume: Clone {
     fn harmonics_mut(&mut self) -> &mut [f32];
     fn resonance_decay(&self) -> &[f32];
     fn resonance_decay_mut(&mut self) -> &mut [f32];
+    /// Resize the voxel-major harmonic rows, preserving overlapping channels per voxel.
     fn ensure_harmonic_channels(&mut self, channels: usize);
     fn blank_like(&self, harmonic_channels: usize) -> PureResult<Self>;
 }
@@ -69,7 +70,9 @@ pub fn interpolate_temporal_sequence<T: TemporalVolume>(
     let steps = config.steps.max(1);
     let mut frames = Vec::with_capacity(steps + 2);
     frames.push(start.clone());
-    let harmonic_channels = start.harmonic_channels().max(end.harmonic_channels());
+    let start_channels = start.harmonic_channels();
+    let end_channels = end.harmonic_channels();
+    let harmonic_channels = start_channels.max(end_channels);
     let voxel_count = start.voxel_count();
     for step in 1..=steps {
         let t = step as f32 / (steps as f32 + 1.0);
@@ -89,16 +92,23 @@ pub fn interpolate_temporal_sequence<T: TemporalVolume>(
             let decay_end = end.resonance_decay()[idx];
             frame.resonance_decay_mut()[idx] = lerp(decay_start, decay_end, t);
             for channel in 0..harmonic_channels {
-                let start_val = start
-                    .harmonics()
-                    .get(idx * start.harmonic_channels() + channel)
-                    .copied()
-                    .unwrap_or(0.0);
-                let end_val = end
-                    .harmonics()
-                    .get(idx * end.harmonic_channels() + channel)
-                    .copied()
-                    .unwrap_or(0.0);
+                let start_val = if channel < start_channels {
+                    start
+                        .harmonics()
+                        .get(idx * start_channels + channel)
+                        .copied()
+                        .unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                let end_val = if channel < end_channels {
+                    end.harmonics()
+                        .get(idx * end_channels + channel)
+                        .copied()
+                        .unwrap_or(0.0)
+                } else {
+                    0.0
+                };
                 frame.harmonics_mut()[idx * harmonic_channels + channel] =
                     lerp(start_val, end_val, t);
             }
@@ -233,8 +243,15 @@ mod tests {
             if self.harmonic_channels == channels {
                 return;
             }
+            let mut remapped = vec![0.0; self.voxel_count() * channels];
+            for voxel in 0..self.voxel_count() {
+                for channel in 0..channels.min(self.harmonic_channels) {
+                    remapped[voxel * channels + channel] =
+                        self.harmonics[voxel * self.harmonic_channels + channel];
+                }
+            }
+            self.harmonics = remapped;
             self.harmonic_channels = channels;
-            self.harmonics.resize(self.voxel_count() * channels, 0.0);
         }
 
         fn blank_like(&self, harmonic_channels: usize) -> PureResult<Self> {
