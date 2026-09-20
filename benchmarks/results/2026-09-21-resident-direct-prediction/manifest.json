@@ -12,8 +12,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 10099,
-      "sha256": "f0ce005d65bbbd7ab31126fba9d25cfae4c332b303386481a26af2fe52d5762d"
+      "bytes": 10394,
+      "sha256": "6102e7502105fa666677d7981e833b56750817d6fc690f199cf02300c466af6b"
     },
     {
       "path": "baseline-inventory.json",
@@ -67,8 +67,8 @@
     },
     {
       "path": "reproduction/finalize-publication.py",
-      "bytes": 971,
-      "sha256": "1c80509c964f2a401e3608495310d38c41def4a82acf2ff407727cdbfc151abb"
+      "bytes": 977,
+      "sha256": "de955056d7edbcd7d7f2f899949f258aeca684d5b4ff2bac68a8245a8d03b8b4"
     },
     {
       "path": "reproduction/measure.py",
@@ -107,8 +107,8 @@
     },
     {
       "path": "test_verify.py",
-      "bytes": 4294,
-      "sha256": "86fdfb873d6c08aeb5bb19ad2e0a601f242e043c610b203713dd4d2ff3566910"
+      "bytes": 4694,
+      "sha256": "76afe605533667b5ffe32b91f2a81bf115b07a92db0e80fb32472a765fd167e8"
     },
     {
       "path": "validation/a-clipped_topos_ema-validation.json",
@@ -462,8 +462,8 @@
     },
     {
       "path": "verify.py",
-      "bytes": 12881,
-      "sha256": "132f4dc68e4ad4355368fff82d5ad53e39ccefeba7678fcffb04aa1a098ab56a"
+      "bytes": 12952,
+      "sha256": "7c5001c02d86b1a7304c112b9bbd8e88453af1728c89500f00a1a0c895396d2e"
     }
   ]
 }

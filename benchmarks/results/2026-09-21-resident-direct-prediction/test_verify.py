@@ -1,7 +1,8 @@
 """Tamper checks for the published-byte/aggregation verifier, not GPU tests."""
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import runpy
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,12 @@ import unittest
 
 
 class PublicationVerificationTests(unittest.TestCase):
+    def test_portable_manifest_paths(self):
+        normalize = runpy.run_path(str(Path(__file__).with_name("verify.py")))["archive_path"]
+        for kind, base in [(PureWindowsPath, "C:/archive"), (PurePosixPath, "/archive")]:
+            root = kind(base)
+            self.assertEqual(normalize(root / "validation/a.json", root), "validation/a.json")
+
     def test_tampering_is_rejected(self):
         root = Path(__file__).resolve().parent
         changes = {

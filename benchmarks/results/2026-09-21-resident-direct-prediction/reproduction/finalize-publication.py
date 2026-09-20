@@ -10,7 +10,7 @@ records = []
 for path in sorted(root.rglob("*")):
     if path.is_file() and path.name != "manifest.json":
         data = path.read_bytes()
-        records.append(dict(path=str(path.relative_to(root)), bytes=len(data),
+        records.append(dict(path=path.relative_to(root).as_posix(), bytes=len(data),
             sha256=hashlib.sha256(data).hexdigest()))
 manifest = dict(schema="spiraltorch.direct_prediction_manifest.v1",
     source=summary["source"], files=records)

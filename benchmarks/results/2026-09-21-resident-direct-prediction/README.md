@@ -143,6 +143,10 @@ python3 -S benchmarks/results/2026-09-21-resident-direct-prediction/verify.py \
 These commands do not replay GPU work or numerics. Public hashes cannot
 reconstruct omitted tensors. Numerical replay needs those raw files and
 `tools/validate_resident_training_bench.py`, or a new live run.
+The verifier expects an isolated archive directory: extra files, including
+OS-generated `.DS_Store` metadata, are rejected rather than silently ignored.
+Manifest paths use `/` on both Windows and POSIX systems; the path regression
+test does not claim a full numerical replay on either platform.
 
 For a new comparison, build `resident_training_bench` with Rust 1.98.0,
 `--locked --release -p st-nn --features wgpu --example resident_training_bench`

@@ -17,12 +17,16 @@ def sha(path):
     return h.hexdigest()
 
 
+def archive_path(path, root):
+    return path.relative_to(root).as_posix()
+
+
 def checked_files(root, records):
     seen = set()
     for row in records:
         path = (root / row["path"]).resolve(strict=True)
         assert path.is_relative_to(root.resolve()) and path.is_file()
-        assert str(path.relative_to(root.resolve())) == row["path"] and row["path"] not in seen
+        assert archive_path(path, root.resolve()) == row["path"] and row["path"] not in seen
         seen.add(row["path"])
         assert path.stat().st_size == row["bytes"] and sha(path) == row["sha256"], row["path"]
     return seen
@@ -38,7 +42,7 @@ def main():
     root = Path(__file__).resolve().parent
     manifest = json.loads((root / "manifest.json").read_bytes())
     seen = checked_files(root, manifest["files"])
-    assert seen == {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()} - {"manifest.json"}
+    assert seen == {archive_path(p, root) for p in root.rglob("*") if p.is_file()} - {"manifest.json"}
     summary = json.loads((root / "summary.json").read_bytes())
     verified = json.loads((root / "verification/receipt.json").read_bytes())
     final = json.loads((root / "verification-final/receipt.json").read_bytes())
