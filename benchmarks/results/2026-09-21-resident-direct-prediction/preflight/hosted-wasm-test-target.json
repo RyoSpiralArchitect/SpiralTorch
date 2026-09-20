@@ -1,0 +1,17 @@
+{
+  "run": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/35524688117",
+  "job_id": 106114691010,
+  "source": {
+    "commit": "2a50f54aad83b5095047f65907327ec58b088b65",
+    "tree": "0d673543ce52c771d93a510894c46ebc3a106c3c"
+  },
+  "conclusion": "failure",
+  "error": "method `capture_into` is never used; -D dead-code implied by -D warnings; could not compile st-backend-wgpu (lib test)",
+  "cause": "The measured-source local wasm Clippy check covered --lib, while hosted --all-targets also compiled lib tests.",
+  "followup": "test-cfg-followup.json",
+  "full_local_log": {
+    "path": "ci-wasm-job.log",
+    "bytes": 245258,
+    "sha256": "adab385c392853474911fded746989ef32dada6fe7f2abb07595d00b93546031"
+  }
+}

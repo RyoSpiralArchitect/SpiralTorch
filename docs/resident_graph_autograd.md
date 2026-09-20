@@ -105,7 +105,10 @@ This is a composable prerequisite for richer losses and band replays, **not** an
 automatic migration of `ModuleTrainer`, generic autograd, GNN, or `pure::Tensor`.
 Their existing learning policies must be connected explicitly rather than
 silently replaced. The source Module and published wheels are not changed by
-compiling a resident graph. Performance is unclaimed until separately measured.
+compiling a resident graph. The
+[matched direct-prediction comparison](../benchmarks/results/2026-09-21-resident-direct-prediction/README.md)
+passes its bounded numerical suite but does not show a consistent latency win;
+all measured regressions and the Torch comparison boundaries are retained.
 
 The shared `resident_graph_training` native/browser fixture includes arbitrary
 cotangents, GPU-derived seeds, ranks 1/2/3, fusion on/off, retained snapshots,

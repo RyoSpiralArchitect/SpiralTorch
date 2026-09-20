@@ -1,0 +1,74 @@
+{
+  "records": [
+    {
+      "path": "native-worker",
+      "bytes": 8541408,
+      "sha256": "912be8f4ec06f111d2554a5cca7fc01b52cdb372b5cad4f626f3525619871c67"
+    },
+    {
+      "path": "python-gpu.dylib",
+      "bytes": 27644688,
+      "sha256": "0c12385119d55af496143394139cb051f24b14f1172c937c5f749e8231e46f2a"
+    },
+    {
+      "path": "python-cpu.dylib",
+      "bytes": 21040176,
+      "sha256": "8ae53eff1cfb47f02c9cbd81c11138954240dd5a64b6e7e8a66957c3a1bde37d"
+    },
+    {
+      "path": "module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "bytes": 4526,
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "path": "module/spiraltorch_wasm.d.ts",
+      "bytes": 132886,
+      "sha256": "d3754570a8357cda86914d26017acc59fe798e15c4e625dbc293146cab166f8f"
+    },
+    {
+      "path": "module/spiraltorch_wasm.js",
+      "bytes": 386757,
+      "sha256": "42e84f27c528cf5de96be09a5698506c4c01397158e307b80c70d75d199d2354"
+    },
+    {
+      "path": "module/spiraltorch_wasm_bg.wasm",
+      "bytes": 8857893,
+      "sha256": "05985269c15dc753399afac460b0d75158e4865092dda7aaf6cbe1806d1ba80f"
+    },
+    {
+      "path": "module/spiraltorch_wasm_bg.wasm.d.ts",
+      "bytes": 74926,
+      "sha256": "b873a764be79c00f1fcf32e3ea9d9df361cd2bbb5e780b2efaa17e59bb599227"
+    },
+    {
+      "path": "benchmark/snippets/st-nn-f975d31addace2e2/inline0.js",
+      "bytes": 64,
+      "sha256": "a662b8ee113366a5b2b051588bfcdb2a5810dcd2119e020eafb6fdd94425a05b"
+    },
+    {
+      "path": "benchmark/spiraltorch_wasm.d.ts",
+      "bytes": 4191,
+      "sha256": "abbe30d295772429e439335326f930e45d9c9c0ab6ccb246bced1c65801bc8f4"
+    },
+    {
+      "path": "benchmark/spiraltorch_wasm.js",
+      "bytes": 48437,
+      "sha256": "9899ffdb634bbebf62eca380bbd87aa560ca5fe58bb489cede63a9650b7cdd38"
+    },
+    {
+      "path": "benchmark/spiraltorch_wasm_bg.wasm",
+      "bytes": 2106346,
+      "sha256": "7507ccd95e245e593d2a3d758f6216c03e964393e436e21a535e294b23bdbbb9"
+    },
+    {
+      "path": "benchmark/spiraltorch_wasm_bg.wasm.d.ts",
+      "bytes": 2781,
+      "sha256": "5ef683d232568881fa45398d087c28760d63e22b22b746730fa67bd5f5c92169"
+    },
+    {
+      "path": "receipt.json",
+      "bytes": 17099,
+      "sha256": "e1208243279ce451b15d255a819ab57ae2e1d4d5da54902ec8e77b8dd4df6b51"
+    }
+  ]
+}

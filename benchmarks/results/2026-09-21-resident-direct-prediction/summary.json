@@ -1,0 +1,4066 @@
+{
+  "schema": "spiraltorch.direct_prediction_summary.v1",
+  "source": {
+    "commit": "2a50f54aad83b5095047f65907327ec58b088b65",
+    "tree": "0d673543ce52c771d93a510894c46ebc3a106c3c"
+  },
+  "baseline_source": {
+    "commit": "4f78325a88fffeb442e04aff00b19a2cf2227f66",
+    "tree": "0dd74b56bd4858291f7ff8e806f2320d0eafaca4"
+  },
+  "recipes": 54,
+  "measured_intervals": 5400,
+  "retained_intervals": 4320,
+  "browser_intervals_revalidated": 2160,
+  "maximum_saved_state_abs_error": 3.259629011154175e-08,
+  "all_paired_fingerprints_equal": true,
+  "ratios": [
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9824890293824625,
+      "torch_over_candidate": 0.9731906972912834
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0755031333829745,
+      "torch_over_candidate": 0.8731454290397049
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0059238607761964,
+      "torch_over_candidate": 0.7089322488194207
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0081038269984846,
+      "torch_over_candidate": 0.8188642650137291
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.1129212937653794,
+      "torch_over_candidate": 0.8560341139555269
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0660710449826214,
+      "torch_over_candidate": 0.9205887767658049
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0212894134211836,
+      "torch_over_candidate": 1.0462111400951069
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.1033607135974026,
+      "torch_over_candidate": 0.9389541543371489
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0050948532574195,
+      "torch_over_candidate": 0.6961230466553359
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0458158095760655,
+      "torch_over_candidate": 0.85227297095902
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.1423840235407496,
+      "torch_over_candidate": 0.8820006912330466
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0232799057201936,
+      "torch_over_candidate": 0.8988793785525305
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0281889202752474,
+      "torch_over_candidate": 1.0003067076011132
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9682375369827831,
+      "torch_over_candidate": 0.9197170935999998
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.234791676504539,
+      "torch_over_candidate": 0.7624011135768846
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0212098874263327,
+      "torch_over_candidate": 0.8699501098587885
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9930355938448785,
+      "torch_over_candidate": 0.7919932881074316
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.007073111363544,
+      "torch_over_candidate": 0.9239562707610216
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.8955223879933119
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0071428567171097
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.055999999631246
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9820143887504668
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.841736694628473
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.1882951655603469
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0724637681055091
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9583333327296983
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9472222220566537
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0988142292606518
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9674134419258339
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9099099097390805
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.7878787879569784
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9488636368543125
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9705882352531031
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.160156250095497
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0530785562615903
+    },
+    {
+      "run": "a-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0098039215328212
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0112411453713352,
+      "torch_over_candidate": 0.5501879854351136
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.115748546393858,
+      "torch_over_candidate": 0.4536437020727586
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.1721327890497963,
+      "torch_over_candidate": 0.4939018245519828
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9614064608322387,
+      "torch_over_candidate": 0.51625844350807
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.036523587079399,
+      "torch_over_candidate": 0.7034880961781788
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9983390091534486,
+      "torch_over_candidate": 0.7342065565684825
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.137692064871597,
+      "torch_over_candidate": 0.6304530874769186
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9987665581665393,
+      "torch_over_candidate": 0.5012976695451598
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0459966156858402,
+      "torch_over_candidate": 0.509981555487934
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0055936014787565,
+      "torch_over_candidate": 0.522313956342076
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0660477058159872,
+      "torch_over_candidate": 0.7088886598452645
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.8935344247068924,
+      "torch_over_candidate": 0.6375417464228695
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9723637376105592,
+      "torch_over_candidate": 0.6514715432585344
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0261277597511125,
+      "torch_over_candidate": 0.5028624536170359
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0119797451904657,
+      "torch_over_candidate": 0.48244950844748175
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9687480796393083,
+      "torch_over_candidate": 0.5045974953138389
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.8855585888008982,
+      "torch_over_candidate": 0.5624439765289215
+    },
+    {
+      "run": "a-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0118297498328548,
+      "torch_over_candidate": 0.7036645262151623
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0930232554512969
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9600000003774961
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.1670761667770626
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0379008745519744
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.04405286326623
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9515306124674495
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0650887574903614
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0357142857142858
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0396341464723526
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9959349592892659
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0023094688567435
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0268096512715703
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.2425742577744978
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.1290322580257515
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.8786279684902271
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9758064515571789
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.045258620883796
+    },
+    {
+      "run": "a-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.1509971509058337
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9011077140407323,
+      "torch_over_candidate": 0.6220760036040126
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.5552675323300625,
+      "torch_over_candidate": 0.16083168845491894
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0332963952827705,
+      "torch_over_candidate": 0.5730777614777354
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0328037527675034,
+      "torch_over_candidate": 0.5661408026817364
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.198052385214984,
+      "torch_over_candidate": 0.7344693755012099
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0004587427732234,
+      "torch_over_candidate": 0.7223478827038231
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9970915267120685,
+      "torch_over_candidate": 0.6841955844688516
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0170621710331467,
+      "torch_over_candidate": 0.54692782171856
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0232451339287543,
+      "torch_over_candidate": 0.508626890335089
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0039209251178902,
+      "torch_over_candidate": 0.590032146564333
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0640928726022165,
+      "torch_over_candidate": 0.7090898577380293
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9943822850946549,
+      "torch_over_candidate": 0.7498133429635834
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0563523107038228,
+      "torch_over_candidate": 0.5474808816673264
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9731097987447963,
+      "torch_over_candidate": 0.4583278691363473
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.967647368315899,
+      "torch_over_candidate": 0.43890254979404447
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0132148921538036,
+      "torch_over_candidate": 0.563265014934249
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.033621255295511,
+      "torch_over_candidate": 0.7128077133611721
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0101424260057306,
+      "torch_over_candidate": 0.7377957812471222
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0662650608033535
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9930069934223513
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0253164556006975
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.028225806274749
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.1392111368861382
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.014534883501825
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0059880240429273
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9305555560657709
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0144092216860656
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9959514166425656
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0071090048447668
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.00877192995642
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0179640716746245
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9710144928553429
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9776536311628365
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9925373138768168
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0332541567330245
+    },
+    {
+      "run": "a-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0117302050158892
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0155567847530136,
+      "torch_over_candidate": 1.0741151008196645
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.017074212095757,
+      "torch_over_candidate": 0.9378743181998374
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.096584446319566,
+      "torch_over_candidate": 0.7422533990399315
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9120069024750843,
+      "torch_over_candidate": 0.7125080914114102
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0293665463962032,
+      "torch_over_candidate": 0.8776630905294922
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.996294404534663,
+      "torch_over_candidate": 0.988324354430127
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9995671328889758,
+      "torch_over_candidate": 0.9442006321060449
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.017536332189039,
+      "torch_over_candidate": 0.9337644540725798
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9988092628361402,
+      "torch_over_candidate": 0.6886518817051379
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.8120229221618268,
+      "torch_over_candidate": 0.8067306066850994
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0365876349367769,
+      "torch_over_candidate": 0.8546130496985647
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0049827495769745,
+      "torch_over_candidate": 0.9388802028413855
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0087652368572746,
+      "torch_over_candidate": 0.9503910482397503
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.008937966844978,
+      "torch_over_candidate": 0.9645258094987826
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0060632183642026,
+      "torch_over_candidate": 0.6612032809505574
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9780337459862095,
+      "torch_over_candidate": 0.8332369021181754
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0239448606322217,
+      "torch_over_candidate": 0.8021338076339096
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.055905478495987,
+      "torch_over_candidate": 0.9513429875624324
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0037453184074514
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0071428567171097
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9708994708577555
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0039370082262427
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.00471698137908
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.081920903916157
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.8967136152188981
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9671052631643443
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.015625
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9959999999403953
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0213270143615119
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9722222222222222
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.01685393283118
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9791666668714714
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9947506562844898
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0000000002769733
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9299781184159279
+    },
+    {
+      "run": "b-clipped_topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "clipped_topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0055401658745378
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0121451835945325,
+      "torch_over_candidate": 0.5596864607138323
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9545235309429517,
+      "torch_over_candidate": 0.476501392673293
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9572870523951487,
+      "torch_over_candidate": 0.4929786159091247
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0260665660971195,
+      "torch_over_candidate": 0.6193788238251248
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0412660926784514,
+      "torch_over_candidate": 0.6734685303457856
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9556859115054147,
+      "torch_over_candidate": 0.6253497215005624
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0132055456395215,
+      "torch_over_candidate": 0.6093435516990273
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.120147918854587,
+      "torch_over_candidate": 0.5234382811366179
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.025896190582937,
+      "torch_over_candidate": 0.5267138330961432
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0358729866094982,
+      "torch_over_candidate": 0.6405499313909764
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9971233442612891,
+      "torch_over_candidate": 0.6993115410862585
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9978271090251184,
+      "torch_over_candidate": 0.7966937042625011
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0056522890974602,
+      "torch_over_candidate": 0.6339659344402467
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0072512327093261,
+      "torch_over_candidate": 0.5446459103102892
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9767317521157625,
+      "torch_over_candidate": 0.5400527169601961
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0097576338455392,
+      "torch_over_candidate": 0.6088054288637837
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0701167846107096,
+      "torch_over_candidate": 0.7575563583970986
+    },
+    {
+      "run": "b-plain",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.973034262910575,
+      "torch_over_candidate": 0.7739445559144139
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0506329111974158
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.8885135133681007
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9453681710318868
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9188345474500211
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.019283746636199
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.1565217391952225
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.7910447762798447
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.1550802142595575
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.997304582170186
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.5083333333470075
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.527290448388236
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0213903742484565
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9931972798218118
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0243309000611476
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9772727269391958
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.96428571434379
+    },
+    {
+      "run": "b-plain",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.8043010752681281
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0260973954002348,
+      "torch_over_candidate": 0.6951404865260032
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.010139451030848,
+      "torch_over_candidate": 0.5218019599692636
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9626262110861713,
+      "torch_over_candidate": 0.47187987567981027
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9657875122775411,
+      "torch_over_candidate": 0.5977279698488255
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9587774134944227,
+      "torch_over_candidate": 0.6706393416123572
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9013449105011607,
+      "torch_over_candidate": 0.754904456073619
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.854472520497239,
+      "torch_over_candidate": 0.6751392331022426
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0021310447564278,
+      "torch_over_candidate": 0.5615088797533239
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0823339233431966,
+      "torch_over_candidate": 0.3470883662178181
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9796922508949713,
+      "torch_over_candidate": 0.6599897451314047
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0754532636020457,
+      "torch_over_candidate": 0.5537993131666763
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0819021917233016,
+      "torch_over_candidate": 0.685606196382377
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.9938184784655143,
+      "torch_over_candidate": 0.7171719531296855
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.8232288085649961,
+      "torch_over_candidate": 0.36768339859117616
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.4762655492381666,
+      "torch_over_candidate": 0.36166071393441157
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0088902852064765,
+      "torch_over_candidate": 0.7197174186223956
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0423359714670535,
+      "torch_over_candidate": 0.39818922926041783
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "native",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.3944395913738055,
+      "torch_over_candidate": 0.8161068622242544
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0117647060576607
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9999999994601029
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0116279067148255
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0000000006057383
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.8821052631265238
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 17,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9971181555762825
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0357142858093187
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.000000000543838
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0192307690378917
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9918032785683862
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0193704599741689
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 29,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.00877192995642
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0236686385158715
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          16,
+          32
+        ],
+        "depth": 2,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 1.0074626861231832
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 1.0191082805449534
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          2,
+          129,
+          32
+        ],
+        "depth": 4,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9959839356840892
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "immediate",
+      "baseline_over_candidate": 0.982182628291125
+    },
+    {
+      "run": "b-topos_ema",
+      "client": "browser",
+      "config": {
+        "shape": [
+          4,
+          32,
+          64
+        ],
+        "depth": 8,
+        "seed": 43,
+        "steps": 8,
+        "graph": true,
+        "learner_optimizer": "topos_ema"
+      },
+      "cadence": "deferred",
+      "baseline_over_candidate": 0.9913793104297282
+    }
+  ],
+  "groups": [
+    {
+      "optimizer": "plain",
+      "client": "native",
+      "cadence": "immediate",
+      "cases": 18,
+      "geometric_mean": 1.0225093483435574,
+      "min": 0.8855585888008982,
+      "max": 1.1721327890497963,
+      "favorable": 13
+    },
+    {
+      "optimizer": "plain",
+      "client": "native",
+      "cadence": "deferred",
+      "cases": 18,
+      "geometric_mean": 1.0020060968962714,
+      "min": 0.8935344247068924,
+      "max": 1.120147918854587,
+      "favorable": 9
+    },
+    {
+      "optimizer": "plain",
+      "client": "browser",
+      "cadence": "immediate",
+      "cases": 18,
+      "geometric_mean": 1.0076886587622036,
+      "min": 0.5083333333470075,
+      "max": 1.2425742577744978,
+      "favorable": 13
+    },
+    {
+      "optimizer": "plain",
+      "client": "browser",
+      "cadence": "deferred",
+      "cases": 18,
+      "geometric_mean": 0.9424560878021514,
+      "min": 0.527290448388236,
+      "max": 1.1509971509058337,
+      "favorable": 6
+    },
+    {
+      "optimizer": "topos_ema",
+      "client": "native",
+      "cadence": "immediate",
+      "cases": 18,
+      "geometric_mean": 0.9715332397899925,
+      "min": 0.4762655492381666,
+      "max": 1.198052385214984,
+      "favorable": 10
+    },
+    {
+      "optimizer": "topos_ema",
+      "client": "native",
+      "cadence": "deferred",
+      "cases": 18,
+      "geometric_mean": 0.9744517357658509,
+      "min": 0.5552675323300625,
+      "max": 1.3944395913738055,
+      "favorable": 11
+    },
+    {
+      "optimizer": "topos_ema",
+      "client": "browser",
+      "cadence": "immediate",
+      "cases": 18,
+      "geometric_mean": 1.0151276317199818,
+      "min": 0.8821052631265238,
+      "max": 1.1392111368861382,
+      "favorable": 15
+    },
+    {
+      "optimizer": "topos_ema",
+      "client": "browser",
+      "cadence": "deferred",
+      "cases": 18,
+      "geometric_mean": 0.9963997296715401,
+      "min": 0.9305555560657709,
+      "max": 1.028225806274749,
+      "favorable": 8
+    },
+    {
+      "optimizer": "clipped_topos_ema",
+      "client": "native",
+      "cadence": "immediate",
+      "cases": 18,
+      "geometric_mean": 1.0393969047881553,
+      "min": 0.9824890293824625,
+      "max": 1.234791676504539,
+      "favorable": 14
+    },
+    {
+      "optimizer": "clipped_topos_ema",
+      "client": "native",
+      "cadence": "deferred",
+      "cases": 18,
+      "geometric_mean": 1.0046269467324693,
+      "min": 0.8120229221618268,
+      "max": 1.1033607135974026,
+      "favorable": 13
+    },
+    {
+      "optimizer": "clipped_topos_ema",
+      "client": "browser",
+      "cadence": "immediate",
+      "cases": 18,
+      "geometric_mean": 0.9663175357544751,
+      "min": 0.7878787879569784,
+      "max": 1.0724637681055091,
+      "favorable": 8
+    },
+    {
+      "optimizer": "clipped_topos_ema",
+      "client": "browser",
+      "cadence": "deferred",
+      "cases": 18,
+      "geometric_mean": 1.0130398572116797,
+      "min": 0.9099099097390805,
+      "max": 1.1882951655603469,
+      "favorable": 10
+    }
+  ],
+  "boundary": "Diagnostic correlated per-case medians, not GPU kernel times or confidence intervals. Both runtimes use identical ordinary unfused quadratic/quartic seed evaluation. Torch lacks equivalent guards and rollback. No exact browser physical adapter attestation, CUDA, fastest-Torch, uninterrupted FT or learning-quality claim."
+}
