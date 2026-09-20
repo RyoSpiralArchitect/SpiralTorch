@@ -1,0 +1,30 @@
+{
+  "candidate_commit": "c6c82992557c252804aefe2f9ece15c6c8c53bab",
+  "integration_commit": "04ed74b623efb6d8ea24fddbf1ffea10ed7c5ae4",
+  "identical_git_tree": "d3502abb890da0f753dabefe485a1f4900af1bbd",
+  "baseline_dense_commit": "7ead4cb1ce0271b169198895364721cec650c39b",
+  "baseline_crosscut_commit": "bf8cc8eabdf011203d065215d163ac618928de74",
+  "baseline_runtime_note": "The baseline commits have identical production Rust sources; the later commit adds only the dense harness and evidence.",
+  "rejected_candidate_commits": [
+    "19f6e1c4afb0c82106b1c068845130a55fc007e2",
+    "dd0645d274866d14fdf8dd5d479020c0240c4a23"
+  ],
+  "harness_hashes": {
+    "cpu_dense_workspace.rs": "c3c08cfacecf0d19986df7a8f79a4e2bf1c13015d79d3d54ef629474fcb13864",
+    "source_crosscut.rs": "cb900f6dc310670a26455f9d8a79394c22e68bc5295ce837c7315216be63f624"
+  },
+  "local_binary_retention": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/baseline-dense": "6e1fa6ad7700bf1548898de84fdb8fd588c00e81b9d47655333cfdc51e7a37d2",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/baseline-crosscut": "c423608a120c7c0184ea807714c8d0d5d1d1a63322277604cd7cf96e560e1aab",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-a/candidate-dense": "9e8c95769361e86f00b9e4d3358105e4312063038c5027b231667331081a4742",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-a/candidate-crosscut": "4c7add9afcf6d7668f818d9a4a634fd1c716c8dd95bb4725f6c24f1f99ae7c39",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-b/candidate-dense": "66304b4b0c4e6fb7ec4bdae95db0d39111ed7ed81c56c23f68fac183f737d641",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-b/candidate-crosscut": "9da61e3c292b6c5f2767e9f660ec826e8fedc96a369165c70040084085131692",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-c/candidate-dense": "e4129dc1a4bc6a32af275d391f3e9a3ec2710d36cecfa23f4bb3bd892325b714",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-c/candidate-crosscut": "aa907f74be7e50c8035f0a01bf42e3fc9daee564ae0c3e11358a8a09f40eb041"
+  },
+  "local_logs": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "publication_boundary": "results, logs, validation and hashes; no executable/extension or full Rust tensor payloads"
+}

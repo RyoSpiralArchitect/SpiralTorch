@@ -53,6 +53,12 @@ successful all-workspace lint run.
 
 ## Next Candidates
 
+The [CPU workspace follow-up](../../benchmarks/results/2026-09-21-cpu-dense-workspace/README.md)
+implements fixed-width direct products, serial panel-buffer reuse, checked sizes,
+and direct Tensor label construction. It retains rejected experiments and shows
+that allocation savings are not equivalent to large-matrix speedups. Auto routing
+and multi-tile parallel packing still need separate work.
+
 1. CPU dense packing and small-batch dispatch: the measured Tensor-returning path
    has extra temporary allocations and some regressions, while PyTorch remains
    faster at batch 96. Inspect `cpu_dense::matmul_into`, its blocked-size predicate,

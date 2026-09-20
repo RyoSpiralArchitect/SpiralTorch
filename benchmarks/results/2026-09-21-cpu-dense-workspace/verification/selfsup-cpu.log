@@ -1,0 +1,85 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling spiral-selfsup v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-selfsup)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.47s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/spiral_selfsup-926b2d9506e93cab)
+
+running 20 tests
+test metrics::tests::epoch_metrics_convert_to_values ... ok
+test metrics::tests::registering_descriptors_is_idempotent ... ok
+test trainer::distributed::st_distributed::tests::dropping_the_last_session_removes_the_group_registry_entry ... ok
+test trainer::device::policy_commit_tests::mean_scale_failure_is_rejected_by_every_rank_without_local_rollback ... ok
+test trainer::distributed::st_distributed::tests::poisoned_group_lock_is_recovered_before_collective_execution ... ok
+test trainer::distributed::st_distributed::tests::non_finite_input_is_reported_to_every_connected_rank ... ok
+test trainer::distributed::st_distributed::tests::non_finite_reduction_is_reported_to_every_connected_rank ... ok
+test trainer::tests::cpu_accumulator_checkpoint_has_a_verifiable_provider_identity ... ok
+test trainer::tests::distributed_accumulator_checkpoint_verifies_provider_state ... ok
+test trainer::tests::distributed_device_detects_duplicate_rank ... ok
+test trainer::tests::distributed_device_all_reduce_averages_gradients ... ok
+test trainer::tests::distributed_device_aggregates_metrics ... ok
+test trainer::tests::distributed_device_rejects_invalid_world_size ... ok
+test trainer::tests::distributed_device_implements_accumulator_synchronizer_bridge ... ok
+test trainer::tests::distributed_device_reports_buffer_mismatch ... ok
+test trainer::distributed::st_distributed::tests::duplicate_contribution_is_rejected_without_aborting_the_round ... ok
+test trainer::distributed::st_distributed::tests::rank_drop_aborts_an_active_collective ... ok
+test trainer::tests::distributed_device_collective_timeout_is_configurable ... ok
+test trainer::distributed::st_distributed::tests::missing_rank_times_out_without_mutating_the_caller_buffer ... ok
+test trainer::distributed::st_distributed::tests::repeated_collectives_do_not_overwrite_unconsumed_rounds ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/augmentations.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/augmentations-7f60f305defd78d1)
+
+running 3 tests
+test augmentation_pipeline_matches_manual_transform ... ok
+test info_nce_batcher_produces_tensor_batches ... ok
+test info_nce_config_from_toml ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/distributed_selfsup.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/distributed_selfsup-fd7ee0716ea991db)
+
+running 3 tests
+test gradients_are_synchronized_via_all_reduce ... ignored
+test metrics_are_aggregated_across_workers ... ignored
+test sum_reduction_keeps_total_metric ... ignored
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/info_nce_tensor.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/info_nce_tensor-39c19c05c7370b2b)
+
+running 6 tests
+test vector_result_rejects_empty_tensor_without_panicking ... ok
+test entry_points_reject_invalid_temperatures_and_shapes ... ok
+test cpu_backend_matches_reference ... ok
+test tensor_wrapper_matches_vector_api ... ok
+test tensor_layouts_preserve_logical_rows ... ok
+test shared_backend_matches_independent_float64_objective ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/module_trainer_accumulators.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/module_trainer_accumulators-c0fc62d466c8ee7a)
+
+running 1 test
+test module_trainer_step_matches_averaged_distributed_accumulators ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/repro.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/repro-258ed93f3e84e8b0)
+
+running 2 tests
+test masked_mse_reproducible_with_identical_seed ... ok
+test info_nce_reproducible_across_seeds ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests spiral_selfsup
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
