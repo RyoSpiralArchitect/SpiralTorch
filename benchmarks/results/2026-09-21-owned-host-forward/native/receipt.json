@@ -1,0 +1,81 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/cpu_gelu_chain",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/cpu_gelu_chain"
+  },
+  "sha256": {
+    "baseline": "c1c4f4e4578a119e28dbdfc27553a33c638bb5334affc3e349878e6468f7c555",
+    "candidate": "3ff2fdda4661cdf94bf6ec9fc6bbf27595205c852f4afa54a6ec3d7a6eb59fec"
+  },
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/cpu_gelu_chain"
+      ],
+      "exit_code": 0,
+      "seconds": 2.274885083010304,
+      "raw_sha256": "ead55441998ef2e3cedb315204dd8b5dd04fafde5b92562fe38053d8a1b1e383"
+    },
+    {
+      "name": "warm-candidate",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/cpu_gelu_chain"
+      ],
+      "exit_code": 0,
+      "seconds": 2.4394378750002943,
+      "raw_sha256": "46cd03b96ca3af7eb990b0d7f0085ed2b8920722ffc5d8624061d752a2a4a320"
+    },
+    {
+      "name": "baseline-a",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/cpu_gelu_chain"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2778278340119869,
+      "raw_sha256": "85ab4d9e9b798e6b7a9c72f7f999abfa5b4ded311f485727b66e8fc76b7001e4"
+    },
+    {
+      "name": "candidate-a",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/cpu_gelu_chain"
+      ],
+      "exit_code": 0,
+      "seconds": 1.1951772500033258,
+      "raw_sha256": "fd285d8d85cd88cadaf8e76959bee86efa7125993d9ea401c417f8a8cdce1303"
+    },
+    {
+      "name": "candidate-b",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/cpu_gelu_chain"
+      ],
+      "exit_code": 0,
+      "seconds": 1.220114374998957,
+      "raw_sha256": "751dac53ad8afd631a0193850dad2ed930cdbdab94d23715d51da0a4422cc13e"
+    },
+    {
+      "name": "baseline-b",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/cpu_gelu_chain"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2774209169874666,
+      "raw_sha256": "140613abc0203a4568aaec12a4950c7f27efa63269ae97981ce5d6aad68038f8"
+    }
+  ],
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  }
+}

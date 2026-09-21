@@ -1,0 +1,54 @@
+[
+  {
+    "name": "format",
+    "exit_code": 0
+  },
+  {
+    "name": "tensor",
+    "exit_code": 0
+  },
+  {
+    "name": "nn",
+    "exit_code": 0
+  },
+  {
+    "name": "clippy",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-clippy",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-build",
+    "exit_code": 0
+  },
+  {
+    "name": "bindgen",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-gelu",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-autograd",
+    "exit_code": 0
+  },
+  {
+    "name": "python-build",
+    "exit_code": 0
+  },
+  {
+    "name": "python-gelu",
+    "exit_code": 0
+  },
+  {
+    "name": "python-autograd",
+    "exit_code": 0
+  },
+  {
+    "name": "wgpu-layout",
+    "exit_code": 0
+  }
+]

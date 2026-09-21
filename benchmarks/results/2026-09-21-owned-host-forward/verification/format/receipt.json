@@ -1,0 +1,36 @@
+{
+  "source": {
+    "commit": "d17fdcdbee71a351f5521fa4e626e9948399b01e",
+    "status": "",
+    "files": {
+      "crates/st-tensor/src/pure.rs": "3fad918b591dbb8d58dcbe79513f06766e0c81ad81dfc6aabdd536c006f2a34d",
+      "crates/st-nn/src/layers/gelu.rs": "4842567563af71f702585c1368efb5d5e71178216cb1a472fe1633d36bcdcfc8",
+      "crates/st-nn/src/module.rs": "1a0ef33275a6da2504670c952d998139582c54a00b46ecfedf25e13327eecf59",
+      "crates/st-nn/src/layers/sequential.rs": "5131b06a029fdef416fba2d674a9ebd3737e01e54e6a27c6090d5b7e553b04c1",
+      "crates/st-bench/examples/cpu_gelu_chain.rs": "fe1dc2a492841ddd3981ed8b115a54c68d61a978f7710e1864ea5f9c00e003b1",
+      "crates/st-nn/tests/gelu_layout_contract.rs": "c137757b9565846ff91c9467b80c014765d51388bbe53399987b00b4bafb6e67",
+      "crates/st-bench/examples/cpu_gelu.rs": "f0e91d2921af332145b0cbb14de8b5efd1a3b1d333af70e0ab9ed3f0807467f2",
+      "crates/st-bench/examples/cpu_nn_layout.rs": "8ec08a37cde1d7f2b304617cc200eb6a4d022d4e11e060b7f72fe0cdfc65f137",
+      "bindings/st-py/tests/test_gelu_host.py": "8ecd85ea2f3f52801a1cc1200e450e792e078bcce7b35c21a80d6e0138aa2101",
+      "bindings/st-wasm/tests/gelu_host.cjs": "a522abb0be6a685a4512d8c1ad3391a2f126f675bb1d5ae88d03e7b2f7770d4f",
+      ".github/workflows/ci.yml": "e52b7c42088bce53a9da148e34235606719c363b9d93324f8229c35c37438503",
+      "Cargo.lock": "93a69465042036581e6b247a657c4974c563dc53b5ab821d0bf8a9a114dfdf4b"
+    }
+  },
+  "command": [
+    "cargo",
+    "+nightly-2026-04-15",
+    "fmt",
+    "--all",
+    "--",
+    "--check"
+  ],
+  "exit_code": 0,
+  "seconds": 2.1913910000002943,
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+    "CARGO_BUILD_JOBS": "4",
+    "RAYON_NUM_THREADS": "4"
+  },
+  "source_unchanged": true
+}

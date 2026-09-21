@@ -846,6 +846,16 @@ pub trait Module {
     /// Runs a forward pass.
     fn forward(&self, input: &Tensor) -> PureResult<Tensor>;
 
+    /// Runs the same host forward while transferring ownership of the input.
+    ///
+    /// Implementations may reuse unaliased storage, but must preserve `forward`
+    /// semantics, backend policy and any retained or externally shared values.
+    /// Keep activations needed by backward alive before transferring ownership.
+    /// The default preserves existing modules without requiring an override.
+    fn forward_owned(&self, input: Tensor) -> PureResult<Tensor> {
+        self.forward(&input)
+    }
+
     /// Propagates a gradient backwards. Implementations should populate the
     /// relevant parameter accumulators before returning the gradient with
     /// respect to `input`.

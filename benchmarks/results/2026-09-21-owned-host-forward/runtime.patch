@@ -1,0 +1,356 @@
+diff --git a/bindings/st-py/tests/test_gelu_host.py b/bindings/st-py/tests/test_gelu_host.py
+index 279d3dd5..6b82bf03 100644
+--- a/bindings/st-py/tests/test_gelu_host.py
++++ b/bindings/st-py/tests/test_gelu_host.py
+@@ -6,6 +6,31 @@ import spiraltorch as st
+ 
+ 
+ class GeluHostTests(unittest.TestCase):
++    def test_sequential_chain_keeps_input_and_backward_values(self):
++        values = [(i % 17 - 8) / 4 for i in range(36)]
++        seeds = [(i % 11 - 5) / 8 for i in range(36)]
++        x, g = st.Tensor(6, 6, values), st.Tensor(6, 6, seeds)
++        model = st.nn.Sequential()
++        for _ in range(4):
++            model.add(st.nn.Gelu())
++        expected, gradient = [], []
++        c = math.sqrt(2 / math.pi)
++        for value, seed in zip(values, seeds):
++            for _ in range(4):
++                t = math.tanh(c * (value + 0.044715 * value ** 3))
++                seed *= (0.5 * (1 + t) + 0.5 * value * (1 - t * t)
++                         * c * (1 + 3 * 0.044715 * value * value))
++                value = 0.5 * value * (1 + t)
++            expected.append(value)
++            gradient.append(seed)
++        first = model(x).tolist()
++        actual_gradient = sum(model.backward(x, g).tolist(), [])
++        self.assertEqual(model(x).tolist(), first)
++        self.assertEqual(sum(x.tolist(), []), values)
++        self.assertEqual(sum(g.tolist(), []), seeds)
++        for actual, target in zip(sum(first, []) + actual_gradient, expected + gradient):
++            self.assertLessEqual(abs(actual - target), 2e-6 * (1 + abs(target)))
++
+     def test_forward_and_supplied_seed_derivative(self):
+         for rows, cols in [(2, 6), (33, 195)]:
+             values = [(i % 131) / 16 - 4 for i in range(rows * cols)]
+diff --git a/crates/st-nn/src/layers/gelu.rs b/crates/st-nn/src/layers/gelu.rs
+index 38b9dbd1..b5649e1c 100644
+--- a/crates/st-nn/src/layers/gelu.rs
++++ b/crates/st-nn/src/layers/gelu.rs
+@@ -139,6 +139,10 @@ impl Module for Gelu {
+         input.try_gelu()
+     }
+ 
++    fn forward_owned(&self, input: Tensor) -> PureResult<Tensor> {
++        input.try_into_gelu()
++    }
++
+     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+         let (rows, cols) = input.shape();
+         if input.shape() != grad_output.shape() {
+diff --git a/crates/st-nn/src/layers/sequential.rs b/crates/st-nn/src/layers/sequential.rs
+index 96a214f5..1253c7fc 100644
+--- a/crates/st-nn/src/layers/sequential.rs
++++ b/crates/st-nn/src/layers/sequential.rs
+@@ -128,9 +128,12 @@ impl Module for Sequential {
+     }
+ 
+     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+-        let mut activ = input.clone();
++        self.forward_owned(input.clone())
++    }
++
++    fn forward_owned(&self, mut activ: Tensor) -> PureResult<Tensor> {
+         for layer in &self.layers {
+-            activ = layer.forward(&activ)?;
++            activ = layer.forward_owned(activ)?;
+         }
+         Ok(activ)
+     }
+diff --git a/crates/st-nn/src/module.rs b/crates/st-nn/src/module.rs
+index a8c01ed2..5de33e15 100644
+--- a/crates/st-nn/src/module.rs
++++ b/crates/st-nn/src/module.rs
+@@ -846,6 +846,16 @@ pub trait Module {
+     /// Runs a forward pass.
+     fn forward(&self, input: &Tensor) -> PureResult<Tensor>;
+ 
++    /// Runs the same host forward while transferring ownership of the input.
++    ///
++    /// Implementations may reuse unaliased storage, but must preserve `forward`
++    /// semantics, backend policy and any retained or externally shared values.
++    /// Keep activations needed by backward alive before transferring ownership.
++    /// The default preserves existing modules without requiring an override.
++    fn forward_owned(&self, input: Tensor) -> PureResult<Tensor> {
++        self.forward(&input)
++    }
++
+     /// Propagates a gradient backwards. Implementations should populate the
+     /// relevant parameter accumulators before returning the gradient with
+     /// respect to `input`.
+diff --git a/crates/st-nn/tests/gelu_layout_contract.rs b/crates/st-nn/tests/gelu_layout_contract.rs
+index 25aeb12f..3263406d 100644
+--- a/crates/st-nn/tests/gelu_layout_contract.rs
++++ b/crates/st-nn/tests/gelu_layout_contract.rs
+@@ -209,6 +209,7 @@ impl Module for RetainInput {
+ 
+ #[test]
+ fn sequential_keeps_custom_module_retained_inputs_intact() {
++    let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+     let saved = Rc::new(RefCell::new(Vec::new()));
+     let mut model = Sequential::new();
+     model.push(RetainInput(saved.clone()));
+@@ -221,7 +222,7 @@ fn sequential_keeps_custom_module_retained_inputs_intact() {
+     assert_eq!(model.forward(&input).unwrap(), second);
+     assert_eq!(&*saved.borrow(), &[input.clone(), first.clone()]);
+     model
+-        .backward(&input, &Tensor::ones(2, 6).unwrap())
++        .backward(&input, &Tensor::from_vec(2, 6, vec![1.0; 12]).unwrap())
+         .unwrap();
+     assert_eq!(
+         &*saved.borrow(),
+@@ -264,6 +265,163 @@ fn nested_sequential_forward_and_backward_match_independent_chain() {
+     }
+ }
+ 
++fn owned_fixture() -> Tensor {
++    Tensor::from_vec(
++        2,
++        6,
++        vec![
++            -0.0, 0.0, -2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0, -3.0, 0.25, -0.25,
++        ],
++    )
++    .unwrap()
++}
++
++fn bits(tensor: &Tensor) -> Vec<u32> {
++    tensor.data().iter().map(|x| x.to_bits()).collect()
++}
++
++#[test]
++fn owned_gelu_reuses_unique_storage_and_revokes_weak_stamps() {
++    for via_module in [false, true] {
++        let input = owned_fixture();
++        let expected = input.try_gelu().unwrap();
++        let pointer = input.data().as_ptr();
++        let stamp = input.content_stamp().unwrap();
++        let output = if via_module {
++            Gelu::new().forward_owned(input)
++        } else {
++            input.try_into_gelu()
++        }
++        .unwrap();
++        assert_eq!(output.data().as_ptr(), pointer);
++        assert_eq!(bits(&output), bits(&expected));
++        assert!(!stamp.matches(&output));
++        assert!(output.content_stamp().unwrap().matches(&output));
++    }
++}
++
++#[test]
++fn owned_gelu_materializes_shared_snapshot_external_and_nonrow_inputs() {
++    use st_tensor::dlpack::{DlpackCopyPolicy, DlpackExportOptions, DlpackProtocol};
++    let options = DlpackExportOptions {
++        protocol: DlpackProtocol::Versioned,
++        copy: DlpackCopyPolicy::Never,
++    };
++    for kind in 0..8 {
++        let original = owned_fixture();
++        let expected = original.try_gelu().unwrap();
++        let mut alias = None;
++        let input = match kind {
++            0 => {
++                alias = Some(original.clone());
++                original
++            }
++            1 => original.into_snapshot(),
++            2 => {
++                alias = Some(
++                    Tensor::from_managed_dlpack(original.export_dlpack(options).unwrap()).unwrap(),
++                );
++                original
++            }
++            3 => {
++                let foreign =
++                    Tensor::from_managed_dlpack(original.export_dlpack(options).unwrap()).unwrap();
++                alias = Some(original);
++                foreign
++            }
++            4 => original.to_layout(Layout::ColMajor).unwrap(),
++            5 => original
++                .to_layout(Layout::Chimera {
++                    stripes: 3,
++                    tile: 2,
++                })
++                .unwrap(),
++            6 => {
++                drop(original.export_dlpack(options).unwrap());
++                assert!(original.content_stamp().is_none());
++                original
++            }
++            _ => {
++                let snapshot = original.into_snapshot();
++                let foreign =
++                    Tensor::from_managed_dlpack(snapshot.export_dlpack(options).unwrap()).unwrap();
++                alias = Some(snapshot);
++                foreign
++            }
++        };
++        let before = alias.as_ref().map(bits);
++        let pointer = input.data().as_ptr();
++        let output = input.try_into_gelu().unwrap();
++        assert_ne!(output.data().as_ptr(), pointer, "kind={kind}");
++        assert_eq!(bits(&output), bits(&expected), "kind={kind}");
++        assert_eq!(output.layout(), Layout::RowMajor);
++        assert!(!output.is_snapshot());
++        assert!(output.content_stamp().is_some());
++        assert_eq!(alias.as_ref().map(bits), before);
++    }
++}
++
++#[test]
++fn owned_gelu_preserves_outlier_errors_and_aliases_on_failure() {
++    for (values, label) in [
++        (vec![0.5, f32::MAX, f32::NAN], "gelu_input"),
++        (vec![0.5, f32::MAX], "gelu_square"),
++        (vec![0.5, 1e14], "gelu_cubic"),
++    ] {
++        for shared in [false, true] {
++            let input = Tensor::from_vec(1, values.len(), values.clone()).unwrap();
++            let alias = shared.then(|| input.clone());
++            assert!(
++                matches!(input.try_into_gelu(), Err(TensorError::NonFiniteValue { label: actual, .. }) if actual == label)
++            );
++            if let Some(alias) = alias {
++                assert_eq!(
++                    bits(&alias),
++                    values.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
++                );
++            }
++        }
++    }
++    let input = Tensor::from_vec(1, 4, vec![-0.0, 0.0, 2e12, -5e12]).unwrap();
++    let expected = input.try_gelu().unwrap();
++    let pointer = input.data().as_ptr();
++    let output = input.try_into_gelu().unwrap();
++    assert_eq!(output.data().as_ptr(), pointer);
++    assert_eq!(bits(&output), bits(&expected));
++    for (rows, cols) in [(0, 6), (3, 0)] {
++        let output = Tensor::zeros(rows, cols).unwrap().try_into_gelu().unwrap();
++        assert_eq!(output.shape(), (rows, cols));
++        assert!(output.is_empty());
++    }
++}
++
++#[test]
++fn owned_sequential_and_default_custom_module_preserve_contracts() {
++    let saved = Rc::new(RefCell::new(Vec::new()));
++    let input = owned_fixture();
++    let before = input.clone();
++    let intermediate = RetainInput(saved.clone()).forward_owned(input).unwrap();
++    let expected = intermediate.try_gelu().unwrap();
++    let mut model = Sequential::new();
++    model.push(Sequential::new());
++    model.push(Gelu::new());
++    let output = model.forward_owned(intermediate).unwrap();
++    assert_eq!(bits(&output), bits(&expected));
++    assert_eq!(&*saved.borrow(), &[before]);
++
++    let mut inner = Sequential::new();
++    inner.push(Gelu::new());
++    let mut model = Sequential::new();
++    model.push(inner);
++    model.push(Gelu::new());
++    let input = owned_fixture();
++    let expected = input.try_gelu().unwrap().try_gelu().unwrap();
++    let pointer = input.data().as_ptr();
++    let output = model.forward_owned(input).unwrap();
++    assert_eq!(output.data().as_ptr(), pointer);
++    assert_eq!(bits(&output), bits(&expected));
++}
++
+ #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+ #[test]
+ fn strict_wgpu_backward_pairs_logical_layouts() {
+diff --git a/crates/st-tensor/src/pure.rs b/crates/st-tensor/src/pure.rs
+index cabb9e85..51824b49 100644
+--- a/crates/st-tensor/src/pure.rs
++++ b/crates/st-tensor/src/pure.rs
+@@ -6388,17 +6388,7 @@ impl Tensor {
+     /// Reject non-finite inputs and intermediate powers, preserving the neural
+     /// layer's checked forward policy. The input and its aliases remain unchanged.
+     pub fn try_gelu(&self) -> PureResult<Tensor> {
+-        // At |x| <= 1e12, even x^3 is at most about 1e36, well below
+-        // f32::MAX. All subsequent GELU intermediates are smaller. Establish
+-        // that bound during input validation, not once per intermediate.
+-        let mut bounded = true;
+-        for &value in self.data() {
+-            if value.abs() <= 1e12 {
+-                continue;
+-            }
+-            Self::validate_finite_tensor_util_value("gelu_input", value)?;
+-            bounded = false;
+-        }
++        let bounded = validate_gelu_input(self.data())?;
+         let row_major;
+         let input = if self.layout == Layout::RowMajor {
+             self
+@@ -6419,6 +6409,34 @@ impl Tensor {
+         Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+     }
+ 
++    /// Consume this tensor and apply the same checked policy as [`Self::try_gelu`].
++    ///
++    /// Reuse only uniquely owned, tracked row-major storage. Shared buffers,
++    /// snapshots, external storage and other layouts use a fresh output instead.
++    /// Weak content stamps are invalidated even when the values allocation is reused.
++    pub fn try_into_gelu(mut self) -> PureResult<Tensor> {
++        let reusable = self.layout == Layout::RowMajor
++            && Arc::strong_count(&self.data) == 1
++            && self.data.content_is_tracked()
++            && matches!(&self.data.backing, TensorBacking::Owned(values)
++                if Arc::strong_count(values) == 1);
++        if !reusable {
++            return self.try_gelu();
++        }
++        let bounded = validate_gelu_input(self.data())?;
++        let data = Arc::make_mut(&mut self.data).make_mut_slice();
++        if bounded {
++            for value in data {
++                *value = gelu(*value);
++            }
++        } else {
++            for value in data {
++                *value = checked_gelu_finite(*value)?;
++            }
++        }
++        Ok(self)
++    }
++
+     /// Apply the GELU activation in-place (`self[i] = GELU(self[i])`).
+     pub fn gelu_inplace(&mut self) {
+         let data = Arc::make_mut(&mut self.data);
+@@ -12091,6 +12109,21 @@ fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32
+     }
+ }
+ 
++fn validate_gelu_input(values: &[f32]) -> PureResult<bool> {
++    // At |x| <= 1e12, even x^3 is at most about 1e36, well below
++    // f32::MAX. All subsequent GELU intermediates are smaller. Establish
++    // that bound during input validation, not once per intermediate.
++    let mut bounded = true;
++    for &value in values {
++        if value.abs() <= 1e12 {
++            continue;
++        }
++        Tensor::validate_finite_tensor_util_value("gelu_input", value)?;
++        bounded = false;
++    }
++    Ok(bounded)
++}
++
+ fn gelu(x: f32) -> f32 {
+     const COEFF: f32 = 0.044_715;
+     const SQRT_2_OVER_PI: f32 = 0.797_884_6;

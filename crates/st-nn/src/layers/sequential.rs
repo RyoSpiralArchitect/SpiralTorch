@@ -128,9 +128,12 @@ impl Module for Sequential {
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
-        let mut activ = input.clone();
+        self.forward_owned(input.clone())
+    }
+
+    fn forward_owned(&self, mut activ: Tensor) -> PureResult<Tensor> {
         for layer in &self.layers {
-            activ = layer.forward(&activ)?;
+            activ = layer.forward_owned(activ)?;
         }
         Ok(activ)
     }

@@ -103,6 +103,16 @@ host adapter. Non-tiny forward improves 1.216x native and 1.090x Node/WASM, whil
 tiny WASM and full MLP remain mixed. Non-tiny Torch CPU remains faster overall.
 Public WASM autograd/resident paths are unchanged; no browser/FT speedup is claimed.
 
+The [owned host-forward follow-up](../../benchmarks/results/2026-09-21-owned-host-forward/README.md)
+adds default-compatible `Module::forward_owned` and transfers intermediate
+ownership through `Sequential`. Checked GELU reuses only unique, tracked,
+row-major owned storage; shared/exported/snapshot/foreign buffers stay protected.
+Depth-16 GELU chains reduce allocation requests from 48 to 3, and the real MLP
+grid saves three requests in every paired condition. Non-tiny depth-16 chains
+improve 1.079x native and 1.098x through a test-only Node/WASM host adapter.
+Whole-MLP latency remains mixed and non-tiny Torch remains faster. Python uses
+the same Rust path; backward and resident/autograd kernels remain unchanged.
+
 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
    steps. The fixed harness now covers the first two, not training throughput.
    Profile the remaining checked GELU/transcendental cost and explicit

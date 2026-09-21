@@ -6,6 +6,31 @@ import spiraltorch as st
 
 
 class GeluHostTests(unittest.TestCase):
+    def test_sequential_chain_keeps_input_and_backward_values(self):
+        values = [(i % 17 - 8) / 4 for i in range(36)]
+        seeds = [(i % 11 - 5) / 8 for i in range(36)]
+        x, g = st.Tensor(6, 6, values), st.Tensor(6, 6, seeds)
+        model = st.nn.Sequential()
+        for _ in range(4):
+            model.add(st.nn.Gelu())
+        expected, gradient = [], []
+        c = math.sqrt(2 / math.pi)
+        for value, seed in zip(values, seeds):
+            for _ in range(4):
+                t = math.tanh(c * (value + 0.044715 * value ** 3))
+                seed *= (0.5 * (1 + t) + 0.5 * value * (1 - t * t)
+                         * c * (1 + 3 * 0.044715 * value * value))
+                value = 0.5 * value * (1 + t)
+            expected.append(value)
+            gradient.append(seed)
+        first = model(x).tolist()
+        actual_gradient = sum(model.backward(x, g).tolist(), [])
+        self.assertEqual(model(x).tolist(), first)
+        self.assertEqual(sum(x.tolist(), []), values)
+        self.assertEqual(sum(g.tolist(), []), seeds)
+        for actual, target in zip(sum(first, []) + actual_gradient, expected + gradient):
+            self.assertLessEqual(abs(actual - target), 2e-6 * (1 + abs(target)))
+
     def test_forward_and_supplied_seed_derivative(self):
         for rows, cols in [(2, 6), (33, 195)]:
             values = [(i % 131) / 16 - 4 for i in range(rows * cols)]

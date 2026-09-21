@@ -1,0 +1,99 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/wasm/host_forward_measurement_shim.js",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/wasm/host_forward_measurement_shim.js",
+    "baseline_wasm": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/wasm/host_forward_measurement_shim_bg.wasm",
+    "candidate_wasm": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/wasm/host_forward_measurement_shim_bg.wasm",
+    "harness": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/wasm_chain.cjs"
+  },
+  "sha256": {
+    "baseline": "a071d32e8dc83150890a3632a6b9c35077dbe867aebcea90060bd2b06f5ea379",
+    "candidate": "a071d32e8dc83150890a3632a6b9c35077dbe867aebcea90060bd2b06f5ea379",
+    "baseline_wasm": "ec1b9a75202c6d4457f33deec293d051389e623dadd8889b279a3c953dad1b6e",
+    "candidate_wasm": "a7b8d94ef540be9be031f5da8dc616a5b92b6f861f89a8bda5b414a03a7d86ae",
+    "harness": "669416062d56f5509ebcf60ebcd359203ff0a0035f4206e78aa194bf5777018a"
+  },
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "lane": "baseline",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/wasm_chain.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/wasm/host_forward_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 3.270389958008309,
+      "raw_sha256": "3179fb12de84ed123889fedaf6a40328dd490b625e9214306e558066e499013c"
+    },
+    {
+      "name": "warm-candidate",
+      "lane": "candidate",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/wasm_chain.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/wasm/host_forward_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 3.012376166996546,
+      "raw_sha256": "df4e95d1775284bfb7b18e9c473dc0950a51e5a3e4c5bd2bd660fd6eb671359e"
+    },
+    {
+      "name": "baseline-a",
+      "lane": "baseline",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/wasm_chain.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/wasm/host_forward_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 3.265634791998309,
+      "raw_sha256": "a31790312335b88e303fc35e70a6d076fa58d1773960cd53900a3a29e884e171"
+    },
+    {
+      "name": "candidate-a",
+      "lane": "candidate",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/wasm_chain.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/wasm/host_forward_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 2.990887458989164,
+      "raw_sha256": "bfbb56ff8042fd24e1c795ffe91650c2d5a38f457cf2ce16485f8111405efe05"
+    },
+    {
+      "name": "candidate-b",
+      "lane": "candidate",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/wasm_chain.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/candidate-build/wasm/host_forward_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 3.0063770830020076,
+      "raw_sha256": "a902059af8077063a7930fbac3c14521a72bca41af1bfc1e4c800b0fb7dd36ef"
+    },
+    {
+      "name": "baseline-b",
+      "lane": "baseline",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/wasm_chain.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/host-forward-ownership-20260921/baseline-build/wasm/host_forward_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 3.2775652080017608,
+      "raw_sha256": "1f5211ac66e71f6a6b30c2310315752674cc6def5e8fb1c248d8658de8b8ecc9"
+    }
+  ],
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  }
+}
