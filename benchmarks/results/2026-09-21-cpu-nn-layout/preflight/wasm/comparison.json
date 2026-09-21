@@ -1,0 +1,1172 @@
+{
+  "comparisons": [
+    {
+      "condition": [
+        "pack",
+        1025,
+        null,
+        97,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 1.2592792766473364,
+      "baseline": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          43146,
+          43083.5,
+          43125,
+          43062.5,
+          43104.5,
+          43083.5,
+          44354,
+          43041.5,
+          43125
+        ],
+        "output_sha256": "2338a38b3369054c6217a543e1da9cec439884c17807da32cf9bc28e99681152"
+      },
+      "candidate": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          38062.5,
+          34187.5,
+          34229.5,
+          34291.5,
+          34541.5,
+          34146,
+          34062.5,
+          33958.5,
+          34895.5
+        ],
+        "output_sha256": "2338a38b3369054c6217a543e1da9cec439884c17807da32cf9bc28e99681152"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        137,
+        null,
+        195,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 1.1996148607392796,
+      "baseline": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          14271,
+          12770.5,
+          12708.5,
+          12750,
+          12750,
+          12770.5,
+          12771,
+          12812.5,
+          12750
+        ],
+        "output_sha256": "b165a9201ae46895944bb672629351cc2f5b212677662a63d135c7f7ba6e0729"
+      },
+      "candidate": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          10771,
+          11854,
+          10645.5,
+          10667,
+          10562.5,
+          10583.5,
+          10583,
+          10500,
+          12145.5
+        ],
+        "output_sha256": "b165a9201ae46895944bb672629351cc2f5b212677662a63d135c7f7ba6e0729"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        256,
+        null,
+        1024,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 6.447761194029851,
+      "baseline": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          567437.5,
+          570958,
+          566354,
+          566666.5,
+          571125,
+          567000,
+          576979.5,
+          566729.5,
+          566500
+        ],
+        "output_sha256": "99dddb7977b1cf40cd145be68712f5fad0c2ecf08179b7c9e43f535f9f067e37"
+      },
+      "candidate": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          87833,
+          93666.5,
+          95416.5,
+          88208.5,
+          87937.5,
+          87708.5,
+          87750,
+          87541.5,
+          91271
+        ],
+        "output_sha256": "99dddb7977b1cf40cd145be68712f5fad0c2ecf08179b7c9e43f535f9f067e37"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        3072,
+        null,
+        768,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 1.2480846549982216,
+      "baseline": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          6977833.5,
+          7002958.5,
+          6967396,
+          6990437.5,
+          6943021,
+          6969770.5,
+          6984312.5,
+          6955250,
+          7104396
+        ],
+        "output_sha256": "f1814934312bfcc928e40fad50799db67350d86f138df0196f0c54373c3dd912"
+      },
+      "candidate": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          3909375,
+          5535916.5,
+          5801166.5,
+          4811770.5,
+          3542395.5,
+          5865354,
+          5686312.5,
+          5743458.5,
+          5590833.5
+        ],
+        "output_sha256": "f1814934312bfcc928e40fad50799db67350d86f138df0196f0c54373c3dd912"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        64,
+        null,
+        64,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 0.656302489642044,
+      "baseline": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          8916.5,
+          8562.5,
+          10708,
+          14417,
+          8791.5,
+          11000,
+          8562.5,
+          8271,
+          8417
+        ],
+        "output_sha256": "7e125d9e3ccda68fcb7df6076ea67fab1a7789ec4703cfba3f00240bab0bb7a7"
+      },
+      "candidate": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          13395.5,
+          13083.5,
+          16625,
+          19021,
+          16000,
+          13396,
+          12771,
+          12458,
+          12917
+        ],
+        "output_sha256": "7e125d9e3ccda68fcb7df6076ea67fab1a7789ec4703cfba3f00240bab0bb7a7"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        768,
+        null,
+        3072,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 6.051064509267503,
+      "baseline": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          5132729,
+          5139896,
+          5124396,
+          5145083.5,
+          5132562.5,
+          5144312.5,
+          5134833.5,
+          5147437.5,
+          5132396
+        ],
+        "output_sha256": "e3b9e792bd58e7fd22f82e0cfe324a92c152294bc1c084016d2fa94221fd99ef"
+      },
+      "candidate": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          865062.5,
+          848583.5,
+          900375,
+          967375,
+          882583.5,
+          844979,
+          829791.5,
+          822479.5,
+          844354
+        ],
+        "output_sha256": "e3b9e792bd58e7fd22f82e0cfe324a92c152294bc1c084016d2fa94221fd99ef"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        1025,
+        null,
+        97,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 1.4339850057232957,
+      "baseline": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          94583,
+          94500,
+          94416.5,
+          94583.5,
+          94729,
+          94625,
+          96000,
+          99416.5,
+          94416.5
+        ],
+        "output_sha256": "882394330bb4e0042f46fd32c56790a56bf1c949eb655371eb59ce98730bfc39"
+      },
+      "candidate": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          65958.5,
+          67312.5,
+          67416.5,
+          64229,
+          65521,
+          64521,
+          64145.5,
+          65979.5,
+          65958.5
+        ],
+        "output_sha256": "882394330bb4e0042f46fd32c56790a56bf1c949eb655371eb59ce98730bfc39"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        137,
+        null,
+        195,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 1.4319421197559528,
+      "baseline": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          26750,
+          26521,
+          26541.5,
+          26500,
+          26583,
+          26562.5,
+          26479,
+          26500,
+          26479
+        ],
+        "output_sha256": "b8ddaf359f5f45e234c13dd621f1fee1f5e78a8ff1ea67efd53322184650a8ca"
+      },
+      "candidate": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          18708,
+          19604,
+          19896,
+          18521,
+          18521,
+          18500,
+          18458.5,
+          18750,
+          18479.5
+        ],
+        "output_sha256": "b8ddaf359f5f45e234c13dd621f1fee1f5e78a8ff1ea67efd53322184650a8ca"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        256,
+        null,
+        1024,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 4.140642926985799,
+      "baseline": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          681167,
+          688396,
+          679583,
+          687708.5,
+          685687.5,
+          683895.5,
+          680958.5,
+          686312.5,
+          681166.5
+        ],
+        "output_sha256": "cc80331c4d4fc757154119b13b5cb6921f36daabcd658c391409eb737d725fe2"
+      },
+      "candidate": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          167854.5,
+          165041.5,
+          165083.5,
+          169896,
+          165166.5,
+          164875,
+          165229,
+          171979.5,
+          164854.5
+        ],
+        "output_sha256": "cc80331c4d4fc757154119b13b5cb6921f36daabcd658c391409eb737d725fe2"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        3072,
+        null,
+        768,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 1.236049544105264,
+      "baseline": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          7749687.5,
+          7742042,
+          7685979.5,
+          7707979,
+          7660833.5,
+          7733458,
+          7660250,
+          7703312.5,
+          7774041.5
+        ],
+        "output_sha256": "e668c88c743a6607e1e0c27a56f39a0a004e3560a743be80e75b70a01809e386"
+      },
+      "candidate": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          6317062.5,
+          6144167,
+          6408354,
+          6235979,
+          6125354.5,
+          6452000,
+          5639604.5,
+          6051479,
+          6284041.5
+        ],
+        "output_sha256": "e668c88c743a6607e1e0c27a56f39a0a004e3560a743be80e75b70a01809e386"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        64,
+        null,
+        64,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 0.9620487804878048,
+      "baseline": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          14937.5,
+          15104,
+          16104,
+          14791.5,
+          14000,
+          22166.5,
+          14146,
+          13854.5,
+          13875
+        ],
+        "output_sha256": "055fc982f350272a7b33cbb25483ab7d267fdd1cad7fd14e45604342d4652194"
+      },
+      "candidate": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          14250,
+          13562.5,
+          15541.5,
+          15416.5,
+          15375,
+          15291.5,
+          17458.5,
+          14146,
+          17500
+        ],
+        "output_sha256": "055fc982f350272a7b33cbb25483ab7d267fdd1cad7fd14e45604342d4652194"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        768,
+        null,
+        3072,
+        null,
+        null
+      ],
+      "round": "a",
+      "ratio": 3.787055271388757,
+      "baseline": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          6081833.5,
+          6113333.5,
+          6057104,
+          6108395.5,
+          6076125,
+          6139062.5,
+          6152229.5,
+          6598375,
+          6199896
+        ],
+        "output_sha256": "ef5613e2535d1bf3236d17859e7037a3d8e797bf494b70e0fef605a83b7dad9f"
+      },
+      "candidate": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          1812854.5,
+          1753541.5,
+          1651667,
+          1671520.5,
+          1599021,
+          1577250,
+          1614271,
+          1564208.5,
+          1591312.5
+        ],
+        "output_sha256": "ef5613e2535d1bf3236d17859e7037a3d8e797bf494b70e0fef605a83b7dad9f"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        1025,
+        null,
+        97,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 1.2515200559905515,
+      "baseline": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          42916.5,
+          42958,
+          42875,
+          42916.5,
+          42937.5,
+          44229,
+          42937.5,
+          42854.5,
+          42854.5
+        ],
+        "output_sha256": "2338a38b3369054c6217a543e1da9cec439884c17807da32cf9bc28e99681152"
+      },
+      "candidate": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          34396,
+          34042,
+          34291.5,
+          35875,
+          36458.5,
+          35416.5,
+          34187.5,
+          34041.5,
+          34146
+        ],
+        "output_sha256": "2338a38b3369054c6217a543e1da9cec439884c17807da32cf9bc28e99681152"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        137,
+        null,
+        195,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 1.2165162753342467,
+      "baseline": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          13750,
+          12646,
+          12625,
+          14125,
+          12875,
+          13166.5,
+          15104,
+          12750,
+          12645.5
+        ],
+        "output_sha256": "b165a9201ae46895944bb672629351cc2f5b212677662a63d135c7f7ba6e0729"
+      },
+      "candidate": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          14479,
+          10541.5,
+          10562.5,
+          10583.5,
+          10562.5,
+          10666.5,
+          10646,
+          10479,
+          10604
+        ],
+        "output_sha256": "b165a9201ae46895944bb672629351cc2f5b212677662a63d135c7f7ba6e0729"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        256,
+        null,
+        1024,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 6.508250338686181,
+      "baseline": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          561417,
+          549625,
+          574083,
+          577875,
+          575625,
+          581417,
+          576771,
+          560687.5,
+          540500
+        ],
+        "output_sha256": "99dddb7977b1cf40cd145be68712f5fad0c2ecf08179b7c9e43f535f9f067e37"
+      },
+      "candidate": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          87854,
+          88041.5,
+          89750,
+          91604,
+          87854,
+          92271,
+          89458.5,
+          88208.5,
+          88208.5
+        ],
+        "output_sha256": "99dddb7977b1cf40cd145be68712f5fad0c2ecf08179b7c9e43f535f9f067e37"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        3072,
+        null,
+        768,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 1.1758354053694586,
+      "baseline": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          6961667,
+          6948771,
+          6948625,
+          6948646,
+          6959937.5,
+          6949021,
+          6947771,
+          6955812.5,
+          6946020.5
+        ],
+        "output_sha256": "f1814934312bfcc928e40fad50799db67350d86f138df0196f0c54373c3dd912"
+      },
+      "candidate": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          5901541.5,
+          5909646,
+          4030708.5,
+          3773333,
+          5677312.5,
+          5935437.5,
+          5935166.5,
+          5932937.5,
+          5920750
+        ],
+        "output_sha256": "f1814934312bfcc928e40fad50799db67350d86f138df0196f0c54373c3dd912"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        64,
+        null,
+        64,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 0.7358566612926865,
+      "baseline": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          10125,
+          9875,
+          13062.5,
+          14312.5,
+          10041.5,
+          12375,
+          9521,
+          9437.5,
+          9479.5
+        ],
+        "output_sha256": "7e125d9e3ccda68fcb7df6076ea67fab1a7789ec4703cfba3f00240bab0bb7a7"
+      },
+      "candidate": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          13646,
+          13062.5,
+          15229.5,
+          16229.5,
+          14104,
+          12708.5,
+          15187.5,
+          10500,
+          13270.5
+        ],
+        "output_sha256": "7e125d9e3ccda68fcb7df6076ea67fab1a7789ec4703cfba3f00240bab0bb7a7"
+      }
+    },
+    {
+      "condition": [
+        "pack",
+        768,
+        null,
+        3072,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 5.724417851225477,
+      "baseline": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          5167833.5,
+          5075354,
+          5066708,
+          5080562.5,
+          5061458.5,
+          5082979,
+          5059937.5,
+          5056521,
+          5053583.5
+        ],
+        "output_sha256": "e3b9e792bd58e7fd22f82e0cfe324a92c152294bc1c084016d2fa94221fd99ef"
+      },
+      "candidate": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "pack",
+        "valid": true,
+        "elapsed_ns": [
+          874875,
+          891229,
+          860791.5,
+          859416.5,
+          907458.5,
+          983458,
+          886729,
+          885104.5,
+          839687.5
+        ],
+        "output_sha256": "e3b9e792bd58e7fd22f82e0cfe324a92c152294bc1c084016d2fa94221fd99ef"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        1025,
+        null,
+        97,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 1.4718779492859315,
+      "baseline": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          94271,
+          94520.5,
+          94166.5,
+          94354,
+          97479,
+          96187.5,
+          94291.5,
+          94187.5,
+          94417
+        ],
+        "output_sha256": "882394330bb4e0042f46fd32c56790a56bf1c949eb655371eb59ce98730bfc39"
+      },
+      "candidate": {
+        "rows": 1025,
+        "cols": 97,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          64312.5,
+          64104.5,
+          64229,
+          64083,
+          64229,
+          64083.5,
+          64020.5,
+          64396,
+          64062.5
+        ],
+        "output_sha256": "882394330bb4e0042f46fd32c56790a56bf1c949eb655371eb59ce98730bfc39"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        137,
+        null,
+        195,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 1.4348771472059143,
+      "baseline": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          26437.5,
+          26437.5,
+          26396,
+          26312.5,
+          26375,
+          26270.5,
+          26333.5,
+          26541.5,
+          28125
+        ],
+        "output_sha256": "b8ddaf359f5f45e234c13dd621f1fee1f5e78a8ff1ea67efd53322184650a8ca"
+      },
+      "candidate": {
+        "rows": 137,
+        "cols": 195,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          18562.5,
+          18500,
+          18395.5,
+          18291.5,
+          18458.5,
+          18396,
+          18437.5,
+          18375,
+          18396
+        ],
+        "output_sha256": "b8ddaf359f5f45e234c13dd621f1fee1f5e78a8ff1ea67efd53322184650a8ca"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        256,
+        null,
+        1024,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 3.908839393939394,
+      "baseline": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          671979,
+          678625,
+          670708.5,
+          672167,
+          616146,
+          644958.5,
+          602791.5,
+          625645.5,
+          643729
+        ],
+        "output_sha256": "cc80331c4d4fc757154119b13b5cb6921f36daabcd658c391409eb737d725fe2"
+      },
+      "candidate": {
+        "rows": 256,
+        "cols": 1024,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          167291.5,
+          165000,
+          164541.5,
+          165395.5,
+          164541.5,
+          164521,
+          164542,
+          169437.5,
+          171583.5
+        ],
+        "output_sha256": "cc80331c4d4fc757154119b13b5cb6921f36daabcd658c391409eb737d725fe2"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        3072,
+        null,
+        768,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 1.1655516791808225,
+      "baseline": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          7654854,
+          7654833.5,
+          7649229,
+          7637958.5,
+          7755187.5,
+          7710562.5,
+          7647750,
+          7632833,
+          7784916.5
+        ],
+        "output_sha256": "e668c88c743a6607e1e0c27a56f39a0a004e3560a743be80e75b70a01809e386"
+      },
+      "candidate": {
+        "rows": 3072,
+        "cols": 768,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          6599729,
+          6099625,
+          6578854.5,
+          6553604.5,
+          6575000,
+          6567562.5,
+          6595541.5,
+          6541896,
+          6547021
+        ],
+        "output_sha256": "e668c88c743a6607e1e0c27a56f39a0a004e3560a743be80e75b70a01809e386"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        64,
+        null,
+        64,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 0.8168191126279863,
+      "baseline": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          14958,
+          14396,
+          16500,
+          15916.5,
+          15479,
+          21875,
+          14312.5,
+          14291.5,
+          14270.5
+        ],
+        "output_sha256": "055fc982f350272a7b33cbb25483ab7d267fdd1cad7fd14e45604342d4652194"
+      },
+      "candidate": {
+        "rows": 64,
+        "cols": 64,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          18937.5,
+          18375,
+          16625,
+          19396,
+          18312.5,
+          18145.5,
+          18250,
+          16583.5,
+          18833.5
+        ],
+        "output_sha256": "055fc982f350272a7b33cbb25483ab7d267fdd1cad7fd14e45604342d4652194"
+      }
+    },
+    {
+      "condition": [
+        "transpose",
+        768,
+        null,
+        3072,
+        null,
+        null
+      ],
+      "round": "b",
+      "ratio": 3.711153952417498,
+      "baseline": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          6044542,
+          6024396,
+          6093812.5,
+          6065562.5,
+          6044083,
+          6081000,
+          6059937.5,
+          6035208,
+          6011854.5
+        ],
+        "output_sha256": "ef5613e2535d1bf3236d17859e7037a3d8e797bf494b70e0fef605a83b7dad9f"
+      },
+      "candidate": {
+        "rows": 768,
+        "cols": 3072,
+        "operation": "transpose",
+        "valid": true,
+        "elapsed_ns": [
+          1699875,
+          1640270.5,
+          1720416.5,
+          1628750,
+          1606000,
+          1598729.5,
+          1576416.5,
+          1658333,
+          1624708.5
+        ],
+        "output_sha256": "ef5613e2535d1bf3236d17859e7037a3d8e797bf494b70e0fef605a83b7dad9f"
+      }
+    }
+  ],
+  "groups": {
+    "pack/None/None": {
+      "geomean": 1.9108223647850866,
+      "minimum": 0.656302489642044,
+      "maximum": 6.508250338686181,
+      "favorable": 10,
+      "count": 12
+    },
+    "transpose/None/None": {
+      "geomean": 1.7947244012811432,
+      "minimum": 0.8168191126279863,
+      "maximum": 4.140642926985799,
+      "favorable": 10,
+      "count": 12
+    }
+  }
+}

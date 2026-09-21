@@ -1,0 +1,47 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.80s
+     Running tests/temporal_channels.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/temporal_channels-67e87fffecb28e3e)
+
+running 3 tests
+test harmonic_resize_preserves_each_voxel ... FAILED
+test integration_keeps_voxel_identity_when_drive_adds_channels ... FAILED
+test interpolation_zero_pads_channels_not_adjacent_voxels ... FAILED
+
+failures:
+
+---- harmonic_resize_preserves_each_voxel stdout ----
+
+thread 'harmonic_resize_preserves_each_voxel' (906899) panicked at crates/st-vision/tests/temporal_channels.rs:16:5:
+assertion `left == right` failed
+  left: [1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+ right: [1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- integration_keeps_voxel_identity_when_drive_adds_channels stdout ----
+
+thread 'integration_keeps_voxel_identity_when_drive_adds_channels' (906900) panicked at crates/st-vision/tests/temporal_channels.rs:70:5:
+assertion `left == right` failed
+  left: [5.5, 51.0, 11.5, 100.0, 15.0, 150.0]
+ right: [5.5, 50.0, 11.0, 100.0, 16.5, 150.0]
+
+---- interpolation_zero_pads_channels_not_adjacent_voxels stdout ----
+
+thread 'interpolation_zero_pads_channels_not_adjacent_voxels' (906901) panicked at crates/st-vision/tests/temporal_channels.rs:49:9:
+assertion `left == right` failed
+  left: [5.5, 51.0, 11.0, 101.5, 16.5, 150.0]
+ right: [5.5, 50.0, 11.0, 100.0, 16.5, 150.0]
+
+
+failures:
+    harmonic_resize_preserves_each_voxel
+    integration_keeps_voxel_identity_when_drive_adds_channels
+    interpolation_zero_pads_channels_not_adjacent_voxels
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p st-vision --test temporal_channels`

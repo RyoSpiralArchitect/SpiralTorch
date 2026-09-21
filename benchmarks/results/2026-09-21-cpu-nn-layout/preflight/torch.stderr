@@ -1,0 +1,12 @@
+/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/torch_compare.py:31: RuntimeWarning: divide by zero encountered in matmul
+  expected = values.astype(np.float64) @ weights + bias
+/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/torch_compare.py:31: RuntimeWarning: overflow encountered in matmul
+  expected = values.astype(np.float64) @ weights + bias
+/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/torch_compare.py:31: RuntimeWarning: invalid value encountered in matmul
+  expected = values.astype(np.float64) @ weights + bias
+/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/torch_compare.py:37: RuntimeWarning: divide by zero encountered in matmul
+  expected = hidden @ weights + bias
+/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/torch_compare.py:37: RuntimeWarning: overflow encountered in matmul
+  expected = hidden @ weights + bias
+/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/torch_compare.py:37: RuntimeWarning: invalid value encountered in matmul
+  expected = hidden @ weights + bias

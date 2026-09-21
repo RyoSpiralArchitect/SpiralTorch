@@ -1,0 +1,27 @@
+{
+  "source": {
+    "commit": "d5fa45129429675370c3570ef534051c24c6a9ef",
+    "files": {
+      "crates/st-bench/examples/cpu_nn_layout.rs": "8ec08a37cde1d7f2b304617cc200eb6a4d022d4e11e060b7f72fe0cdfc65f137",
+      "crates/st-tensor/src/pure.rs": "26a0c9bab96ffe530c402bf28374aa3bbdd01c2df365f95577e2855413930a10",
+      "crates/st-tensor/src/backend/faer_dense.rs": "9968c7b81f4c898de7df5d4bbc7081782cc93e7cf8e3860d3d8aca926334343e",
+      "crates/st-tensor/src/backend/mod.rs": "ce5f5caa4aa0a8c7739e6e6073650f957e9bb92660b56839673b410f6ec82a65",
+      "crates/st-tensor/src/backend/transpose.rs": "1e25077595af159b2b4fc8304f9ad3aad06d7dfb20139265ecc64285cf673f32"
+    },
+    "status": ""
+  },
+  "command": [
+    "cargo",
+    "+1.98.0",
+    "build",
+    "--locked",
+    "--release",
+    "-p",
+    "st-bench",
+    "--example",
+    "cpu_nn_layout"
+  ],
+  "exit_code": 0,
+  "seconds": 84.09328783299134,
+  "worker_sha256": "9e84ba1a3c1a095a84bd38c10b81d3358fabd4e4169d1e31eb350b50718284f7"
+}

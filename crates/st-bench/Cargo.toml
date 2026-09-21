@@ -14,6 +14,8 @@ st-core = { path = "../st-core", default-features = false }
 st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 st-nn = { path = "../st-nn" }
 st-text = { path = "../st-text" }
+st-frac = { path = "../st-frac" }
+spiral-selfsup = { path = "../spiral-selfsup" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"

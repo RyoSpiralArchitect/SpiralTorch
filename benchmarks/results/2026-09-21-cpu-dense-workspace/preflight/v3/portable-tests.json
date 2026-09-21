@@ -1,0 +1,30 @@
+{
+  "source": "dd0645d274866d14fdf8dd5d479020c0240c4a23",
+  "command": [
+    "cargo",
+    "+1.98.0",
+    "test",
+    "--locked",
+    "-p",
+    "st-tensor",
+    "--no-default-features",
+    "--features",
+    "cpu",
+    "--test",
+    "prepacked_cpu_dispatch",
+    "--test",
+    "autograd_sgd",
+    "--test",
+    "autograd_observability",
+    "--test",
+    "classification",
+    "--",
+    "--test-threads=1"
+  ],
+  "exit_code": 0,
+  "seconds": 4.430294083002082,
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0"
+  }
+}

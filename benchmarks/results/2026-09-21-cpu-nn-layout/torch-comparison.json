@@ -1,0 +1,1819 @@
+{
+  "results": [
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 8.152173913043478
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 1.2428571428571429
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 6.240415621640989
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.9478639455782313
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 5.218330134357005
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 1.2488516306844282
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 3.191095639428362
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.9522169372915642
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 4.9230421004979625
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 1.0919771061351542
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 3.398439024390244
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.8410352986624173
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 2.6169806749279347
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.4398066733371036
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 1.5712671072999336
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.18714226305887657
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 2.206824984370798
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.46093471599577923
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 1.6227686180164922
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.20449110954597743
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 1.2228159137498023
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.3914798052776516
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.992327875732246
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.19706065431976458
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.5841180533751962
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.17283956122689392
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.678589546119292
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.13013006208751407
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.5182939128012258
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.1607386379738051
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.5974890919466047
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.11938811151525854
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.22605066971369916
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.11299502009889834
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.3774706411810984
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.10365328146249705
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.26928485721627893
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.13211958399351925
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.49566479013753295
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.2569984851283946
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.18952049888281125
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.12177798437638687
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.43250333782356
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.2900086122876197
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.06517950898034668
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.05256995640204919
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.23408186611162757
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.1841519187989538
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.2496299005521013
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.13966382460414128
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.3994546793324925
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.23617241379310344
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.24981263616557733
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.1399474696583575
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.3992131147540984
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.25578876605915746
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.19412728725637587
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.12116626652689953
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.2888852567921673
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.2056625515639017
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.19316527614826404
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.13140877598152426
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.7205027494108406
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.4767151767151767
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.17252880533656761
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.12277049641570564
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.6706309839118756
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.45559308563481027
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.12835551545228965
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.09234014930217462
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.36536988243152463
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "a",
+      "torch_over_spiral_ratio": 0.2971297242719091
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 9.00248344370861
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 1.1398176291793314
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 5.57344
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.8763270440251573
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 9.318766066838046
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 1.1496986996511258
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 5.649367499189101
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.8763270440251573
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 4.501241721854305
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 1.0116279069767442
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 3.1196489342647324
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        1,
+        64,
+        64
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.7769549895168845
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 2.348939591078067
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.4230824470916565
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 1.5161073331535766
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.16266965324566465
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 1.939413355350796
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.27437338182212934
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.7033418968276768
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.17263463800472795
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.9553053473777151
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.3237996957322444
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.8402790743282996
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1799441635824343
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.4719072508823453
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.14571593813501496
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.5609291123802632
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.11805088663925703
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.37709861153339413
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.11361897760166838
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.47324229010260127
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.11463078478339898
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.18319442882607098
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.09591627247534962
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.33899832110983474
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.09836012952088881
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.2515152374202693
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.13877267987486966
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.5452145471145815
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.3297877384343979
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.2572064698299437
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1400751302780915
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.5265453444360333
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.33550376229982637
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.06913700694627353
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.05660998564364333
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.2562756674910918
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.18028104881985374
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.2629908256880734
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1408081264551876
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.4208004055019238
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.25880930338012736
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.27741111347668723
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1506754270696452
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.42792543013565965
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.2511470570709594
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1944565040429804
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.12185334750265675
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.2585040432538522
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.20718601819570592
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.19711334606313724
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1299977153301348
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.6040040755128898
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "auto",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.4730109405182038
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1676487919858574
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.12304490511918705
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.5476909083786916
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "faer",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.4326281224505506
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.1058998697189652
+    },
+    {
+      "operation": "linear",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.08714515534198271
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": false,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.3564247227255035
+    },
+    {
+      "operation": "mlp",
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "backend": "cpu_simd",
+      "invalidate": true,
+      "round": "b",
+      "torch_over_spiral_ratio": 0.2813324335930311
+    }
+  ],
+  "groups": {
+    "linear/auto/False": {
+      "geomean": 0.7248981553852248,
+      "minimum": 0.19316527614826404,
+      "maximum": 9.00248344370861,
+      "spiral_favorable": 4,
+      "count": 12
+    },
+    "linear/auto/True": {
+      "geomean": 0.24227189938995344,
+      "minimum": 0.1299977153301348,
+      "maximum": 1.2428571428571429,
+      "spiral_favorable": 2,
+      "count": 12
+    },
+    "linear/cpu_simd/False": {
+      "geomean": 0.34107691507667576,
+      "minimum": 0.06517950898034668,
+      "maximum": 4.9230421004979625,
+      "spiral_favorable": 3,
+      "count": 12
+    },
+    "linear/cpu_simd/True": {
+      "geomean": 0.16883842168438418,
+      "minimum": 0.05256995640204919,
+      "maximum": 1.0919771061351542,
+      "spiral_favorable": 2,
+      "count": 12
+    },
+    "linear/faer/False": {
+      "geomean": 0.6308723179852608,
+      "minimum": 0.1676487919858574,
+      "maximum": 9.318766066838046,
+      "spiral_favorable": 4,
+      "count": 12
+    },
+    "linear/faer/True": {
+      "geomean": 0.22627949401682973,
+      "minimum": 0.11361897760166838,
+      "maximum": 1.2488516306844282,
+      "spiral_favorable": 2,
+      "count": 12
+    },
+    "mlp/auto/False": {
+      "geomean": 0.9613921088414015,
+      "minimum": 0.3994546793324925,
+      "maximum": 6.240415621640989,
+      "spiral_favorable": 4,
+      "count": 12
+    },
+    "mlp/auto/True": {
+      "geomean": 0.2960761905167104,
+      "minimum": 0.11805088663925703,
+      "maximum": 0.9478639455782313,
+      "spiral_favorable": 0,
+      "count": 12
+    },
+    "mlp/cpu_simd/False": {
+      "geomean": 0.5431995794859412,
+      "minimum": 0.23408186611162757,
+      "maximum": 3.398439024390244,
+      "spiral_favorable": 2,
+      "count": 12
+    },
+    "mlp/cpu_simd/True": {
+      "geomean": 0.23470003299026346,
+      "minimum": 0.09836012952088881,
+      "maximum": 0.8410352986624173,
+      "spiral_favorable": 0,
+      "count": 12
+    },
+    "mlp/faer/False": {
+      "geomean": 0.8127983169105231,
+      "minimum": 0.3992131147540984,
+      "maximum": 5.649367499189101,
+      "spiral_favorable": 3,
+      "count": 12
+    },
+    "mlp/faer/True": {
+      "geomean": 0.2983135953321711,
+      "minimum": 0.11463078478339898,
+      "maximum": 0.9522169372915642,
+      "spiral_favorable": 0,
+      "count": 12
+    }
+  },
+  "boundary": "one Torch run reused for both native rounds and cache states; invalidation has no Torch equivalent; Python versus Rust eager entry overhead is included, not isolated kernel speed"
+}

@@ -1,0 +1,40 @@
+   Compiling st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling faer v0.23.2
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling spiral-selfsup v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-selfsup)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 43.89s
+     Running tests/info_nce_tensor.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/info_nce_tensor-39c19c05c7370b2b)
+
+running 5 tests
+test entry_points_reject_invalid_temperatures_and_shapes ... ok
+test cpu_backend_matches_reference ... ok
+test tensor_wrapper_matches_vector_api ... ok
+test tensor_layouts_preserve_logical_rows ... FAILED
+test vector_result_rejects_empty_tensor_without_panicking ... FAILED
+
+failures:
+
+---- tensor_layouts_preserve_logical_rows stdout ----
+
+thread 'tensor_layouts_preserve_logical_rows' (902837) panicked at crates/spiral-selfsup/tests/info_nce_tensor.rs:34:17:
+assertion failed: (actual.loss - expected.loss).abs() < 1e-5
+
+---- vector_result_rejects_empty_tensor_without_panicking stdout ----
+
+thread 'vector_result_rejects_empty_tensor_without_panicking' (902839) panicked at crates/spiral-selfsup/src/contrastive.rs:317:10:
+chunk size must be non-zero
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tensor_layouts_preserve_logical_rows
+    vector_result_rejects_empty_tensor_without_panicking
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p spiral-selfsup --test info_nce_tensor`

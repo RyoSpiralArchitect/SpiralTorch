@@ -1,0 +1,52 @@
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.60s
+     Running tests/autograd_observability.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/autograd_observability-4810ca67643447f5)
+
+running 2 tests
+test kernel_observers_read_gradients_after_vjp_success_and_failed_commit ... ok
+test optimizer_kernel_observers_can_read_gradients_after_success_and_failure ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/autograd_sgd.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/autograd_sgd-892bc3da7c9204cc)
+
+running 7 tests
+test a_late_failure_preserves_the_entire_parameter_set_and_all_gradients ... ok
+test concurrent_backward_cannot_split_a_multi_parameter_gradient_snapshot ... ok
+test empty_registration_is_allowed_but_an_empty_step_is_not ... ok
+test repeated_training_uses_bounded_fresh_graphs ... ok
+test updates_all_leaves_without_changing_old_graphs_or_gradients ... ok
+test validation_is_atomic_and_rejects_duplicates_constants_and_intermediates ... ok
+test zero_grad_and_accumulation_use_the_current_leaves_only ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/classification.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/classification-5e808594de51ac4c)
+
+running 16 tests
+test all_ignored_and_empty_batches_have_explicit_semantics ... ok
+test autograd_owns_labels_and_reuses_core_vjp ... ok
+test class_index_tensor_transport_does_not_truncate ... ok
+test column_major_inputs_and_seeds_are_normalized ... ok
+test dominant_correct_class_preserves_tiny_loss_and_gradient ... ok
+test extreme_seeds_are_reduced_in_f64 ... ok
+test finite_differences_match_smoothed_cross_entropy_vjp ... ok
+test ignored_rows_do_not_change_mean_normalizer ... ok
+test invalid_inputs_are_not_silently_clamped_or_masked ... ok
+test large_common_offset_does_not_cancel_log_partition ... ok
+test log_softmax_retains_small_seeds_between_large_cancelling_terms ... ok
+test log_softmax_retains_sum_correction_until_after_probability_scaling ... ok
+test log_softmax_vjp_matches_finite_differences ... ok
+test mean_is_narrowed_only_after_reduction ... ok
+test overflowing_vjp_never_commits_partial_gradients ... ok
+test uniform_logits_and_smoothing_have_expected_loss_and_gradient ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/prepacked_cpu_dispatch.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/prepacked_cpu_dispatch-3507ab8211983524)
+
+running 1 test
+test packed_auto_uses_portable_cpu_kernel_without_gpu_or_faer ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,3297 @@
+{
+  "comparisons": [
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.9252544529262086,
+        1.6751186440677965
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2821.625,
+            2091.15625,
+            2080.71875,
+            2072.90625,
+            2049.46875,
+            3148.4375,
+            2066.40625,
+            2644.53125,
+            2052.0625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3792,
+          "rust_allocation_calls": 5
+        },
+        {
+          "elapsed_ns": [
+            1013.0,
+            774.71875,
+            765.625,
+            769.53125,
+            772.125,
+            769.53125,
+            774.71875,
+            769.53125,
+            777.34375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3792,
+          "rust_allocation_calls": 5
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1462.25,
+            1085.9375,
+            1083.34375,
+            1080.71875,
+            1082.03125,
+            1080.71875,
+            1079.40625,
+            1080.75,
+            1079.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2304,
+          "rust_allocation_calls": 4
+        },
+        {
+          "elapsed_ns": [
+            606.75,
+            466.15625,
+            460.9375,
+            462.25,
+            460.9375,
+            460.9375,
+            460.9375,
+            460.9375,
+            460.9375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2304,
+          "rust_allocation_calls": 4
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        2.443319274657989,
+        1.5550344277018262
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2704.4375,
+            3506.5,
+            2476.5625,
+            2464.84375,
+            6455.71875,
+            6261.71875,
+            4854.1875,
+            10397.125,
+            3566.40625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3360,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            1063.78125,
+            1053.375,
+            951.8125,
+            953.125,
+            1048.15625,
+            970.0625,
+            967.46875,
+            973.9375,
+            975.25
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3360,
+          "rust_allocation_calls": 13
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1781.25,
+            1558.59375,
+            1460.9375,
+            1459.65625,
+            1460.9375,
+            1451.8125,
+            1451.8125,
+            1453.125,
+            1449.21875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1808,
+          "rust_allocation_calls": 11
+        },
+        {
+          "elapsed_ns": [
+            753.90625,
+            686.1875,
+            757.8125,
+            643.21875,
+            622.375,
+            626.3125,
+            625.0,
+            622.375,
+            622.40625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1808,
+          "rust_allocation_calls": 11
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.821099276140148,
+        1.610624
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2059.90625,
+            2777.34375,
+            2067.6875,
+            2070.3125,
+            2062.5,
+            2313.8125,
+            2070.3125,
+            2050.78125,
+            2053.375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2880,
+          "rust_allocation_calls": 6
+        },
+        {
+          "elapsed_ns": [
+            789.0625,
+            786.4375,
+            790.375,
+            789.0625,
+            783.875,
+            785.15625,
+            789.0625,
+            785.15625,
+            785.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2880,
+          "rust_allocation_calls": 6
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1138.03125,
+            1140.625,
+            1135.40625,
+            1136.71875,
+            1134.09375,
+            1136.71875,
+            1134.09375,
+            1134.125,
+            1134.125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1392,
+          "rust_allocation_calls": 5
+        },
+        {
+          "elapsed_ns": [
+            490.90625,
+            488.28125,
+            487.0,
+            485.6875,
+            486.96875,
+            489.59375,
+            488.28125,
+            488.28125,
+            487.0
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1392,
+          "rust_allocation_calls": 5
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.655691499583627,
+        1.4866449832446285
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2408.84375,
+            2406.25,
+            2658.875,
+            2423.15625,
+            2420.5625,
+            2548.1875,
+            2438.8125,
+            2411.4375,
+            2916.65625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3360,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            932.3125,
+            932.28125,
+            1024.71875,
+            940.09375,
+            945.3125,
+            942.71875,
+            946.59375,
+            941.40625,
+            947.90625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3360,
+          "rust_allocation_calls": 13
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1485.65625,
+            1472.65625,
+            1466.125,
+            1460.9375,
+            1462.21875,
+            1463.53125,
+            1460.9375,
+            1463.53125,
+            1463.53125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1808,
+          "rust_allocation_calls": 11
+        },
+        {
+          "elapsed_ns": [
+            638.03125,
+            636.71875,
+            638.0,
+            634.125,
+            636.71875,
+            632.8125,
+            631.53125,
+            626.28125,
+            623.6875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1808,
+          "rust_allocation_calls": 11
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.7853329061882641,
+        1.551555638028082
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2087.25,
+            2084.625,
+            2085.9375,
+            2084.625,
+            2089.84375,
+            2100.28125,
+            2092.46875,
+            2098.96875,
+            2101.5625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2880,
+          "rust_allocation_calls": 6
+        },
+        {
+          "elapsed_ns": [
+            785.15625,
+            783.875,
+            786.4375,
+            785.15625,
+            783.84375,
+            783.875,
+            773.4375,
+            773.4375,
+            776.0625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2880,
+          "rust_allocation_calls": 6
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1171.875,
+            1175.78125,
+            1170.5625,
+            1170.5625,
+            1169.28125,
+            1169.28125,
+            1174.46875,
+            1171.875,
+            1167.96875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1392,
+          "rust_allocation_calls": 5
+        },
+        {
+          "elapsed_ns": [
+            507.8125,
+            506.5,
+            502.59375,
+            505.1875,
+            505.21875,
+            505.21875,
+            503.90625,
+            520.8125,
+            576.84375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1392,
+          "rust_allocation_calls": 5
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.6281173252401013,
+        1.4766332392172135
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2628.90625,
+            3140.625,
+            2545.59375,
+            2557.3125,
+            2541.6875,
+            2545.59375,
+            2549.5,
+            2548.15625,
+            2546.875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3856,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            951.8125,
+            989.59375,
+            945.3125,
+            945.3125,
+            947.90625,
+            946.625,
+            947.90625,
+            949.21875,
+            1009.125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3856,
+          "rust_allocation_calls": 7
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1583.34375,
+            1744.8125,
+            1563.8125,
+            1559.875,
+            1562.5,
+            1565.09375,
+            1574.21875,
+            1572.9375,
+            1559.90625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2368,
+          "rust_allocation_calls": 6
+        },
+        {
+          "elapsed_ns": [
+            638.03125,
+            635.40625,
+            634.125,
+            720.03125,
+            643.21875,
+            643.25,
+            640.625,
+            641.9375,
+            644.53125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2368,
+          "rust_allocation_calls": 6
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.5378842975206612,
+        1.399722628862008
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            4505.21875,
+            2911.4375,
+            2904.9375,
+            2915.375,
+            2895.84375,
+            2886.71875,
+            2908.875,
+            2907.5625,
+            2907.5625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3424,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            1138.0,
+            1136.71875,
+            1136.71875,
+            1136.71875,
+            1135.4375,
+            1134.125,
+            1134.125,
+            1134.125,
+            1135.40625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3424,
+          "rust_allocation_calls": 15
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1915.34375,
+            1897.125,
+            1890.625,
+            1889.3125,
+            1895.8125,
+            1895.84375,
+            1890.625,
+            1890.625,
+            1889.3125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1872,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            812.5,
+            809.90625,
+            807.3125,
+            809.875,
+            811.1875,
+            813.8125,
+            809.90625,
+            812.5,
+            811.1875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1872,
+          "rust_allocation_calls": 13
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.5932514035460035,
+        1.4362057142857143
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2584.65625,
+            2574.21875,
+            2580.71875,
+            2567.71875,
+            2569.03125,
+            2966.15625,
+            2757.8125,
+            2596.375,
+            2571.625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2944,
+          "rust_allocation_calls": 8
+        },
+        {
+          "elapsed_ns": [
+            981.78125,
+            984.375,
+            983.0625,
+            976.5625,
+            968.75,
+            967.4375,
+            968.75,
+            1059.875,
+            981.78125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2944,
+          "rust_allocation_calls": 8
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1619.78125,
+            1631.5,
+            1617.1875,
+            1615.875,
+            1619.78125,
+            1619.78125,
+            1614.59375,
+            1615.90625,
+            5431.0
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1456,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            688.8125,
+            684.90625,
+            683.59375,
+            683.59375,
+            682.3125,
+            683.59375,
+            682.28125,
+            683.59375,
+            680.96875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1456,
+          "rust_allocation_calls": 7
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.511066398390342,
+        1.3832759208085703
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2933.59375,
+            3040.375,
+            2915.375,
+            2904.9375,
+            2907.53125,
+            2934.90625,
+            2958.34375,
+            2903.625,
+            2984.375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3424,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            1141.9375,
+            1136.71875,
+            1143.25,
+            1144.53125,
+            1157.5625,
+            1141.90625,
+            1140.625,
+            1141.9375,
+            1139.3125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 3424,
+          "rust_allocation_calls": 15
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            1957.03125,
+            1955.71875,
+            1941.40625,
+            1938.8125,
+            1940.09375,
+            1932.28125,
+            3579.40625,
+            2454.4375,
+            1934.90625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1872,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            846.375,
+            842.46875,
+            842.4375,
+            837.21875,
+            825.53125,
+            819.03125,
+            821.625,
+            820.3125,
+            824.21875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1872,
+          "rust_allocation_calls": 13
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.6100566037735848,
+        1.3767826086956523
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2690.09375,
+            2721.34375,
+            2634.09375,
+            2891.90625,
+            2666.65625,
+            2761.71875,
+            2606.75,
+            2604.15625,
+            2592.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2944,
+          "rust_allocation_calls": 8
+        },
+        {
+          "elapsed_ns": [
+            988.28125,
+            992.1875,
+            988.28125,
+            985.6875,
+            989.59375,
+            989.5625,
+            989.59375,
+            990.875,
+            988.28125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 2944,
+          "rust_allocation_calls": 8
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            2324.21875,
+            1649.75,
+            2328.125,
+            1656.25,
+            1657.5625,
+            1644.53125,
+            1654.9375,
+            1658.84375,
+            1651.03125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1456,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            772.125,
+            721.34375,
+            794.28125,
+            718.75,
+            945.3125,
+            707.03125,
+            703.125,
+            703.125,
+            704.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 1456,
+          "rust_allocation_calls": 7
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0106407069071848,
+        1.0246620560051984
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            26893.25,
+            34049.5,
+            26244.78125,
+            27010.40625,
+            26220.0625,
+            25630.21875,
+            17640.625,
+            11838.5625,
+            17829.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 27904,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            10277.34375,
+            10290.375,
+            10496.09375,
+            10492.1875,
+            10423.1875,
+            11358.0625,
+            10713.53125,
+            11195.3125,
+            10647.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 27904,
+          "rust_allocation_calls": 7
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            25944.0,
+            25552.0625,
+            25631.5,
+            25402.34375,
+            26812.5,
+            25744.78125,
+            26544.28125,
+            26596.375,
+            36035.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 25856,
+          "rust_allocation_calls": 6
+        },
+        {
+          "elapsed_ns": [
+            11100.25,
+            10309.90625,
+            10091.15625,
+            10283.84375,
+            10243.46875,
+            10239.59375,
+            10272.15625,
+            10157.5625,
+            10227.84375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 25856,
+          "rust_allocation_calls": 6
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.9789374949098946,
+        0.9989019236778548
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            11109.375,
+            10893.21875,
+            10666.65625,
+            10712.25,
+            13425.78125,
+            10713.5625,
+            17161.46875,
+            16083.3125,
+            10592.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24304,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            11190.09375,
+            10566.40625,
+            10688.78125,
+            10644.53125,
+            10544.28125,
+            10419.28125,
+            10882.8125,
+            11075.53125,
+            10714.84375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24304,
+          "rust_allocation_calls": 15
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            20519.53125,
+            11717.4375,
+            10494.78125,
+            11127.59375,
+            12205.75,
+            11373.71875,
+            11003.90625,
+            10708.34375,
+            11009.125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22000,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            10886.71875,
+            10843.75,
+            10589.84375,
+            10697.9375,
+            10684.875,
+            10734.375,
+            10915.34375,
+            10700.53125,
+            10393.25
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22000,
+          "rust_allocation_calls": 13
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.001456664238893,
+        0.9945287865182617
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            18161.46875,
+            22098.96875,
+            10523.4375,
+            10548.1875,
+            10542.96875,
+            10640.625,
+            10742.1875,
+            10790.34375,
+            10800.78125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 19792,
+          "rust_allocation_calls": 8
+        },
+        {
+          "elapsed_ns": [
+            10498.6875,
+            10415.375,
+            10218.75,
+            10447.9375,
+            10412.78125,
+            10417.96875,
+            10360.6875,
+            10518.21875,
+            10747.40625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 19792,
+          "rust_allocation_calls": 8
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            10899.71875,
+            11213.53125,
+            11014.34375,
+            10726.5625,
+            10733.09375,
+            10524.71875,
+            10411.46875,
+            10651.03125,
+            10375.0
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 17744,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            10475.28125,
+            10222.65625,
+            10214.84375,
+            10601.5625,
+            10545.5625,
+            10820.3125,
+            11578.125,
+            10329.40625,
+            10367.1875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 17744,
+          "rust_allocation_calls": 7
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0837945626865926,
+        0.9990434376673626
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            11126.3125,
+            10856.75,
+            11957.03125,
+            20372.40625,
+            20276.0625,
+            20308.59375,
+            14868.5,
+            10769.53125,
+            10776.03125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24304,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            11317.71875,
+            15718.75,
+            10747.40625,
+            10912.75,
+            10657.53125,
+            11015.625,
+            10901.03125,
+            10518.21875,
+            10654.9375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24304,
+          "rust_allocation_calls": 15
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            22618.46875,
+            19218.75,
+            10889.34375,
+            10862.0,
+            16097.65625,
+            14204.4375,
+            10957.03125,
+            11028.65625,
+            11032.5625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22000,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            10851.5625,
+            10824.21875,
+            11016.90625,
+            10670.5625,
+            11135.40625,
+            10911.46875,
+            11141.9375,
+            10877.59375,
+            10924.46875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22000,
+          "rust_allocation_calls": 13
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.9904889851932105,
+        0.9905508100147276
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            14975.28125,
+            10541.65625,
+            10579.4375,
+            10727.875,
+            10680.96875,
+            10713.53125,
+            10682.3125,
+            15028.65625,
+            14230.46875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 19792,
+          "rust_allocation_calls": 8
+        },
+        {
+          "elapsed_ns": [
+            10381.5,
+            10373.6875,
+            10214.84375,
+            10915.34375,
+            10307.28125,
+            10509.125,
+            10550.78125,
+            10761.71875,
+            10550.78125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 19792,
+          "rust_allocation_calls": 8
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            13084.625,
+            10795.59375,
+            10816.40625,
+            10813.8125,
+            10812.5,
+            11059.875,
+            13574.21875,
+            10791.65625,
+            10880.21875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 17744,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            12376.3125,
+            11596.34375,
+            10803.375,
+            11941.40625,
+            10609.375,
+            10580.71875,
+            10488.28125,
+            10500.0,
+            10604.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 17744,
+          "rust_allocation_calls": 7
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.1373458605469489,
+        1.0625355285317353
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            12675.78125,
+            12423.1875,
+            12723.96875,
+            16381.5,
+            14070.3125,
+            13898.4375,
+            12792.96875,
+            18295.5625,
+            16290.34375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 28160,
+          "rust_allocation_calls": 9
+        },
+        {
+          "elapsed_ns": [
+            12550.78125,
+            12891.9375,
+            12298.1875,
+            12273.4375,
+            11958.34375,
+            12500.0,
+            12338.5625,
+            12687.5,
+            13424.5
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 28160,
+          "rust_allocation_calls": 9
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            12230.46875,
+            12220.0625,
+            15149.75,
+            14315.09375,
+            12214.84375,
+            12197.90625,
+            12195.3125,
+            15576.8125,
+            12218.75
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 26112,
+          "rust_allocation_calls": 8
+        },
+        {
+          "elapsed_ns": [
+            11774.75,
+            12230.46875,
+            13304.6875,
+            11664.0625,
+            11753.90625,
+            11678.375,
+            11877.59375,
+            11669.28125,
+            11764.3125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 26112,
+          "rust_allocation_calls": 8
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0621296225035595,
+        1.038335327249933
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            20942.71875,
+            16421.875,
+            13611.96875,
+            14950.5,
+            13635.40625,
+            13661.46875,
+            15799.46875,
+            13800.78125,
+            13630.1875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24560,
+          "rust_allocation_calls": 17
+        },
+        {
+          "elapsed_ns": [
+            12882.8125,
+            12312.5,
+            12449.21875,
+            12226.5625,
+            12391.9375,
+            12368.5,
+            12476.5625,
+            12592.4375,
+            12562.5
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24560,
+          "rust_allocation_calls": 17
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            12934.90625,
+            16364.59375,
+            17411.4375,
+            12934.90625,
+            12975.28125,
+            12928.40625,
+            12993.5,
+            13578.125,
+            13108.09375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22256,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            12235.6875,
+            11989.59375,
+            11983.0625,
+            12054.6875,
+            11964.84375,
+            11973.9375,
+            12194.0,
+            12125.0,
+            11971.34375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22256,
+          "rust_allocation_calls": 15
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0137638275380376,
+        1.0261910661884577
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            13371.09375,
+            13382.8125,
+            13778.65625,
+            13378.90625,
+            13518.25,
+            13416.6875,
+            15863.28125,
+            15397.15625,
+            13425.78125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 20048,
+          "rust_allocation_calls": 10
+        },
+        {
+          "elapsed_ns": [
+            12204.4375,
+            12635.40625,
+            12502.59375,
+            12673.15625,
+            12843.75,
+            12160.15625,
+            12294.25,
+            12149.75,
+            12152.34375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 20048,
+          "rust_allocation_calls": 10
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            13190.125,
+            13243.5,
+            13539.0625,
+            13289.0625,
+            14533.84375,
+            13204.40625,
+            13226.5625,
+            13208.3125,
+            14273.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 18000,
+          "rust_allocation_calls": 9
+        },
+        {
+          "elapsed_ns": [
+            11989.5625,
+            11980.46875,
+            11825.53125,
+            11820.3125,
+            11855.46875,
+            13444.03125,
+            12230.46875,
+            11979.15625,
+            12088.53125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 18000,
+          "rust_allocation_calls": 9
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0367933972093404,
+        0.9975947370137117
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            13687.5,
+            14049.5,
+            14272.125,
+            14273.4375,
+            15212.25,
+            14928.40625,
+            17049.46875,
+            14218.75,
+            14822.9375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24560,
+          "rust_allocation_calls": 17
+        },
+        {
+          "elapsed_ns": [
+            12429.6875,
+            14148.4375,
+            12325.53125,
+            12226.5625,
+            12453.125,
+            12696.59375,
+            12523.4375,
+            12214.84375,
+            12373.71875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 24560,
+          "rust_allocation_calls": 17
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            13763.03125,
+            13760.40625,
+            13790.34375,
+            13734.375,
+            13766.90625,
+            13725.25,
+            14050.78125,
+            15766.90625,
+            15954.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22256,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            12419.28125,
+            12285.15625,
+            12454.40625,
+            12256.5,
+            12806.0,
+            12617.1875,
+            12459.65625,
+            12747.40625,
+            12894.53125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 22256,
+          "rust_allocation_calls": 15
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.9467315604616157,
+        0.9819817554587787
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            14007.8125,
+            14444.0,
+            15674.46875,
+            14740.90625,
+            14032.53125,
+            14457.03125,
+            16615.875,
+            15045.59375,
+            14996.09375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 20048,
+          "rust_allocation_calls": 10
+        },
+        {
+          "elapsed_ns": [
+            12035.15625,
+            12381.5,
+            12204.4375,
+            12213.53125,
+            12217.4375,
+            12261.71875,
+            12020.8125,
+            12204.4375,
+            12199.21875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 20048,
+          "rust_allocation_calls": 10
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            14141.9375,
+            14902.34375,
+            15570.3125,
+            14669.28125,
+            17347.65625,
+            14720.0625,
+            15807.28125,
+            15817.71875,
+            15798.1875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 18000,
+          "rust_allocation_calls": 9
+        },
+        {
+          "elapsed_ns": [
+            13095.03125,
+            12428.375,
+            12144.53125,
+            12100.25,
+            12247.40625,
+            12731.78125,
+            12270.84375,
+            13716.15625,
+            12488.28125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 18000,
+          "rust_allocation_calls": 9
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.9699201162825909,
+        1.0229188916871186
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            142032.53125,
+            138320.3125,
+            133656.25,
+            130575.53125,
+            125115.90625,
+            123479.1875,
+            120209.65625,
+            119934.90625,
+            118420.5625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 174848,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            120220.03125,
+            118192.71875,
+            120304.6875,
+            116694.0,
+            120516.9375,
+            116963.53125,
+            119652.34375,
+            117399.71875,
+            119542.96875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 174848,
+          "rust_allocation_calls": 13
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            148364.59375,
+            140527.34375,
+            136061.1875,
+            129962.25,
+            128996.09375,
+            123563.8125,
+            123571.625,
+            118247.375,
+            117292.96875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 146176,
+          "rust_allocation_calls": 6
+        },
+        {
+          "elapsed_ns": [
+            115915.34375,
+            119358.09375,
+            116864.5625,
+            117509.125,
+            116622.40625,
+            115299.46875,
+            117933.59375,
+            114872.375,
+            121473.96875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 146176,
+          "rust_allocation_calls": 6
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.9894415230592483,
+        1.0056118030372303
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            119548.15625,
+            116286.46875,
+            120997.40625,
+            115915.375,
+            121736.96875,
+            117346.34375,
+            117747.40625,
+            118449.21875,
+            116733.0625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 163568,
+          "rust_allocation_calls": 21
+        },
+        {
+          "elapsed_ns": [
+            116260.40625,
+            119308.59375,
+            117391.9375,
+            117388.03125,
+            118378.90625,
+            117602.875,
+            120852.84375,
+            116382.8125,
+            123585.9375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 163568,
+          "rust_allocation_calls": 21
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            116467.4375,
+            117373.6875,
+            119003.90625,
+            115473.9375,
+            121134.125,
+            120557.28125,
+            120209.625,
+            115805.96875,
+            120157.5625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134128,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            115656.25,
+            119807.28125,
+            115848.96875,
+            120179.6875,
+            115682.28125,
+            118625.0,
+            116946.59375,
+            118248.71875,
+            116781.25
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134128,
+          "rust_allocation_calls": 13
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0190469847823915,
+        1.0231029007881867
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            118756.53125,
+            117563.8125,
+            120095.03125,
+            118225.25,
+            120169.28125,
+            119542.96875,
+            124201.8125,
+            117813.8125,
+            125317.6875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 125776,
+          "rust_allocation_calls": 14
+        },
+        {
+          "elapsed_ns": [
+            122394.53125,
+            119584.65625,
+            116917.96875,
+            124438.8125,
+            118119.8125,
+            120606.75,
+            116932.28125,
+            119533.84375,
+            118270.8125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 125776,
+          "rust_allocation_calls": 14
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            116317.71875,
+            117408.875,
+            115411.46875,
+            114588.53125,
+            117567.71875,
+            117490.90625,
+            117308.59375,
+            115738.28125,
+            122889.3125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97104,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            115960.9375,
+            117406.25,
+            115475.25,
+            117412.78125,
+            114781.25,
+            117924.5,
+            116255.21875,
+            116834.625,
+            118800.78125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97104,
+          "rust_allocation_calls": 7
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.9969832517392425,
+        0.9962133630191865
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            118916.65625,
+            161989.59375,
+            119223.9375,
+            124984.375,
+            119438.78125,
+            120915.375,
+            139480.46875,
+            125190.09375,
+            118920.5625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 163568,
+          "rust_allocation_calls": 21
+        },
+        {
+          "elapsed_ns": [
+            117002.59375,
+            119020.8125,
+            116321.625,
+            119777.34375,
+            116583.34375,
+            119201.8125,
+            115481.78125,
+            120626.3125,
+            117846.34375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 163568,
+          "rust_allocation_calls": 21
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            117052.09375,
+            123298.1875,
+            116462.25,
+            121281.25,
+            121809.90625,
+            122626.28125,
+            119056.0,
+            122209.625,
+            119716.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134128,
+          "rust_allocation_calls": 13
+        },
+        {
+          "elapsed_ns": [
+            118096.375,
+            118294.25,
+            119201.84375,
+            119421.875,
+            116464.84375,
+            121114.5625,
+            119401.03125,
+            118294.28125,
+            116449.21875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134128,
+          "rust_allocation_calls": 13
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": false
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0317682252715095,
+        0.9925073873622291
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            123326.8125,
+            137914.0625,
+            152847.65625,
+            121005.21875,
+            123949.21875,
+            117855.46875,
+            127510.40625,
+            118727.875,
+            157677.09375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 125776,
+          "rust_allocation_calls": 14
+        },
+        {
+          "elapsed_ns": [
+            118832.03125,
+            116434.90625,
+            116561.21875,
+            119101.5625,
+            117285.15625,
+            116895.84375,
+            118010.40625,
+            117369.78125,
+            115546.875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 125776,
+          "rust_allocation_calls": 14
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            120319.03125,
+            119311.1875,
+            117212.25,
+            120132.8125,
+            120402.34375,
+            121644.53125,
+            117200.5,
+            121023.4375,
+            116760.40625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97104,
+          "rust_allocation_calls": 7
+        },
+        {
+          "elapsed_ns": [
+            118040.375,
+            118170.5625,
+            119707.03125,
+            116220.0625,
+            118157.5625,
+            119149.75,
+            118057.3125,
+            118622.40625,
+            120151.03125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97104,
+          "rust_allocation_calls": 7
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.022177020397966,
+        0.9767544820853847
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            137704.40625,
+            135007.8125,
+            134006.53125,
+            136002.59375,
+            135273.4375,
+            134670.5625,
+            164963.53125,
+            133376.28125,
+            145184.90625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 175616,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            133019.53125,
+            131726.5625,
+            131268.21875,
+            133812.5,
+            129444.0,
+            131200.53125,
+            131110.65625,
+            131186.1875,
+            130932.28125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 175616,
+          "rust_allocation_calls": 15
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            132338.5625,
+            131612.0,
+            129563.78125,
+            127692.71875,
+            134217.46875,
+            135705.75,
+            134430.96875,
+            129933.59375,
+            133661.4375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 146944,
+          "rust_allocation_calls": 8
+        },
+        {
+          "elapsed_ns": [
+            133218.75,
+            135490.875,
+            134322.9375,
+            139638.03125,
+            132625.0,
+            133505.1875,
+            130201.8125,
+            135200.53125,
+            135036.46875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 146944,
+          "rust_allocation_calls": 8
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0291973094170404,
+        0.9972062048698691
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            141915.375,
+            161072.9375,
+            136636.71875,
+            133427.09375,
+            135234.375,
+            133363.28125,
+            156320.3125,
+            133100.25,
+            136272.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 164336,
+          "rust_allocation_calls": 23
+        },
+        {
+          "elapsed_ns": [
+            133817.71875,
+            129687.5,
+            133253.90625,
+            131144.53125,
+            132924.5,
+            131138.03125,
+            132914.0625,
+            129234.375,
+            134218.75
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 164336,
+          "rust_allocation_calls": 23
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            131750.0,
+            132406.25,
+            131550.78125,
+            133259.125,
+            133808.59375,
+            132279.9375,
+            131292.96875,
+            134496.09375,
+            135587.25
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134896,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            137441.40625,
+            133154.96875,
+            138729.15625,
+            132516.90625,
+            136996.09375,
+            133286.4375,
+            152410.15625,
+            132066.40625,
+            132108.0625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134896,
+          "rust_allocation_calls": 15
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0190200343341937,
+        0.9935734848261855
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            133212.25,
+            133032.53125,
+            153962.25,
+            134773.4375,
+            142063.8125,
+            134226.5625,
+            131494.78125,
+            133242.1875,
+            131614.5625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 126544,
+          "rust_allocation_calls": 16
+        },
+        {
+          "elapsed_ns": [
+            128791.65625,
+            133290.375,
+            128487.0,
+            133126.3125,
+            129912.75,
+            132167.96875,
+            128325.53125,
+            135636.71875,
+            131854.1875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 126544,
+          "rust_allocation_calls": 16
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            129820.3125,
+            130755.21875,
+            134178.40625,
+            133526.03125,
+            129195.3125,
+            134343.75,
+            130260.4375,
+            132576.84375,
+            128579.40625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97872,
+          "rust_allocation_calls": 9
+        },
+        {
+          "elapsed_ns": [
+            132707.03125,
+            132115.875,
+            136799.46875,
+            134998.6875,
+            138493.5,
+            130988.28125,
+            139958.34375,
+            132613.28125,
+            132011.71875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97872,
+          "rust_allocation_calls": 9
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.9779404043679696,
+        0.9738488340735363
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            131428.40625,
+            132967.4375,
+            129548.1875,
+            132141.90625,
+            131839.84375,
+            134160.15625,
+            129222.65625,
+            134062.5,
+            129604.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 164336,
+          "rust_allocation_calls": 23
+        },
+        {
+          "elapsed_ns": [
+            131033.875,
+            129447.9375,
+            132660.15625,
+            129570.3125,
+            133191.40625,
+            131695.3125,
+            132278.65625,
+            131183.59375,
+            137621.09375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 164336,
+          "rust_allocation_calls": 23
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            137984.375,
+            130690.125,
+            137778.65625,
+            134787.78125,
+            134813.78125,
+            129865.875,
+            136376.3125,
+            132658.84375,
+            135360.6875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134896,
+          "rust_allocation_calls": 15
+        },
+        {
+          "elapsed_ns": [
+            133703.125,
+            134946.625,
+            133729.15625,
+            137158.84375,
+            143893.21875,
+            136803.375,
+            135529.96875,
+            135231.78125,
+            134717.46875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 134896,
+          "rust_allocation_calls": 15
+        }
+      ]
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "col_major",
+        "normalize": true
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.989456468623155,
+        1.007086624547115
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            133244.8125,
+            128596.375,
+            132191.40625,
+            132095.0625,
+            131315.125,
+            128040.375,
+            131126.3125,
+            132148.4375,
+            131359.375
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 126544,
+          "rust_allocation_calls": 16
+        },
+        {
+          "elapsed_ns": [
+            130604.15625,
+            136303.375,
+            130610.65625,
+            131768.21875,
+            130977.875,
+            131381.53125,
+            131954.4375,
+            130273.4375,
+            133505.21875
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 126544,
+          "rust_allocation_calls": 16
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            133237.0,
+            133289.0625,
+            132759.125,
+            132808.59375,
+            131459.625,
+            128679.6875,
+            133217.4375,
+            130891.9375,
+            131298.15625
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97872,
+          "rust_allocation_calls": 9
+        },
+        {
+          "elapsed_ns": [
+            129585.9375,
+            134045.59375,
+            129545.59375,
+            132358.09375,
+            129923.15625,
+            134345.0625,
+            129359.375,
+            132661.46875,
+            130457.03125
+          ],
+          "repetitions": 32,
+          "rust_allocated_bytes": 97872,
+          "rust_allocation_calls": 9
+        }
+      ]
+    },
+    {
+      "condition": {
+        "iterations": 1,
+        "kind": "fractal_weave",
+        "len": 16,
+        "octaves": 1
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.1106666666666667,
+        0.625
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            260.5,
+            218.75,
+            208.25,
+            208.25,
+            208.25,
+            197.75,
+            604.25,
+            187.5,
+            166.75
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            208.5,
+            156.25,
+            156.25,
+            156.25,
+            156.25,
+            145.75,
+            156.25,
+            156.25,
+            146.0
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            260.5,
+            187.5,
+            968.75,
+            218.75,
+            166.75,
+            166.75,
+            208.25,
+            166.75,
+            156.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            281.25,
+            229.0,
+            1041.75,
+            250.0,
+            208.25,
+            208.25,
+            3333.25,
+            260.5,
+            177.0
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        }
+      ]
+    },
+    {
+      "condition": {
+        "iterations": 16,
+        "kind": "fractal_weave",
+        "len": 16,
+        "octaves": 4
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0176842105263157,
+        1.0
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            666.75,
+            614.5,
+            614.75,
+            604.0,
+            593.75,
+            593.75,
+            604.25,
+            604.25,
+            604.0
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            833.5,
+            750.0,
+            687.5,
+            604.0,
+            604.25,
+            614.75,
+            604.0,
+            604.25,
+            604.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            614.5,
+            593.75,
+            593.75,
+            593.75,
+            583.25,
+            593.75,
+            583.25,
+            593.75,
+            593.75
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            645.75,
+            614.5,
+            604.25,
+            614.5,
+            604.25,
+            593.75,
+            593.75,
+            604.25,
+            604.0
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 320,
+          "rust_allocation_calls": 3
+        }
+      ]
+    },
+    {
+      "condition": {
+        "iterations": 1,
+        "kind": "fractal_weave",
+        "len": 4096,
+        "octaves": 1
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.130164107527828,
+        1.0489179152260213
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            25760.5,
+            25718.75,
+            25687.5,
+            25677.0,
+            25656.25,
+            25687.5,
+            25677.25,
+            25656.25,
+            27208.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            24573.0,
+            25187.5,
+            25354.25,
+            25572.75,
+            24468.75,
+            24479.0,
+            25323.0,
+            24458.25,
+            24468.75
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            22750.0,
+            22718.75,
+            22729.0,
+            22718.75,
+            22739.5,
+            22750.0,
+            22718.75,
+            22729.0,
+            22708.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            24406.25,
+            24510.5,
+            23427.0,
+            23416.5,
+            23406.25,
+            23416.5,
+            23448.0,
+            23427.0,
+            23416.75
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        }
+      ]
+    },
+    {
+      "condition": {
+        "iterations": 16,
+        "kind": "fractal_weave",
+        "len": 4096,
+        "octaves": 4
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0558115178364704,
+        0.9993566472838019
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            174687.5,
+            168239.5,
+            195281.25,
+            169864.5,
+            182448.0,
+            183677.0,
+            163864.5,
+            164729.25,
+            162010.5
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            168697.75,
+            163000.0,
+            161937.5,
+            161052.25,
+            161906.25,
+            161093.75,
+            161791.75,
+            167291.75,
+            217041.5
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            163364.75,
+            160979.0,
+            160760.5,
+            160833.5,
+            160833.25,
+            160687.5,
+            160885.25,
+            165260.5,
+            200322.75
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            165729.0,
+            196781.25,
+            171843.75,
+            163906.25,
+            162041.75,
+            161739.5,
+            161729.0,
+            161708.5,
+            161854.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 81920,
+          "rust_allocation_calls": 3
+        }
+      ]
+    },
+    {
+      "condition": {
+        "iterations": 1,
+        "kind": "fractal_weave",
+        "len": 65536,
+        "octaves": 1
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        0.981317630178753,
+        1.0140361622414074
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            385698.0,
+            401656.25,
+            419854.25,
+            396010.25,
+            393010.5,
+            392968.75,
+            405593.75,
+            393948.0,
+            380885.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            379802.25,
+            374166.75,
+            375729.25,
+            405406.25,
+            398302.25,
+            388218.75,
+            397614.5,
+            442312.5,
+            389073.0
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            378229.25,
+            392427.25,
+            408198.0,
+            411239.5,
+            401448.0,
+            399718.75,
+            400583.25,
+            411604.0,
+            408208.5
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            391125.0,
+            388083.25,
+            385135.25,
+            390802.0,
+            382021.0,
+            383687.5,
+            382958.5,
+            368583.5,
+            368781.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        }
+      ]
+    },
+    {
+      "condition": {
+        "iterations": 16,
+        "kind": "fractal_weave",
+        "len": 65536,
+        "octaves": 4
+      },
+      "baseline_valid": true,
+      "baseline_over_candidate": [
+        1.0013282795503518,
+        1.0127585796674166
+      ],
+      "exclusion": null,
+      "baseline_allocations": [
+        {
+          "elapsed_ns": [
+            2441771.0,
+            2412843.75,
+            2410291.75,
+            2410135.5,
+            2406729.0,
+            2410312.5,
+            2410635.25,
+            2415239.5,
+            2429541.75
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            2430666.75,
+            2412739.75,
+            2449416.5,
+            2447521.0,
+            2418750.0,
+            2450635.25,
+            2450437.5,
+            2405614.5,
+            2462927.0
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        }
+      ],
+      "candidate_allocations": [
+        {
+          "elapsed_ns": [
+            2436364.5,
+            2391364.5,
+            2463645.75,
+            2413375.0,
+            2407437.5,
+            2391073.0,
+            2404489.75,
+            2421083.25,
+            2383604.0
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        },
+        {
+          "elapsed_ns": [
+            2396135.5,
+            2416687.5,
+            2413947.75,
+            2623927.0,
+            2476552.0,
+            2398812.5,
+            2417823.0,
+            2417260.25,
+            2388354.25
+          ],
+          "repetitions": 4,
+          "rust_allocated_bytes": 1310720,
+          "rust_allocation_calls": 3
+        }
+      ]
+    }
+  ],
+  "torch_comparisons": [
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        10.8853226925746,
+        25.52257627118644
+      ],
+      "torch_max_logit_abs": 1.6486703486862098e-06
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        8.05964589265452,
+        18.783454745035424
+      ],
+      "torch_max_logit_abs": 1.6486703486862098e-06
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        10.361324415820329,
+        24.093312
+      ],
+      "torch_max_logit_abs": 1.6486703486862098e-06
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        13.179801529461095,
+        32.133385259468405
+      ],
+      "torch_max_logit_abs": 1.7125878992718668e-07
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        10.910479338842975,
+        25.428923645889515
+      ],
+      "torch_max_logit_abs": 1.7125878992718668e-07
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 8,
+        "dims": 31,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        12.73482144579708,
+        30.17526857142857
+      ],
+      "torch_max_logit_abs": 1.7125878992718668e-07
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        0.5874539874344743,
+        1.4878657437208465
+      ],
+      "torch_max_logit_abs": 6.234921308134744e-06
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        1.3696497726653618,
+        1.4243130452051154
+      ],
+      "torch_max_logit_abs": 6.234921308134744e-06
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        1.420856518572469,
+        1.454940052325564
+      ],
+      "torch_max_logit_abs": 6.234921308134744e-06
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        2.2261035898957147,
+        2.312342943967189
+      ],
+      "torch_max_logit_abs": 3.5026134947990784e-07
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        2.093594874360257,
+        2.268894640404309
+      ],
+      "torch_max_logit_abs": 3.5026134947990784e-07
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 32,
+        "dims": 64,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        2.054073696530373,
+        2.2706227583958265
+      ],
+      "torch_max_logit_abs": 3.5026134947990784e-07
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        0.20613923628985859,
+        0.227538234697965
+      ],
+      "torch_max_logit_abs": 1.9202996096367997e-05
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        0.22344775972427375,
+        0.22737862982862636
+      ],
+      "torch_max_logit_abs": 1.9202996096367997e-05
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": false
+      },
+      "torch_over_candidate": [
+        0.22667696713396157,
+        0.22759653869732538
+      ],
+      "torch_max_logit_abs": 1.9202996096367997e-05
+    },
+    {
+      "condition": {
+        "api": "vector",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "rows",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        0.3461960964703693,
+        0.3410816842060203
+      ],
+      "torch_max_logit_abs": 4.350882822912183e-07
+    },
+    {
+      "condition": {
+        "api": "tensor",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        0.3460191172999764,
+        0.3437341008532845
+      ],
+      "torch_max_logit_abs": 4.350882822912183e-07
+    },
+    {
+      "condition": {
+        "api": "tensor_as_result",
+        "batch": 96,
+        "dims": 128,
+        "kind": "info_nce",
+        "layout": "row_major",
+        "normalize": true
+      },
+      "torch_over_candidate": [
+        0.3503882612715984,
+        0.34523486297942485
+      ],
+      "torch_max_logit_abs": 4.350882822912183e-07
+    }
+  ],
+  "candidate_numerical_passes": 72,
+  "baseline_numerical_failures": 0,
+  "numerical_reference": "independent float64 dot, normalization, logsumexp; atol=rtol=1e-4; fractal bitwise base+branch",
+  "limitations": [
+    "CPU forward only, no gradient or resident GPU comparison",
+    "PyTorch has one CPU/inter-op thread; default-thread results may differ",
+    "Host exclusivity and thermal state unknown; two fixed AB/BA rounds, no outlier trimming",
+    "Allocator counts are Rust allocation requests, not peak memory or Python/GPU allocations"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "inventory_commit": "7f64e24a8bcccc1464faea85c1eae878e51041ca",
+  "baseline_commit": "3f1581c81d9be0f4403850e91440c333f0404239",
+  "candidate_commit": "bf8cc8eabdf011203d065215d163ac618928de74",
+  "harness_sha256": "cb900f6dc310670a26455f9d8a79394c22e68bc5295ce837c7315216be63f624",
+  "rust_profile": "release",
+  "benchmark_command": "cargo +1.98.0 build --locked --release -p st-bench --example source_crosscut",
+  "benchmark_selfsup_wgpu_feature": false,
+  "baseline_build_boundary": "Benchmark harness and regression tests added to 7f64e24a; no production changes",
+  "retained_local_products": [
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rust-source-crosscut-20260921/baseline-worker",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rust-source-crosscut-20260921/candidate-worker",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/rust-source-crosscut-20260921/verified-b"
+  ],
+  "claim_boundary": "CPU forward microbenchmarks and independent numerical gates; no resident GPU, autograd, CUDA, or FT quality claim"
+}

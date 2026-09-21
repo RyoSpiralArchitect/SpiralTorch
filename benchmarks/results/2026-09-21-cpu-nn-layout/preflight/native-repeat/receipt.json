@@ -1,0 +1,68 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/baseline/worker",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/candidate-b/worker"
+  },
+  "sha256": {
+    "baseline": "64623b7fb782310eb09221a4b10bf10f152ab4495bb2620ecff889ef38e5f755",
+    "candidate": "18a22dec95928d50bf9e781b9d53cdf21cc68ab589681ba4bfb88353043ca40b"
+  },
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  },
+  "home_removed": true,
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/baseline/worker"
+      ],
+      "exit_code": 0,
+      "seconds": 6.045689375008806
+    },
+    {
+      "name": "warm-candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/candidate-b/worker"
+      ],
+      "exit_code": 0,
+      "seconds": 4.927981375003583
+    },
+    {
+      "name": "baseline-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/baseline/worker"
+      ],
+      "exit_code": 0,
+      "seconds": 5.899715166990063
+    },
+    {
+      "name": "candidate-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/candidate-b/worker"
+      ],
+      "exit_code": 0,
+      "seconds": 3.352453291998245
+    },
+    {
+      "name": "candidate-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/candidate-b/worker"
+      ],
+      "exit_code": 0,
+      "seconds": 3.1813845409924397
+    },
+    {
+      "name": "baseline-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/baseline/worker"
+      ],
+      "exit_code": 0,
+      "seconds": 5.029712666000705
+    }
+  ],
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown"
+}

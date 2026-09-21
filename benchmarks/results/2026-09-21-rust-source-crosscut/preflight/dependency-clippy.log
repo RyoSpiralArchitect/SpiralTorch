@@ -1,0 +1,2644 @@
+    Checking libm v0.2.16
+    Checking libc v0.2.189
+    Checking cfg-if v1.0.3
+   Compiling bytemuck_derive v1.10.2
+    Checking once_cell v1.21.4
+    Checking bitflags v2.13.1
+    Checking thiserror v1.0.69
+    Checking crossbeam-utils v0.8.21
+   Compiling zerocopy v0.8.27
+    Checking num-traits v0.2.19
+   Compiling zerocopy-derive v0.8.27
+    Checking bytemuck v1.25.2
+    Checking serde_core v1.0.229
+    Checking crossbeam-epoch v0.9.20
+    Checking crossbeam-deque v0.8.6
+    Checking num-integer v0.1.46
+    Checking either v1.15.0
+    Checking rayon-core v1.13.0
+    Checking getrandom v0.2.17
+    Checking reborrow v0.5.5
+    Checking memchr v2.7.6
+    Checking log v0.4.28
+    Checking num-complex v0.4.6
+    Checking rand_core v0.6.4
+    Checking rayon v1.12.0
+   Compiling serde v1.0.229
+    Checking pulp v0.21.5
+    Checking smallvec v1.15.2
+    Checking dyn-stack v0.13.2
+    Checking byteorder v1.5.0
+    Checking rawpointer v0.2.1
+    Checking matrixmultiply v0.3.10
+    Checking ppv-lite86 v0.2.21
+    Checking sysctl v0.6.0
+    Checking rand_chacha v0.3.1
+    Checking zmij v1.0.21
+    Checking rand v0.8.8
+    Checking typenum v1.19.0
+    Checking raw-cpuid v11.6.0
+    Checking arrayvec v0.7.6
+    Checking pin-project-lite v0.2.16
+    Checking itoa v1.0.15
+    Checking regex-syntax v0.8.8
+    Checking serde_json v1.0.151
+    Checking approx v0.5.1
+    Checking nano-gemm-core v0.1.0
+    Checking safe_arch v0.7.4
+    Checking tracing-core v0.1.36
+    Checking regex-automata v0.4.13
+    Checking gemm-common v0.18.2
+   Compiling generic-array v0.14.9
+    Checking lazy_static v1.5.0
+    Checking thiserror v2.0.17
+    Checking wide v0.7.33
+    Checking rustc-hash v1.1.0
+    Checking tracing v0.1.44
+    Checking sharded-slab v0.1.7
+   Compiling crypto-common v0.1.6
+   Compiling block-buffer v0.10.4
+    Checking tracing-log v0.2.0
+    Checking ndarray v0.15.6
+    Checking crossbeam-channel v0.5.16
+    Checking crossbeam-queue v0.3.12
+    Checking matchers v0.2.0
+    Checking thread_local v1.1.9
+    Checking nu-ansi-term v0.50.3
+    Checking equator v0.4.2
+    Checking crossbeam v0.8.4
+    Checking equator v0.2.2
+    Checking tracing-subscriber v0.3.23
+   Compiling digest v0.10.7
+    Checking nano-gemm-f32 v0.1.0
+    Checking nano-gemm-c32 v0.1.0
+    Checking nano-gemm-f64 v0.1.0
+    Checking nano-gemm-c64 v0.1.0
+   Compiling getrandom v0.4.2
+    Checking gemm-c64 v0.18.2
+    Checking gemm-f32 v0.18.2
+    Checking gemm-c32 v0.18.2
+    Checking gemm-f64 v0.18.2
+   Compiling cpufeatures v0.2.17
+    Checking qd v0.7.7
+    Checking rand_distr v0.4.3
+    Checking num-rational v0.4.2
+    Checking generativity v1.1.0
+    Checking constant_time_eq v0.4.2
+    Checking atomic-wait v1.1.0
+    Checking faer-traits v0.23.2
+    Checking spindle v0.2.5 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/spindle)
+    Checking blake3 v1.8.7
+    Checking gemm v0.18.2
+    Checking nano-gemm v0.1.3
+   Compiling sha2 v0.10.9
+   Compiling uuid v1.26.0
+    Checking st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+    Checking tracing-chrome v0.7.2
+    Checking simba v0.6.0
+    Checking st-kernel-contracts v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kernel-contracts)
+    Checking winnow v1.0.3
+    Checking strength_reduce v0.2.4
+    Checking option-ext v0.2.0
+    Checking dirs-sys v0.4.1
+    Checking transpose v0.2.3
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+    Checking toml_parser v1.1.2+spec-1.1.0
+    Checking spiral-config v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config)
+    Checking faer v0.23.2
+    Checking st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kdsl)
+    Checking simba v0.8.1
+    Checking toml_datetime v0.7.5+spec-1.1.0
+    Checking serde_spanned v1.1.1
+    Checking primal-check v0.3.4
+    Checking winnow v0.7.13
+    Checking nalgebra v0.29.0
+    Checking toml_writer v1.1.1+spec-1.1.0
+    Checking toml v0.9.12+spec-1.1.0
+    Checking nalgebra v0.32.6
+    Checking rustfft v6.4.1
+    Checking statrs v0.16.1
+    Checking anyhow v1.0.104
+    Checking dirs v5.0.1
+    Checking num-bigint v0.4.8
+    Checking futures-sink v0.3.34
+    Checking futures-core v0.3.34
+    Checking futures-channel v0.3.34
+    Checking st-softlogic v0.2.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-softlogic)
+    Checking futures-task v0.3.34
+    Checking futures-io v0.3.34
+    Checking slab v0.4.11
+    Checking bincode v1.3.3
+    Checking futures-util v0.3.34
+    Checking ordered-float v4.6.0
+   Compiling cfg_aliases v0.1.1
+    Checking core-foundation-sys v0.8.7
+   Compiling parking_lot_core v0.9.12
+    Checking core-foundation v0.9.4
+    Checking malloc_buf v0.0.6
+   Compiling foreign-types-macros v0.2.3
+    Checking hashbrown v0.16.0
+    Checking bitflags v1.3.2
+    Checking unicode-width v0.1.14
+    Checking foreign-types-shared v0.3.1
+    Checking scopeguard v1.2.0
+    Checking equivalent v1.0.2
+    Checking bit-vec v0.6.3
+    Checking termcolor v1.4.1
+    Checking bit-set v0.5.3
+    Checking futures-executor v0.3.34
+    Checking codespan-reporting v0.11.1
+    Checking indexmap v2.11.4
+    Checking futures v0.3.34
+    Checking lock_api v0.4.14
+    Checking foreign-types v0.5.0
+    Checking core-graphics-types v0.1.3
+    Checking objc v0.2.7
+   Compiling wgpu-hal v0.21.1
+    Checking block v0.1.6
+    Checking unicode-xid v0.2.6
+    Checking hexf-parse v0.2.1
+    Checking naga v0.20.0
+    Checking metal v0.28.0
+    Checking parking_lot v0.12.5
+   Compiling wgpu-core v0.21.1
+    Checking wgpu-types v0.20.0
+    Checking libloading v0.8.9
+    Checking profiling v1.0.17
+   Compiling litrs v1.0.0
+    Checking raw-window-handle v0.6.2
+   Compiling document-features v0.2.12
+   Compiling wgpu v0.20.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/wgpu-0.20.1)
+    Checking static_assertions v1.1.0
+    Checking half v2.7.1
+    Checking anstyle v1.0.13
+    Checking plotters-backend v0.3.7
+    Checking clap_lex v1.1.0
+    Checking pollster v0.3.0
+    Checking ciborium-io v0.2.2
+    Checking ciborium-ll v0.2.2
+    Checking clap_builder v4.5.60
+    Checking plotters-svg v0.3.7
+    Checking itertools v0.10.5
+    Checking errno v0.3.14
+    Checking same-file v1.0.6
+    Checking cast v0.3.0
+    Checking walkdir v2.5.0
+    Checking criterion-plot v0.5.0
+    Checking rustix v1.1.4
+    Checking clap v4.5.60
+    Checking plotters v0.3.7
+    Checking ciborium v0.2.2
+    Checking regex v1.12.2
+    Checking tinytemplate v1.2.1
+    Checking is-terminal v0.4.16
+    Checking st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Checking fastrand v2.3.0
+    Checking anes v0.1.6
+    Checking oorandom v11.1.5
+    Checking tempfile v3.27.0
+    Checking criterion v0.5.1
+warning: unexpected `cfg` condition name: `wgpu_core`
+  --> vendor/wgpu-0.20.1/src/lib.rs:71:7
+   |
+71 | #[cfg(wgpu_core)]
+   |       ^^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 32 more
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+  --> vendor/wgpu-0.20.1/src/lib.rs:77:7
+   |
+77 | #[cfg(wgpu_core)]
+   |       ^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+  --> vendor/wgpu-0.20.1/src/lib.rs:82:7
+   |
+82 | #[cfg(wgpu_core)]
+   |       ^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+  --> vendor/wgpu-0.20.1/src/lib.rs:88:15
+   |
+88 | #[cfg(all(not(wgpu_core), naga))]
+   |               ^^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `naga`
+  --> vendor/wgpu-0.20.1/src/lib.rs:88:27
+   |
+88 | #[cfg(all(not(wgpu_core), naga))]
+   |                           ^^^^ help: found config with similar value: `feature = "naga"`
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(naga)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(naga)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+  --> vendor/wgpu-0.20.1/src/lib.rs:99:11
+   |
+99 | #[cfg(any(webgl, webgpu))]
+   |           ^^^^^ help: found config with similar value: `feature = "webgl"`
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+  --> vendor/wgpu-0.20.1/src/lib.rs:99:18
+   |
+99 | #[cfg(any(webgl, webgpu))]
+   |                  ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+   --> vendor/wgpu-0.20.1/src/lib.rs:104:11
+    |
+104 | #[cfg(any(webgpu, webgl))]
+    |           ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+   --> vendor/wgpu-0.20.1/src/lib.rs:104:19
+    |
+104 | #[cfg(any(webgpu, webgl))]
+    |                   ^^^^^ help: found config with similar value: `feature = "webgl"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:120:7
+    |
+120 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:122:11
+    |
+122 | #[cfg(not(send_sync))]
+    |           ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:137:7
+    |
+137 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:154:7
+    |
+154 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:179:7
+    |
+179 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:190:7
+    |
+190 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:411:7
+    |
+411 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:452:7
+    |
+452 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:468:7
+    |
+468 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:483:7
+    |
+483 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:501:7
+    |
+501 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:574:7
+    |
+574 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:746:7
+    |
+746 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:772:7
+    |
+772 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:797:7
+    |
+797 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:891:7
+    |
+891 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:915:7
+    |
+915 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:950:7
+    |
+950 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+   --> vendor/wgpu-0.20.1/src/lib.rs:988:7
+    |
+988 | #[cfg(send_sync)]
+    |       ^^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1017:7
+     |
+1017 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1106:7
+     |
+1106 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1129:7
+     |
+1129 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1130:7
+     |
+1130 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1154:7
+     |
+1154 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1208:7
+     |
+1208 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1240:7
+     |
+1240 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1334:7
+     |
+1334 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1354:7
+     |
+1354 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1372:7
+     |
+1372 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1387:7
+     |
+1387 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1440:7
+     |
+1440 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1496:7
+     |
+1496 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1566:7
+     |
+1566 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1584:7
+     |
+1584 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1611:7
+     |
+1611 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1651:7
+     |
+1651 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1674:7
+     |
+1674 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1703:7
+     |
+1703 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1722:7
+     |
+1722 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1740:7
+     |
+1740 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1800:7
+     |
+1800 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1809:7
+     |
+1809 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1818:7
+     |
+1818 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1828:7
+     |
+1828 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1887:7
+     |
+1887 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2979:7
+     |
+2979 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2981:7
+     |
+2981 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2984:7
+     |
+2984 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3016:7
+     |
+3016 | #[cfg(wgpu_core)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3069:7
+     |
+3069 | #[cfg(wgpu_core)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:4814:7
+     |
+4814 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5505:7
+     |
+5505 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2969:11
+     |
+2969 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2975:11
+     |
+2975 |     #[cfg(webgpu)]
+     |           ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3034:11
+     |
+3034 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5468:15
+     |
+5468 |         #[cfg(send_sync)]
+     |               ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5472:19
+     |
+5472 |         #[cfg(not(send_sync))]
+     |                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5479:15
+     |
+5479 |         #[cfg(send_sync)]
+     |               ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5483:19
+     |
+5483 |         #[cfg(not(send_sync))]
+     |                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5494:15
+     |
+5494 |         #[cfg(send_sync)]
+     |               ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5498:19
+     |
+5498 |         #[cfg(not(send_sync))]
+     |                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+ --> vendor/wgpu-0.20.1/src/backend/mod.rs:1:7
+  |
+1 | #[cfg(webgpu)]
+  |       ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+ --> vendor/wgpu-0.20.1/src/backend/mod.rs:3:7
+  |
+3 | #[cfg(webgpu)]
+  |       ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+ --> vendor/wgpu-0.20.1/src/backend/mod.rs:6:7
+  |
+6 | #[cfg(wgpu_core)]
+  |       ^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+ --> vendor/wgpu-0.20.1/src/backend/mod.rs:9:7
+  |
+9 | #[cfg(wgpu_core)]
+  |       ^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:3027:7
+     |
+3027 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:3029:7
+     |
+3029 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `native`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:1406:24
+     |
+1406 |     #[cfg_attr(not(any(native, Emscripten)), allow(unused))]
+     |                        ^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(native)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(native)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `Emscripten`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:1406:32
+     |
+1406 |     #[cfg_attr(not(any(native, Emscripten)), allow(unused))]
+     |                                ^^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(Emscripten)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(Emscripten)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:2226:15
+     |
+2226 |     #[cfg(any(webgpu, webgl))]
+     |               ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:2226:23
+     |
+2226 |     #[cfg(any(webgpu, webgl))]
+     |                       ^^^^^ help: found config with similar value: `feature = "webgl"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `metal`
+   --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:560:19
+    |
+560 |             #[cfg(metal)]
+    |                   ^^^^^ help: found config with similar value: `feature = "metal"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(metal)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(metal)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `dx12`
+   --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:565:19
+    |
+565 |             #[cfg(dx12)]
+    |                   ^^^^ help: found config with similar value: `feature = "dx12"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dx12)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(dx12)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `dx12`
+   --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:570:19
+    |
+570 |             #[cfg(dx12)]
+    |                   ^^^^ help: found config with similar value: `feature = "dx12"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dx12)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(dx12)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `dx12`
+   --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:576:19
+    |
+576 |             #[cfg(dx12)]
+    |                   ^^^^ help: found config with similar value: `feature = "dx12"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dx12)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(dx12)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `native`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:1408:19
+     |
+1408 |         #[cfg(any(native, Emscripten))]
+     |                   ^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(native)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(native)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `Emscripten`
+    --> vendor/wgpu-0.20.1/src/backend/wgpu_core.rs:1408:27
+     |
+1408 |         #[cfg(any(native, Emscripten))]
+     |                           ^^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(Emscripten)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(Emscripten)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1061:7
+     |
+1061 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1102:7
+     |
+1102 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1104:11
+     |
+1104 | #[cfg(not(send_sync))]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1107:7
+     |
+1107 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1110:11
+     |
+1110 | #[cfg(not(send_sync))]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1114:7
+     |
+1114 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1117:11
+     |
+1117 | #[cfg(not(send_sync))]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1121:7
+     |
+1121 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1123:11
+     |
+1123 | #[cfg(not(send_sync))]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1126:7
+     |
+1126 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1128:11
+     |
+1128 | #[cfg(not(send_sync))]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1130:7
+     |
+1130 | #[cfg(send_sync)]
+     |       ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `send_sync`
+    --> vendor/wgpu-0.20.1/src/context.rs:1132:11
+     |
+1132 | #[cfg(not(send_sync))]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(send_sync)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(send_sync)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+   --> vendor/wgpu-0.20.1/src/context.rs:579:15
+    |
+579 |     #[cfg(any(webgl, webgpu))]
+    |               ^^^^^ help: found config with similar value: `feature = "webgl"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+   --> vendor/wgpu-0.20.1/src/context.rs:579:22
+    |
+579 |     #[cfg(any(webgl, webgpu))]
+    |                      ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/context.rs:1561:15
+     |
+1561 |     #[cfg(any(webgpu, webgl))]
+     |               ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+    --> vendor/wgpu-0.20.1/src/context.rs:1561:23
+     |
+1561 |     #[cfg(any(webgpu, webgl))]
+     |                       ^^^^^ help: found config with similar value: `feature = "webgl"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/context.rs:2998:15
+     |
+2998 |     #[cfg(any(webgpu, webgl))]
+     |               ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+    --> vendor/wgpu-0.20.1/src/context.rs:2998:23
+     |
+2998 |     #[cfg(any(webgpu, webgl))]
+     |                       ^^^^^ help: found config with similar value: `feature = "webgl"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+ --> vendor/wgpu-0.20.1/src/util/init.rs:5:7
+  |
+5 | #[cfg(wgpu_core)]
+  |       ^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+ --> vendor/wgpu-0.20.1/src/util/init.rs:9:11
+  |
+9 | #[cfg(not(wgpu_core))]
+  |           ^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `native`
+  --> vendor/wgpu-0.20.1/src/util/init.rs:41:7
+   |
+41 | #[cfg(native)]
+   |       ^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(native)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(native)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `native`
+  --> vendor/wgpu-0.20.1/src/util/init.rs:73:11
+   |
+73 | #[cfg(not(native))]
+   |           ^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(native)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(native)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+   --> vendor/wgpu-0.20.1/src/lib.rs:626:15
+    |
+626 |     #[cfg(any(webgpu, webgl))]
+    |               ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+   --> vendor/wgpu-0.20.1/src/lib.rs:626:23
+    |
+626 |     #[cfg(any(webgpu, webgl))]
+    |                       ^^^^^ help: found config with similar value: `feature = "webgl"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+   --> vendor/wgpu-0.20.1/src/lib.rs:638:15
+    |
+638 |     #[cfg(any(webgpu, webgl))]
+    |               ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+   --> vendor/wgpu-0.20.1/src/lib.rs:638:23
+    |
+638 |     #[cfg(any(webgpu, webgl))]
+    |                       ^^^^^ help: found config with similar value: `feature = "webgl"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `metal`
+   --> vendor/wgpu-0.20.1/src/lib.rs:683:11
+    |
+683 |     #[cfg(metal)]
+    |           ^^^^^ help: found config with similar value: `feature = "metal"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(metal)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(metal)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `dx12`
+   --> vendor/wgpu-0.20.1/src/lib.rs:691:11
+    |
+691 |     #[cfg(dx12)]
+    |           ^^^^ help: found config with similar value: `feature = "dx12"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dx12)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(dx12)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `dx12`
+   --> vendor/wgpu-0.20.1/src/lib.rs:699:11
+    |
+699 |     #[cfg(dx12)]
+    |           ^^^^ help: found config with similar value: `feature = "dx12"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dx12)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(dx12)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `dx12`
+   --> vendor/wgpu-0.20.1/src/lib.rs:707:11
+    |
+707 |     #[cfg(dx12)]
+    |           ^^^^ help: found config with similar value: `feature = "dx12"`
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dx12)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(dx12)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2047:11
+     |
+2047 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2066:11
+     |
+2066 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2084:11
+     |
+2084 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2101:11
+     |
+2101 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2143:11
+     |
+2143 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2287:11
+     |
+2287 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `native`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1946:17
+     |
+1946 |         if cfg!(native) {
+     |                 ^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(native)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(native)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `metal`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1947:21
+     |
+1947 |             if cfg!(metal) {
+     |                     ^^^^^ help: found config with similar value: `feature = "metal"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(metal)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(metal)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `dx12`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1950:21
+     |
+1950 |             if cfg!(dx12) {
+     |                     ^^^^ help: found config with similar value: `feature = "dx12"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dx12)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(dx12)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1972:21
+     |
+1972 |             if cfg!(webgpu) {
+     |                     ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+    --> vendor/wgpu-0.20.1/src/lib.rs:1975:21
+     |
+1975 |             if cfg!(webgl) {
+     |                     ^^^^^ help: found config with similar value: `feature = "webgl"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2012:15
+     |
+2012 |         #[cfg(webgpu)]
+     |               ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2026:15
+     |
+2026 |         #[cfg(wgpu_core)]
+     |               ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2193:23
+     |
+2193 |             #[cfg(any(webgpu, webgl))]
+     |                       ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2193:31
+     |
+2193 |             #[cfg(any(webgpu, webgl))]
+     |                               ^^^^^ help: found config with similar value: `feature = "webgl"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2212:23
+     |
+2212 |             #[cfg(any(webgpu, webgl))]
+     |                       ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2212:31
+     |
+2212 |             #[cfg(any(webgpu, webgl))]
+     |                               ^^^^^ help: found config with similar value: `feature = "webgl"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2357:11
+     |
+2357 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2409:11
+     |
+2409 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2766:11
+     |
+2766 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2805:11
+     |
+2805 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2911:11
+     |
+2911 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2990:19
+     |
+2990 |             #[cfg(wgpu_core)]
+     |                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2992:19
+     |
+2992 |             #[cfg(webgpu)]
+     |                   ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2997:27
+     |
+2997 |             #[cfg(not(any(webgpu, wgpu_core)))]
+     |                           ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:2997:35
+     |
+2997 |             #[cfg(not(any(webgpu, wgpu_core)))]
+     |                                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3006:19
+     |
+3006 |             #[cfg(wgpu_core)]
+     |                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3008:19
+     |
+3008 |             #[cfg(webgpu)]
+     |                   ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3010:27
+     |
+3010 |             #[cfg(not(any(webgpu, wgpu_core)))]
+     |                           ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3010:35
+     |
+3010 |             #[cfg(not(any(webgpu, wgpu_core)))]
+     |                                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3050:19
+     |
+3050 |             #[cfg(wgpu_core)]
+     |                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3061:19
+     |
+3061 |             #[cfg(wgpu_core)]
+     |                   ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3333:11
+     |
+3333 |     #[cfg(webgpu)]
+     |           ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3379:11
+     |
+3379 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:3744:11
+     |
+3744 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:4949:15
+     |
+4949 |     #[cfg(any(webgpu, webgl))]
+     |               ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgl`
+    --> vendor/wgpu-0.20.1/src/lib.rs:4949:23
+     |
+4949 |     #[cfg(any(webgpu, webgl))]
+     |                       ^^^^^ help: found config with similar value: `feature = "webgl"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgl)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgl)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5175:11
+     |
+5175 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `wgpu_core`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5326:11
+     |
+5326 |     #[cfg(wgpu_core)]
+     |           ^^^^^^^^^
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wgpu_core)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(wgpu_core)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `webgpu`
+    --> vendor/wgpu-0.20.1/src/lib.rs:5385:11
+     |
+5385 |     #[cfg(webgpu)]
+     |           ^^^^^^ help: found config with similar value: `feature = "webgpu"`
+     |
+     = help: consider using a Cargo feature instead
+     = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+              [lints.rust]
+              unexpected_cfgs = { level = "warn", check-cfg = ['cfg(webgpu)'] }
+     = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(webgpu)");` to the top of the `build.rs`
+     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: field `0` is never read
+   --> vendor/wgpu-0.20.1/src/lib.rs:189:28
+    |
+189 | pub struct SubmissionIndex(ObjectId, Arc<crate::Data>);
+    |            --------------- ^^^^^^^^
+    |            |
+    |            field in this struct
+    |
+    = note: `SubmissionIndex` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+    |
+189 - pub struct SubmissionIndex(ObjectId, Arc<crate::Data>);
+189 + pub struct SubmissionIndex((), Arc<crate::Data>);
+    |
+
+warning: methods `device_downlevel_properties`, `device_mark_lost`, `render_bundle_encoder_multi_draw_indirect`, `render_bundle_encoder_multi_draw_indexed_indirect`, `render_bundle_encoder_multi_draw_indirect_count`, and `render_bundle_encoder_multi_draw_indexed_indirect_count` are never used
+   --> vendor/wgpu-0.20.1/src/context.rs:186:8
+    |
+ 33 | pub trait Context: Debug + WasmNotSendSync + Sized {
+    |           ------- methods in this trait
+...
+186 |     fn device_downlevel_properties(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     fn device_mark_lost(
+    |        ^^^^^^^^^^^^^^^^
+...
+764 |     fn render_bundle_encoder_multi_draw_indirect(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+773 |     fn render_bundle_encoder_multi_draw_indexed_indirect(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+783 |     fn render_bundle_encoder_multi_draw_indirect_count(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+796 |     fn render_bundle_encoder_multi_draw_indexed_indirect_count(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `device_downlevel_properties`, `device_mark_lost`, `render_bundle_encoder_multi_draw_indirect`, `render_bundle_encoder_multi_draw_indexed_indirect`, `render_bundle_encoder_multi_draw_indirect_count`, and `render_bundle_encoder_multi_draw_indexed_indirect_count` are never used
+    --> vendor/wgpu-0.20.1/src/context.rs:1214:8
+     |
+1136 | pub(crate) trait DynContext: Debug + WasmNotSendSync {
+     |                  ---------- methods in this trait
+...
+1214 |     fn device_downlevel_properties(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1308 |     fn device_mark_lost(&self, device: &ObjectId, device_data: &crate::Data, message: &str);
+     |        ^^^^^^^^^^^^^^^^
+...
+1738 |     fn render_bundle_encoder_multi_draw_indirect(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1747 |     fn render_bundle_encoder_multi_draw_indexed_indirect(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1757 |     fn render_bundle_encoder_multi_draw_indirect_count(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1770 |     fn render_bundle_encoder_multi_draw_indexed_indirect_count(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `0` is never read
+  --> vendor/wgpu-0.20.1/src/util/mod.rs:86:5
+   |
+85 | pub struct DownloadBuffer(
+   |            -------------- field in this struct
+86 |     Arc<super::Buffer>,
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+86 -     Arc<super::Buffer>,
+86 +     (),
+   |
+
+warning: `wgpu` (lib) generated 161 warnings
+    Checking st-backend-wgpu v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-backend-wgpu)
+    Checking st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+    Checking st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+    Checking st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+error: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+   --> crates/st-nn/src/language/automation.rs:359:61
+    |
+359 |             for (value, sanitised) in values.iter_mut().zip(sanitised.values.into_iter()) {
+    |                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+   --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+    = note: `-D clippy::useless-conversion` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::useless_conversion)]`
+help: consider removing the `.into_iter()`
+    |
+359 -             for (value, sanitised) in values.iter_mut().zip(sanitised.values.into_iter()) {
+359 +             for (value, sanitised) in values.iter_mut().zip(sanitised.values) {
+    |
+
+error: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+   --> crates/st-nn/src/language/automation.rs:388:54
+    |
+388 |         for (value, scaled) in values.iter_mut().zip(scaled.into_iter()) {
+    |                                                      ^^^^^^^^^^^^^^^^^^
+    |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+   --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+help: consider removing the `.into_iter()`
+    |
+388 -         for (value, scaled) in values.iter_mut().zip(scaled.into_iter()) {
+388 +         for (value, scaled) in values.iter_mut().zip(scaled) {
+    |
+
+error: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+   --> crates/st-nn/src/language/gw.rs:372:51
+    |
+372 |     for (value, scaled) in weights.iter_mut().zip(scaled.into_iter()) {
+    |                                                   ^^^^^^^^^^^^^^^^^^
+    |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+   --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+help: consider removing the `.into_iter()`
+    |
+372 -     for (value, scaled) in weights.iter_mut().zip(scaled.into_iter()) {
+372 +     for (value, scaled) in weights.iter_mut().zip(scaled) {
+    |
+
+error: this function has too many arguments (10/7)
+  --> crates/st-nn/src/layers/activation.rs:31:1
+   |
+31 | / fn emit_relu_meta(
+32 | |     op_name: &'static str,
+33 | |     rows: usize,
+34 | |     cols: usize,
+...  |
+41 | |     fallback_message: Option<&str>,
+42 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+   = note: `-D clippy::too-many-arguments` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::too_many_arguments)]`
+
+error: this function has too many arguments (10/7)
+  --> crates/st-nn/src/layers/continuous_wavelet.rs:12:1
+   |
+12 | / fn emit_continuous_wavelet_meta(
+13 | |     op_name: &'static str,
+14 | |     rows: usize,
+15 | |     cols: usize,
+...  |
+22 | |     gradient_scale: Option<f32>,
+23 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: the loop variable `c` is used to index `profile`
+   --> crates/st-nn/src/layers/continuous_wavelet.rs:173:18
+    |
+173 |         for c in 0..cols {
+    |                  ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+    = note: `-D clippy::needless-range-loop` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_range_loop)]`
+help: consider using an iterator and enumerate()
+    |
+173 -         for c in 0..cols {
+173 +         for (c, <item>) in profile.iter_mut().enumerate().take(cols) {
+    |
+
+error: this function has too many arguments (9/7)
+  --> crates/st-nn/src/layers/dropout.rs:33:1
+   |
+33 | / fn emit_dropout_meta(
+34 | |     op_name: &'static str,
+35 | |     rows: usize,
+36 | |     cols: usize,
+...  |
+42 | |     mask_backend: Option<String>,
+43 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: derefed type is same as origin
+  --> crates/st-nn/src/layers/embedding.rs:83:30
+   |
+83 |         if let Some(stats) = stats.as_deref_mut() {
+   |                              ^^^^^^^^^^^^^^^^^^^^ help: try: `stats`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_option_as_deref
+   = note: `-D clippy::needless-option-as-deref` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::needless_option_as_deref)]`
+
+error: this function has too many arguments (13/7)
+   --> crates/st-nn/src/layers/embedding.rs:145:1
+    |
+145 | / fn emit_embedding_meta(
+146 | |     op_name: &'static str,
+147 | |     input_shape: (usize, usize),
+148 | |     output_shape: (usize, usize),
+...   |
+158 | |     fallback_message: Option<&str>,
+159 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (28/7)
+   --> crates/st-nn/src/layers/lstm.rs:116:1
+    |
+116 | / fn emit_lstm_meta(
+117 | |     op_name: &'static str,
+118 | |     timesteps: usize,
+119 | |     input_dim: usize,
+...   |
+144 | |     bptt_scan_parallel_axis: Option<&'static str>,
+145 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (13/7)
+   --> crates/st-nn/src/layers/non_liner.rs:262:1
+    |
+262 | / fn emit_non_liner_meta(
+263 | |     op_name: &'static str,
+264 | |     rows: usize,
+265 | |     cols: usize,
+...   |
+275 | |     gradient_scale: Option<f32>,
+276 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: the loop variable `col` is used to index `gain`
+    --> crates/st-nn/src/layers/non_liner.rs:1021:24
+     |
+1021 |             for col in 0..cols {
+     |                        ^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+     |
+1021 -             for col in 0..cols {
+1021 +             for (col, <item>) in gain.iter().enumerate().take(cols) {
+     |
+
+error: the loop variable `col` is used to index `gain`
+    --> crates/st-nn/src/layers/non_liner.rs:1043:24
+     |
+1043 |             for col in 0..cols {
+     |                        ^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+     |
+1043 -             for col in 0..cols {
+1043 +             for (col, <item>) in gain.iter().enumerate().take(cols) {
+     |
+
+error: this function has too many arguments (11/7)
+  --> crates/st-nn/src/layers/normalization.rs:23:1
+   |
+23 | / fn emit_normalization_backward_meta(
+24 | |     op_name: &'static str,
+25 | |     rows: usize,
+26 | |     cols: usize,
+...  |
+34 | |     affine_gradient_backend: Option<String>,
+35 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (8/7)
+   --> crates/st-nn/src/layers/normalization.rs:176:1
+    |
+176 | / fn checked_projector_gain_update(
+177 | |     current_gain: f32,
+178 | |     target_radius: f32,
+179 | |     smoothing: f32,
+...   |
+184 | |     gain_label: &'static str,
+185 | | ) -> PureResult<Option<f32>> {
+    | |____________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (13/7)
+  --> crates/st-nn/src/layers/wave_gate.rs:71:1
+   |
+71 | / fn emit_wave_gate_backward_meta(
+72 | |     rows: usize,
+73 | |     cols: usize,
+74 | |     backend: &'static str,
+...  |
+84 | |     fallback_message: Option<&str>,
+85 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (9/7)
+  --> crates/st-nn/src/layers/zspace_projector.rs:20:1
+   |
+20 | / fn emit_zspace_projector_meta(
+21 | |     op_name: &'static str,
+22 | |     layer_backend: &'static str,
+23 | |     rows: usize,
+...  |
+29 | |     saturation_gradient: &'static str,
+30 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (8/7)
+   --> crates/st-nn/src/z_rba/cov_head.rs:263:1
+    |
+263 | / fn emit_cov_head_meta(
+264 | |     rows: usize,
+265 | |     cols: usize,
+266 | |     rank: usize,
+...   |
+271 | |     telemetry: &CovHeadTelemetry,
+272 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (8/7)
+    --> crates/st-nn/src/zspace_coherence/sequencer.rs:1812:5
+     |
+1812 | /     fn build_coherence_diagnostics(
+1813 | |         &self,
+1814 | |         aggregated: &Tensor,
+1815 | |         coherence_weights: &[f32],
+...    |
+1820 | |         pre_discard: Option<PreDiscardTelemetry>,
+1821 | |     ) -> CoherenceDiagnostics {
+     | |_____________________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+    --> crates/st-nn/src/zspace_coherence/sequencer.rs:2481:64
+     |
+2481 |             for ((_, weight), scaled) in window.iter_mut().zip(scaled.into_iter()) {
+     |                                                                ^^^^^^^^^^^^^^^^^^
+     |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+    --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+help: consider removing the `.into_iter()`
+     |
+2481 -             for ((_, weight), scaled) in window.iter_mut().zip(scaled.into_iter()) {
+2481 +             for ((_, weight), scaled) in window.iter_mut().zip(scaled) {
+     |
+
+error: this `impl` can be derived
+   --> crates/st-nn/src/zspace_coherence/vae.rs:128:1
+    |
+128 | / impl Default for ZSpaceVaeOptimizerKind {
+129 | |     fn default() -> Self {
+130 | |         Self::Sgd
+131 | |     }
+132 | | }
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#derivable_impls
+    = note: `-D clippy::derivable-impls` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::derivable_impls)]`
+help: replace the manual implementation with a derive attribute and mark the default variant
+    |
+101 + #[derive(Default)]
+102 | pub enum ZSpaceVaeOptimizerKind {
+103 ~     #[default]
+104 ~     Sgd,
+    |
+
+error: this function has too many arguments (9/7)
+   --> crates/st-nn/src/zspace_coherence/vae.rs:224:5
+    |
+224 | /     fn configure(
+225 | |         &mut self,
+226 | |         input_dim: usize,
+227 | |         latent_dim: usize,
+...   |
+233 | |         grad_clip: Option<f64>,
+234 | |     ) -> PureResult<()> {
+    | |_______________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: could not compile `st-nn` (lib) due to 22 previous errors

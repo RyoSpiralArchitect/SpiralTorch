@@ -146,6 +146,12 @@ jobs:
           cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
+      - name: Cross-crate layout and geometry regressions
+        if: matrix.run_upper_stack
+        run: |
+          cargo test --locked -p spiral-selfsup --release --test info_nce_tensor
+          cargo test --locked -p st-vision --release --test temporal_channels
+          cargo test --locked -p st-frac --release --lib fractal_field
 
   windows-core:
     name: build & test core (windows)
@@ -215,6 +221,10 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
         run: cargo test --locked -p st-nn --features wgpu --release --lib -- --test-threads=1
+      - name: InfoNCE entry points with a live dense WGPU probe
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+        run: cargo test --locked -p spiral-selfsup --features wgpu --release --test info_nce_tensor -- --test-threads=1
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)

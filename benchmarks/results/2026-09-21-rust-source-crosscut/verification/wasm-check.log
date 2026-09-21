@@ -1,0 +1,20 @@
+   Compiling serde_json v1.0.151
+   Compiling wasm-bindgen v0.2.104
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling spiraltorch-wasm v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm)
+    Checking tracing-chrome v0.7.2
+    Checking st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kdsl)
+    Checking js-sys v0.3.81
+    Checking getrandom v0.2.17
+    Checking serde-wasm-bindgen v0.5.0
+    Checking web-sys v0.3.81
+    Checking rand_core v0.6.4
+    Checking rand_chacha v0.3.1
+    Checking rand v0.8.8
+    Checking rand_distr v0.4.3
+    Checking spiral-config v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config)
+    Checking st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+    Checking nalgebra v0.29.0
+    Checking st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Checking statrs v0.16.1
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 37.22s

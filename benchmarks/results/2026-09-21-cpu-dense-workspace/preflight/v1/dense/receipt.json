@@ -1,0 +1,72 @@
+{
+  "steps": [
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/baseline-dense"
+      ],
+      "mode": "serial",
+      "name": "baseline-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-a/candidate-dense"
+      ],
+      "mode": "serial",
+      "name": "candidate-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-a/candidate-dense"
+      ],
+      "mode": "serial",
+      "name": "candidate-b",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/baseline-dense"
+      ],
+      "mode": "serial",
+      "name": "baseline-b",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/baseline-dense"
+      ],
+      "mode": "parallel",
+      "name": "baseline-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-a/candidate-dense"
+      ],
+      "mode": "parallel",
+      "name": "candidate-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-a/candidate-dense"
+      ],
+      "mode": "parallel",
+      "name": "candidate-b",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/baseline-dense"
+      ],
+      "mode": "parallel",
+      "name": "baseline-b",
+      "exit_code": 0
+    }
+  ],
+  "binaries": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/baseline-dense": "6e1fa6ad7700bf1548898de84fdb8fd588c00e81b9d47655333cfdc51e7a37d2",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-dense-workspace-20260921/verified-a/candidate-dense": "9e8c95769361e86f00b9e4d3358105e4312063038c5027b231667331081a4742"
+  }
+}

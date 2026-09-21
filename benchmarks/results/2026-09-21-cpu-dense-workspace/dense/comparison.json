@@ -1,0 +1,2025 @@
+{
+  "condition_runs": 240,
+  "bitwise_passes": 240,
+  "summaries": [
+    {
+      "mode": "serial",
+      "packed": false,
+      "geometric_mean": 1.6671715513908167,
+      "minimum": 0.336,
+      "maximum": 9.00900900900901,
+      "favorable": 21,
+      "count": 30
+    },
+    {
+      "mode": "serial",
+      "packed": true,
+      "geometric_mean": 0.9328706900476617,
+      "minimum": 0.5060240963855421,
+      "maximum": 1.1065718692397397,
+      "favorable": 12,
+      "count": 30
+    },
+    {
+      "mode": "parallel",
+      "packed": false,
+      "geometric_mean": 1.7287728137198421,
+      "minimum": 0.336,
+      "maximum": 9.277397260273972,
+      "favorable": 18,
+      "count": 30
+    },
+    {
+      "mode": "parallel",
+      "packed": true,
+      "geometric_mean": 0.9164450685165699,
+      "minimum": 0.336,
+      "maximum": 1.0563646170442287,
+      "favorable": 14,
+      "count": 30
+    }
+  ],
+  "comparisons": [
+    {
+      "mode": "serial",
+      "shape": [
+        1,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        9.00900900900901,
+        8.384384384384385
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1488
+        ],
+        [
+          1,
+          1488
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        1,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.8950695322376738,
+        0.8333333333333334
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        3,
+        37,
+        13
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        3.8890666666666664,
+        3.5776
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1776
+        ],
+        [
+          1,
+          1776
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        3,
+        37,
+        13
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0,
+        0.9375
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        4,
+        5,
+        16
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        5.641921397379913,
+        5.096069868995633
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          240
+        ],
+        [
+          1,
+          240
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        4,
+        5,
+        16
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0,
+        0.9489230769230769
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        7,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        4.455106237148732,
+        4.0
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1488
+        ],
+        [
+          1,
+          1488
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        7,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0201212121212122,
+        0.9482929242949035
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        8,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        4.2262905162064826,
+        3.8992201559688064
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1488
+        ],
+        [
+          1,
+          1488
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        8,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.027027027027027,
+        0.9544066317626527
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        8,
+        7,
+        12
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0183326058489743,
+        0.9626666666666667
+      ],
+      "baseline_allocations": [
+        [
+          2,
+          560
+        ],
+        [
+          2,
+          560
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          560
+        ],
+        [
+          2,
+          560
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        8,
+        7,
+        12
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0,
+        0.9413841807909604
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          224
+        ],
+        [
+          1,
+          224
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          224
+        ],
+        [
+          1,
+          224
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        17,
+        37,
+        29
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0854584837545127,
+        1.0012188751523594
+      ],
+      "baseline_allocations": [
+        [
+          3,
+          4144
+        ],
+        [
+          3,
+          4144
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          2960
+        ],
+        [
+          2,
+          2960
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        17,
+        37,
+        29
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.1065718692397397,
+        1.0093023255813953
+      ],
+      "baseline_allocations": [
+        [
+          2,
+          2368
+        ],
+        [
+          2,
+          2368
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          1184
+        ],
+        [
+          1,
+          1184
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        32,
+        64,
+        32
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0924949963729167,
+        1.0062011842600125
+      ],
+      "baseline_allocations": [
+        [
+          3,
+          7168
+        ],
+        [
+          3,
+          7168
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          5120
+        ],
+        [
+          2,
+          5120
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        32,
+        64,
+        32
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0943584672435105,
+        1.0057774304284597
+      ],
+      "baseline_allocations": [
+        [
+          2,
+          4096
+        ],
+        [
+          2,
+          4096
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          2048
+        ],
+        [
+          1,
+          2048
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        96,
+        128,
+        96
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0202086418692093,
+        0.9618055999774834
+      ],
+      "baseline_allocations": [
+        [
+          9,
+          38912
+        ],
+        [
+          9,
+          38912
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          10240
+        ],
+        [
+          2,
+          10240
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        96,
+        128,
+        96
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.983068865960923,
+        0.9609461414107037
+      ],
+      "baseline_allocations": [
+        [
+          8,
+          32768
+        ],
+        [
+          8,
+          32768
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          4096
+        ],
+        [
+          1,
+          4096
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        65,
+        257,
+        49
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.9926261455809544,
+        1.0076373102801397
+      ],
+      "baseline_allocations": [
+        [
+          9,
+          78128
+        ],
+        [
+          9,
+          78128
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          20560
+        ],
+        [
+          2,
+          20560
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        65,
+        257,
+        49
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0051765082583985,
+        1.0244211251711421
+      ],
+      "baseline_allocations": [
+        [
+          8,
+          65792
+        ],
+        [
+          8,
+          65792
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          8224
+        ],
+        [
+          1,
+          8224
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        129,
+        129,
+        97
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.9939561983554157,
+        0.9558648786284162
+      ],
+      "baseline_allocations": [
+        [
+          17,
+          72240
+        ],
+        [
+          17,
+          72240
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          10320
+        ],
+        [
+          2,
+          10320
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        129,
+        129,
+        97
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0053486554151188,
+        1.000796796339346
+      ],
+      "baseline_allocations": [
+        [
+          16,
+          66048
+        ],
+        [
+          16,
+          66048
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          4128
+        ],
+        [
+          1,
+          4128
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        129,
+        1025,
+        33
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0111782381137688,
+        1.087268279653207
+      ],
+      "baseline_allocations": [
+        [
+          33,
+          1098800
+        ],
+        [
+          33,
+          1098800
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          82000
+        ],
+        [
+          2,
+          82000
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        129,
+        1025,
+        33
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9976103098834502,
+        1.020106783575371
+      ],
+      "baseline_allocations": [
+        [
+          32,
+          1049600
+        ],
+        [
+          32,
+          1049600
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          32800
+        ],
+        [
+          1,
+          32800
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        1,
+        4096,
+        1
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.4699570815450644,
+        2.0852685050798256
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          196608
+        ],
+        [
+          1,
+          196608
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        1,
+        4096,
+        1
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0108303249097472,
+        0.9916458530703643
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        16,
+        0,
+        12
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.832,
+        1.0
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        16,
+        0,
+        12
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.8028846153846154,
+        0.832
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        0,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.5,
+        0.336
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "serial",
+      "shape": [
+        0,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.5060240963855421,
+        0.5060240963855421
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        1,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        9.277397260273972,
+        7.554666666666667
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1488
+        ],
+        [
+          1,
+          1488
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        1,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.8333333333333334,
+        0.888
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        3,
+        37,
+        13
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        3.5913802509547192,
+        3.7896205357142856
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1776
+        ],
+        [
+          1,
+          1776
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        3,
+        37,
+        13
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0231649455763328,
+        1.0563646170442287
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        4,
+        5,
+        16
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        5.096069868995633,
+        5.093886462882096
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          240
+        ],
+        [
+          1,
+          240
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        4,
+        5,
+        16
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9230769230769231,
+        0.8777062609713283
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        7,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        4.292872265349329,
+        4.143347050754458
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1488
+        ],
+        [
+          1,
+          1488
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        7,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9785550165943324,
+        0.96875
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        8,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        3.9741538461538464,
+        3.8992201559688064
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          1488
+        ],
+        [
+          1,
+          1488
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        8,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9813817855540601,
+        0.9632320563628357
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        8,
+        7,
+        12
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0185604345857855,
+        1.0190217391304348
+      ],
+      "baseline_allocations": [
+        [
+          2,
+          560
+        ],
+        [
+          2,
+          560
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          560
+        ],
+        [
+          2,
+          560
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        8,
+        7,
+        12
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.971045197740113,
+        0.9703599153140438
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          224
+        ],
+        [
+          1,
+          224
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          224
+        ],
+        [
+          1,
+          224
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        17,
+        37,
+        29
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0309125430164947,
+        1.0158248175182483
+      ],
+      "baseline_allocations": [
+        [
+          3,
+          4144
+        ],
+        [
+          3,
+          4144
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          2960
+        ],
+        [
+          2,
+          2960
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        17,
+        37,
+        29
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0047169811320755,
+        1.0328120898488768
+      ],
+      "baseline_allocations": [
+        [
+          2,
+          2368
+        ],
+        [
+          2,
+          2368
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          1184
+        ],
+        [
+          1,
+          1184
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        32,
+        64,
+        32
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.9904476295479603,
+        1.0187983227472974
+      ],
+      "baseline_allocations": [
+        [
+          3,
+          7168
+        ],
+        [
+          3,
+          7168
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          5120
+        ],
+        [
+          2,
+          5120
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        32,
+        64,
+        32
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0101840453347712,
+        1.0041652065081352
+      ],
+      "baseline_allocations": [
+        [
+          2,
+          4096
+        ],
+        [
+          2,
+          4096
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          2048
+        ],
+        [
+          1,
+          2048
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        96,
+        128,
+        96
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0202048388475677,
+        0.9895591694599425
+      ],
+      "baseline_allocations": [
+        [
+          9,
+          38912
+        ],
+        [
+          9,
+          38912
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          2,
+          10240
+        ],
+        [
+          2,
+          10240
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        96,
+        128,
+        96
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0285335459345393,
+        1.0135477293190605
+      ],
+      "baseline_allocations": [
+        [
+          8,
+          32768
+        ],
+        [
+          8,
+          32768
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          1,
+          4096
+        ],
+        [
+          1,
+          4096
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        65,
+        257,
+        49
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.9650842677768079,
+        0.9191879744016065
+      ],
+      "baseline_allocations": [
+        [
+          9,
+          78128
+        ],
+        [
+          9,
+          78128
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          9,
+          78128
+        ],
+        [
+          9,
+          78128
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        65,
+        257,
+        49
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0505224099069275,
+        1.030471234092067
+      ],
+      "baseline_allocations": [
+        [
+          8,
+          65792
+        ],
+        [
+          8,
+          65792
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          8,
+          65792
+        ],
+        [
+          8,
+          65792
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        129,
+        129,
+        97
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.9748401881720883,
+        0.9637545899376856
+      ],
+      "baseline_allocations": [
+        [
+          17,
+          72240
+        ],
+        [
+          17,
+          72240
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          17,
+          72240
+        ],
+        [
+          17,
+          72240
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        129,
+        129,
+        97
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0124123292727945,
+        0.9998315982572804
+      ],
+      "baseline_allocations": [
+        [
+          16,
+          66048
+        ],
+        [
+          16,
+          66048
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          16,
+          66048
+        ],
+        [
+          16,
+          66048
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        129,
+        1025,
+        33
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.9899618349874345,
+        0.9852326843620219
+      ],
+      "baseline_allocations": [
+        [
+          33,
+          1098800
+        ],
+        [
+          33,
+          1098800
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          33,
+          1098800
+        ],
+        [
+          33,
+          1098800
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        129,
+        1025,
+        33
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0024614294570897,
+        1.0070063487130938
+      ],
+      "baseline_allocations": [
+        [
+          32,
+          1049600
+        ],
+        [
+          32,
+          1049600
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          32,
+          1049600
+        ],
+        [
+          32,
+          1049600
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        1,
+        4096,
+        1
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        2.560780964721126,
+        2.5955882352941178
+      ],
+      "baseline_allocations": [
+        [
+          1,
+          196608
+        ],
+        [
+          1,
+          196608
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        1,
+        4096,
+        1
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0134505494505495,
+        0.9987677502640535
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        16,
+        0,
+        12
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.0,
+        1.0
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        16,
+        0,
+        12
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.7990430622009569,
+        0.7990430622009569
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        0,
+        31,
+        8
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        0.9880952380952381,
+        0.336
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "mode": "parallel",
+      "shape": [
+        0,
+        31,
+        8
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.5060240963855421,
+        0.336
+      ],
+      "baseline_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "candidate_allocations": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    }
+  ],
+  "boundary": "recorded CPU-only forward microbenchmark, not an autograd or GPU speed claim"
+}

@@ -1,0 +1,41 @@
+{
+  "candidate_commit": "634222f991502f1a84b518180e240f4f976c4bf7",
+  "candidate_tree": "d1e293668df246eab8c063b8e98cdccb667a71af",
+  "baseline_commit": "64e500768abe4cdf7e78e0674e1c07cc588ab163",
+  "baseline_workers": {
+    "baseline-dense": "aa8748eb073ff705009464b4c8b2aab5b45886dbc3aa71df83a6223be5ee4c12",
+    "baseline-extended": "86ebc3d25239aa81f60743b7598eeb9c1351a8890800625562e9c025d578dc6d",
+    "baseline-crosscut": "d97d8ab265bed811942efa0b759bf09ee311b3d4b06de2b04084141e84707f9c"
+  },
+  "baseline_note": "Workers/modules frozen in the preceding panel-reuse archive; baseline commit changes only evidence/docs after the verified production source.",
+  "native_source_hashes": {
+    "crates/st-tensor/src/backend/cpu_dense.rs": "3d2626401e148f0736e663ed3e1591eefeaaafe9394f513f0d03c75496fb710c",
+    "crates/st-bench/examples/cpu_dense_workspace.rs": "c3c08cfacecf0d19986df7a8f79a4e2bf1c13015d79d3d54ef629474fcb13864",
+    "crates/st-bench/examples/cpu_dense_extended.rs": "12ba1714b4a025bb9f6556759d7367691fa5e086588d65c519907517b7340ea5",
+    "crates/st-bench/examples/source_crosscut.rs": "cb900f6dc310670a26455f9d8a79394c22e68bc5295ce837c7315216be63f624"
+  },
+  "wasm_harness_sha256": "2a0aa46f5c3f774f7a1ad882943231c41a81bc17a349fba0f93800acb7d58439",
+  "wasm_products": {
+    "baseline": "b149b31cbbc62a021f337c36a91fac41a8ebd1e9e7b3173d463983a5aca0048b",
+    "candidate": "1b5dec496646d22e628e52597ec5741cf2f1143f3955982c6d53e8b548926963"
+  },
+  "selected_probe_note": "Probe-b ran as a dirty delta on the baseline; exact source hashes match the subsequently committed/verified candidate, and rebuilt dense/crosscut worker hashes also match.",
+  "local_products": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-dense": "aa8748eb073ff705009464b4c8b2aab5b45886dbc3aa71df83a6223be5ee4c12",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended": "86ebc3d25239aa81f60743b7598eeb9c1351a8890800625562e9c025d578dc6d",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-crosscut": "d97d8ab265bed811942efa0b759bf09ee311b3d4b06de2b04084141e84707f9c",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-dense": "659981e89ee07f3433e9a01a479bf0e8c56d94407c523b43ba08a8b66dbe31f2",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-extended": "52986a0abf6bd4045071992c58a2297dc5a250a15b65cdd7211ef4c037ee2164",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-crosscut": "8f1c0eb18babef1f8b664af2e9c89b832c75da71547b7a84e42226f660a5096d",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-dense": "6ec771e17c7ab11d1096cd8f58cd7cd5e8af1db0c264e71344a7084fd38d0ff9",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended": "0c20a3d7745503329aa72a2fab9addc3cf63603c951684a04624c58845d68db3",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-crosscut": "64f847aa0b9ff4954d7fb184c92ac409c00b99d5845a79aa9cfc95a349133209",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/python-cpu.dylib": "b903f36a44febdb0e2e96fb7285c8444cd09d62fa5dae0fe0eac53cb99e2d106",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/verified-a/wasm/spiraltorch_wasm_bg.wasm": "b149b31cbbc62a021f337c36a91fac41a8ebd1e9e7b3173d463983a5aca0048b",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm_bg.wasm": "1b5dec496646d22e628e52597ec5741cf2f1143f3955982c6d53e8b548926963"
+  },
+  "local_logs": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "publication_boundary": "all conditions, validation, hashes and replay scripts; binaries/extensions/WASM remain local"
+}

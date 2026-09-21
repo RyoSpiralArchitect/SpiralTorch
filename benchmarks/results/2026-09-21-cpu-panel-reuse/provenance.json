@@ -1,0 +1,40 @@
+{
+  "candidate_commit": "967ae20cc00a451865efdc9d55cf083b09806756",
+  "candidate_tree": "7d4c3f92a5bbc155fe7320c598a64ffbdc4b333e",
+  "baseline_commit": "574750bb708c50b7ea30f638d28f7651bd876538",
+  "cpu_dense_sha256": "ab7159405098679a78aa99133c2b06ee53078abdc6ba519f43abb5a2808fcfcf",
+  "harness_hashes": {
+    "cpu_dense_workspace.rs": "c3c08cfacecf0d19986df7a8f79a4e2bf1c13015d79d3d54ef629474fcb13864",
+    "cpu_dense_extended.rs": "12ba1714b4a025bb9f6556759d7367691fa5e086588d65c519907517b7340ea5",
+    "source_crosscut.rs": "cb900f6dc310670a26455f9d8a79394c22e68bc5295ce837c7315216be63f624"
+  },
+  "dense_initial_source": {
+    "commit": "f18e3e9567864b662d59aedbb3f9c09d37b36f17",
+    "tree": "1cf6067a5795c9430af0259863067e95c5bff507"
+  },
+  "dense_initial_note": "Same production source as selected candidate; later commit adds only extended harness.",
+  "baseline_legacy_workers": "Byte-identical to c6c82992 selected workers in prior cpu-dense-workspace evidence; baseline commit adds evidence only.",
+  "local_products": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/baseline-dense": "66304b4b0c4e6fb7ec4bdae95db0d39111ed7ed81c56c23f68fac183f737d641",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/baseline-crosscut": "9da61e3c292b6c5f2767e9f660ec826e8fedc96a369165c70040084085131692",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/probe-a/candidate-dense": "aa8748eb073ff705009464b4c8b2aab5b45886dbc3aa71df83a6223be5ee4c12",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/probe-a/candidate-crosscut": "d97d8ab265bed811942efa0b759bf09ee311b3d4b06de2b04084141e84707f9c",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-b/baseline-extended": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-b/candidate-extended": "86ebc3d25239aa81f60743b7598eeb9c1351a8890800625562e9c025d578dc6d",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/verified-a/candidate-dense": "aa8748eb073ff705009464b4c8b2aab5b45886dbc3aa71df83a6223be5ee4c12",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/verified-a/candidate-crosscut": "d97d8ab265bed811942efa0b759bf09ee311b3d4b06de2b04084141e84707f9c",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/verified-a/python-cpu.dylib": "867ad5da75103f714e0e9bdac172eadc36526922f953fa0500fd709c605e0bf9"
+  },
+  "platform": "Darwin Ryos-MacBook-Pro.local 25.4.0 Darwin Kernel Version 25.4.0: Thu Mar 19 19:31:09 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T8132 arm64",
+  "hardware": [
+    "Apple M4",
+    "25769803776",
+    "10"
+  ],
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "local_logs": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921",
+  "publication_boundary": "results, validation logs, hashes and replay scripts; executable/native/WASM products remain local"
+}

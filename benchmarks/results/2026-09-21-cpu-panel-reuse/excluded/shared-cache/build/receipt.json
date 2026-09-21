@@ -1,0 +1,46 @@
+{
+  "harness_sha256": "12ba1714b4a025bb9f6556759d7367691fa5e086588d65c519907517b7340ea5",
+  "steps": [
+    {
+      "label": "baseline",
+      "root": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/baseline-source",
+      "commit": "574750bb708c50b7ea30f638d28f7651bd876538",
+      "status": "?? crates/st-bench/examples/cpu_dense_extended.rs",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "cpu_dense_extended"
+      ],
+      "exit_code": 0,
+      "seconds": 53.50500012500561,
+      "binary_sha256": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa"
+    },
+    {
+      "label": "candidate",
+      "root": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+      "commit": "967ae20cc00a451865efdc9d55cf083b09806756",
+      "status": "",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "cpu_dense_extended"
+      ],
+      "exit_code": 0,
+      "seconds": 43.807559709006455,
+      "binary_sha256": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa"
+    }
+  ],
+  "status": "passed"
+}

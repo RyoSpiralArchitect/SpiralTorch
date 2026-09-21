@@ -1,0 +1,14 @@
+WASM CPU matmul 1x31x8, packed=false: forward/backward passed
+WASM CPU matmul 1x31x8, packed=true: forward/backward passed
+WASM CPU matmul 3x37x13, packed=false: forward/backward passed
+WASM CPU matmul 3x37x13, packed=true: forward/backward passed
+WASM CPU matmul 4x5x16, packed=false: forward/backward passed
+WASM CPU matmul 4x5x16, packed=true: forward/backward passed
+WASM CPU matmul 8x31x8, packed=false: forward/backward passed
+WASM CPU matmul 8x31x8, packed=true: forward/backward passed
+WASM CPU matmul 17x37x29, packed=false: forward/backward passed
+WASM CPU matmul 17x37x29, packed=true: forward/backward passed
+WASM CPU matmul 33x129x49, packed=false: forward/backward passed
+WASM CPU matmul 33x129x49, packed=true: forward/backward passed
+WASM CPU matmul 65x257x25, packed=false: forward/backward passed
+WASM CPU matmul 65x257x25, packed=true: forward/backward passed

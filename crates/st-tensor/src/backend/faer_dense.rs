@@ -15,24 +15,28 @@ mod imp {
         ColMajor,
     }
 
-    unsafe fn row_major_ref<'a>(
-        ptr: *const f32,
+    fn validate_inputs(
+        lhs: &[f32],
+        rhs: &[f32],
         rows: usize,
+        inner: usize,
         cols: usize,
-        row_stride: isize,
-        col_stride: isize,
-    ) -> MatRef<'a, f32> {
-        MatRef::from_raw_parts(ptr, rows, cols, row_stride, col_stride)
-    }
-
-    unsafe fn row_major_mut<'a>(
-        ptr: *mut f32,
-        rows: usize,
-        cols: usize,
-        row_stride: isize,
-        col_stride: isize,
-    ) -> MatMut<'a, f32> {
-        MatMut::from_raw_parts_mut(ptr, rows, cols, row_stride, col_stride)
+    ) -> Result<usize, String> {
+        let length = |r: usize, c: usize, name: &str| {
+            r.checked_mul(c)
+                .ok_or_else(|| format!("{name} dimensions overflow: {r}x{c}"))
+        };
+        let out_len = length(rows, cols, "destination")?;
+        let lhs_len = length(rows, inner, "lhs")?;
+        let rhs_len = length(inner, cols, "rhs")?;
+        for (name, actual, expected) in [("lhs", lhs.len(), lhs_len), ("rhs", rhs.len(), rhs_len)] {
+            if actual != expected {
+                return Err(format!(
+                    "{name} length mismatch: expected {expected} elements, got {actual}"
+                ));
+            }
+        }
+        Ok(out_len)
     }
 
     pub fn is_available() -> bool {
@@ -40,7 +44,7 @@ mod imp {
     }
 
     pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
-        let volume = rows * inner * cols;
+        let volume = rows.saturating_mul(inner).saturating_mul(cols);
         volume >= 8 * 8 * 8 && (rows >= 4 || cols >= 4)
     }
 
@@ -51,10 +55,8 @@ mod imp {
         inner: usize,
         cols: usize,
     ) -> Result<Vec<f32>, String> {
-        if rows == 0 || cols == 0 || inner == 0 {
-            return Ok(vec![0.0; rows * cols]);
-        }
-        let mut buffer = vec![0.0; rows * cols];
+        let len = validate_inputs(lhs, rhs, rows, inner, cols)?;
+        let mut buffer = vec![0.0; len];
         matmul_oriented_into(
             &mut buffer,
             lhs,
@@ -76,19 +78,6 @@ mod imp {
         inner: usize,
         cols: usize,
     ) -> Result<(), String> {
-        if dst.len() != rows * cols {
-            return Err(format!(
-                "destination length mismatch: expected {} elements, got {}",
-                rows * cols,
-                dst.len()
-            ));
-        }
-
-        if rows == 0 || cols == 0 || inner == 0 {
-            dst.fill(0.0);
-            return Ok(());
-        }
-
         matmul_oriented_into(
             dst,
             lhs,
@@ -112,10 +101,11 @@ mod imp {
         inner: usize,
         cols: usize,
     ) -> Result<(), String> {
-        if dst.len() != rows * cols {
+        let len = validate_inputs(lhs, rhs, rows, inner, cols)?;
+        if dst.len() != len {
             return Err(format!(
                 "destination length mismatch: expected {} elements, got {}",
-                rows * cols,
+                len,
                 dst.len()
             ));
         }
@@ -125,37 +115,17 @@ mod imp {
             return Ok(());
         }
 
-        let (lhs_row_stride, lhs_col_stride) = match lhs_layout {
-            DenseLayout::RowMajor => (inner as isize, 1),
-            DenseLayout::ColMajor => (1, rows as isize),
+        let lhs = match lhs_layout {
+            DenseLayout::RowMajor => MatRef::from_row_major_slice(lhs, rows, inner),
+            DenseLayout::ColMajor => MatRef::from_column_major_slice(lhs, rows, inner),
         };
-        let (rhs_row_stride, rhs_col_stride) = match rhs_layout {
-            DenseLayout::RowMajor => (cols as isize, 1),
-            DenseLayout::ColMajor => (1, inner as isize),
+        let rhs = match rhs_layout {
+            DenseLayout::RowMajor => MatRef::from_row_major_slice(rhs, inner, cols),
+            DenseLayout::ColMajor => MatRef::from_column_major_slice(rhs, inner, cols),
         };
-
-        let lhs =
-            unsafe { row_major_ref(lhs.as_ptr(), rows, inner, lhs_row_stride, lhs_col_stride) };
-        let rhs =
-            unsafe { row_major_ref(rhs.as_ptr(), inner, cols, rhs_row_stride, rhs_col_stride) };
-
-        dst.fill(0.0);
-        let mut out = unsafe { row_major_mut(dst.as_mut_ptr(), rows, cols, cols as isize, 1) };
-
-        // faer 0.23 API: matmul(dst, accum_mode, lhs, rhs, alpha, parallelism)
-        // - dst: mutable output matrix
-        // - accum_mode: Accum::Replace (overwrite) or Accum::Add (accumulate)
-        // - lhs, rhs: input matrices
-        // - alpha: scalar multiplier (1.0 for simple C = A·B)
-        // - parallelism: threading configuration
-        faer_matmul(
-            out.as_mut(),
-            Accum::Replace, // Overwrite dst with result
-            lhs.as_ref(),
-            rhs.as_ref(),
-            1.0, // α = 1
-            get_global_parallelism(),
-        );
+        let out = MatMut::from_row_major_slice_mut(dst, rows, cols);
+        // Replace does not read the previous destination; no zeroing pass is needed.
+        faer_matmul(out, Accum::Replace, lhs, rhs, 1.0, get_global_parallelism());
 
         Ok(())
     }
@@ -220,3 +190,117 @@ mod imp {
 }
 
 pub use imp::*;
+
+#[cfg(all(test, feature = "faer"))]
+mod tests {
+    use super::*;
+
+    fn orient(values: &[f32], rows: usize, cols: usize, layout: DenseLayout) -> Vec<f32> {
+        if layout == DenseLayout::RowMajor {
+            return values.to_vec();
+        }
+        let mut output = vec![0.0; values.len()];
+        for row in 0..rows {
+            for col in 0..cols {
+                output[col * rows + row] = values[row * cols + col];
+            }
+        }
+        output
+    }
+
+    #[test]
+    fn all_layouts_replace_nan_destinations_and_match_independent_products() {
+        for (rows, inner, cols) in [
+            (0, 0, 0),
+            (0, 3, 4),
+            (3, 0, 4),
+            (3, 4, 0),
+            (1, 1, 1),
+            (3, 5, 7),
+            (17, 33, 65),
+        ] {
+            let lhs: Vec<_> = (0..rows * inner)
+                .map(|i| ((i % 13) as f32 - 6.0) / 8.0)
+                .collect();
+            let rhs: Vec<_> = (0..inner * cols)
+                .map(|i| ((i % 17) as f32 - 8.0) / 8.0)
+                .collect();
+            let mut expected = vec![0.0f64; rows * cols];
+            for row in 0..rows {
+                for col in 0..cols {
+                    for k in 0..inner {
+                        expected[row * cols + col] +=
+                            f64::from(lhs[row * inner + k]) * f64::from(rhs[k * cols + col]);
+                    }
+                }
+            }
+            for lhs_layout in [DenseLayout::RowMajor, DenseLayout::ColMajor] {
+                for rhs_layout in [DenseLayout::RowMajor, DenseLayout::ColMajor] {
+                    let mut output = vec![f32::NAN; rows * cols];
+                    matmul_oriented_into(
+                        &mut output,
+                        &orient(&lhs, rows, inner, lhs_layout),
+                        lhs_layout,
+                        &orient(&rhs, inner, cols, rhs_layout),
+                        rhs_layout,
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .unwrap();
+                    assert!(output
+                        .iter()
+                        .zip(&expected)
+                        .all(|(&a, &b)| f64::from(a) == b));
+                }
+            }
+            let allocating = matmul(&lhs, &rhs, rows, inner, cols).unwrap();
+            let mut into = vec![f32::NAN; rows * cols];
+            matmul_into(&mut into, &lhs, &rhs, rows, inner, cols).unwrap();
+            assert_eq!(allocating, into);
+        }
+    }
+
+    #[test]
+    fn malformed_lengths_are_errors_before_destination_mutation() {
+        for (lhs, rhs) in [
+            (vec![1.0; 5], vec![1.0; 6]),
+            (vec![1.0; 7], vec![1.0; 6]),
+            (vec![1.0; 6], vec![1.0; 5]),
+            (vec![1.0; 6], vec![1.0; 7]),
+        ] {
+            assert!(matmul(&lhs, &rhs, 2, 3, 2).is_err());
+            let mut dst = vec![42.0; 4];
+            assert!(matmul_into(&mut dst, &lhs, &rhs, 2, 3, 2).is_err());
+            assert_eq!(dst, vec![42.0; 4]);
+            for layout in [DenseLayout::RowMajor, DenseLayout::ColMajor] {
+                assert!(
+                    matmul_oriented_into(&mut dst, &lhs, layout, &rhs, layout, 2, 3, 2).is_err()
+                );
+                assert_eq!(dst, vec![42.0; 4]);
+            }
+        }
+        let mut dst = [42.0; 3];
+        assert!(matmul_into(&mut dst, &[1.0; 6], &[1.0; 6], 2, 3, 2).is_err());
+        assert_eq!(dst, [42.0; 3]);
+        // A zero output must not bypass the input shape contract.
+        assert!(matmul(&[], &[], 0, 3, 2).is_err());
+        assert!(matmul_into(&mut [], &[], &[], 0, 3, 2).is_err());
+    }
+
+    #[test]
+    fn overflow_is_rejected_before_allocation_or_empty_shortcuts() {
+        for (rows, inner, cols) in [(usize::MAX, 0, 2), (usize::MAX, 2, 0), (0, usize::MAX, 2)] {
+            let mut dst = [42.0];
+            assert!(matmul(&[], &[], rows, inner, cols)
+                .unwrap_err()
+                .contains("overflow"));
+            assert!(matmul_into(&mut dst, &[], &[], rows, inner, cols)
+                .unwrap_err()
+                .contains("overflow"));
+            assert_eq!(dst, [42.0]);
+        }
+        assert!(should_use(usize::MAX, usize::MAX, usize::MAX));
+        assert!(!should_use(usize::MAX, 0, usize::MAX));
+    }
+}

@@ -1,0 +1,278 @@
+{
+  "source": {
+    "commit": "634222f991502f1a84b518180e240f4f976c4bf7",
+    "tree": "d1e293668df246eab8c063b8e98cdccb667a71af"
+  },
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 2.1715472910000244,
+      "overrides": {}
+    },
+    {
+      "name": "cpu-suite",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,faer",
+        "--lib",
+        "--test",
+        "prepacked_cpu_dispatch",
+        "--test",
+        "autograd_observability",
+        "--test",
+        "autograd_sgd",
+        "--test",
+        "classification",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 8.294833292005933,
+      "overrides": {}
+    },
+    {
+      "name": "cpu-serial",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu",
+        "--lib",
+        "backend::cpu_dense",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 8.164934375003213,
+      "overrides": {
+        "SPIRAL_DETERMINISTIC": "1",
+        "SPIRAL_DETERMINISTIC_REDUCTION": "1",
+        "RAYON_NUM_THREADS": "1"
+      }
+    },
+    {
+      "name": "selfsup-cpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "spiral-selfsup"
+      ],
+      "exit_code": 0,
+      "seconds": 23.0367890829948,
+      "overrides": {}
+    },
+    {
+      "name": "native-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "-p",
+        "spiral-selfsup",
+        "-p",
+        "st-bench",
+        "--all-targets",
+        "--no-deps",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 10.038295000005746,
+      "overrides": {}
+    },
+    {
+      "name": "wasm-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 2.3683803750027437,
+      "overrides": {}
+    },
+    {
+      "name": "wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "-p",
+        "spiraltorch-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--release"
+      ],
+      "exit_code": 0,
+      "seconds": 32.70175812499656,
+      "overrides": {}
+    },
+    {
+      "name": "wasm-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm",
+        "--target",
+        "nodejs",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm"
+      ],
+      "exit_code": 0,
+      "seconds": 0.24903854199510533,
+      "overrides": {}
+    },
+    {
+      "name": "wasm-numerics",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/numeric_boundaries.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.047319334000349045,
+      "overrides": {}
+    },
+    {
+      "name": "wasm-dense-autograd",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_dense_matmul.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.05946162500185892,
+      "overrides": {}
+    },
+    {
+      "name": "python-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "spiraltorch-py",
+        "--no-default-features",
+        "--features",
+        "python-default"
+      ],
+      "exit_code": 0,
+      "seconds": 81.20475699999952,
+      "overrides": {}
+    },
+    {
+      "name": "python-numerics",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_source_crosscut.py"
+      ],
+      "exit_code": 0,
+      "seconds": 2.067054208004265,
+      "overrides": {}
+    },
+    {
+      "name": "selfsup-wgpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "spiral-selfsup",
+        "--features",
+        "wgpu",
+        "--test",
+        "info_nce_tensor",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 45.57030854199547,
+      "overrides": {
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS": "1"
+      }
+    },
+    {
+      "name": "benchmark-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "cpu_dense_workspace",
+        "--example",
+        "source_crosscut"
+      ],
+      "exit_code": 0,
+      "seconds": 55.046893125007045,
+      "overrides": {}
+    }
+  ],
+  "products": {
+    "python-cpu.dylib": "b903f36a44febdb0e2e96fb7285c8444cd09d62fa5dae0fe0eac53cb99e2d106",
+    "candidate-crosscut": "64f847aa0b9ff4954d7fb184c92ac409c00b99d5845a79aa9cfc95a349133209",
+    "candidate-dense": "6ec771e17c7ab11d1096cd8f58cd7cd5e8af1db0c264e71344a7084fd38d0ff9"
+  },
+  "status": "passed",
+  "compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n",
+  "environment": {
+    "CARGO_BUILD_JOBS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0",
+    "RAYON_NUM_THREADS": "4",
+    "SPIRALTORCH_AUTOTUNE": "1",
+    "SPIRALTORCH_AUTOTUNE_STORE": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/tuning.json"
+  }
+}

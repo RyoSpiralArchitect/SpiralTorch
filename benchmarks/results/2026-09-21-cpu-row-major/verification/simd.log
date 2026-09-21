@@ -1,0 +1,111 @@
+   Compiling proc-macro2 v1.0.101
+   Compiling quote v1.0.41
+   Compiling unicode-ident v1.0.19
+   Compiling autocfg v1.5.0
+   Compiling cfg-if v1.0.3
+   Compiling zerocopy v0.8.27
+   Compiling libc v0.2.189
+   Compiling libm v0.2.16
+   Compiling syn v2.0.106
+   Compiling num-traits v0.2.19
+   Compiling serde_core v1.0.229
+   Compiling zerocopy-derive v0.8.27
+   Compiling syn v3.0.4
+   Compiling serde v1.0.229
+   Compiling serde_derive v1.0.229
+   Compiling getrandom v0.2.17
+   Compiling crossbeam-utils v0.8.21
+   Compiling zmij v1.0.21
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_core v0.6.4
+   Compiling find-msvc-tools v0.1.9
+   Compiling serde_json v1.0.151
+   Compiling crossbeam-epoch v0.9.20
+   Compiling shlex v2.0.1
+   Compiling thiserror v2.0.17
+   Compiling cc v1.2.63
+   Compiling rand_chacha v0.3.1
+   Compiling thiserror-impl v2.0.17
+   Compiling matrixmultiply v0.3.10
+   Compiling memchr v2.7.6
+   Compiling thiserror v1.0.69
+   Compiling either v1.15.0
+   Compiling itoa v1.0.15
+   Compiling rand v0.8.8
+   Compiling blake3 v1.8.7
+   Compiling half v2.7.1
+   Compiling thiserror-impl v1.0.69
+   Compiling arrayvec v0.7.6
+   Compiling rawpointer v0.2.1
+   Compiling anstyle v1.0.13
+   Compiling rayon-core v1.13.0
+   Compiling clap_lex v1.1.0
+   Compiling ciborium-io v0.2.2
+   Compiling regex-syntax v0.8.8
+   Compiling clap_builder v4.5.60
+   Compiling regex-automata v0.4.13
+   Compiling ciborium-ll v0.2.2
+   Compiling crossbeam-deque v0.8.6
+   Compiling itertools v0.10.5
+   Compiling num-integer v0.1.46
+   Compiling num-complex v0.4.6
+   Compiling same-file v1.0.6
+   Compiling cast v0.3.0
+   Compiling plotters-backend v0.3.7
+   Compiling termcolor v1.4.1
+   Compiling hashbrown v0.16.0
+   Compiling bit-vec v0.6.3
+   Compiling equivalent v1.0.2
+   Compiling unicode-width v0.1.14
+   Compiling constant_time_eq v0.4.2
+   Compiling codespan-reporting v0.11.1
+   Compiling indexmap v2.11.4
+   Compiling bit-set v0.5.3
+   Compiling plotters-svg v0.3.7
+   Compiling criterion-plot v0.5.0
+   Compiling ndarray v0.15.6
+   Compiling walkdir v2.5.0
+   Compiling regex v1.12.2
+   Compiling ciborium v0.2.2
+   Compiling clap v4.5.60
+   Compiling tinytemplate v1.2.1
+   Compiling is-terminal v0.4.16
+   Compiling bitflags v2.13.1
+   Compiling anes v0.1.6
+   Compiling hexf-parse v0.2.1
+   Compiling unicode-xid v0.2.6
+   Compiling rustc-hash v1.1.0
+   Compiling once_cell v1.21.4
+   Compiling oorandom v11.1.5
+   Compiling log v0.4.28
+   Compiling criterion v0.5.1
+   Compiling st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kdsl)
+   Compiling naga v0.20.0
+   Compiling st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+   Compiling rayon v1.12.0
+   Compiling plotters v0.3.7
+   Compiling spiral-config v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config)
+   Compiling st-kernel-contracts v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kernel-contracts)
+   Compiling rand_distr v0.4.3
+   Compiling pollster v0.3.0
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.68s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_tensor-8b8bd63818fde0db)
+
+running 13 tests
+test backend::cpu_dense::tests::autotune_cache_recovers_after_poison ... ok
+test backend::cpu_dense::tests::autotune_keeps_rhs_layouts_separate_and_benchmarks_the_actual_path ... ok
+test backend::cpu_dense::tests::direct_panels_preserve_every_small_width_and_tail ... ok
+test backend::cpu_dense::tests::every_kernel_preserves_sequential_reduction_with_tails ... ok
+test backend::cpu_dense::tests::invalid_lengths_and_overflow_are_errors_before_writing ... ok
+test backend::cpu_dense::tests::matmul_into_matches_reference_m8n12 ... ok
+test backend::cpu_dense::tests::matmul_into_matches_reference_with_tail_and_partial_rows ... ok
+test backend::cpu_dense::tests::matmul_packed_into_matches_unpacked ... ok
+test backend::cpu_dense::tests::matmul_with_kernel_spec_matches_reference_m4n16 ... ok
+test backend::cpu_dense::tests::public_paths_preserve_sequential_reduction_and_overwrite_destination ... ok
+test backend::cpu_dense::tests::row_major_kernels_respect_strides_and_output_guards ... ok
+test backend::cpu_dense::tests::row_major_tiles_preserve_every_row_and_column_tail ... ok
+test backend::cpu_dense::tests::serial_panel_storage_is_reused_between_rhs_blocks ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 443 filtered out; finished in 0.73s
+

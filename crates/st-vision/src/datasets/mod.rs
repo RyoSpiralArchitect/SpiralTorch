@@ -493,7 +493,7 @@ mod tests {
         assert_eq!(batch.len(), 3);
         let bounds = batch.bounds.data();
         let mut previous_start = None;
-        for chunk in bounds.chunks_exact(2) {
+        for chunk in bounds.as_chunks::<2>().0 {
             assert!(chunk[0] < chunk[1]);
             if let Some(prev) = previous_start {
                 assert!(chunk[0] >= prev);

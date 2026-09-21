@@ -1,0 +1,19 @@
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.88s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_nn-e94245fa8fb8d565)
+
+running 7 tests
+test layers::linear::tests::linear_backward_rejects_non_finite_grad_without_updates ... ok
+test layers::linear::tests::linear_backward_rejects_non_finite_input_grad_without_updates ... ok
+test layers::linear::tests::linear_backward_streams_hypergrad ... ok
+test layers::linear::tests::linear_empty_batch_backward_returns_empty_input_grad_without_updates ... ok
+test layers::linear::tests::linear_forward_matches_manual ... ok
+test layers::linear::tests::linear_forward_rejects_non_finite_input ... ok
+test layers::linear::tests::linear_forward_rejects_non_finite_parameter_before_pack ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 708 filtered out; finished in 0.00s
+

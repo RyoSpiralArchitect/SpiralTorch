@@ -1,0 +1,125 @@
+{
+  "steps": [
+    {
+      "name": "serial-warm-baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-warm-candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-baseline-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-candidate-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-candidate-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-baseline-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-torch",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-S",
+        "-c",
+        "import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=sys.argv[2:];runpy.run_path(sys.argv[0],run_name='__main__')",
+        "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/measure_extended.py",
+        "torch",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-warm-baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-warm-candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-baseline-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-candidate-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-candidate-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-baseline-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-torch",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-S",
+        "-c",
+        "import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=sys.argv[2:];runpy.run_path(sys.argv[0],run_name='__main__')",
+        "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/measure_extended.py",
+        "torch",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "binaries": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/baseline-extended": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/extended-build-a/candidate-extended": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa"
+  },
+  "policy": "One complete recorded preconditioning grid per binary/mode, then fixed AB/BA; no interval trimming"
+}
