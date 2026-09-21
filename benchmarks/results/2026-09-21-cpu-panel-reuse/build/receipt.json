@@ -1,0 +1,50 @@
+{
+  "harness_sha256": "12ba1714b4a025bb9f6556759d7367691fa5e086588d65c519907517b7340ea5",
+  "steps": [
+    {
+      "label": "baseline",
+      "root": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-panel-reuse-20260921/baseline-source",
+      "commit": "574750bb708c50b7ea30f638d28f7651bd876538",
+      "status": "?? crates/st-bench/examples/cpu_dense_extended.rs",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "cpu_dense_extended"
+      ],
+      "exit_code": 0,
+      "seconds": 51.819871750005404,
+      "source_sha256": "61411b598e8c40c32c89c3451c3fc6433083e956f97cc3965f750b9947093aef",
+      "forced_rebuild": "mtime-only touch of cpu_dense.rs and identical benchmark harness",
+      "binary_sha256": "3a7bb6d52fe1585e60fad9b3861cce005ede128dfb33bca2f416c5c3d61133fa"
+    },
+    {
+      "label": "candidate",
+      "root": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+      "commit": "967ae20cc00a451865efdc9d55cf083b09806756",
+      "status": "",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "cpu_dense_extended"
+      ],
+      "exit_code": 0,
+      "seconds": 56.91644354199525,
+      "source_sha256": "ab7159405098679a78aa99133c2b06ee53078abdc6ba519f43abb5a2808fcfcf",
+      "forced_rebuild": "mtime-only touch of cpu_dense.rs and identical benchmark harness",
+      "binary_sha256": "86ebc3d25239aa81f60743b7598eeb9c1351a8890800625562e9c025d578dc6d"
+    }
+  ],
+  "status": "passed"
+}

@@ -56,13 +56,22 @@ successful all-workspace lint run.
 The [CPU workspace follow-up](../../benchmarks/results/2026-09-21-cpu-dense-workspace/README.md)
 implements fixed-width direct products, serial panel-buffer reuse, checked sizes,
 and direct Tensor label construction. It retains rejected experiments and shows
-that allocation savings are not equivalent to large-matrix speedups. Auto routing
-and multi-tile parallel packing still need separate work.
+that allocation savings are not equivalent to large-matrix speedups.
 
-1. CPU dense packing and small-batch dispatch: the measured Tensor-returning path
-   has extra temporary allocations and some regressions, while PyTorch remains
-   faster at batch 96. Inspect `cpu_dense::matmul_into`, its blocked-size predicate,
-   and reusable packing storage before claiming an across-the-board speedup.
+The [panel-reuse follow-up](../../benchmarks/results/2026-09-21-cpu-panel-reuse/README.md)
+now reuses packed A rows across bounded column groups and the full prepacked RHS.
+On the fixed wider CPU grid, prepacked median-time ratios geometrically average
+1.618x serial and 2.141x with four threads, relative to the workspace follow-up.
+Unpacked results remain mixed, can require more RHS scratch, and retain repeated
+work when the inner dimension permits only one panel per group. All negative
+results and an excluded shared-build-cache attempt are preserved. The comparison
+now checks source/build identity before trusting timing or numerical success.
+PyTorch is still faster across this grid; Auto routing is not changed.
+
+1. CPU dense packing and small-batch dispatch: profile the remaining deep-inner
+   unpacked path, SIMD/microkernel throughput, and high-level Auto dispatch as
+   separate boundaries. Reusing A panels is useful, but does not close the wide
+   matrix-product gap with PyTorch or prove end-to-end training improvement.
 2. `st-core/src/util/rope_lru.rs`: epsilon-based equality and bitwise hashing do
    not define the same key identity; equality is also non-transitive. Review
    exact angle identity, finite values, eviction, and real consumers before

@@ -1,0 +1,51 @@
+{
+  "source": {
+    "commit": "f18e3e9567864b662d59aedbb3f9c09d37b36f17",
+    "tree": "1cf6067a5795c9430af0259863067e95c5bff507"
+  },
+  "steps": [
+    {
+      "name": "cpu-kernels",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu",
+        "--lib",
+        "backend::cpu_dense",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 5.332534000001033
+    },
+    {
+      "name": "benchmark-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "cpu_dense_workspace",
+        "--example",
+        "source_crosscut"
+      ],
+      "exit_code": 0,
+      "seconds": 74.20807933299511
+    }
+  ],
+  "products": {
+    "candidate-dense": "aa8748eb073ff705009464b4c8b2aab5b45886dbc3aa71df83a6223be5ee4c12",
+    "candidate-crosscut": "d97d8ab265bed811942efa0b759bf09ee311b3d4b06de2b04084141e84707f9c"
+  },
+  "status": "passed"
+}

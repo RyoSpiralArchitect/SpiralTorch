@@ -1,0 +1,16 @@
+✔ autograd dimensions reject coercion before tensor construction (3.200792ms)
+✔ ignore_index rejects lossy conversions without changing gradients (2.969792ms)
+✔ optimizer indices reject non-numbers as well as malformed numbers (0.517542ms)
+✔ numeric transport never invokes user coercion hooks (1.033708ms)
+✔ tuner index mutations reject invalid input before touching records (0.998125ms)
+✔ every tuner workload route validates all three dimensions (14.953ms)
+✔ valid workload wrappers retain matching and fallback behavior (2.538041ms)
+✔ generated TypeScript retains numeric and optional parameter types (0.543833ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30.02575
