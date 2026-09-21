@@ -42,6 +42,7 @@ function check(rows, inner, cols, packed) {
 for (const [rows, inner, cols] of [
   [1, 31, 8], [3, 37, 13], [4, 5, 16], [8, 31, 8],
   [17, 37, 29], [33, 129, 49], [65, 257, 25],
+  [17, 137, 123], [9, 2049, 25],
 ]) {
   for (const packed of [false, true]) check(rows, inner, cols, packed);
 }

@@ -190,7 +190,8 @@ fn compute_with_packed_block(
     let tn = spec.tn;
     let kernel = spec.kernel;
 
-    if width == tn {
+    if width >= tn {
+        let full_width = width / tn * tn;
         let full_row_blocks = rows / tm;
         if full_row_blocks > 0 {
             let prefix_rows = full_row_blocks * tm;
@@ -205,20 +206,20 @@ fn compute_with_packed_block(
                 for offset in (0..local_rows).step_by(tm) {
                     let lhs_panel = &lhs_chunk[offset * inner..(offset + tm) * inner];
                     pack_a_block(lhs_panel, inner, tm, packed_a);
-                    // SAFETY: `packed_a` is exactly `tm * inner` elements arranged as expected by
-                    // the microkernel, `packed_block` contains `tn * inner` packed rhs elements,
-                    // and `dst_chunk` covers `local_rows * cols` elements with
-                    // `offset + tm <= local_rows` and `col_start + tn <= cols`.
-                    unsafe {
-                        kernel(
-                            packed_a.as_ptr(),
-                            packed_block.as_ptr(),
-                            dst_chunk.as_mut_ptr().add(offset * cols + col_start),
-                            tm,
-                            inner,
-                            cols,
-                            inner,
-                        );
+                    for col in (0..full_width).step_by(tn) {
+                        // SAFETY: A has tm * inner lanes; each B subpanel has tn * inner
+                        // elements. Both output row and column spans stay within this chunk.
+                        unsafe {
+                            kernel(
+                                packed_a.as_ptr(),
+                                packed_block.as_ptr().add(col * inner),
+                                dst_chunk.as_mut_ptr().add(offset * cols + col_start + col),
+                                tm,
+                                inner,
+                                cols,
+                                inner,
+                            );
+                        }
                     }
                 }
             };
@@ -244,6 +245,19 @@ fn compute_with_packed_block(
         }
 
         let processed_rows = (rows / tm) * tm;
+        if full_width < width && processed_rows > 0 {
+            scalar_block_with_packed(
+                dst,
+                lhs,
+                inner,
+                cols,
+                0,
+                processed_rows,
+                col_start + full_width,
+                width - full_width,
+                &packed_block[full_width * inner..],
+            );
+        }
         if processed_rows < rows {
             scalar_block_with_packed(
                 dst,
@@ -474,6 +488,12 @@ fn select_microkernel(rows: usize, inner: usize, cols: usize) -> &'static MicroK
     autotune_microkernel(rows, inner, cols).unwrap_or_else(default_kernel)
 }
 
+fn rhs_panel_width(inner: usize, cols: usize, tn: usize) -> usize {
+    // At least one kernel panel, even when a single panel exceeds the cache target.
+    let blocks = (L2_TARGET_BYTES / core::mem::size_of::<f32>() / inner / tn).max(1);
+    cols.min(blocks * tn)
+}
+
 fn matmul_with_kernel_spec(
     spec: &'static MicroKernelSpec,
     dst: &mut [f32],
@@ -483,38 +503,18 @@ fn matmul_with_kernel_spec(
     inner: usize,
     cols: usize,
 ) {
-    let tn = spec.tn;
-    let mut packed_panel = vec![0.0f32; tn * inner];
+    let panel_cols = rhs_panel_width(inner, cols, spec.tn);
+    let mut packed_panel = vec![0.0f32; panel_cols * inner];
     let mut serial_scratch = Vec::new();
-    let full_blocks = cols.checked_div(tn).unwrap_or(0);
-    let tail = cols.checked_rem(tn).unwrap_or(cols);
-
-    for block in 0..full_blocks {
-        let col_start = block * tn;
-        pack_b_block_into(packed_panel.as_mut_slice(), rhs, inner, cols, col_start, tn);
-        compute_with_packed_block(
-            spec,
-            dst,
-            lhs,
-            rows,
-            inner,
-            cols,
-            col_start,
-            tn,
-            packed_panel.as_slice(),
-            &mut serial_scratch,
-        );
-    }
-
-    if tail > 0 {
-        let col_start = full_blocks * tn;
+    for col_start in (0..cols).step_by(panel_cols) {
+        let width = (cols - col_start).min(panel_cols);
         pack_b_block_into(
-            &mut packed_panel[..tail * inner],
+            &mut packed_panel[..width * inner],
             rhs,
             inner,
             cols,
             col_start,
-            tail,
+            width,
         );
         compute_with_packed_block(
             spec,
@@ -524,8 +524,8 @@ fn matmul_with_kernel_spec(
             inner,
             cols,
             col_start,
-            tail,
-            &packed_panel[..tail * inner],
+            width,
+            &packed_panel[..width * inner],
             &mut serial_scratch,
         );
     }
@@ -540,44 +540,19 @@ fn matmul_packed_with_kernel_spec(
     inner: usize,
     cols: usize,
 ) {
-    let tn = spec.tn;
     let mut serial_scratch = Vec::new();
-    let full_blocks = cols.checked_div(tn).unwrap_or(0);
-    let tail = cols.checked_rem(tn).unwrap_or(cols);
-
-    for block in 0..full_blocks {
-        let col_start = block * tn;
-        let packed_block = &packed_rhs[col_start * inner..(col_start + tn) * inner];
-        compute_with_packed_block(
-            spec,
-            dst,
-            lhs,
-            rows,
-            inner,
-            cols,
-            col_start,
-            tn,
-            packed_block,
-            &mut serial_scratch,
-        );
-    }
-
-    if tail > 0 {
-        let col_start = full_blocks * tn;
-        let packed_block = &packed_rhs[col_start * inner..(col_start + tail) * inner];
-        compute_with_packed_block(
-            spec,
-            dst,
-            lhs,
-            rows,
-            inner,
-            cols,
-            col_start,
-            tail,
-            packed_block,
-            &mut serial_scratch,
-        );
-    }
+    compute_with_packed_block(
+        spec,
+        dst,
+        lhs,
+        rows,
+        inner,
+        cols,
+        0,
+        cols,
+        packed_rhs,
+        &mut serial_scratch,
+    );
 }
 
 pub fn is_available() -> bool {
@@ -750,7 +725,7 @@ pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, S
     Ok(packed)
 }
 
-const CPU_AUTOTUNE_REVISION: u64 = 3;
+const CPU_AUTOTUNE_REVISION: u64 = 4;
 const CPU_AUTOTUNE_MIN_VOLUME: usize = 64 * 64 * 32;
 const CPU_AUTOTUNE_SAMPLE_MAX_DIM: usize = 2048;
 const CPU_AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -1203,6 +1178,8 @@ mod tests {
                 (spec.tm, 1, spec.tn),
                 (spec.tm * 2 + 1, 37, spec.tn * 2 + 3),
                 (spec.tm + 1, 1025, spec.tn + 1),
+                (spec.tm * 3 + 1, 137, spec.tn * 16 + 3),
+                (spec.tm + 1, 2049, spec.tn * 2 + 1),
             ] {
                 let lhs: Vec<f32> = (0..rows * inner)
                     .map(|i| ((i * 17 % 127) as f32 - 63.0) / 31.0)
@@ -1371,6 +1348,20 @@ mod tests {
                         dst.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
                         expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rhs_groups_are_bounded_except_for_one_minimum_kernel_panel() {
+        for spec in MICROKERNELS {
+            for inner in [1, 31, 137, 2049, 16385] {
+                for cols in [1, spec.tn - 1, spec.tn, spec.tn * 17 + 3] {
+                    let width = rhs_panel_width(inner, cols, spec.tn);
+                    assert!(width > 0 && width <= cols);
+                    assert!(width == cols || width.is_multiple_of(spec.tn));
+                    assert!(width * inner * 4 <= L2_TARGET_BYTES || width <= spec.tn);
                 }
             }
         }
