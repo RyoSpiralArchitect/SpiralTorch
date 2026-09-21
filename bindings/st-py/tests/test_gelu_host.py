@@ -28,7 +28,7 @@ class GeluHostTests(unittest.TestCase):
     def test_checked_forward_retains_errors_and_signed_zero(self):
         for values, label in [([3e38, float("nan")], "gelu_input"),
                               ([3e38], "gelu_square"), ([1e14], "gelu_cubic")]:
-            with self.assertRaisesRegex(RuntimeError, label):
+            with self.assertRaisesRegex(ValueError, label):
                 st.nn.Gelu()(st.Tensor(1, len(values), values))
         result = st.nn.Gelu()(st.Tensor(1, 2, [-0.0, 0.0])).tolist()[0]
         self.assertEqual([math.copysign(1, x) for x in result], [-1, 1])
