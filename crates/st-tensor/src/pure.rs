@@ -6383,6 +6383,26 @@ impl Tensor {
         Ok(output)
     }
 
+    /// Return checked tanh-GELU on the CPU, with a row-major result.
+    ///
+    /// Reject non-finite inputs and intermediate powers, preserving the neural
+    /// layer's checked forward policy. The input and its aliases remain unchanged.
+    pub fn try_gelu(&self) -> PureResult<Tensor> {
+        Self::validate_finite_tensor_util_slice("gelu_input", self.data())?;
+        let row_major;
+        let input = if self.layout == Layout::RowMajor {
+            self
+        } else {
+            row_major = self.to_layout(Layout::RowMajor)?;
+            &row_major
+        };
+        let mut data = aligned_with_capacity(self.len());
+        for &value in input.data() {
+            data.push(checked_gelu_finite(value)?);
+        }
+        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+    }
+
     /// Apply the GELU activation in-place (`self[i] = GELU(self[i])`).
     pub fn gelu_inplace(&mut self) {
         let data = Arc::make_mut(&mut self.data);
@@ -6444,6 +6464,22 @@ impl Tensor {
             return Tensor::zeros(rows, cols);
         }
 
+        // Backends consume logical row-major pairs, not arbitrary storage order.
+        let input_row_major;
+        let input = if self.layout == Layout::RowMajor {
+            self
+        } else {
+            input_row_major = self.to_layout(Layout::RowMajor)?;
+            &input_row_major
+        };
+        let seed_row_major;
+        let seed = if grad_output.layout == Layout::RowMajor {
+            grad_output
+        } else {
+            seed_row_major = grad_output.to_layout(Layout::RowMajor)?;
+            &seed_row_major
+        };
+
         #[cfg(feature = "wgpu_dense")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -6452,7 +6488,7 @@ impl Tensor {
             {
                 #[cfg(feature = "wgpu_dense")]
                 if wgpu_dense::is_available() {
-                    match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
+                    match wgpu_dense::gelu_backward(input.data(), seed.data(), rows, cols) {
                         Ok(buffer) => {
                             Self::validate_finite_tensor_util_slice(
                                 "gelu_backward_output",
@@ -6491,7 +6527,7 @@ impl Tensor {
             TensorUtilBackend::GpuWgpu => {
                 #[cfg(feature = "wgpu_dense")]
                 {
-                    match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
+                    match wgpu_dense::gelu_backward(input.data(), seed.data(), rows, cols) {
                         Ok(buffer) => {
                             Self::validate_finite_tensor_util_slice(
                                 "gelu_backward_output",
@@ -6531,12 +6567,12 @@ impl Tensor {
             }
         }
 
-        let mut data = Vec::with_capacity(rows * cols);
-        for (z, g) in self.data().iter().zip(grad_output.data().iter()) {
+        let mut data = aligned_with_capacity(rows * cols);
+        for (z, g) in input.data().iter().zip(seed.data().iter()) {
             data.push(gelu_prime(*z) * g);
         }
         Self::validate_finite_tensor_util_slice("gelu_backward_output", &data)?;
-        let output = Tensor::from_vec(rows, cols, data)?;
+        let output = Tensor::from_aligned(rows, cols, data, Layout::RowMajor)?;
         #[cfg(feature = "wgpu_dense")]
         let (fallback_from, fallback_message) = if let Some(message) = wgpu_failure.as_deref() {
             (Some("wgpu"), Some(message))
@@ -12044,6 +12080,25 @@ fn gelu(x: f32) -> f32 {
     const SQRT_2_OVER_PI: f32 = 0.797_884_6;
     let x_cubed = x * x * x;
     0.5 * x * (1.0 + (SQRT_2_OVER_PI * (x + COEFF * x_cubed)).tanh())
+}
+
+// Called only after validating every input, so input errors keep precedence over
+// intermediate overflow. Keep the Module's arithmetic and error labels intact.
+fn checked_gelu_finite(value: f32) -> PureResult<f32> {
+    const SQRT_2_OVER_PI: f32 = std::f32::consts::FRAC_2_SQRT_PI * std::f32::consts::FRAC_1_SQRT_2;
+    let square = value * value;
+    Tensor::validate_finite_tensor_util_value("gelu_square", square)?;
+    let cubic = square * value;
+    Tensor::validate_finite_tensor_util_value("gelu_cubic", cubic)?;
+    let inner_arg = value + 0.044715 * cubic;
+    Tensor::validate_finite_tensor_util_value("gelu_inner_arg", inner_arg)?;
+    let inner = SQRT_2_OVER_PI * inner_arg;
+    Tensor::validate_finite_tensor_util_value("gelu_inner", inner)?;
+    let tanh_inner = inner.tanh();
+    Tensor::validate_finite_tensor_util_value("gelu_tanh", tanh_inner)?;
+    let output = 0.5 * value * (1.0 + tanh_inner);
+    Tensor::validate_finite_tensor_util_value("gelu_output", output)?;
+    Ok(output)
 }
 
 /// Returns the scalar derivative of the tanh-approximate GELU used by Tensor.

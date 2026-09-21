@@ -149,6 +149,7 @@ jobs:
       - name: Cross-crate layout and geometry regressions
         if: matrix.run_upper_stack
         run: |
+          cargo test --locked -p st-nn --release --test gelu_layout_contract
           cargo test --locked -p spiral-selfsup --release --test info_nce_tensor
           cargo test --locked -p st-vision --release --test temporal_channels
           cargo test --locked -p st-frac --release --lib fractal_field
@@ -220,7 +221,7 @@ jobs:
       - name: neural layers and losses with WGPU enabled
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
-        run: cargo test --locked -p st-nn --features wgpu --release --lib -- --test-threads=1
+        run: cargo test --locked -p st-nn --features wgpu --release --lib --test gelu_layout_contract -- --test-threads=1
       - name: InfoNCE entry points with a live dense WGPU probe
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"

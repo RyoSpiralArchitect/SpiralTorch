@@ -6,9 +6,11 @@
 use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::Module;
 use crate::{PureResult, Tensor};
-use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorError, TensorUtilBackend};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, Layout, TensorError, TensorUtilBackend};
 
+#[cfg(test)]
 const SQRT_2_OVER_PI: f32 = std::f32::consts::FRAC_2_SQRT_PI * std::f32::consts::FRAC_1_SQRT_2;
+#[cfg(test)]
 const KAPPA: f32 = 0.044715;
 
 fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
@@ -75,23 +77,6 @@ impl Gelu {
         0.5 * value * (1.0 + inner.tanh())
     }
 
-    fn gelu_checked(value: f32) -> PureResult<f32> {
-        validate_finite_value("gelu_input", value)?;
-        let square = value * value;
-        validate_finite_value("gelu_square", square)?;
-        let cubic = square * value;
-        validate_finite_value("gelu_cubic", cubic)?;
-        let inner_arg = value + KAPPA * cubic;
-        validate_finite_value("gelu_inner_arg", inner_arg)?;
-        let inner = SQRT_2_OVER_PI * inner_arg;
-        validate_finite_value("gelu_inner", inner)?;
-        let tanh_inner = inner.tanh();
-        validate_finite_value("gelu_tanh", tanh_inner)?;
-        let output = 0.5 * value * (1.0 + tanh_inner);
-        validate_finite_value("gelu_output", output)?;
-        Ok(output)
-    }
-
     #[cfg(test)]
     fn gelu_derivative(value: f32) -> f32 {
         let cubic = value * value * value;
@@ -151,16 +136,7 @@ impl Module for Gelu {
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
-        let (rows, cols) = input.shape();
-        validate_finite_tensor("gelu_input", input)?;
-        if rows == 0 || cols == 0 {
-            return Tensor::zeros(rows, cols);
-        }
-        let mut data = Vec::with_capacity(rows * cols);
-        for value in input.data() {
-            data.push(Self::gelu_checked(*value)?);
-        }
-        Tensor::from_vec(rows, cols, data)
+        input.try_gelu()
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -190,6 +166,8 @@ impl Module for Gelu {
                 backend: fallback_from,
                 message: fallback_message,
             }) => {
+                let input = input.to_layout(Layout::RowMajor)?;
+                let grad_output = grad_output.to_layout(Layout::RowMajor)?;
                 let mut data = Vec::with_capacity(rows * cols);
                 for (z, g) in input.data().iter().zip(grad_output.data().iter()) {
                     let derivative = Self::gelu_derivative_checked(*z)?;
