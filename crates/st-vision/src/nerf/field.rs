@@ -256,7 +256,7 @@ impl NerfField {
                 let dir_off = row * dir_dims;
                 buffer.extend_from_slice(&dir_slice[dir_off..dir_off + dir_dims]);
             } else if dir_dims > 0 {
-                buffer.extend(std::iter::repeat(0.0).take(dir_dims));
+                buffer.extend(std::iter::repeat_n(0.0, dir_dims));
             }
         }
         Tensor::from_vec(rows, self.layout.total_dims(), buffer)
@@ -348,8 +348,8 @@ impl NerfField {
         let mut data = Vec::with_capacity(checked_elements(rows, 4)?);
         let density_data = density.data();
         let color_data = color.data();
-        for row in 0..rows {
-            data.push(density_data[row]);
+        for (row, &density) in density_data.iter().enumerate() {
+            data.push(density);
             let offset = row * 3;
             data.extend_from_slice(&color_data[offset..offset + 3]);
         }
