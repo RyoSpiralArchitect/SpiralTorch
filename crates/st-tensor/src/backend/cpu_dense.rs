@@ -38,6 +38,7 @@ struct MicroKernelSpec {
     tm: usize,
     tn: usize,
     kernel: KernelFn,
+    row_major_kernel: KernelFn,
 }
 
 const MICROKERNELS: &[MicroKernelSpec] = &[
@@ -46,12 +47,14 @@ const MICROKERNELS: &[MicroKernelSpec] = &[
         tm: 8,
         tn: 12,
         kernel: microkernel_8x12,
+        row_major_kernel: microkernel_row_major::<8, 12>,
     },
     MicroKernelSpec {
         name: "m4n16",
         tm: 4,
         tn: 16,
         kernel: microkernel_4x16,
+        row_major_kernel: microkernel_row_major::<4, 16>,
     },
 ];
 
@@ -105,28 +108,6 @@ fn row_tile_size(rows: usize, inner: usize, tm: usize) -> usize {
         tm
     } else {
         tile
-    }
-}
-
-#[inline]
-fn pack_b_block_into(
-    dst: &mut [f32],
-    rhs: &[f32],
-    inner: usize,
-    cols: usize,
-    col_start: usize,
-    width: usize,
-) {
-    debug_assert_eq!(dst.len(), width * inner);
-    debug_assert_eq!(rhs.len(), inner * cols);
-    debug_assert!(col_start <= cols);
-    debug_assert!(col_start + width <= cols);
-
-    for col in 0..width {
-        let rhs_col = col_start + col;
-        for offset in 0..inner {
-            dst[col * inner + offset] = rhs[offset * cols + rhs_col];
-        }
     }
 }
 
@@ -484,14 +465,58 @@ fn default_kernel() -> &'static MicroKernelSpec {
     &MICROKERNELS[DEFAULT_KERNEL_INDEX]
 }
 
-fn select_microkernel(rows: usize, inner: usize, cols: usize) -> &'static MicroKernelSpec {
-    autotune_microkernel(rows, inner, cols).unwrap_or_else(default_kernel)
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CpuRhsLayout {
+    RowMajor,
+    PrepackedColumns,
 }
 
-fn rhs_panel_width(inner: usize, cols: usize, tn: usize) -> usize {
-    // At least one kernel panel, even when a single panel exceeds the cache target.
-    let blocks = (L2_TARGET_BYTES / core::mem::size_of::<f32>() / inner / tn).max(1);
-    cols.min(blocks * tn)
+impl CpuRhsLayout {
+    fn tag(self) -> &'static str {
+        match self {
+            Self::RowMajor => "row_major",
+            Self::PrepackedColumns => "prepacked_columns",
+        }
+    }
+}
+
+fn select_microkernel(
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    rhs_layout: CpuRhsLayout,
+) -> &'static MicroKernelSpec {
+    autotune_microkernel(rows, inner, cols, rhs_layout).unwrap_or_else(default_kernel)
+}
+
+#[inline(always)]
+#[allow(clippy::needless_range_loop)]
+unsafe fn microkernel_row_major<const TM: usize, const TN: usize>(
+    a: *const f32,
+    b: *const f32,
+    c: *mut f32,
+    lda: usize,
+    ldb: usize,
+    ldc: usize,
+    k: usize,
+) {
+    debug_assert!(lda >= k && ldb >= TN && ldc >= TN);
+    // Independent column lanes preserve each output's sequential K reduction.
+    let mut acc = [[0.0f32; TN]; TM];
+    for p in 0..k {
+        for row in 0..TM {
+            let a_value = *a.add(row * lda + p);
+            for col in 0..TN {
+                acc[row][col] += a_value * *b.add(p * ldb + col);
+            }
+        }
+    }
+    for row in 0..TM {
+        for col in 0..TN {
+            *c.add(row * ldc + col) += acc[row][col];
+        }
+    }
 }
 
 fn matmul_with_kernel_spec(
@@ -503,31 +528,51 @@ fn matmul_with_kernel_spec(
     inner: usize,
     cols: usize,
 ) {
-    let panel_cols = rhs_panel_width(inner, cols, spec.tn);
-    let mut packed_panel = vec![0.0f32; panel_cols * inner];
-    let mut serial_scratch = Vec::new();
-    for col_start in (0..cols).step_by(panel_cols) {
-        let width = (cols - col_start).min(panel_cols);
-        pack_b_block_into(
-            &mut packed_panel[..width * inner],
-            rhs,
-            inner,
-            cols,
-            col_start,
-            width,
-        );
-        compute_with_packed_block(
-            spec,
-            dst,
-            lhs,
-            rows,
-            inner,
-            cols,
-            col_start,
-            width,
-            &packed_panel[..width * inner],
-            &mut serial_scratch,
-        );
+    let full_cols = cols / spec.tn * spec.tn;
+    let row_tile = row_tile_size(rows, inner, spec.tm);
+    let apply = |dst_chunk: &mut [f32], lhs_chunk: &[f32]| {
+        let local_rows = lhs_chunk.len() / inner;
+        let full_rows = local_rows / spec.tm * spec.tm;
+        for row in (0..full_rows).step_by(spec.tm) {
+            for col in (0..full_cols).step_by(spec.tn) {
+                // SAFETY: each tile reads TM complete LHS rows and TN RHS columns;
+                // the disjoint output chunk contains every addressed row and column.
+                unsafe {
+                    (spec.row_major_kernel)(
+                        lhs_chunk.as_ptr().add(row * inner),
+                        rhs.as_ptr().add(col),
+                        dst_chunk.as_mut_ptr().add(row * cols + col),
+                        inner,
+                        cols,
+                        cols,
+                        inner,
+                    );
+                }
+            }
+        }
+        for row in 0..local_rows {
+            let start = if row < full_rows { full_cols } else { 0 };
+            direct_row::<true>(
+                &mut dst_chunk[row * cols..(row + 1) * cols],
+                &lhs_chunk[row * inner..(row + 1) * inner],
+                rhs,
+                cols,
+                start,
+            );
+        }
+    };
+    // A partial final row group alone does not justify starting parallel work.
+    if rows / spec.tm * spec.tm <= row_tile || determinism::lock_reduction_order() {
+        for (dst_chunk, lhs_chunk) in dst
+            .chunks_mut(cols * row_tile)
+            .zip(lhs.chunks(inner * row_tile))
+        {
+            apply(dst_chunk, lhs_chunk);
+        }
+    } else {
+        dst.par_chunks_mut(cols * row_tile)
+            .zip(lhs.par_chunks(inner * row_tile))
+            .for_each(|(dst_chunk, lhs_chunk)| apply(dst_chunk, lhs_chunk));
     }
 }
 
@@ -609,7 +654,7 @@ fn validate_matmul_lengths(
 }
 
 #[inline]
-fn direct_panel<const WIDTH: usize>(
+fn direct_panel<const WIDTH: usize, const ACCUMULATE: bool>(
     out: &mut [f32],
     row: &[f32],
     rhs: &[f32],
@@ -623,28 +668,49 @@ fn direct_panel<const WIDTH: usize>(
             *sum += a * b;
         }
     }
-    out[col..col + WIDTH].copy_from_slice(&sums);
+    if ACCUMULATE {
+        for (value, sum) in out[col..col + WIDTH].iter_mut().zip(sums) {
+            *value += sum;
+        }
+    } else {
+        out[col..col + WIDTH].copy_from_slice(&sums);
+    }
+}
+
+#[inline]
+fn direct_row<const ACCUMULATE: bool>(
+    out: &mut [f32],
+    row: &[f32],
+    rhs: &[f32],
+    cols: usize,
+    start: usize,
+) {
+    let end = start + (cols - start) / 8 * 8;
+    for col in (start..end).step_by(8) {
+        direct_panel::<8, ACCUMULATE>(out, row, rhs, cols, col);
+    }
+    let tail = if cols - end >= 4 {
+        direct_panel::<4, ACCUMULATE>(out, row, rhs, cols, end);
+        end + 4
+    } else {
+        end
+    };
+    for (col, value) in out.iter_mut().enumerate().skip(tail) {
+        let mut sum = 0.0f32;
+        for (&a, rhs_row) in row.iter().zip(rhs.chunks_exact(cols)) {
+            sum += a * rhs_row[col];
+        }
+        if ACCUMULATE {
+            *value += sum;
+        } else {
+            *value = sum;
+        }
+    }
 }
 
 fn matmul_direct(dst: &mut [f32], lhs: &[f32], rhs: &[f32], inner: usize, cols: usize) {
     for (out, row) in dst.chunks_exact_mut(cols).zip(lhs.chunks_exact(inner)) {
-        let end = cols / 8 * 8;
-        for col in (0..end).step_by(8) {
-            direct_panel::<8>(out, row, rhs, cols, col);
-        }
-        let tail = if cols - end >= 4 {
-            direct_panel::<4>(out, row, rhs, cols, end);
-            end + 4
-        } else {
-            end
-        };
-        for (col, value) in out.iter_mut().enumerate().skip(tail) {
-            let mut sum = 0.0f32;
-            for (&a, rhs_row) in row.iter().zip(rhs.chunks_exact(cols)) {
-                sum += a * rhs_row[col];
-            }
-            *value = sum;
-        }
+        direct_row::<false>(out, row, rhs, cols, 0);
     }
 }
 
@@ -669,7 +735,7 @@ pub fn matmul_into(
         matmul_direct(dst, lhs, rhs, inner, cols);
         return Ok(());
     }
-    let kernel = select_microkernel(rows, inner, cols);
+    let kernel = select_microkernel(rows, inner, cols, CpuRhsLayout::RowMajor);
     if rows < kernel.tm || cols < kernel.tn {
         matmul_direct(dst, lhs, rhs, inner, cols);
     } else {
@@ -696,7 +762,7 @@ pub fn matmul_packed_into(
 
     dst.fill(0.0);
 
-    let kernel = select_microkernel(rows, inner, cols);
+    let kernel = select_microkernel(rows, inner, cols, CpuRhsLayout::PrepackedColumns);
     matmul_packed_with_kernel_spec(kernel, dst, lhs, packed_rhs, rows, inner, cols);
 
     Ok(())
@@ -725,7 +791,7 @@ pub fn prepack_rhs(rhs: &[f32], inner: usize, cols: usize) -> Result<Vec<f32>, S
     Ok(packed)
 }
 
-const CPU_AUTOTUNE_REVISION: u64 = 4;
+const CPU_AUTOTUNE_REVISION: u64 = 5;
 const CPU_AUTOTUNE_MIN_VOLUME: usize = 64 * 64 * 32;
 const CPU_AUTOTUNE_SAMPLE_MAX_DIM: usize = 2048;
 const CPU_AUTOTUNE_WARMUP_RUNS: usize = 1;
@@ -740,13 +806,14 @@ fn autotune_microkernel(
     rows: usize,
     inner: usize,
     cols: usize,
+    rhs_layout: CpuRhsLayout,
 ) -> Option<&'static MicroKernelSpec> {
     if !should_autotune(rows, inner, cols) {
         return None;
     }
 
     let (bucket_rows, bucket_inner, bucket_cols) = quantized_problem(rows, inner, cols);
-    let (key, path) = cpu_autotune_key(bucket_rows, bucket_inner, bucket_cols)?;
+    let (key, path) = cpu_autotune_key(bucket_rows, bucket_inner, bucket_cols, rhs_layout)?;
 
     if let Some(index) = cached_microkernel_index(&key) {
         return MICROKERNELS.get(index);
@@ -765,6 +832,7 @@ fn autotune_microkernel(
         sample_cols,
         revision: CPU_AUTOTUNE_REVISION,
         runs: CPU_AUTOTUNE_SAMPLE_RUNS as u32,
+        rhs_layout,
     };
 
     let autotune_enabled = autotune_env_enabled();
@@ -807,9 +875,8 @@ fn autotune_microkernel(
         let spec = &MICROKERNELS[index];
         match microbenchmark_kernel(
             spec,
-            sample_rows,
-            sample_inner,
-            sample_cols,
+            (sample_rows, sample_inner, sample_cols),
+            rhs_layout,
             &lhs,
             &rhs,
             scratch.as_mut_slice(),
@@ -881,13 +948,13 @@ struct CpuAutotuneContext {
     sample_cols: usize,
     revision: u64,
     runs: u32,
+    rhs_layout: CpuRhsLayout,
 }
 
 fn microbenchmark_kernel(
     spec: &'static MicroKernelSpec,
-    rows: usize,
-    inner: usize,
-    cols: usize,
+    (rows, inner, cols): (usize, usize, usize),
+    rhs_layout: CpuRhsLayout,
     lhs: &[f32],
     rhs: &[f32],
     scratch: &mut [f32],
@@ -895,17 +962,25 @@ fn microbenchmark_kernel(
     if rows == 0 || inner == 0 || cols == 0 {
         return Ok(0.0);
     }
+    let apply = |scratch: &mut [f32]| match rhs_layout {
+        CpuRhsLayout::RowMajor => {
+            matmul_with_kernel_spec(spec, scratch, lhs, rhs, rows, inner, cols);
+        }
+        CpuRhsLayout::PrepackedColumns => {
+            matmul_packed_with_kernel_spec(spec, scratch, lhs, rhs, rows, inner, cols);
+        }
+    };
 
     for _ in 0..CPU_AUTOTUNE_WARMUP_RUNS {
         scratch.fill(0.0);
-        matmul_with_kernel_spec(spec, scratch, lhs, rhs, rows, inner, cols);
+        apply(scratch);
     }
 
     let mut total = Duration::default();
     for _ in 0..CPU_AUTOTUNE_SAMPLE_RUNS {
         scratch.fill(0.0);
         let start = Instant::now();
-        matmul_with_kernel_spec(spec, scratch, lhs, rhs, rows, inner, cols);
+        apply(scratch);
         total += start.elapsed();
     }
 
@@ -957,15 +1032,30 @@ fn sample_dimension(value: usize) -> usize {
     quantize_dimension(value).clamp(1, CPU_AUTOTUNE_SAMPLE_MAX_DIM)
 }
 
-fn cpu_autotune_key(rows: usize, inner: usize, cols: usize) -> Option<(String, PathBuf)> {
+fn cpu_autotune_key(
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    rhs_layout: CpuRhsLayout,
+) -> Option<(String, PathBuf)> {
     let path = autotune_store_path()?;
+    Some((cpu_autotune_signature(rows, inner, cols, rhs_layout), path))
+}
+
+fn cpu_autotune_signature(
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    rhs_layout: CpuRhsLayout,
+) -> String {
     let arch = env::consts::ARCH;
     let os = env::consts::OS;
     let features = cpu_feature_tag();
-    let key = format!(
-        "cpu.matmul.v{CPU_AUTOTUNE_REVISION:02}|{arch}|{os}|{features}|{rows}x{inner}x{cols}|runs{CPU_AUTOTUNE_SAMPLE_RUNS}"
-    );
-    Some((key, path))
+    let layout = rhs_layout.tag();
+    let portable_simd = cfg!(feature = "simd");
+    format!(
+        "cpu.matmul.v{CPU_AUTOTUNE_REVISION:02}|{arch}|{os}|{features}|simd={portable_simd}|{layout}|{rows}x{inner}x{cols}|runs{CPU_AUTOTUNE_SAMPLE_RUNS}"
+    )
 }
 
 fn autotune_env_enabled() -> bool {
@@ -1354,14 +1444,105 @@ mod tests {
     }
 
     #[test]
-    fn rhs_groups_are_bounded_except_for_one_minimum_kernel_panel() {
+    fn row_major_kernels_respect_strides_and_output_guards() {
         for spec in MICROKERNELS {
-            for inner in [1, 31, 137, 2049, 16385] {
-                for cols in [1, spec.tn - 1, spec.tn, spec.tn * 17 + 3] {
-                    let width = rhs_panel_width(inner, cols, spec.tn);
-                    assert!(width > 0 && width <= cols);
-                    assert!(width == cols || width.is_multiple_of(spec.tn));
-                    assert!(width * inner * 4 <= L2_TARGET_BYTES || width <= spec.tn);
+            for inner in [0, 1, 5, 37] {
+                let (lda, ldb, ldc) = (inner + 3, spec.tn + 5, spec.tn + 7);
+                let lhs: Vec<_> = (0..spec.tm * lda + 1)
+                    .map(|i| (i % 19) as f32 / 7.0 - 1.0)
+                    .collect();
+                let rhs: Vec<_> = (0..inner * ldb + 1)
+                    .map(|i| (i % 23) as f32 / 11.0 - 1.0)
+                    .collect();
+                let mut actual = vec![17.25; (spec.tm + 2) * ldc];
+                let mut expected = actual.clone();
+                for row in 0..spec.tm {
+                    for col in 0..spec.tn {
+                        let mut sum = 0.0f32;
+                        for k in 0..inner {
+                            sum += lhs[1 + row * lda + k] * rhs[1 + k * ldb + col];
+                        }
+                        expected[(row + 1) * ldc + 2 + col] += sum;
+                    }
+                }
+                // SAFETY: the padded fixtures cover both input tiles and all output
+                // rows; surrounding guard elements are deliberately not writable.
+                unsafe {
+                    (spec.row_major_kernel)(
+                        lhs.as_ptr().add(1),
+                        rhs.as_ptr().add(1),
+                        actual.as_mut_ptr().add(ldc + 2),
+                        lda,
+                        ldb,
+                        ldc,
+                        inner,
+                    );
+                }
+                assert_eq!(
+                    actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn row_major_tiles_preserve_every_row_and_column_tail() {
+        for spec in MICROKERNELS {
+            for row_tail in 0..spec.tm {
+                for col_tail in 0..spec.tn {
+                    let (rows, inner, cols) = (spec.tm * 2 + row_tail, 17, spec.tn * 2 + col_tail);
+                    let lhs: Vec<_> = (0..rows * inner)
+                        .map(|i| (i % 19) as f32 / 7.0 - 1.0)
+                        .collect();
+                    let rhs: Vec<_> = (0..inner * cols)
+                        .map(|i| (i % 23) as f32 / 11.0 - 1.0)
+                        .collect();
+                    let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+                    let mut actual = vec![0.25; rows * cols];
+                    matmul_with_kernel_spec(spec, &mut actual, &lhs, &rhs, rows, inner, cols);
+                    for (&a, &b) in actual.iter().zip(&expected) {
+                        assert_eq!(a.to_bits(), (0.25 + b).to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn autotune_keeps_rhs_layouts_separate_and_benchmarks_the_actual_path() {
+        let (rows, inner, cols) = (9, 17, 35);
+        let row_key = cpu_autotune_signature(rows, inner, cols, CpuRhsLayout::RowMajor);
+        let packed_key = cpu_autotune_signature(rows, inner, cols, CpuRhsLayout::PrepackedColumns);
+        assert_ne!(row_key, packed_key);
+        assert!(row_key.contains("|row_major|"));
+        assert!(packed_key.contains("|prepacked_columns|"));
+
+        let lhs: Vec<_> = (0..rows * inner)
+            .map(|i| (i % 19) as f32 / 7.0 - 1.0)
+            .collect();
+        let rhs: Vec<_> = (0..inner * cols)
+            .map(|i| (i % 23) as f32 / 11.0 - 1.0)
+            .collect();
+        let packed = unwrap_ok(prepack_rhs(&rhs, inner, cols));
+        let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+        for spec in MICROKERNELS {
+            for (layout, data) in [
+                (CpuRhsLayout::RowMajor, &rhs),
+                (CpuRhsLayout::PrepackedColumns, &packed),
+            ] {
+                let mut actual = vec![f32::NAN; rows * cols];
+                let elapsed = unwrap_ok(microbenchmark_kernel(
+                    spec,
+                    (rows, inner, cols),
+                    layout,
+                    &lhs,
+                    data,
+                    &mut actual,
+                ));
+                assert!(elapsed.is_finite() && elapsed >= 0.0);
+                for (&a, &b) in actual.iter().zip(&expected) {
+                    assert_eq!(a.to_bits(), b.to_bits());
                 }
             }
         }
