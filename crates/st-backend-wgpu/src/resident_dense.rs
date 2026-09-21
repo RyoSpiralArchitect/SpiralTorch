@@ -8,7 +8,7 @@ use crate::{
     shader_sources::{checked_dense_matmul_source, MatmulAccumulation, MatmulKernel},
 };
 use bytemuck::{Pod, Zeroable};
-use st_kernel_contracts::layout::{NdLayout, NdLayoutError};
+use st_kernel_contracts::layout::{NdLayout, NdLayoutError, RowMajorRows};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +72,16 @@ pub(crate) struct Uniforms {
     pub validation_index: u32,
     pub padding: [u32; 2],
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct RowInputUniforms {
+    base: Uniforms,
+    row_stride: u32,
+    offset: u32,
+}
+
+pub(crate) const ROW_INPUT_UNIFORM_BYTES: u32 = std::mem::size_of::<RowInputUniforms>() as u32;
 
 pub(crate) fn validate_layers(
     limits: &wgpu::Limits,
@@ -178,6 +188,30 @@ pub(crate) struct DenseDispatch {
     binding: wgpu::BindGroup,
     uniform: runtime::Shared<wgpu::Buffer>,
     groups: [u32; 2],
+    params: Uniforms,
+}
+
+impl DenseDispatch {
+    pub(crate) fn row_input_uniform(
+        &self,
+        device: &wgpu::Device,
+        rows: RowMajorRows,
+    ) -> Result<runtime::Shared<wgpu::Buffer>, DenseError> {
+        if rows.rows() != self.params.rows as usize || rows.cols() != self.params.inner as usize {
+            return Err(DenseError::InvalidLayout);
+        }
+        let params = RowInputUniforms {
+            base: self.params,
+            row_stride: u32::try_from(rows.row_stride()).map_err(|_| NdLayoutError::Overflow)?,
+            offset: u32::try_from(rows.offset()).map_err(|_| NdLayoutError::Overflow)?,
+        };
+        Ok(runtime::Shared::new(runtime::upload_slice(
+            device,
+            "dense.row_input.params",
+            &[params],
+            wgpu::BufferUsages::UNIFORM,
+        )?))
+    }
 }
 
 impl DenseKernel {
@@ -187,14 +221,37 @@ impl DenseKernel {
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<Self, DenseError> {
+        let source = checked_dense_matmul_source(tile.dimensions(), kernel, accumulation)
+            .map_err(|_| MatmulError::UnsupportedKernelTile)?;
+        Self::from_source(device, tile, source)
+    }
+
+    pub(crate) fn new_row_input(
+        device: &wgpu::Device,
+        tile: MatmulTile,
+        kernel: MatmulKernel,
+        accumulation: MatmulAccumulation,
+    ) -> Result<Self, DenseError> {
+        if device.limits().max_uniform_buffer_binding_size < ROW_INPUT_UNIFORM_BYTES {
+            return Err(MatmulError::DeviceLimit("row-input uniforms").into());
+        }
+        let source =
+            crate::shader_sources::row_input_dense_source(tile.dimensions(), kernel, accumulation)
+                .map_err(|_| MatmulError::UnsupportedKernelTile)?;
+        Self::from_source(device, tile, source)
+    }
+
+    fn from_source(
+        device: &wgpu::Device,
+        tile: MatmulTile,
+        source: String,
+    ) -> Result<Self, DenseError> {
         let limits = device.limits();
         if limits.max_storage_buffers_per_shader_stage < 7 || limits.max_bindings_per_bind_group < 8
         {
             return Err(MatmulError::DeviceLimit("checked dense bindings").into());
         }
         let layout = dense_layout(device, false);
-        let source = checked_dense_matmul_source(tile.dimensions(), kernel, accumulation)
-            .map_err(|_| MatmulError::UnsupportedKernelTile)?;
         let pipeline = dense_pipeline(device, &layout, source);
         Ok(Self {
             layout,
@@ -241,6 +298,7 @@ impl DenseKernel {
             binding,
             uniform,
             groups: [(cols as u32).div_ceil(tn), (rows as u32).div_ceil(tm)],
+            params,
         })
     }
 
@@ -258,19 +316,41 @@ impl DenseKernel {
         unused: &wgpu::Buffer,
         validation: &wgpu::Buffer,
     ) -> DenseDispatch {
+        self.rebind_with_uniform(
+            device,
+            template,
+            input,
+            output,
+            weight,
+            bias,
+            unused,
+            validation,
+            &template.uniform,
+        )
+    }
+
+    /// The caller pairs the ordinary/row-input shader with its matching uniform
+    /// ABI. Buffers remain retained by the binding, not by a mutable queue write.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rebind_with_uniform(
+        &self,
+        device: &wgpu::Device,
+        template: &DenseDispatch,
+        input: &wgpu::Buffer,
+        output: &wgpu::Buffer,
+        weight: &wgpu::Buffer,
+        bias: &wgpu::Buffer,
+        unused: &wgpu::Buffer,
+        validation: &wgpu::Buffer,
+        uniform: &runtime::Shared<wgpu::Buffer>,
+    ) -> DenseDispatch {
         DenseDispatch {
             binding: self.bind_resources(
-                device,
-                input,
-                output,
-                weight,
-                bias,
-                unused,
-                validation,
-                &template.uniform,
+                device, input, output, weight, bias, unused, validation, uniform,
             ),
-            uniform: template.uniform.clone(),
+            uniform: uniform.clone(),
             groups: template.groups,
+            params: template.params,
         }
     }
 
@@ -621,6 +701,58 @@ impl DenseReadback {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn row_input_shader_has_a_private_extended_abi_without_reusing_guard_words() {
+        assert_eq!(std::mem::size_of::<Uniforms>(), 32);
+        assert_eq!(ROW_INPUT_UNIFORM_BYTES, 40);
+        assert_eq!(std::mem::offset_of!(Uniforms, padding), 24);
+        assert_eq!(std::mem::offset_of!(RowInputUniforms, row_stride), 32);
+        assert_eq!(std::mem::offset_of!(RowInputUniforms, offset), 36);
+        for kernel in [MatmulKernel::Scalar, MatmulKernel::Register2x2] {
+            for accumulation in [
+                MatmulAccumulation::Sequential,
+                MatmulAccumulation::Tiled,
+                MatmulAccumulation::Compensated,
+            ] {
+                for rows in [false, true] {
+                    let source = if rows {
+                        crate::shader_sources::row_input_dense_source(
+                            [8, 8, 16],
+                            kernel,
+                            accumulation,
+                        )
+                        .unwrap()
+                    } else {
+                        checked_dense_matmul_source([8, 8, 16], kernel, accumulation).unwrap()
+                    };
+                    let module = naga::front::wgsl::parse_str(&source).unwrap();
+                    naga::valid::Validator::new(
+                        naga::valid::ValidationFlags::all(),
+                        naga::valid::Capabilities::empty(),
+                    )
+                    .validate(&module)
+                    .unwrap();
+                    let (_, uniform) = module
+                        .types
+                        .iter()
+                        .find(|(_, ty)| ty.name.as_deref() == Some("MatmulUniforms"))
+                        .unwrap();
+                    let naga::TypeInner::Struct { members, span } = &uniform.inner else {
+                        panic!("uniform struct");
+                    };
+                    assert_eq!(*span, if rows { 40 } else { 32 });
+                    assert_eq!(members[6].offset, 24);
+                    assert_eq!(members[6].name.as_deref(), Some("validation_mask"));
+                    if rows {
+                        assert_eq!(members[8].offset, 32);
+                        assert_eq!(members[9].offset, 36);
+                    }
+                    assert_eq!(source.contains("params.input_row_stride"), rows);
+                }
+            }
+        }
+    }
 
     #[test]
     fn checked_shader_validates_for_existing_kernel_options() {

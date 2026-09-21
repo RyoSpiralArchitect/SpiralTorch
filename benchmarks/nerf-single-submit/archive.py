@@ -1,10 +1,12 @@
 """Compact submission-comparison evidence, not numerical reexecution."""
 import argparse
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
 import shutil
 import sys
+from typing import Callable
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -15,6 +17,20 @@ STAGES = [
     "backend-tests", "native-build", "freeze-native", "wasm-build", "bindgen",
     "legacy-native", "legacy-browser",
 ] + [f"round-{r}-{family}" for r in range(3) for family in ("native", "browser", "torch")]
+
+
+@dataclass(frozen=True)
+class ArchiveProtocol:
+    analyze: Callable
+    validate_summary: Callable
+    stages: list[str]
+    decision: str
+
+
+DEFAULT = ArchiveProtocol(
+    analyze, validate_summary, STAGES,
+    "Do not replace the existing default based on submission count; expose explicit scheduling.",
+)
 
 
 def read(path):
@@ -41,15 +57,15 @@ def safe_path(root, name):
     return root / path
 
 
-def summary(root, exploratory=False):
+def summary(root, exploratory=False, *, protocol=DEFAULT):
     def path(family, repeat):
         stem = f"screen-{family}-{repeat + 1}" if exploratory else f"round-{repeat}-{family}"
         return root / (stem + ".json" if family == "browser" else stem + "/stdout.log")
-    return analyze(*[[read(path(family, repeat)) for repeat in range(3)]
-                     for family in ("native", "browser", "torch")])
+    return protocol.analyze(*[[read(path(family, repeat)) for repeat in range(3)]
+                              for family in ("native", "browser", "torch")])
 
 
-def exploration(raw):
+def exploration(raw, *, protocol=DEFAULT):
     sources, attempts = {}, []
     for path in sorted(raw.glob("*/receipt.json")):
         receipt = read(path)
@@ -61,25 +77,26 @@ def exploration(raw):
                          if receipt["exit_code"] else None})
     return {
         "role": "Exploratory, not pooled with final clean-source measurements. All recorded attempts retained.",
-        "sources": sources, "attempts": attempts, "screening": summary(raw, True),
-        "decision": "Do not replace the existing default based on submission count; expose explicit scheduling.",
+        "sources": sources, "attempts": attempts,
+        "screening": summary(raw, True, protocol=protocol),
+        "decision": protocol.decision,
     }
 
 
-def publish(raw, output):
+def publish(raw, output, *, protocol=DEFAULT):
     accepted = raw / "accepted"
     source = read(accepted / "round-0-native/receipt.json")["source"]
     if source["status"]:
         raise ValueError("accepted source must be committed and clean")
     receipts = []
-    for stage in STAGES:
+    for stage in protocol.stages:
         receipt = read(accepted / stage / "receipt.json")
         if receipt.pop("source") != source or receipt["exit_code"] != 0 or receipt["source_unchanged"] is not True:
             raise ValueError(f"unaccepted source/validation: {stage}")
         receipts.append({"stage": stage, **receipt})
-    result = summary(accepted)
-    validate_summary(result)
-    earlier = exploration(raw)
+    result = summary(accepted, protocol=protocol)
+    protocol.validate_summary(result)
+    earlier = exploration(raw, protocol=protocol)
     output.mkdir(parents=True, exist_ok=False)
     write(output / "results.json", result)
     write(output / "source.json", source)
@@ -96,19 +113,19 @@ def publish(raw, output):
     return result["descriptive_summary"]
 
 
-def verify(root, raw=None, source=None):
+def verify(root, raw=None, source=None, *, protocol=DEFAULT):
     if read(root / "manifest.json") != files(root):
         raise ValueError("archive bytes differ")
     result = read(root / "results.json")
-    validate_summary(result)
+    protocol.validate_summary(result)
     earlier = read(root / "exploration.json")
-    validate_summary(earlier["screening"])
+    protocol.validate_summary(earlier["screening"])
     for attempt in earlier["attempts"]:
         recorded = earlier["sources"][attempt["source_sha256"]]
         if hashlib.sha256(json.dumps(recorded, sort_keys=True).encode()).hexdigest() != attempt["source_sha256"]:
             raise ValueError("exploratory source identity differs")
     receipts = read(root / "validation.json")
-    if [r["stage"] for r in receipts] != STAGES or any(
+    if [r["stage"] for r in receipts] != protocol.stages or any(
         r["exit_code"] != 0 or r["source_unchanged"] is not True for r in receipts
     ):
         raise ValueError("incomplete validation records")
@@ -119,7 +136,8 @@ def verify(root, raw=None, source=None):
             path = safe_path(raw, name)
             if path.stat().st_size != record["bytes"] or sha(path) != record["sha256"]:
                 raise ValueError(f"raw bytes differ: {name}")
-        if result != summary(raw / "accepted") or earlier != exploration(raw):
+        if (result != summary(raw / "accepted", protocol=protocol)
+                or earlier != exploration(raw, protocol=protocol)):
             raise ValueError("raw summaries differ")
     if source is not None:
         for name, expected in read(root / "source.json")["files"].items():
@@ -129,7 +147,7 @@ def verify(root, raw=None, source=None):
             "raw_fixity_and_summary_recomputed": raw is not None, "source_checked": source is not None}
 
 
-if __name__ == "__main__":
+def main(protocol=DEFAULT):
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["publish", "verify", "seal"])
     parser.add_argument("root", type=Path)
@@ -139,10 +157,14 @@ if __name__ == "__main__":
     if args.mode == "publish":
         if args.raw_root is None:
             parser.error("publish requires --raw-root")
-        value = publish(args.raw_root, args.root)
+        value = publish(args.raw_root, args.root, protocol=protocol)
     elif args.mode == "seal":
         write(args.root / "manifest.json", files(args.root))
         value = {"status": "sealed"}
     else:
-        value = verify(args.root, args.raw_root, args.source_root)
+        value = verify(args.root, args.raw_root, args.source_root, protocol=protocol)
     print(json.dumps(value, allow_nan=False))
+
+
+if __name__ == "__main__":
+    main()

@@ -5,10 +5,15 @@ mod fixture;
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> fixture::Result<()> {
     let mut args = std::env::args().skip(1);
-    let compare_submissions = match (args.next().as_deref(), args.next()) {
-        (None, None) => false,
-        (Some("--compare-submissions"), None) => true,
-        _ => return Err("usage: resident_nerf_bench [--compare-submissions]".into()),
+    let comparison = match (args.next().as_deref(), args.next()) {
+        (None, None) => fixture::Comparison::StagedDirect,
+        (Some("--compare-submissions"), None) => fixture::Comparison::Submissions,
+        (Some("--compare-input-layouts"), None) => fixture::Comparison::InputRows,
+        _ => {
+            return Err(
+                "usage: resident_nerf_bench [--compare-submissions|--compare-input-layouts]".into(),
+            )
+        }
     };
     fn now() -> f64 {
         static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -23,7 +28,7 @@ fn main() -> fixture::Result<()> {
     ))?;
     println!(
         "{}",
-        pollster::block_on(fixture::run(runtime, now, compare_submissions))?
+        pollster::block_on(fixture::run(runtime, now, comparison))?
     );
     Ok(())
 }

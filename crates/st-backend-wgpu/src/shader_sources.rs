@@ -47,6 +47,32 @@ pub fn checked_dense_matmul_source(
     Ok(source)
 }
 
+/// Private inference-only addressing ABI. Canonical host/training uniforms and
+/// loads stay unchanged, including the validation-mask word used by gradients.
+pub(crate) fn row_input_dense_source(
+    tile: [u32; 3],
+    kernel: MatmulKernel,
+    accumulation: MatmulAccumulation,
+) -> Result<String, &'static str> {
+    let mut source = checked_dense_matmul_source(tile, kernel, accumulation)?;
+    for (before, after) in [
+        (
+            "_pad2: f32,",
+            "_pad2: f32,\n    input_row_stride: u32,\n    input_offset: u32,",
+        ),
+        (
+            "lhs[a_row * params.inner + a_k]",
+            "lhs[params.input_offset + a_row * params.input_row_stride + a_k]",
+        ),
+    ] {
+        if source.matches(before).count() != 1 {
+            return Err("missing canonical row-input specialization point");
+        }
+        source = source.replacen(before, after, 1);
+    }
+    Ok(source)
+}
+
 /// Training reuses the same matrix kernel; only tape storage and RHS addressing differ.
 pub fn training_dense_matmul_source(
     tile: [u32; 3],
