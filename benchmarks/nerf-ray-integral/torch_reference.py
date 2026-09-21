@@ -23,7 +23,7 @@ def setup(meta, gradients=False):
     batch, samples = meta["batch"], meta["samples"]
     origins = torch.tensor(meta["origins"], dtype=torch.float32).reshape(batch, 3)
     directions = torch.tensor(meta["directions"], dtype=torch.float32).reshape(batch, 3)
-    bounds = torch.tensor(meta["bounds"], dtype=torch.float64).reshape(batch, 2)
+    bounds = torch.tensor(meta["bounds"], dtype=torch.float32).reshape(batch, 2).double()
     targets = torch.tensor(meta["targets"], dtype=torch.float32).reshape(batch, 3)
 
     def encode(x, bands, residual):
