@@ -1,0 +1,31 @@
+warning: patch `spindle v0.2.5 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/spindle)` was not used in the crate graph
+warning: patch `wgpu v0.20.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/wgpu-0.20.1)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling num-traits v0.2.19
+   Compiling wasm-bindgen v0.2.104
+   Compiling serde_core v1.0.229
+   Compiling thiserror v2.0.17
+   Compiling matrixmultiply v0.3.10
+   Compiling js-sys v0.3.81
+   Compiling num-complex v0.4.6
+   Compiling num-integer v0.1.46
+   Compiling thiserror-impl v1.0.69
+   Compiling thiserror v1.0.69
+   Compiling getrandom v0.2.17
+   Compiling serde v1.0.229
+   Compiling rand_core v0.6.4
+   Compiling rand_chacha v0.3.1
+   Compiling serde_json v1.0.151
+   Compiling rand v0.8.8
+   Compiling ndarray v0.15.6
+   Compiling st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kdsl)
+   Compiling spiral-config v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config)
+   Compiling rand_distr v0.4.3
+   Compiling st-kernel-contracts v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kernel-contracts)
+   Compiling st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling gelu-measurement-shim v0.0.0 (/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm-shim)
+    Finished `release` profile [optimized] target(s) in 10.19s

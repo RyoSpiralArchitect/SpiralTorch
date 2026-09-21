@@ -1,0 +1,81 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_gelu",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_gelu"
+  },
+  "sha256": {
+    "baseline": "b80950e7d56a48e32058f823764a9fbe8ac63c7f4fd84d09a44c6c0b1bfbcf72",
+    "candidate": "51b306af855af57d299f16dcaf73342dfcce59b22e1bea251bd27c7f34bb5de7"
+  },
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_gelu"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2443287920032162,
+      "raw_sha256": "f1e2c402e0bf93f19e5acf4a1c1fcdd38b6b0b78bbc646c9794da9af8fc6b616"
+    },
+    {
+      "name": "warm-candidate",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_gelu"
+      ],
+      "exit_code": 0,
+      "seconds": 0.8203788329992676,
+      "raw_sha256": "ada99fd1fe8685ea230a15f1a0c7359bf8b505e7b276b4c17b001cc32e1b9d04"
+    },
+    {
+      "name": "baseline-a",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_gelu"
+      ],
+      "exit_code": 0,
+      "seconds": 0.23487549999845214,
+      "raw_sha256": "f85f210bb1759a7f4046e43cfc0fe541f9c4ce04f15b8370a1735a870d31a8c2"
+    },
+    {
+      "name": "candidate-a",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_gelu"
+      ],
+      "exit_code": 0,
+      "seconds": 0.22113620799791533,
+      "raw_sha256": "a555d76c1e672fe0cdf93a88479633f2a97ec7563fa8cb860efadbf96a395af4"
+    },
+    {
+      "name": "candidate-b",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_gelu"
+      ],
+      "exit_code": 0,
+      "seconds": 0.22078720798890572,
+      "raw_sha256": "0159986b10a442a88be242c999f18fea19ca6164f0ca53213ff99abfcc664bac"
+    },
+    {
+      "name": "baseline-b",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_gelu"
+      ],
+      "exit_code": 0,
+      "seconds": 0.2347203750105109,
+      "raw_sha256": "7313636fbef29aeab529aaec1abe27c8fe7391239e135895a5680e022f7c67c9"
+    }
+  ],
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  }
+}

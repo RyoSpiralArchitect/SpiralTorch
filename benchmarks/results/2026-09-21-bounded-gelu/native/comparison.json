@@ -1,0 +1,372 @@
+{
+  "comparisons": [
+    {
+      "condition": [
+        1,
+        1,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.0
+    },
+    {
+      "condition": [
+        1,
+        1,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.0
+    },
+    {
+      "condition": [
+        1,
+        1,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0
+    },
+    {
+      "condition": [
+        1,
+        1,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.062968515742129
+    },
+    {
+      "condition": [
+        1,
+        8,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.0
+    },
+    {
+      "condition": [
+        1,
+        8,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.2
+    },
+    {
+      "condition": [
+        1,
+        8,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0
+    },
+    {
+      "condition": [
+        1,
+        8,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.042
+    },
+    {
+      "condition": [
+        1,
+        32,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.1531365313653137
+    },
+    {
+      "condition": [
+        1,
+        32,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.2306273062730628
+    },
+    {
+      "condition": [
+        1,
+        32,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0004899559039686
+    },
+    {
+      "condition": [
+        1,
+        32,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0200783545543586
+    },
+    {
+      "condition": [
+        1,
+        64,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.1949648711943794
+    },
+    {
+      "condition": [
+        1,
+        64,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.1955503512880563
+    },
+    {
+      "condition": [
+        1,
+        64,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0
+    },
+    {
+      "condition": [
+        1,
+        64,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0237142857142858
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.2377340606943594
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.2250164271047228
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0003062933189542
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0057095243606065
+    },
+    {
+      "condition": [
+        17,
+        195,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.203946462715105
+    },
+    {
+      "condition": [
+        17,
+        195,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.203961759082218
+    },
+    {
+      "condition": [
+        17,
+        195,
+        true
+      ],
+      "round": "a",
+      "ratio": 0.9885563561679591
+    },
+    {
+      "condition": [
+        17,
+        195,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0086987408067751
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.2309949714081596
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.2144075975359343
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0120637517356488
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        true
+      ],
+      "round": "b",
+      "ratio": 0.9965837277113231
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.2314141922729056
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.2077007783386298
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0054687445887447
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0092313777945927
+    },
+    {
+      "condition": [
+        65,
+        97,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.198527162977867
+    },
+    {
+      "condition": [
+        65,
+        97,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.2033023402347505
+    },
+    {
+      "condition": [
+        65,
+        97,
+        true
+      ],
+      "round": "a",
+      "ratio": 0.9929806050747734
+    },
+    {
+      "condition": [
+        65,
+        97,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0089151291512914
+    }
+  ],
+  "groups": {
+    "False/all": {
+      "geomean": 1.1710124995070799,
+      "min": 1.0,
+      "max": 1.2377340606943594,
+      "favorable": 15,
+      "count": 18
+    },
+    "False/tiny": {
+      "geomean": 1.1175422258648346,
+      "min": 1.0,
+      "max": 1.2306273062730628,
+      "favorable": 5,
+      "count": 8
+    },
+    "False/non_tiny": {
+      "geomean": 1.2156249413210973,
+      "min": 1.198527162977867,
+      "max": 1.2377340606943594,
+      "favorable": 10,
+      "count": 10
+    },
+    "True/all": {
+      "geomean": 1.0097252637212877,
+      "min": 0.9885563561679591,
+      "max": 1.062968515742129,
+      "favorable": 12,
+      "count": 18
+    },
+    "True/tiny": {
+      "geomean": 1.0184193531112247,
+      "min": 1.0,
+      "max": 1.062968515742129,
+      "favorable": 5,
+      "count": 8
+    },
+    "True/non_tiny": {
+      "geomean": 1.0028234611754825,
+      "min": 0.9885563561679591,
+      "max": 1.0120637517356488,
+      "favorable": 7,
+      "count": 10
+    }
+  }
+}

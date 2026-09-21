@@ -1,0 +1,68 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_nn_layout",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_nn_layout"
+  },
+  "sha256": {
+    "baseline": "20f3a9699a473bfcead6d9e30b5c062a4bf6322d0ead2e1920d571c63ea1c52e",
+    "candidate": "4eb9c179ff4132257c6c41c5d13868494ec7e74e8257966868adf1ce86717731"
+  },
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  },
+  "home_removed": true,
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 3.6962892500014277
+    },
+    {
+      "name": "warm-candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 3.68569979199674
+    },
+    {
+      "name": "baseline-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 3.0639431250019697
+    },
+    {
+      "name": "candidate-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 3.1246147500060033
+    },
+    {
+      "name": "candidate-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 3.0785989169962704
+    },
+    {
+      "name": "baseline-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 3.070867083995836
+    }
+  ],
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown"
+}

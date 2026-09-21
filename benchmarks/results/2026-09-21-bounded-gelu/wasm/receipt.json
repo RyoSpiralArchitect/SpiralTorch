@@ -1,0 +1,99 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/wasm/gelu_measurement_shim.js",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/wasm/gelu_measurement_shim.js",
+    "baseline_wasm": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/wasm/gelu_measurement_shim_bg.wasm",
+    "candidate_wasm": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/wasm/gelu_measurement_shim_bg.wasm",
+    "harness": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm_gelu.cjs"
+  },
+  "sha256": {
+    "baseline": "27ececdff22b5d7be169d541353d18b004a663c34abda3427ae778d3e40d4806",
+    "candidate": "27ececdff22b5d7be169d541353d18b004a663c34abda3427ae778d3e40d4806",
+    "baseline_wasm": "dd087c932626255e9d38fc4180f39b9fbac12ca65fa7eae136c469625a5090c9",
+    "candidate_wasm": "ba2dbb799926666631b421294c4149c3623fe07d3ec200a2715296acbc1e313f",
+    "harness": "69504f53776e83fd8634dd8732ed678f33c3d11587b3eca21c6ed486a7f1ad1e"
+  },
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "lane": "baseline",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm_gelu.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/wasm/gelu_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.4331802499946207,
+      "raw_sha256": "5d5feadbc18159c944f75514a054e2601a8ab6adccbb138c4291ccc7c69630ac"
+    },
+    {
+      "name": "warm-candidate",
+      "lane": "candidate",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm_gelu.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/wasm/gelu_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.27161895799508784,
+      "raw_sha256": "b6bf26b3889956b27fd308e41cf767d7773714283cadead53b78c227db976a1b"
+    },
+    {
+      "name": "baseline-a",
+      "lane": "baseline",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm_gelu.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/wasm/gelu_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.2873093329981202,
+      "raw_sha256": "3668caceae2af2472a90ea6778cfacb965cc5d730c626a72e183f4e12bedcf7b"
+    },
+    {
+      "name": "candidate-a",
+      "lane": "candidate",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm_gelu.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/wasm/gelu_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.27386366699647624,
+      "raw_sha256": "5f2945a732a70e131f57a5f4ae3d3eda44afc8668cf158822071bbc958d3f6e0"
+    },
+    {
+      "name": "candidate-b",
+      "lane": "candidate",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm_gelu.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/candidate-build/wasm/gelu_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.27292433301045094,
+      "raw_sha256": "75e0dafc241d511810807b6566b17e18604459c6c9d096f3feac663d60656a3a"
+    },
+    {
+      "name": "baseline-b",
+      "lane": "baseline",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/wasm_gelu.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921/baseline-build/wasm/gelu_measurement_shim.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.28640708299644757,
+      "raw_sha256": "3e169066e817ba3ceaa29eeab828cec37c49aa2400ea25d05a33b58e0292f50f"
+    }
+  ],
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  }
+}

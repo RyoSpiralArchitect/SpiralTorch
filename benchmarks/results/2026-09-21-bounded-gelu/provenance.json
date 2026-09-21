@@ -1,0 +1,54 @@
+{
+  "baseline": "5c57b2326525b0b8529724e5e0c9ba4542c8d3bb",
+  "candidate": "6bf69c8656e31f63d3021b44044f67a0b2e4dc2b",
+  "workers": {
+    "baseline": {
+      "cpu_gelu": "b80950e7d56a48e32058f823764a9fbe8ac63c7f4fd84d09a44c6c0b1bfbcf72",
+      "cpu_nn_layout": "20f3a9699a473bfcead6d9e30b5c062a4bf6322d0ead2e1920d571c63ea1c52e",
+      "wasm/gelu_measurement_shim.d.ts": "9b73071dc1427182f1a760351732d5853bd2d24ccb33ec9f7476b58d2d58fdf8",
+      "wasm/gelu_measurement_shim.js": "27ececdff22b5d7be169d541353d18b004a663c34abda3427ae778d3e40d4806",
+      "wasm/gelu_measurement_shim_bg.wasm.d.ts": "5e68db5ec5fbf4a59d2623712a51f2bf816589942670fdfd3f6753ed202d4095",
+      "wasm/gelu_measurement_shim_bg.wasm": "dd087c932626255e9d38fc4180f39b9fbac12ca65fa7eae136c469625a5090c9"
+    },
+    "candidate": {
+      "cpu_gelu": "51b306af855af57d299f16dcaf73342dfcce59b22e1bea251bd27c7f34bb5de7",
+      "cpu_nn_layout": "4eb9c179ff4132257c6c41c5d13868494ec7e74e8257966868adf1ce86717731",
+      "wasm/gelu_measurement_shim.d.ts": "9b73071dc1427182f1a760351732d5853bd2d24ccb33ec9f7476b58d2d58fdf8",
+      "wasm/gelu_measurement_shim.js": "27ececdff22b5d7be169d541353d18b004a663c34abda3427ae778d3e40d4806",
+      "wasm/gelu_measurement_shim_bg.wasm.d.ts": "5e68db5ec5fbf4a59d2623712a51f2bf816589942670fdfd3f6753ed202d4095",
+      "wasm/gelu_measurement_shim_bg.wasm": "ba2dbb799926666631b421294c4149c3623fe07d3ec200a2715296acbc1e313f"
+    }
+  },
+  "local_raw_root": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-bounded-batch-20260921",
+  "raw_sha256": {
+    "native/candidate-b.raw.json": "0159986b10a442a88be242c999f18fea19ca6164f0ca53213ff99abfcc664bac",
+    "native/baseline-b.raw.json": "7313636fbef29aeab529aaec1abe27c8fe7391239e135895a5680e022f7c67c9",
+    "native/candidate-a.raw.json": "a555d76c1e672fe0cdf93a88479633f2a97ec7563fa8cb860efadbf96a395af4",
+    "native/warm-baseline.raw.json": "f1e2c402e0bf93f19e5acf4a1c1fcdd38b6b0b78bbc646c9794da9af8fc6b616",
+    "native/warm-candidate.raw.json": "ada99fd1fe8685ea230a15f1a0c7359bf8b505e7b276b4c17b001cc32e1b9d04",
+    "native/baseline-a.raw.json": "f85f210bb1759a7f4046e43cfc0fe541f9c4ce04f15b8370a1735a870d31a8c2",
+    "wasm/candidate-b.raw.json": "75e0dafc241d511810807b6566b17e18604459c6c9d096f3feac663d60656a3a",
+    "wasm/baseline-b.raw.json": "3e169066e817ba3ceaa29eeab828cec37c49aa2400ea25d05a33b58e0292f50f",
+    "wasm/candidate-a.raw.json": "5f2945a732a70e131f57a5f4ae3d3eda44afc8668cf158822071bbc958d3f6e0",
+    "wasm/warm-baseline.raw.json": "5d5feadbc18159c944f75514a054e2601a8ab6adccbb138c4291ccc7c69630ac",
+    "wasm/warm-candidate.raw.json": "b6bf26b3889956b27fd308e41cf767d7773714283cadead53b78c227db976a1b",
+    "wasm/baseline-a.raw.json": "3668caceae2af2472a90ea6778cfacb965cc5d730c626a72e183f4e12bedcf7b"
+  },
+  "identity": {
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
+    "node": "v24.14.0",
+    "cpu": "Apple M4",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t26.4.1\nBuildVersion:\t\t25E253",
+    "arch": "arm64"
+  },
+  "build_environment_observed": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "CC": null,
+    "CXX": null
+  },
+  "wasm_shim_scope": "Test-only checked Tensor host operation, not a public JS API or browser/WebGPU execution",
+  "numerical_replay": false,
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown"
+}

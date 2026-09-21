@@ -1,0 +1,10 @@
+
+running 5 tests
+test backward_pairs_logical_input_and_seed_across_mixed_layouts ... ok
+test checked_forward_matches_scalar_bits_across_exponents_and_bounds ... ok
+test checked_forward_preserves_error_precedence_and_signed_zero ... ok
+test checked_forward_scans_past_large_finite_inputs_before_arithmetic ... ok
+test forward_preserves_logical_values_for_every_layout ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

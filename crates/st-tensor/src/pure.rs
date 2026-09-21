@@ -6388,7 +6388,17 @@ impl Tensor {
     /// Reject non-finite inputs and intermediate powers, preserving the neural
     /// layer's checked forward policy. The input and its aliases remain unchanged.
     pub fn try_gelu(&self) -> PureResult<Tensor> {
-        Self::validate_finite_tensor_util_slice("gelu_input", self.data())?;
+        // At |x| <= 1e12, even x^3 is at most about 1e36, well below
+        // f32::MAX. All subsequent GELU intermediates are smaller. Establish
+        // that bound during input validation, not once per intermediate.
+        let mut bounded = true;
+        for &value in self.data() {
+            if value.abs() <= 1e12 {
+                continue;
+            }
+            Self::validate_finite_tensor_util_value("gelu_input", value)?;
+            bounded = false;
+        }
         let row_major;
         let input = if self.layout == Layout::RowMajor {
             self
@@ -6397,8 +6407,14 @@ impl Tensor {
             &row_major
         };
         let mut data = aligned_with_capacity(self.len());
-        for &value in input.data() {
-            data.push(checked_gelu_finite(value)?);
+        if bounded {
+            for &value in input.data() {
+                data.push(gelu(value));
+            }
+        } else {
+            for &value in input.data() {
+                data.push(checked_gelu_finite(value)?);
+            }
         }
         Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
     }
