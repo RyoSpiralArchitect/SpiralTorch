@@ -1,0 +1,12 @@
+
+running 2 tests
+test seeded_training_improves_fixed_evaluation_not_just_the_black_image_baseline ... FAILED
+test synthetic_constant_color_regression ... ok
+
+failures:
+
+failures:
+    seeded_training_improves_fixed_evaluation_not_just_the_black_image_baseline
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+

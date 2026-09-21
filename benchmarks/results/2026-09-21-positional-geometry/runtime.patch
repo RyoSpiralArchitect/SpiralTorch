@@ -1,0 +1,1084 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index c42f5788..b1bcfab1 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -152,6 +152,7 @@ jobs:
+           cargo test --locked -p st-nn --release --test gelu_layout_contract
+           cargo test --locked -p spiral-selfsup --release --test info_nce_tensor
+           cargo test --locked -p st-vision --release --test temporal_channels
++          cargo test --locked -p st-vision --release --features nerf --test nerf_geometry --test nerf_regression
+           cargo test --locked -p st-frac --release --lib fractal_field
+ 
+   windows-core:
+@@ -245,6 +246,7 @@ jobs:
+           cargo clippy --locked -p st-tensor --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu_dense -- -D warnings
+           cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
+           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
++          cargo check --locked -p st-vision --target wasm32-unknown-unknown --features nerf
+           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser
+           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_graph_training_browser
+           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_graph_forward_browser
+diff --git a/crates/st-core/src/util/rope_lru.rs b/crates/st-core/src/util/rope_lru.rs
+index 8094157e..b49f0c09 100644
+--- a/crates/st-core/src/util/rope_lru.rs
++++ b/crates/st-core/src/util/rope_lru.rs
+@@ -7,7 +7,10 @@ use std::collections::VecDeque;
+ use std::f64::consts::TAU;
+ use std::hash::{Hash, Hasher};
+ 
+-#[derive(Clone)]
++/// Exact cache identity, including signed zero and NaN payload bits.
++/// Nearby angles must not reuse each other's phase sequence. Bitwise identity
++/// defines Eq/Hash even for non-finite keys; it is not a finite-value validator.
++#[derive(Clone, Debug)]
+ pub struct RopeKey {
+     pub theta: f64,
+     pub t: usize,
+@@ -17,7 +20,7 @@ pub struct RopeKey {
+ 
+ impl PartialEq for RopeKey {
+     fn eq(&self, other: &Self) -> bool {
+-        (self.theta - other.theta).abs() < 1e-9
++        self.theta.to_bits() == other.theta.to_bits()
+             && self.t == other.t
+             && self.dtype == other.dtype
+             && self.device == other.device
+@@ -129,4 +132,95 @@ mod tests {
+         assert_eq!(cos.len(), 3);
+         assert_eq!(sin.len(), 3);
+     }
++
++    #[test]
++    fn equality_and_hash_share_exact_bit_identity() {
++        use std::collections::{hash_map::DefaultHasher, HashSet};
++        let hash = |key: &RopeKey| {
++            let mut h = DefaultHasher::new();
++            key.hash(&mut h);
++            h.finish()
++        };
++        let patterns = [
++            0u64,
++            1,
++            0x8000_0000_0000_0000,
++            0x7ff0_0000_0000_0000,
++            0xfff0_0000_0000_0000,
++            0x7ff8_0000_0000_0000,
++            0x7ff8_0000_0000_0001,
++            0x3ff0_0000_0000_0000,
++        ];
++        let mut keys = HashSet::new();
++        for bits in patterns {
++            let key = make_key(f64::from_bits(bits), 8);
++            assert_eq!(key, key.clone());
++            assert_eq!(hash(&key), hash(&key.clone()));
++            assert!(keys.insert(key.clone()));
++            assert!(!keys.insert(key));
++        }
++        assert_eq!(keys.len(), patterns.len());
++        let a = make_key(1.0, 8);
++        let b = make_key(1.0 + 5e-10, 8);
++        let c = make_key(1.0 + 1.25e-9, 8);
++        assert_ne!(a, b);
++        assert_ne!(b, c);
++        assert_ne!(a, c);
++    }
++
++    #[test]
++    fn nearby_angle_requests_do_not_depend_on_cache_history() {
++        let mut populated = RopeLRU::new(2);
++        let first = populated.get(make_key(1.0, 32)).0.to_vec();
++        let (cos, sin) = populated.get(make_key(1.0 + 5e-10, 32));
++        let actual = (cos.to_vec(), sin.to_vec());
++        let mut fresh = RopeLRU::new(2);
++        let (cos, sin) = fresh.get(make_key(1.0 + 5e-10, 32));
++        assert_eq!(actual, (cos.to_vec(), sin.to_vec()));
++        assert_ne!(first, actual.0);
++    }
++
++    #[test]
++    fn hits_promote_and_eviction_respects_all_key_fields() {
++        let a = make_key(0.25, 8);
++        let mut b = a.clone();
++        b.dtype = "f32";
++        let mut c = a.clone();
++        c.device = "cpu";
++        let mut d = a.clone();
++        d.t = 9;
++        let mut cache = RopeLRU::new(3);
++        let pointer = cache.get(a.clone()).0.as_ptr();
++        cache.get(b.clone());
++        cache.get(c.clone());
++        assert_eq!(cache.get(a.clone()).0.as_ptr(), pointer);
++        cache.get(d.clone());
++        assert_eq!(
++            cache
++                .entries
++                .iter()
++                .map(|e| e.key.clone())
++                .collect::<Vec<_>>(),
++            vec![d, a, c]
++        );
++        assert!(!cache.entries.iter().any(|e| e.key == b));
++    }
++
++    #[test]
++    fn finite_phases_keep_the_existing_recurrence_and_empty_sequence() {
++        let mut cache = RopeLRU::new(2);
++        for theta in [0.0, -0.0, -0.25, 0.42, TAU, 1e100] {
++            let mut phase: f64 = 0.0;
++            let (cos, sin) = cache.get(make_key(theta, 64));
++            for (&c, &s) in cos.iter().zip(sin) {
++                // libm calls and compile-time folding may differ by one ULP;
++                // exact bit identity is required of keys/hits, not libm.
++                assert!((c - phase.cos()).abs() <= 4.0 * f64::EPSILON);
++                assert!((s - phase.sin()).abs() <= 4.0 * f64::EPSILON);
++                phase = (phase + theta) % TAU;
++            }
++        }
++        let (cos, sin) = cache.get(make_key(0.25, 0));
++        assert!(cos.is_empty() && sin.is_empty());
++    }
+ }
+diff --git a/crates/st-nn/src/layers/linear.rs b/crates/st-nn/src/layers/linear.rs
+index 5f91a3fd..9aea351c 100644
+--- a/crates/st-nn/src/layers/linear.rs
++++ b/crates/st-nn/src/layers/linear.rs
+@@ -47,14 +47,10 @@ pub struct Linear {
+ }
+ 
+ impl Linear {
+-    /// Creates a new linear layer with deterministic small parameters.
++    /// Creates a layer with the legacy deterministic ramp parameters.
++    /// Use [`Self::new_xavier`] for size-scaled model initialization.
+     pub fn new(name: impl Into<String>, input_dim: usize, output_dim: usize) -> PureResult<Self> {
+-        if input_dim == 0 || output_dim == 0 {
+-            return Err(TensorError::InvalidDimensions {
+-                rows: input_dim,
+-                cols: output_dim,
+-            });
+-        }
++        Self::validate_dimensions(input_dim, output_dim)?;
+         let name = name.into();
+         let mut scale = 0.01f32;
+         let weights = Tensor::from_fn(input_dim, output_dim, |_r, _c| {
+@@ -62,7 +58,42 @@ impl Linear {
+             scale += 0.01;
+             value
+         })?;
+-        let bias = Tensor::zeros(1, output_dim)?;
++        Self::from_initial_weights(name, weights)
++    }
++
++    /// Creates reproducible Xavier-uniform weights and zero bias.
++    /// The weight bound is `sqrt(6 / (fan_in + fan_out))`. The explicit seed
++    /// controls initialization without changing the process-wide random state.
++    pub fn new_xavier(
++        name: impl Into<String>,
++        input_dim: usize,
++        output_dim: usize,
++        seed: u64,
++    ) -> PureResult<Self> {
++        Self::validate_dimensions(input_dim, output_dim)?;
++        let bound = (6.0 / (input_dim as f64 + output_dim as f64)).sqrt() as f32;
++        let weights = Tensor::random_uniform(input_dim, output_dim, -bound, bound, Some(seed))?;
++        Self::from_initial_weights(name.into(), weights)
++    }
++
++    fn validate_dimensions(input_dim: usize, output_dim: usize) -> PureResult<()> {
++        if input_dim == 0
++            || output_dim == 0
++            || input_dim
++                .checked_mul(output_dim)
++                .filter(|&len| len <= isize::MAX as usize / std::mem::size_of::<f32>())
++                .is_none()
++        {
++            return Err(TensorError::InvalidDimensions {
++                rows: input_dim,
++                cols: output_dim,
++            });
++        }
++        Ok(())
++    }
++
++    fn from_initial_weights(name: String, weights: Tensor) -> PureResult<Self> {
++        let bias = Tensor::zeros(1, weights.shape().1)?;
+         Ok(Self {
+             weight: Parameter::new(format!("{name}::weight"), weights),
+             bias: Parameter::new(format!("{name}::bias"), bias),
+@@ -280,6 +311,73 @@ mod tests {
+         assert_eq!(output, expected);
+     }
+ 
++    #[test]
++    fn xavier_initialization_is_seeded_bounded_and_zero_biased() {
++        for (rows, cols) in [(1, 1), (3, 7), (64, 64), (256, 32)] {
++            let a = Linear::new_xavier("fc", rows, cols, 7).unwrap();
++            let b = Linear::new_xavier("fc", rows, cols, 7).unwrap();
++            let c = Linear::new_xavier("fc", rows, cols, 8).unwrap();
++            assert_eq!(a.weight().value(), b.weight().value());
++            assert_ne!(a.weight().value(), c.weight().value());
++            let bound = (6.0 / (rows + cols) as f64).sqrt() as f32;
++            assert!(a
++                .weight()
++                .value()
++                .data()
++                .iter()
++                .all(|v| { v.is_finite() && *v >= -bound && *v < bound }));
++            assert_eq!(a.bias().value().shape(), (1, cols));
++            assert!(a.bias().value().data().iter().all(|v| *v == 0.0));
++        }
++    }
++
++    #[test]
++    fn constructors_reject_empty_and_overflowing_shapes() {
++        for (rows, cols) in [
++            (0, 1),
++            (1, 0),
++            (usize::MAX, 2),
++            (1, isize::MAX as usize / std::mem::size_of::<f32>() + 1),
++        ] {
++            assert!(matches!(
++                Linear::new("fc", rows, cols),
++                Err(TensorError::InvalidDimensions { .. })
++            ));
++            assert!(matches!(
++                Linear::new_xavier("fc", rows, cols, 0),
++                Err(TensorError::InvalidDimensions { .. })
++            ));
++        }
++    }
++
++    #[test]
++    fn xavier_layer_keeps_the_linear_gradient_and_optimizer_contract() {
++        let mut layer = Linear::new_xavier("fc", 3, 2, 7).unwrap();
++        let x = Tensor::from_vec(2, 3, vec![1.0, -2.0, 0.5, 0.25, 1.0, -0.5]).unwrap();
++        let seed = Tensor::from_vec(2, 2, vec![0.5, -1.0, 0.25, 0.75]).unwrap();
++        let weights = layer.weight().value().clone();
++        let expected_input = seed.matmul(&weights.transpose()).unwrap();
++        let expected_weight = x.transpose().matmul(&seed).unwrap();
++        let expected_bias = Tensor::from_vec(1, 2, seed.sum_axis0()).unwrap();
++        let actual_input = layer.backward(&x, &seed).unwrap();
++        for (a, b) in actual_input.data().iter().zip(expected_input.data()) {
++            assert!((a - b).abs() < 1e-6);
++        }
++        assert_eq!(layer.weight().gradient().unwrap(), &expected_weight);
++        assert_eq!(layer.bias().gradient().unwrap(), &expected_bias);
++        layer.apply_step(0.01).unwrap();
++        for ((a, b), g) in layer
++            .weight()
++            .value()
++            .data()
++            .iter()
++            .zip(weights.data())
++            .zip(expected_weight.data())
++        {
++            assert!((a - (b - 0.01 * g)).abs() < 1e-6);
++        }
++    }
++
+     #[test]
+     fn linear_forward_rejects_non_finite_input() {
+         let layer = Linear::new("fc", 3, 2).unwrap();
+diff --git a/crates/st-vision/src/nerf/encoding.rs b/crates/st-vision/src/nerf/encoding.rs
+index f2a58bea..b807645d 100644
+--- a/crates/st-vision/src/nerf/encoding.rs
++++ b/crates/st-vision/src/nerf/encoding.rs
+@@ -3,6 +3,7 @@
+ // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+ // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+ 
++use super::{checked_elements, row_major, validate_finite};
+ use st_tensor::{PureResult, Tensor, TensorError};
+ 
+ /// Classic NeRF-style positional encoding that expands low dimensional inputs
+@@ -12,12 +13,14 @@ pub struct PositionalEncoding {
+     input_dims: usize,
+     frequencies: Vec<f32>,
+     include_input: bool,
++    output_dims: usize,
+ }
+ 
+ impl PositionalEncoding {
+     /// Builds a positional encoding for the given dimensionality and number of
+     /// frequency bands. Frequencies follow a power-of-two progression matching
+-    /// the original NeRF formulation.
++    /// the original NeRF formulation. At most 128 bands have finite float32
++    /// frequencies. Output dimension arithmetic is checked before allocation.
+     pub fn new(input_dims: usize, num_frequencies: usize) -> PureResult<Self> {
+         if input_dims == 0 {
+             return Err(TensorError::InvalidDimensions {
+@@ -25,6 +28,17 @@ impl PositionalEncoding {
+                 cols: num_frequencies.max(1),
+             });
+         }
++        if num_frequencies > 128 {
++            return Err(TensorError::InvalidValue {
++                label: "nerf_frequency_count",
++            });
++        }
++        let output_dims = input_dims.checked_mul(2 * num_frequencies + 1).ok_or(
++            TensorError::InvalidDimensions {
++                rows: input_dims,
++                cols: num_frequencies,
++            },
++        )?;
+         let mut frequencies = Vec::with_capacity(num_frequencies);
+         for idx in 0..num_frequencies {
+             let freq = 2f32.powi(idx as i32);
+@@ -34,13 +48,17 @@ impl PositionalEncoding {
+             input_dims,
+             frequencies,
+             include_input: true,
++            output_dims,
+         })
+     }
+ 
+     /// Disables the residual copy of the original coordinates in the encoded
+     /// representation.
+     pub fn without_input(mut self) -> Self {
+-        self.include_input = false;
++        if self.include_input {
++            self.include_input = false;
++            self.output_dims -= self.input_dims;
++        }
+         self
+     }
+ 
+@@ -51,12 +69,7 @@ impl PositionalEncoding {
+ 
+     /// Returns the dimensionality of the encoded output.
+     pub fn output_dims(&self) -> usize {
+-        let base = if self.include_input {
+-            self.input_dims
+-        } else {
+-            0
+-        };
+-        base + self.input_dims * self.frequencies.len() * 2
++        self.output_dims
+     }
+ 
+     /// Returns the number of active frequency bands.
+@@ -64,7 +77,9 @@ impl PositionalEncoding {
+         self.frequencies.len()
+     }
+ 
+-    /// Encodes a batch of coordinates.
++    /// Encodes logical coordinates into a row-major tensor, preserving inputs.
++    /// Rejects non-finite coordinates, even for a zero-feature encoding, and
++    /// overflowing frequency-scaled phases before evaluating trigonometry.
+     pub fn encode(&self, input: &Tensor) -> PureResult<Tensor> {
+         let (rows, cols) = input.shape();
+         if cols != self.input_dims {
+@@ -73,22 +88,46 @@ impl PositionalEncoding {
+                 right: (rows, cols),
+             });
+         }
+-        let mut encoded = Vec::with_capacity(rows * self.output_dims());
+-        let data = input.data();
+-        for row in 0..rows {
+-            let offset = row * cols;
++        checked_elements(rows, self.output_dims)?;
++        validate_finite(input.data(), "nerf_input")?;
++        if let Some(&largest) = self.frequencies.last() {
++            // Powers of two are ordered and positive: a finite largest phase
++            // bounds every band, so no per-band finite checks are needed.
++            for &value in input.data() {
++                let phase = value * largest;
++                if !phase.is_finite() {
++                    return Err(TensorError::NonFiniteValue {
++                        label: "nerf_phase",
++                        value: phase,
++                    });
++                }
++            }
++        }
++        let mut output = Tensor::zeros(rows, self.output_dims)?;
++        if output.is_empty() {
++            return Ok(output);
++        }
++        let input = row_major(input)?;
++        for (source, target) in input
++            .data()
++            .chunks_exact(cols)
++            .zip(output.data_mut().chunks_exact_mut(self.output_dims))
++        {
++            let mut offset = 0;
+             if self.include_input {
+-                encoded.extend_from_slice(&data[offset..offset + cols]);
++                target[..cols].copy_from_slice(source);
++                offset = cols;
+             }
+             for &freq in &self.frequencies {
+-                for dim in 0..cols {
+-                    let value = data[offset + dim] * freq;
+-                    encoded.push(value.sin());
+-                    encoded.push(value.cos());
++                for &value in source {
++                    let (sin, cos) = (value * freq).sin_cos();
++                    target[offset] = sin;
++                    target[offset + 1] = cos;
++                    offset += 2;
+                 }
+             }
+         }
+-        Tensor::from_vec(rows, self.output_dims(), encoded)
++        Ok(output)
+     }
+ }
+ 
+diff --git a/crates/st-vision/src/nerf/field.rs b/crates/st-vision/src/nerf/field.rs
+index c8871fb9..e86f56bd 100644
+--- a/crates/st-vision/src/nerf/field.rs
++++ b/crates/st-vision/src/nerf/field.rs
+@@ -3,7 +3,9 @@
+ // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+ // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
+ 
++use super::{checked_elements, row_major, validate_finite};
+ use crate::nerf::encoding::PositionalEncoding;
++use rand::{rngs::StdRng, Rng, SeedableRng};
+ use st_nn::layers::activation::Relu;
+ use st_nn::layers::linear::Linear;
+ use st_nn::layers::sequential::Sequential;
+@@ -20,8 +22,23 @@ pub struct FieldSampleLayout {
+ impl FieldSampleLayout {
+     /// Returns the total number of scalar features that need to be supplied to
+     /// the field per sample.
++    ///
++    /// # Panics
++    /// Panics if a manually constructed layout overflows. Use
++    /// [`Self::try_total_dims`] for unvalidated external layouts.
+     pub fn total_dims(&self) -> usize {
+-        self.position_dims + self.direction_dims
++        self.try_total_dims()
++            .expect("NeRF sample dimensions overflow")
++    }
++
++    /// Checks the combined dimension of an external sample layout.
++    pub fn try_total_dims(&self) -> PureResult<usize> {
++        self.position_dims
++            .checked_add(self.direction_dims)
++            .ok_or(TensorError::InvalidDimensions {
++                rows: self.position_dims,
++                cols: self.direction_dims,
++            })
+     }
+ }
+ 
+@@ -70,8 +87,15 @@ pub struct NerfField {
+ }
+ 
+ impl NerfField {
+-    /// Constructs a field from the provided configuration.
++    /// Constructs a field with deterministic initialization (seed 13).
+     pub fn new(config: NerfFieldConfig) -> PureResult<Self> {
++        Self::new_with_seed(config, 13)
++    }
++
++    /// Constructs independently seeded Xavier layers and a constant positive
++    /// density head. Initial density is 0.1 in inverse ray-distance units,
++    /// avoiding a fully inactive ReLU density field before the first update.
++    pub fn new_with_seed(config: NerfFieldConfig, seed: u64) -> PureResult<Self> {
+         if config.position_dims == 0 {
+             return Err(TensorError::InvalidDimensions {
+                 rows: config.position_dims,
+@@ -82,6 +106,7 @@ impl NerfField {
+             position_dims: config.position_dims,
+             direction_dims: config.direction_dims,
+         };
++        checked_elements(1, layout.try_total_dims()?)?;
+         let position_encoding =
+             PositionalEncoding::new(config.position_dims, config.position_frequencies)?;
+         let direction_encoding = if config.direction_dims > 0 {
+@@ -93,40 +118,83 @@ impl NerfField {
+             None
+         };
+ 
+-        let mut trunk = Sequential::new();
++        let dir_out = direction_encoding
++            .as_ref()
++            .map(|enc| enc.output_dims())
++            .unwrap_or(0);
++        let color_input_dim =
++            config
++                .feature_dim
++                .checked_add(dir_out)
++                .ok_or(TensorError::InvalidDimensions {
++                    rows: config.feature_dim,
++                    cols: dir_out,
++                })?;
+         let mut last_dim = position_encoding.output_dims();
+-        if config.hidden_layers == 0 {
+-            last_dim = position_encoding.output_dims();
++        if config.hidden_layers > 0 {
++            checked_elements(last_dim, config.hidden_width)?;
++            if config.hidden_layers > 1 {
++                checked_elements(config.hidden_width, config.hidden_width)?;
++            }
+         }
++        let trunk_dim = if config.hidden_layers == 0 {
++            last_dim
++        } else {
++            config.hidden_width
++        };
++        checked_elements(trunk_dim, config.feature_dim)?;
++        if config.color_layers > 0 {
++            checked_elements(color_input_dim, config.color_hidden_width)?;
++            if config.color_layers > 1 {
++                checked_elements(config.color_hidden_width, config.color_hidden_width)?;
++            }
++        }
++        checked_elements(
++            if config.color_layers == 0 {
++                color_input_dim
++            } else {
++                config.color_hidden_width
++            },
++            3,
++        )?;
++        let mut trunk = Sequential::new();
++        let mut rng = StdRng::seed_from_u64(seed);
+         for idx in 0..config.hidden_layers {
+-            trunk.push(Linear::new(
++            trunk.push(Linear::new_xavier(
+                 format!("trunk_fc{idx}"),
+                 last_dim,
+                 config.hidden_width,
++                rng.gen(),
+             )?);
+             trunk.push(Relu::new());
+             last_dim = config.hidden_width;
+         }
+ 
+-        let density_head = Linear::new("density", last_dim, 1)?;
+-        let feature_head = Linear::new("feature", last_dim, config.feature_dim)?;
++        let mut density_head = Linear::new_xavier("density", last_dim, 1, rng.gen())?;
++        density_head.visit_parameters_mut(&mut |parameter| {
++            let value = if parameter.name() == "density::bias" {
++                0.1
++            } else {
++                0.0
++            };
++            parameter.value_mut().data_mut().fill(value);
++            Ok(())
++        })?;
++        let feature_head = Linear::new_xavier("feature", last_dim, config.feature_dim, rng.gen())?;
+ 
+         let mut color_head = Sequential::new();
+-        let dir_out = direction_encoding
+-            .as_ref()
+-            .map(|enc| enc.output_dims())
+-            .unwrap_or(0);
+-        let mut color_in = config.feature_dim + dir_out;
++        let mut color_in = color_input_dim;
+         for idx in 0..config.color_layers {
+-            color_head.push(Linear::new(
++            color_head.push(Linear::new_xavier(
+                 format!("color_fc{idx}"),
+                 color_in,
+                 config.color_hidden_width,
++                rng.gen(),
+             )?);
+             color_head.push(Relu::new());
+             color_in = config.color_hidden_width;
+         }
+-        color_head.push(Linear::new("color_out", color_in, 3)?);
++        color_head.push(Linear::new_xavier("color_out", color_in, 3, rng.gen())?);
+ 
+         Ok(Self {
+             layout,
+@@ -137,7 +205,7 @@ impl NerfField {
+             feature_head,
+             color_head,
+             feature_dim: config.feature_dim,
+-            color_input_dim: config.feature_dim + dir_out,
++            color_input_dim,
+         })
+     }
+ 
+@@ -160,7 +228,7 @@ impl NerfField {
+                 right: (rows, cols),
+             });
+         }
+-        let mut buffer = Vec::with_capacity(rows * self.layout.total_dims());
++        let elements = checked_elements(rows, self.layout.total_dims())?;
+         let dir_dims = self.layout.direction_dims;
+         let dir_tensor = match (dir_dims, directions) {
+             (0, _) => None,
+@@ -176,8 +244,11 @@ impl NerfField {
+             }
+             (_, None) => None,
+         };
++        let positions = row_major(positions)?;
++        let directions = dir_tensor.map(row_major).transpose()?;
+         let pos_data = positions.data();
+-        let dir_data = dir_tensor.map(|tensor| tensor.data());
++        let dir_data = directions.as_ref().map(|tensor| tensor.data());
++        let mut buffer = Vec::with_capacity(elements);
+         for row in 0..rows {
+             let pos_off = row * cols;
+             buffer.extend_from_slice(&pos_data[pos_off..pos_off + cols]);
+@@ -185,7 +256,7 @@ impl NerfField {
+                 let dir_off = row * dir_dims;
+                 buffer.extend_from_slice(&dir_slice[dir_off..dir_off + dir_dims]);
+             } else if dir_dims > 0 {
+-                buffer.extend(std::iter::repeat(0.0).take(dir_dims));
++                buffer.extend(std::iter::repeat_n(0.0, dir_dims));
+             }
+         }
+         Tensor::from_vec(rows, self.layout.total_dims(), buffer)
+@@ -199,9 +270,13 @@ impl NerfField {
+                 right: (rows, cols),
+             });
+         }
+-        let mut positions = Vec::with_capacity(rows * self.layout.position_dims);
++        let input = row_major(input)?;
++        let mut positions = Vec::with_capacity(checked_elements(rows, self.layout.position_dims)?);
+         let mut directions = if self.layout.direction_dims > 0 {
+-            Some(Vec::with_capacity(rows * self.layout.direction_dims))
++            Some(Vec::with_capacity(checked_elements(
++                rows,
++                self.layout.direction_dims,
++            )?))
+         } else {
+             None
+         };
+@@ -233,7 +308,12 @@ impl NerfField {
+                     right: (rrows, rcols),
+                 });
+             }
+-            let mut data = Vec::with_capacity(rows * (lcols + rcols));
++            let columns = lcols
++                .checked_add(rcols)
++                .ok_or(TensorError::InvalidDimensions { rows, cols: lcols })?;
++            let left = row_major(left)?;
++            let right = row_major(&right)?;
++            let mut data = Vec::with_capacity(checked_elements(rows, columns)?);
+             let left_data = left.data();
+             let right_data = right.data();
+             for row in 0..rows {
+@@ -242,7 +322,7 @@ impl NerfField {
+                 let roff = row * rcols;
+                 data.extend_from_slice(&right_data[roff..roff + rcols]);
+             }
+-            Tensor::from_vec(rows, lcols + rcols, data)
++            Tensor::from_vec(rows, columns, data)
+         } else {
+             Ok(left.clone())
+         }
+@@ -263,11 +343,13 @@ impl NerfField {
+                 right: (crow, ccols),
+             });
+         }
+-        let mut data = Vec::with_capacity(rows * 4);
++        let density = row_major(density)?;
++        let color = row_major(color)?;
++        let mut data = Vec::with_capacity(checked_elements(rows, 4)?);
+         let density_data = density.data();
+         let color_data = color.data();
+-        for row in 0..rows {
+-            data.push(density_data[row]);
++        for (row, &density) in density_data.iter().enumerate() {
++            data.push(density);
+             let offset = row * 3;
+             data.extend_from_slice(&color_data[offset..offset + 3]);
+         }
+@@ -310,8 +392,9 @@ impl NerfField {
+                 right: (rows, cols),
+             });
+         }
+-        let mut density = Vec::with_capacity(rows);
+-        let mut color = Vec::with_capacity(rows * 3);
++        let grad_output = row_major(grad_output)?;
++        let mut density = Vec::with_capacity(checked_elements(rows, 1)?);
++        let mut color = Vec::with_capacity(checked_elements(rows, 3)?);
+         let data = grad_output.data();
+         for row in 0..rows {
+             let offset = row * 4;
+@@ -349,6 +432,14 @@ impl Module for NerfField {
+     }
+ 
+     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
++        if grad_output.shape() != (input.shape().0, 4) {
++            return Err(TensorError::ShapeMismatch {
++                left: (input.shape().0, 4),
++                right: grad_output.shape(),
++            });
++        }
++        validate_finite(grad_output.data(), "nerf_grad_output")?;
++        let (mut grad_density, grad_color) = self.split_grad_output(grad_output)?;
+         let (positions, directions) = self.split_inputs(input)?;
+         let encoded_pos = self.position_encoding.encode(&positions)?;
+         let trunk = self.trunk.forward(&encoded_pos)?;
+@@ -364,7 +455,6 @@ impl Module for NerfField {
+         } else {
+             features.clone()
+         };
+-        let (mut grad_density, grad_color) = self.split_grad_output(grad_output)?;
+         Self::mask_density_gradients(&density_pre_activation, &mut grad_density)?;
+         let grad_color_input = self.color_head.backward(&color_input, &grad_color)?;
+ 
+diff --git a/crates/st-vision/src/nerf/mod.rs b/crates/st-vision/src/nerf/mod.rs
+index 0b83c044..65b08080 100644
+--- a/crates/st-vision/src/nerf/mod.rs
++++ b/crates/st-vision/src/nerf/mod.rs
+@@ -13,3 +13,40 @@ mod trainer;
+ pub use encoding::PositionalEncoding;
+ pub use field::{FieldSampleLayout, NerfField, NerfFieldConfig};
+ pub use trainer::{NerfTrainer, NerfTrainingConfig, NerfTrainingStats};
++
++use st_tensor::{Layout, PureResult, Tensor, TensorError};
++use std::borrow::Cow;
++
++fn row_major(input: &Tensor) -> PureResult<Cow<'_, Tensor>> {
++    if input.layout() == Layout::RowMajor {
++        Ok(Cow::Borrowed(input))
++    } else {
++        Ok(Cow::Owned(input.to_layout(Layout::RowMajor)?))
++    }
++}
++
++fn checked_elements(rows: usize, cols: usize) -> PureResult<usize> {
++    rows.checked_mul(cols)
++        .filter(|&len| len <= isize::MAX as usize / std::mem::size_of::<f32>())
++        .ok_or(TensorError::InvalidDimensions { rows, cols })
++}
++
++fn validate_finite(values: &[f32], label: &'static str) -> PureResult<()> {
++    if let Some(&value) = values.iter().find(|value| !value.is_finite()) {
++        return Err(TensorError::NonFiniteValue { label, value });
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod contract_tests {
++    use super::*;
++
++    #[test]
++    fn checks_element_and_byte_overflow_without_allocation() {
++        assert_eq!(checked_elements(0, usize::MAX).unwrap(), 0);
++        assert!(checked_elements(usize::MAX, 2).is_err());
++        assert!(checked_elements(1, isize::MAX as usize / 4 + 1).is_err());
++        assert_eq!(checked_elements(2, 6).unwrap(), 12);
++    }
++}
+diff --git a/crates/st-vision/src/nerf/trainer.rs b/crates/st-vision/src/nerf/trainer.rs
+index fb4e4f78..26bcdf95 100644
+--- a/crates/st-vision/src/nerf/trainer.rs
++++ b/crates/st-vision/src/nerf/trainer.rs
+@@ -268,7 +268,7 @@ impl NerfTrainer {
+         let colors_target = batch.colors.data();
+         let mut predicted = vec![0.0f32; batch_size * 3];
+         let mut final_transmittance = vec![0.0f32; batch_size];
+-        for ray in 0..batch_size {
++        for (ray, final_trans) in final_transmittance.iter_mut().enumerate() {
+             let mut trans = 1.0f32;
+             let mut accum = [0.0f32; 3];
+             for sample in 0..samples_per_ray {
+@@ -292,7 +292,7 @@ impl NerfTrainer {
+                 accum[2] += weight * outputs_data[off + 3];
+                 trans *= 1.0 - alpha;
+             }
+-            final_transmittance[ray] = trans;
++            *final_trans = trans;
+             let base = ray * 3;
+             predicted[base] = accum[0];
+             predicted[base + 1] = accum[1];
+diff --git a/crates/st-vision/tests/nerf_geometry.rs b/crates/st-vision/tests/nerf_geometry.rs
+index a22ba281..c808c609 100644
+--- a/crates/st-vision/tests/nerf_geometry.rs
++++ b/crates/st-vision/tests/nerf_geometry.rs
+@@ -4,7 +4,42 @@ use st_core::backend::device_caps::DeviceCaps;
+ use st_nn::execution::{push_backend_policy, BackendPolicy};
+ use st_nn::Module;
+ use st_tensor::{Layout, Tensor, TensorError};
+-use st_vision::nerf::{NerfField, NerfFieldConfig, PositionalEncoding};
++use st_vision::nerf::{FieldSampleLayout, NerfField, NerfFieldConfig, PositionalEncoding};
++
++#[test]
++fn dimension_preflight_and_repeated_residual_removal_are_checked() {
++    assert!(FieldSampleLayout {
++        position_dims: usize::MAX,
++        direction_dims: 1
++    }
++    .try_total_dims()
++    .is_err());
++    for config in [
++        NerfFieldConfig {
++            position_dims: usize::MAX,
++            ..NerfFieldConfig::default()
++        },
++        NerfFieldConfig {
++            feature_dim: usize::MAX,
++            ..NerfFieldConfig::default()
++        },
++        NerfFieldConfig {
++            hidden_width: usize::MAX,
++            ..NerfFieldConfig::default()
++        },
++        NerfFieldConfig {
++            color_hidden_width: usize::MAX,
++            ..NerfFieldConfig::default()
++        },
++    ] {
++        assert!(NerfField::new(config).is_err());
++    }
++    let encoding = PositionalEncoding::new(3, 4)
++        .unwrap()
++        .without_input()
++        .without_input();
++    assert_eq!(encoding.output_dims(), 24);
++}
+ 
+ fn layouts(cols: usize) -> [Layout; 3] {
+     [
+@@ -65,7 +100,7 @@ fn encoding_matches_logical_coordinates_and_f64_reference() {
+                 encoder = encoder.without_input();
+             }
+             let mut expected = Vec::new();
+-            for row in input.data().chunks_exact(6) {
++            for row in input.data().as_chunks::<6>().0 {
+                 if residual {
+                     expected.extend(row.iter().copied().map(f64::from));
+                 }
+@@ -200,8 +235,10 @@ fn assembly_preserves_mixed_input_layouts_and_missing_directions() {
+             let missing = field.assemble_input(&p, None).unwrap();
+             for (row, p) in missing
+                 .data()
+-                .chunks_exact(12)
+-                .zip(positions.data().chunks_exact(6))
++                .as_chunks::<12>()
++                .0
++                .iter()
++                .zip(positions.data().as_chunks::<6>().0)
+             {
+                 assert_eq!(&row[..6], p);
+                 assert_eq!(&row[6..], &[0.0; 6]);
+@@ -318,3 +355,43 @@ fn field_parameter_vjp_matches_finite_differences() {
+         }
+     }
+ }
++
++#[test]
++fn field_initialization_is_seeded_with_an_active_density_head() {
++    let config = NerfFieldConfig {
++        hidden_width: 8,
++        hidden_layers: 2,
++        feature_dim: 4,
++        color_hidden_width: 8,
++        ..NerfFieldConfig::default()
++    };
++    let a = NerfField::new_with_seed(config.clone(), 7).unwrap();
++    let b = NerfField::new_with_seed(config.clone(), 7).unwrap();
++    let c = NerfField::new_with_seed(config.clone(), 8).unwrap();
++    assert_eq!(parameters(&a, false), parameters(&b, false));
++    assert_ne!(parameters(&a, false), parameters(&c, false));
++    let default = NerfField::new(config.clone()).unwrap();
++    let explicit = NerfField::new_with_seed(config, 13).unwrap();
++    assert_eq!(parameters(&default, false), parameters(&explicit, false));
++    let input = Tensor::from_vec(3, 6, (0..18).map(|i| (i as f32 - 9.0) / 10.0).collect()).unwrap();
++    for mut field in [a, b, c, default, explicit] {
++        let output = field.forward(&input).unwrap();
++        assert!(output.data().iter().all(|v| v.is_finite()));
++        assert!(output
++            .data()
++            .as_chunks::<4>()
++            .0
++            .iter()
++            .all(|row| row[0] == 0.1));
++        let seed = Tensor::from_vec(3, 4, [1.0, 0.0, 0.0, 0.0].repeat(3)).unwrap();
++        field.backward(&input, &seed).unwrap();
++        field
++            .visit_parameters(&mut |p| {
++                if p.name() == "density::bias" {
++                    assert_eq!(p.gradient().unwrap().data(), &[3.0]);
++                }
++                Ok(())
++            })
++            .unwrap();
++    }
++}
+diff --git a/crates/st-vision/tests/nerf_regression.rs b/crates/st-vision/tests/nerf_regression.rs
+index 72d17312..f60c8633 100644
+--- a/crates/st-vision/tests/nerf_regression.rs
++++ b/crates/st-vision/tests/nerf_regression.rs
+@@ -5,13 +5,13 @@
+ #![cfg(feature = "nerf")]
+ 
+ use rand::{rngs::StdRng, SeedableRng};
++use st_nn::module::Module;
+ use st_tensor::Tensor;
+ 
+ use st_vision::datasets::{MultiViewDatasetAdapter, MultiViewFrame};
+ use st_vision::nerf::{NerfField, NerfFieldConfig, NerfTrainer, NerfTrainingConfig};
+ 
+-#[test]
+-fn synthetic_constant_color_regression() {
++fn synthetic_dataset() -> MultiViewDatasetAdapter {
+     let frame = MultiViewFrame::new(
+         Tensor::from_vec(64, 3, vec![0.0; 64 * 3]).unwrap(),
+         Tensor::from_vec(
+@@ -42,26 +42,72 @@ fn synthetic_constant_color_regression() {
+         .unwrap(),
+     )
+     .unwrap();
+-    let dataset = MultiViewDatasetAdapter::new(vec![frame]).unwrap();
++    MultiViewDatasetAdapter::new(vec![frame]).unwrap()
++}
+ 
+-    let field = NerfField::new(NerfFieldConfig {
++fn field_config() -> NerfFieldConfig {
++    NerfFieldConfig {
+         hidden_width: 64,
+         hidden_layers: 2,
+         feature_dim: 16,
+         color_layers: 1,
+         color_hidden_width: 32,
+         ..Default::default()
+-    })
+-    .unwrap();
++    }
++}
+ 
+-    let trainer_config = NerfTrainingConfig {
++fn training_config() -> NerfTrainingConfig {
++    NerfTrainingConfig {
+         samples_per_ray: 8,
+         batch_size: 32,
+         learning_rate: 1e-3,
+         steps_per_epoch: 5,
+         stratified: true,
+         seed: 7,
+-    };
++    }
++}
++
++// Evaluate a parameter snapshot at fixed midpoints without advancing the
++// training sampler or comparing two different stratified sample draws.
++fn evaluation_loss(field: &NerfField, dataset: &MultiViewDatasetAdapter) -> f64 {
++    let mut values = Vec::new();
++    field
++        .visit_parameters(&mut |p| {
++            values.push(p.value().clone());
++            Ok(())
++        })
++        .unwrap();
++    let mut snapshot = NerfField::new(field_config()).unwrap();
++    let mut values = values.into_iter();
++    snapshot
++        .visit_parameters_mut(&mut |p| {
++            *p.value_mut() = values.next().unwrap();
++            Ok(())
++        })
++        .unwrap();
++    assert!(values.next().is_none());
++    let mut config = training_config();
++    config.stratified = false;
++    let mut evaluator = NerfTrainer::new(snapshot, config.clone()).unwrap();
++    let batch = dataset
++        .sample_batch(&mut StdRng::seed_from_u64(11), config.batch_size)
++        .unwrap();
++    let predictions = evaluator.render_batch(&batch).unwrap();
++    assert!(predictions.data().iter().all(|v| v.is_finite()));
++    predictions
++        .data()
++        .iter()
++        .zip(batch.colors.data())
++        .map(|(a, b)| (f64::from(*a) - f64::from(*b)).powi(2))
++        .sum::<f64>()
++        / predictions.data().len() as f64
++}
++
++#[test]
++fn synthetic_constant_color_regression() {
++    let dataset = synthetic_dataset();
++    let field = NerfField::new(field_config()).unwrap();
++    let trainer_config = training_config();
+     let mut trainer = NerfTrainer::new(field, trainer_config.clone()).unwrap();
+ 
+     let mut last_loss = f32::MAX;
+@@ -84,3 +130,28 @@ fn synthetic_constant_color_regression() {
+     let predictions = trainer.render_batch(&eval_batch).unwrap();
+     assert!(predictions.data().iter().all(|value| value.is_finite()));
+ }
++
++#[test]
++fn seeded_training_makes_progress_on_fixed_evaluation() {
++    let dataset = synthetic_dataset();
++    let mut failures = Vec::new();
++    for seed in [0, 1, 7, 13] {
++        let field = NerfField::new_with_seed(field_config(), seed).unwrap();
++        let mut trainer = NerfTrainer::new(field, training_config()).unwrap();
++        let before = evaluation_loss(trainer.field(), &dataset);
++        let mut losses = Vec::new();
++        for _ in 0..4 {
++            let stats = trainer.train_epoch(&dataset).unwrap();
++            assert!(stats.loss.is_finite() && stats.avg_transmittance.is_finite());
++            losses.push(stats.loss);
++        }
++        let after = evaluation_loss(trainer.field(), &dataset);
++        eprintln!("NERF_TRAINING seed={seed} steps=20 before={before:.9} after={after:.9} epoch_losses={losses:?}");
++        // Twenty small SGD steps are a progress check, not a convergence claim.
++        // An absolute target-only bound also passes an entirely dead field.
++        if after >= before - 1e-5 {
++            failures.push((seed, before, after));
++        }
++    }
++    assert!(failures.is_empty(), "fixed evaluation failed: {failures:?}");
++}
+diff --git a/docs/development/rust_source_crosscut.md b/docs/development/rust_source_crosscut.md
+index 7581b373..e18e3031 100644
+--- a/docs/development/rust_source_crosscut.md
++++ b/docs/development/rust_source_crosscut.md
+@@ -113,6 +113,30 @@ improve 1.079x native and 1.098x through a test-only Node/WASM host adapter.
+ Whole-MLP latency remains mixed and non-tiny Torch remains faster. Python uses
+ the same Rust path; backward and resident/autograd kernels remain unchanged.
+ 
++The positional-geometry follow-up addresses the next two old-source candidates:
++`RopeKey` now uses one exact float-bit identity for equality and hashing, so
++nearby-angle requests do not depend on cache history. This utility still has no
++production attention caller; its phase recurrence and non-finite-key behavior
++are not redesigned. NeRF encoding and field assembly/backward now honor logical
++row/column/Chimera layouts, reject invalid phases and overflowing dimensions, and
++write encoding results directly into aligned Tensor storage with paired sin/cos.
++
++The actual `st-vision/nerf` WASM dependency graph now excludes native-only Faer;
++a test-only Node adapter exercises the real crate rather than a path-imported
++substitute. This does not add a public browser NeRF API or GPU NeRF kernel.
++Parameter VJPs and one optimizer step are checked across input/seed layouts;
++the documented zero gradient for raw ray inputs is preserved.
++
++Re-enabling the dormant NeRF training regression also exposed unbounded legacy
++ramp initialization. `st_nn::Linear::new_xavier(name, in, out, seed)` offers
++seed-local, fan-scaled uniform weights and zero biases; `Linear::new` keeps
++its old values for compatibility. `NerfField::new_with_seed(config, seed)`
++uses independent Xavier layers, except its density head begins at constant
++0.1 in inverse ray-distance units to avoid an entirely inactive ReLU field.
++`NerfField::new` uses seed 13. New NeRF models therefore initialize differently;
++parameter names and shapes are unchanged. The four-seed, 20-step synthetic
++regression measures fixed-evaluation progress, not convergence or scene quality.
++
+ 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
+    steps. The fixed harness now covers the first two, not training throughput.
+    Profile the remaining checked GELU/transcendental cost and explicit
+@@ -120,14 +144,11 @@ the same Rust path; backward and resident/autograd kernels remain unchanged.
+    packed representation. The earlier 18.41x/11.72x
+    PyTorch gap applies to a different, explicit ordinary-kernel grid, not to all
+    high-level NN calls; neither Node timing nor packing wins prove browser/FT gains.
+-2. `st-core/src/util/rope_lru.rs`: epsilon-based equality and bitwise hashing do
+-   not define the same key identity; equality is also non-transitive. Review
+-   exact angle identity, finite values and eviction before optimizing trigonometry
+-   or wiring it into attention. Current Rust references to `RopeLRU`/`RopeKey` are
+-   confined to the utility itself and its tests, not production attention callers.
+-3. `st-vision/src/nerf/encoding.rs`: benchmark paired sine/cosine evaluation and
+-   validate output-size arithmetic; do not assume an intrinsic is faster on
+-   native and WASM targets without measurements.
++2. RoPE: design finite-angle/size admission and actual attention ownership before
++   introducing public bindings or claiming attention performance improvements.
++3. NeRF: larger nonconstant scenes, compositing/sampling contracts, camera-input
++   derivatives and public browser ownership remain separate work. The current
++   training check is intentionally a small synthetic progress regression.
+ 4. Contrastive backend policy: profile small-batch WGPU transfer cost separately
+    from CPU kernels, and design explicit execution ownership before introducing
+    a resident loss or sharing the trainer's gradient implementation.

@@ -1,0 +1,45 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+    Checking st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+    Checking st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+    Checking st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+    Checking st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+error: using `chunks_exact` with a constant chunk size
+   --> crates/st-vision/tests/nerf_geometry.rs:103:37
+    |
+103 |             for row in input.data().chunks_exact(6) {
+    |                                     ^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks::<6>().0`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#chunks_exact_to_as_chunks
+    = note: `-D clippy::chunks-exact-to-as-chunks` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::chunks_exact_to_as_chunks)]`
+
+error: using `chunks_exact` with a constant chunk size
+   --> crates/st-vision/tests/nerf_geometry.rs:238:18
+    |
+238 |                 .chunks_exact(12)
+    |                  ^^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks::<12>().0.iter()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#chunks_exact_to_as_chunks
+
+error: using `chunks_exact` with a constant chunk size
+   --> crates/st-vision/tests/nerf_geometry.rs:239:39
+    |
+239 |                 .zip(positions.data().chunks_exact(6))
+    |                                       ^^^^^^^^^^^^^^^
+    |
+help: consider using `as_chunks::<6>()` instead
+   --> crates/st-vision/tests/nerf_geometry.rs:239:39
+    |
+239 |                 .zip(positions.data().chunks_exact(6))
+    |                                       ^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#chunks_exact_to_as_chunks
+
+error: using `chunks_exact` with a constant chunk size
+   --> crates/st-vision/tests/nerf_geometry.rs:378:31
+    |
+378 |         assert!(output.data().chunks_exact(4).all(|row| row[0] == 0.1));
+    |                               ^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks::<4>().0.iter()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#chunks_exact_to_as_chunks
+
+error: could not compile `st-vision` (test "nerf_geometry") due to 4 previous errors

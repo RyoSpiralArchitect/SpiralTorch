@@ -113,7 +113,8 @@ improve 1.079x native and 1.098x through a test-only Node/WASM host adapter.
 Whole-MLP latency remains mixed and non-tiny Torch remains faster. Python uses
 the same Rust path; backward and resident/autograd kernels remain unchanged.
 
-The positional-geometry follow-up addresses the next two old-source candidates:
+The [positional-geometry follow-up](../../benchmarks/results/2026-09-21-positional-geometry/README.md)
+addresses the next two old-source candidates:
 `RopeKey` now uses one exact float-bit identity for equality and hashing, so
 nearby-angle requests do not depend on cache history. This utility still has no
 production attention caller; its phase recurrence and non-finite-key behavior
@@ -136,6 +137,11 @@ uses independent Xavier layers, except its density head begins at constant
 `NerfField::new` uses seed 13. New NeRF models therefore initialize differently;
 parameter names and shapes are unchanged. The four-seed, 20-step synthetic
 regression measures fixed-evaluation progress, not convergence or scene quality.
+The fixed multi-row/nonzero-frequency grid improves 1.031x native and 1.146x
+Node/WASM, while new finite checks regress zero-band cases and the all-condition
+aggregate. Torch remains faster overall at 1,024 rows; tiny Python/Rust entry
+cost differences are not a general PyTorch speed claim. All conditions and
+failed preflight attempts are preserved.
 
 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
    steps. The fixed harness now covers the first two, not training throughput.

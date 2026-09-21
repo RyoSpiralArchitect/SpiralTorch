@@ -1,0 +1,57 @@
+{
+  "baseline": "a98d81c1513b42ea02b57691d02a3bfceb400b8f",
+  "candidate": "6899536b46bea49d70d901330451bfbe275cf446",
+  "workers": {
+    "baseline": {
+      "positional-geometry-fixture": "2d55433a759df0507f4889ad8b824e17250e68b8feed9b31e0cdfa5866ad3af8",
+      "wasm/positional_geometry_fixture.js": "0ea8cfceb5aca65bc62a56a8ae3188bbf429015c49124f50da008c2e5de7260e",
+      "wasm/positional_geometry_fixture_bg.wasm.d.ts": "1f54e4453e60bbbe1dd60924da7b6070a8ff835d59dbeac8047ab523d6bfda12",
+      "wasm/positional_geometry_fixture.d.ts": "b55ef767633b8e6349209500df9f35e8b72cb884b6dc87db7349e0115ad2c00c",
+      "wasm/positional_geometry_fixture_bg.wasm": "8a19efd8105f91191e36f471151a16089a6ba78a8329580ff82a61a55f85f600"
+    },
+    "candidate": {
+      "positional-geometry-fixture": "a8d623b7e5202e35a5f4513821f6da13fae179b93a254278fe40442d64702908",
+      "wasm/positional_geometry_fixture.js": "b3046fd4b72f8b3e0862ee382d900544555d7a12f4d28726d7a10a099177809d",
+      "wasm/positional_geometry_fixture_bg.wasm.d.ts": "3260f0943972bb0ec1b1cc4cf711d036fde05015a87c67686abbf0991c98675f",
+      "wasm/positional_geometry_fixture.d.ts": "b55ef767633b8e6349209500df9f35e8b72cb884b6dc87db7349e0115ad2c00c",
+      "wasm/positional_geometry_fixture_bg.wasm": "9364e44ea791b47d1be14bbb1fff3d9271a04b443962193bd21febc04d0c9dec"
+    }
+  },
+  "local_raw_root": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921",
+  "raw_sha256": {
+    "native/candidate-b.raw.json": "198410e1cf338df382067eb53e075ac11c209e9a1384b7393a819bac8793a225",
+    "native/baseline-b.raw.json": "7af68b0f845b10d4bde560bc9540cd70006b362f9fb8fe34aedb81086fd07a2a",
+    "native/candidate-a.raw.json": "4d7f7c52f7170a497e55343d45a75b2d3cac7852c571a81b5a7eae4bcc5ccd61",
+    "native/warm-baseline.raw.json": "90ae77107c72ad7a51ffc47e27d5a62e138b5f1209c8be56b2734d8456636407",
+    "native/warm-candidate.raw.json": "d9e55571b98cb805f19fc8c8686cadf449b6f07043855ea9ff727066fb59e715",
+    "native/baseline-a.raw.json": "e7d665848f82aec712190e4cf69cd87ff40a060241a39058e7fd05428134de53",
+    "wasm/candidate-b.raw.json": "ff3bdeba4abf2640baa2aad781922866bc1e8a4e049f9fd5b33cf066e6058020",
+    "wasm/baseline-b.raw.json": "92609dac3cb2a053ae27522b48370ec9baa4108a27b7b2d19ea7fa494fe431b4",
+    "wasm/candidate-a.raw.json": "cb8e89c3496610d10bebeef6b434d921a91de9a347ae858509997dee40afa623",
+    "wasm/warm-baseline.raw.json": "be30aa6347d9b6cd32ab63c6a794cf2e54d20bf92306caed9c3222639caf1094",
+    "wasm/warm-candidate.raw.json": "2d47b64429a8fb2d4d8f51e6631d42b54d32fa01f0f9ab9feac757f455ed266e",
+    "wasm/baseline-a.raw.json": "543b32ed17a96256a68c36fcf3d71db33fc93976fd122779d8565afe09af2968"
+  },
+  "identity": {
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
+    "node": "v24.14.0",
+    "cpu": "Apple M4",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t26.4.1\nBuildVersion:\t\t25E253",
+    "arch": "arm64"
+  },
+  "numerical_replay": false,
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "fixture_target_boundary": "Private standalone fixture target, not the shared workspace target; stale failed-build copy excluded",
+  "build_environment_observed": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "CC": null,
+    "CXX": null
+  },
+  "wasm_scope": "Actual st-vision/nerf through a Node test adapter, not a public browser or WebGPU API",
+  "excluded_local_sha256": {
+    "excluded-stale-build/positional-geometry-fixture": "b01f2548adf74350984b91c59ca774b63cea2325d341464a86419d78f60d8fe9",
+    "initial-native-build/positional-geometry-fixture": "b01f2548adf74350984b91c59ca774b63cea2325d341464a86419d78f60d8fe9"
+  }
+}

@@ -1,0 +1,1631 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/consensus.rs:43:9
+    |
+ 43 | /         serde_json::json!({
+ 44 | |             "kind": "st_core_kv_consensus_soft_rules",
+ 45 | |             "backend": "cpu",
+ 46 | |             "requested_backend": "auto",
+...   |
+ 61 | |             "median_weight": if median_weight.is_finite() { median_weight as f64 } else { 0.0 },
+ 62 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/execution.rs:50:9
+    |
+ 49 |     let tensor_fallback_guard = st_tensor::execution::push_accelerator_fallback(
+    |                                 ----------------------------------------------- arguments to this function are incorrect
+ 50 |         policy.execution_config().accelerator_fallback,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+    |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+    |
+ 17 | pub enum AcceleratorFallback {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type
+    |
+   ::: crates/spiral-config/src/execution.rs:17:1
+    |
+ 17 | pub enum AcceleratorFallback {
+    | ---------------------------- this is the found type
+    = help: you can use `cargo tree` to explore your dependency tree
+note: function defined here
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor/src/execution.rs:576:8
+    |
+576 | pub fn push_accelerator_fallback(fallback: AcceleratorFallback) -> AcceleratorFallbackGuard {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/execution.rs:68:13
+    |
+ 57 |         let binding = TensorExecutionPlanBinding::try_new_with_workloads(
+    |                       -------------------------------------------------- arguments to this function are incorrect
+...
+ 68 |             policy.execution_config().accelerator_fallback,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+    |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+    |
+ 17 | pub enum AcceleratorFallback {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type
+    |
+   ::: crates/spiral-config/src/execution.rs:17:1
+    |
+ 17 | pub enum AcceleratorFallback {
+    | ---------------------------- this is the found type
+    = help: you can use `cargo tree` to explore your dependency tree
+note: associated function defined here
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor/src/execution.rs:379:12
+    |
+379 |     pub fn try_new_with_workloads(
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+  --> crates/st-core/src/backend/execution.rs:97:5
+   |
+96 | pub fn current_accelerator_fallback() -> AcceleratorFallback {
+   |                                          ------------------- expected `spiral_config::execution::AcceleratorFallback` because of return type
+97 |     st_tensor::execution::current_accelerator_fallback()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+   |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+  --> crates/spiral-config/src/execution.rs:17:1
+   |
+17 | pub enum AcceleratorFallback {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type
+   |
+  ::: /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+   |
+17 | pub enum AcceleratorFallback {
+   | ---------------------------- this is the found type
+   = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/execution.rs:184:9
+    |
+184 |         payload
+    |         ^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/execution_plan.rs:920:9
+    |
+912 |     TensorExecutionPlanBinding::try_new_with_workloads(
+    |     -------------------------------------------------- arguments to this function are incorrect
+...
+920 |         plan.request.execution_config.accelerator_fallback,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+    |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+    |
+ 17 | pub enum AcceleratorFallback {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type
+    |
+   ::: crates/spiral-config/src/execution.rs:17:1
+    |
+ 17 | pub enum AcceleratorFallback {
+    | ---------------------------- this is the found type
+    = help: you can use `cargo tree` to explore your dependency tree
+note: associated function defined here
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor/src/execution.rs:379:12
+    |
+379 |     pub fn try_new_with_workloads(
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/kdsl_bridge.rs:94:9
+    |
+ 94 | /         serde_json::json!({
+ 95 | |             "kind": "st_core_kdsl_env_bridge",
+ 96 | |             "backend": "cpu",
+ 97 | |             "requested_backend": "auto",
+...   |
+119 | |             "override_segments": overrides.segments,
+120 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/kdsl_bridge.rs:159:9
+    |
+159 | /         serde_json::json!({
+160 | |             "kind": "st_core_kdsl_kv_bridge",
+161 | |             "backend": "cpu",
+162 | |             "requested_backend": "auto",
+...   |
+183 | |             "choice_segments": choice.segments,
+184 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+    --> crates/st-core/src/backend/runtime_probe.rs:1539:55
+     |
+1539 |     emit_tensor_op_meta("backend_resolution", move || value);
+     |                                                       ^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+     |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+    --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | -------------- this is the found type
+     |
+    ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | ^^^^^^^^^^^^^^ this is the expected type
+     = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+    --> crates/st-core/src/backend/runtime_probe.rs:1550:58
+     |
+1550 |     emit_tensor_op_meta("backend_device_report", move || value);
+     |                                                          ^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+     |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+    --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | -------------- this is the found type
+     |
+    ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | ^^^^^^^^^^^^^^ this is the expected type
+     = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/temporal_fusion.rs:110:9
+    |
+110 | /         serde_json::json!({
+111 | |             "backend": "cpu",
+112 | |             "requested_backend": "auto",
+113 | |             "kind": "st_core_temporal_spectral_fusion",
+...   |
+131 | |             "spectral_first": finite_meta_f32(fusion.spectral.first().copied().unwrap_or(0.0)),
+132 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+    --> crates/st-core/src/backend/unison_heuristics.rs:1950:17
+     |
+1950 |         payload.into()
+     |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+     |
+     = help: `serde_json::value::Value` implements trait `From<T>`:
+               From<&[T]>
+               From<&str>
+               From<()>
+               From<Cow<'_, str>>
+               From<Vec<T>>
+               From<[T; N]>
+               From<bool>
+               From<f32>
+             and 15 others
+     = note: there are multiple different versions of crate `serde_json` in the dependency graph
+     = help: you can use `cargo tree` to explore your dependency tree
+     = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/wasm_tuner.rs:380:9
+    |
+380 | /         serde_json::json!({
+381 | |             "kind": "st_core_wasm_tuner_choice",
+382 | |             "backend": "wgpu",
+383 | |             "requested_backend": "auto",
+...   |
+403 | |             "fft_segments": choice.segments,
+404 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/backend/wgpu_heuristics.rs:282:9
+    |
+282 | /         serde_json::json!({
+283 | |             "kind": "st_core_wgpu_heuristic_choice",
+284 | |             "backend": "wgpu",
+285 | |             "requested_backend": "wgpu",
+...   |
+319 | |             "override_segments": overrides.segments,
+320 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/autograd/checkpoint.rs:629:9
+    |
+629 | /         serde_json::json!({
+630 | |             "backend": "cpu",
+631 | |             "requested_backend": "receipt_bound",
+632 | |             "kind": "st_core_ameba_autograd_replay_commit",
+...   |
+650 | |             "replay_verified": true,
+651 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/autograd.rs:283:9
+    |
+283 | /         serde_json::json!({
+284 | |             "backend": "cpu",
+285 | |             "requested_backend": stats.weight_update_routes.requested_label(),
+286 | |             "kind": "st_core_ameba_autograd_round",
+...   |
+329 | |             "estimated_queue_values_after": stats.pending_values_after,
+330 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/collective.rs:514:13
+    |
+514 |             value
+    |             ^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/prob_params.rs:261:13
+    |
+261 |             serde_json::to_value(&sample).expect("validated lane sample must serialize")
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/prob_params.rs:573:9
+    |
+573 | /         serde_json::to_value(&outcome.report)
+574 | |             .expect("validated lane consensus report must serialize")
+    | |_____________________________________________________________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/prob_params.rs:763:9
+    |
+763 | /         serde_json::json!({
+764 | |             "kind": "st_core_distributed_lane_consensus_runtime",
+765 | |             "semantic_owner": LANE_PROBABILITY_SEMANTIC_OWNER,
+766 | |             "semantic_backend": LANE_PROBABILITY_SEMANTIC_BACKEND,
+...   |
+776 | |             "committed": true,
+777 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/topk3_stage.rs:464:9
+    |
+464 |         serde_json::to_value(&outcome.report).expect("validated TopK stage report must serialize")
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/topk_dist.rs:390:9
+    |
+390 |         serde_json::to_value(&outcome.report).expect("validated TopK report must serialize")
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/trainer.rs:470:17
+    |
+470 | /                 serde_json::json!({
+471 | |                     "backend": "cpu",
+472 | |                     "requested_backend": collective_report.requested_backend.as_str(),
+473 | |                     "kind": "st_core_distributed_trainer_sync_step",
+...   |
+497 | |                     "estimated_parameter_update_values": self.total_params(),
+498 | |                 })
+    | |__________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/trainer.rs:522:17
+    |
+522 | /                 serde_json::json!({
+523 | |                     "backend": "cpu",
+524 | |                     "requested_backend": "none",
+525 | |                     "kind": "st_core_distributed_trainer_async_enqueue",
+...   |
+533 | |                     "estimated_queue_push_values": gradient.len(),
+534 | |                 })
+    | |__________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/trainer.rs:552:21
+    |
+552 | /                     serde_json::json!({
+553 | |                         "backend": "cpu",
+554 | |                         "requested_backend": "none",
+555 | |                         "kind": "st_core_distributed_trainer_async_merge",
+...   |
+568 | |                         "estimated_parameter_update_values": 0,
+569 | |                     })
+    | |______________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/distributed/trainer.rs:587:17
+    |
+587 | /                 serde_json::json!({
+588 | |                     "backend": "cpu",
+589 | |                     "requested_backend": result.reduction_route.requested_backend,
+590 | |                     "kind": "st_core_distributed_trainer_async_merge",
+...   |
+614 | |                     "estimated_parameter_update_values": total,
+615 | |                 })
+    | |__________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/engine/hook_points.rs:66:13
+    |
+ 66 | /             serde_json::json!({
+ 67 | |                 "backend": "cpu",
+ 68 | |                 "requested_backend": "auto",
+ 69 | |                 "kind": "st_core_onebit_allreduce_hook",
+...   |
+ 84 | |                 "estimated_gradient_values": grad.len(),
+ 85 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/engine/hook_points.rs:103:17
+    |
+103 | /                 serde_json::json!({
+104 | |                     "backend": "cpu",
+105 | |                     "requested_backend": "auto",
+106 | |                     "kind": "st_core_zero_partition_hook",
+...   |
+119 | |                     "estimated_partition_values": output.len(),
+120 | |                 })
+    | |__________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/engine/hook_points.rs:130:13
+    |
+130 | /             serde_json::json!({
+131 | |                 "backend": "cpu",
+132 | |                 "requested_backend": "auto",
+133 | |                 "kind": "st_core_zero_partition_hook",
+...   |
+146 | |                 "estimated_partition_values": output.len(),
+147 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/engine/realgrad.rs:169:9
+    |
+169 |         serde_json::Value::Object(payload)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/engine/scheduler.rs:149:9
+    |
+149 |         serde_json::Value::Object(payload)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/engine/timeline.rs:341:9
+    |
+341 |         serde_json::Value::Object(payload)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/observability.rs:496:17
+    |
+496 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/theory/observation.rs:434:9
+    |
+434 |         serde_json::Value::Object(payload)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+    --> crates/st-core/src/theory/microlocal.rs:1708:17
+     |
+1708 |         payload.into()
+     |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+     |
+     = help: `serde_json::value::Value` implements trait `From<T>`:
+               From<&[T]>
+               From<&str>
+               From<()>
+               From<Cow<'_, str>>
+               From<Vec<T>>
+               From<[T; N]>
+               From<bool>
+               From<f32>
+             and 15 others
+     = note: there are multiple different versions of crate `serde_json` in the dependency graph
+     = help: you can use `cargo tree` to explore your dependency tree
+     = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/scale_persistence.rs:265:17
+    |
+265 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/scale_persistence.rs:327:17
+    |
+327 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/renormalization_flow.rs:516:17
+    |
+516 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/maxwell.rs:731:17
+    |
+731 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+    --> crates/st-core/src/theory/zpulse.rs:1073:17
+     |
+1073 |         payload.into()
+     |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+     |
+     = help: `serde_json::value::Value` implements trait `From<T>`:
+               From<&[T]>
+               From<&str>
+               From<()>
+               From<Cow<'_, str>>
+               From<Vec<T>>
+               From<[T; N]>
+               From<bool>
+               From<f32>
+             and 15 others
+     = note: there are multiple different versions of crate `serde_json` in the dependency graph
+     = help: you can use `cargo tree` to explore your dependency tree
+     = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/spiral_dynamics.rs:641:17
+    |
+641 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/theory/sync_bridge.rs:584:9
+    |
+584 | /         serde_json::json!({
+585 | |             "backend": "cpu",
+586 | |             "requested_backend": "auto",
+587 | |             "kind": "st_core_sync_theorem_step",
+...   |
+612 | |             "effective_delta_max": effective_delta_max,
+613 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/theory/sync_bridge.rs:628:9
+    |
+628 | /         serde_json::json!({
+629 | |             "backend": "cpu",
+630 | |             "requested_backend": "auto",
+631 | |             "kind": "st_core_sync_family_aggregation",
+...   |
+646 | |             "dominant_log_e": aggregation.dominant_log_e.unwrap_or(0.0),
+647 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/theory/rg_flow.rs:331:9
+    |
+331 | /         serde_json::json!({
+332 | |             "backend": "cpu",
+333 | |             "requested_backend": "auto",
+334 | |             "kind": "st_core_rg_flow_fixed_points",
+...   |
+355 | |             },
+356 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/stv.rs:406:17
+    |
+406 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0308]: mismatched types
+    --> crates/st-core/src/theory/general_relativity.rs:1269:9
+     |
+1269 | /         serde_json::json!({
+1270 | |             "backend": "cpu",
+1271 | |             "requested_backend": "auto",
+1272 | |             "kind": "st_core_zrelativity_dimensional_reduction",
+...    |
+1304 | |             "scalar_volume_density": finite_or_zero(reduction.scalar_moduli().volume_density()),
+1305 | |         })
+     | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+     |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+    --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | -------------- this is the found type
+     |
+    ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | ^^^^^^^^^^^^^^ this is the expected type
+     = help: you can use `cargo tree` to explore your dependency tree
+     = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+    --> crates/st-core/src/theory/general_relativity.rs:1325:9
+     |
+1325 | /         serde_json::json!({
+1326 | |             "backend": "cpu",
+1327 | |             "requested_backend": "auto",
+1328 | |             "kind": "st_core_zrelativity_model_assemble",
+...    |
+1356 | |             "base_ricci_square": finite_or_zero(model.base_model.diagnostics.ricci_square),
+1357 | |         })
+     | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+     |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+    --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | -------------- this is the found type
+     |
+    ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | ^^^^^^^^^^^^^^ this is the expected type
+     = help: you can use `cargo tree` to explore your dependency tree
+     = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+    --> crates/st-core/src/theory/general_relativity.rs:1385:9
+     |
+1385 | /         serde_json::json!({
+1386 | |             "backend": "cpu",
+1387 | |             "requested_backend": "auto",
+1388 | |             "kind": "st_core_zrelativity_tensor_bundle",
+...    |
+1411 | |             "warp_cols": warp_shape.1,
+1412 | |         })
+     | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+     |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+    --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | -------------- this is the found type
+     |
+    ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | ^^^^^^^^^^^^^^ this is the expected type
+     = help: you can use `cargo tree` to explore your dependency tree
+     = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `serde_json::value::Value: From<serde_json::Map<std::string::String, serde_json::Value>>` is not satisfied
+   --> crates/st-core/src/theory/inflaton_zspace.rs:228:17
+    |
+228 |         payload.into()
+    |                 ^^^^ the trait `From<serde_json::Map<std::string::String, serde_json::Value>>` is not implemented for `serde_json::value::Value`
+    |
+    = help: `serde_json::value::Value` implements trait `From<T>`:
+              From<&[T]>
+              From<&str>
+              From<()>
+              From<Cow<'_, str>>
+              From<Vec<T>>
+              From<[T; N]>
+              From<bool>
+              From<f32>
+            and 15 others
+    = note: there are multiple different versions of crate `serde_json` in the dependency graph
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: required for `serde_json::Map<std::string::String, serde_json::Value>` to implement `Into<serde_json::value::Value>`
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/atlas.rs:982:9
+    |
+982 |         serde_json::Value::Object(payload)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/chrono.rs:123:13
+    |
+123 | /             serde_json::json!({
+124 | |                 "backend": "cpu",
+125 | |                 "requested_backend": "auto",
+126 | |                 "kind": "st_core_chrono_harmonics_summary",
+...   |
+139 | |                 "dominant_energy_magnitude": dominant_energy_magnitude,
+140 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/chrono.rs:408:13
+    |
+408 | /             serde_json::json!({
+409 | |                 "backend": "cpu",
+410 | |                 "requested_backend": "auto",
+411 | |                 "kind": "st_core_chrono_summary",
+...   |
+422 | |                 "max_energy": summary.max_energy,
+423 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/dashboard.rs:185:13
+    |
+185 | /             serde_json::json!({
+186 | |                 "backend": "cpu",
+187 | |                 "requested_backend": "auto",
+188 | |                 "kind": "st_core_dashboard_frame_ingest",
+...   |
+198 | |                 "critical_events": critical_events,
+199 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/dashboard.rs:300:9
+    |
+300 | /         serde_json::json!({
+301 | |             "backend": "cpu",
+302 | |             "requested_backend": "auto",
+303 | |             "kind": "st_core_dashboard_summary",
+...   |
+326 | |                 .unwrap_or(0.0),
+327 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/hub.rs:852:9
+    |
+852 | /         serde_json::json!({
+853 | |             "backend": "cpu",
+854 | |             "requested_backend": "auto",
+855 | |             "kind": "st_core_dashboard_snapshot_export",
+...   |
+862 | |             "max_metric_abs": max_metric_abs,
+863 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+    --> crates/st-core/src/telemetry/hub.rs:1088:9
+     |
+1088 | /         serde_json::json!({
+1089 | |             "backend": "cpu",
+1090 | |             "requested_backend": "auto",
+1091 | |             "kind": kind,
+...    |
+1108 | |             "extras": report.metadata.extras.len(),
+1109 | |         })
+     | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+     |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+    --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | -------------- this is the found type
+     |
+    ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+     |
+ 116 | pub enum Value {
+     | ^^^^^^^^^^^^^^ this is the expected type
+     = help: you can use `cargo tree` to explore your dependency tree
+     = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/maintainer.rs:330:9
+    |
+330 | /         serde_json::json!({
+331 | |             "backend": "cpu",
+332 | |             "requested_backend": "auto",
+333 | |             "kind": "st_core_timeline_maintainer_assessment",
+...   |
+351 | |             "diagnostic_chars": report.diagnostic.chars().count(),
+352 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/monitoring.rs:234:13
+    |
+234 | /             serde_json::json!({
+235 | |                 "backend": "cpu",
+236 | |                 "requested_backend": "auto",
+237 | |                 "kind": "st_core_monitoring_drift_observe",
+...   |
+244 | |                 "max_z_score": max_z_score,
+245 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/monitoring.rs:432:13
+    |
+432 | /             serde_json::json!({
+433 | |                 "backend": "cpu",
+434 | |                 "requested_backend": "auto",
+435 | |                 "kind": "st_core_monitoring_performance_observe",
+...   |
+442 | |                 "max_latest_abs": max_latest_abs,
+443 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/monitoring.rs:632:13
+    |
+632 | /             serde_json::json!({
+633 | |                 "backend": "cpu",
+634 | |                 "requested_backend": "auto",
+635 | |                 "kind": "st_core_monitoring_hub_observe",
+...   |
+643 | |                 "retry_rate": metrics.retry_rate,
+644 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/noncollapse.rs:233:9
+    |
+233 | /         serde_json::json!({
+234 | |             "backend": "cpu",
+235 | |             "requested_backend": "auto",
+236 | |             "kind": kind,
+...   |
+262 | |                 .unwrap_or(0.0),
+263 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/region_visualizer.rs:226:13
+    |
+226 | /             serde_json::json!({
+227 | |                 "backend": "cpu",
+228 | |                 "requested_backend": "auto",
+229 | |                 "kind": "st_core_zspace_region_heatmap_report",
+...   |
+248 | |                 "max_combined_weight": max_combined_weight,
+249 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/region_visualizer.rs:393:13
+    |
+393 | /             serde_json::json!({
+394 | |                 "backend": "cpu",
+395 | |                 "requested_backend": "auto",
+396 | |                 "kind": "st_core_zspace_region_delta_report",
+...   |
+413 | |                 "global_end": last.snapshot.global_loss().unwrap_or(0.0),
+414 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/region_visualizer.rs:518:13
+    |
+518 | /             serde_json::json!({
+519 | |                 "backend": "cpu",
+520 | |                 "requested_backend": "auto",
+521 | |                 "kind": "st_core_zspace_region_volatility_report",
+...   |
+533 | |                 "max_weight_range": max_range,
+534 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/xai_report.rs:109:9
+    |
+109 | /         serde_json::json!({
+110 | |             "backend": "cpu",
+111 | |             "requested_backend": "auto",
+112 | |             "kind": "st_core_attribution_report_new",
+...   |
+129 | |             "extras": metadata.extras.len(),
+130 | |         })
+    | |__________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/zspace_region.rs:148:13
+    |
+148 | /             serde_json::json!({
+149 | |                 "backend": "cpu",
+150 | |                 "requested_backend": "auto",
+151 | |                 "kind": "st_core_zspace_region_descriptor",
+...   |
+161 | |                 "region_label": key.label(),
+162 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/xai.rs:74:13
+    |
+ 74 | /             serde_json::json!({
+ 75 | |                 "backend": "cpu",
+ 76 | |                 "requested_backend": "auto",
+ 77 | |                 "kind": "st_core_graph_flow_layer_begin",
+...   |
+ 84 | |                 "max_node_energy": max_node_energy,
+ 85 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/xai.rs:106:17
+    |
+106 | /                 serde_json::json!({
+107 | |                     "backend": "cpu",
+108 | |                     "requested_backend": "auto",
+109 | |                     "kind": "st_core_graph_flow_weight_update",
+...   |
+116 | |                     "total_flow_energy": report.total_flow_energy(),
+117 | |                 })
+    | |__________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/xai.rs:132:17
+    |
+132 | /                 serde_json::json!({
+133 | |                     "backend": "cpu",
+134 | |                     "requested_backend": "auto",
+135 | |                     "kind": "st_core_graph_flow_elliptic_annotation",
+...   |
+142 | |                     "spin_alignment": sample.spin_alignment,
+143 | |                 })
+    | |__________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/xai.rs:180:17
+    |
+180 | /                 serde_json::json!({
+181 | |                     "backend": "cpu",
+182 | |                     "requested_backend": "auto",
+183 | |                     "kind": "st_core_graph_flow_roundtable_annotation",
+...   |
+204 | |                     "band_pass_rms": band_pass_rms,
+205 | |                 })
+    | |__________________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> crates/st-core/src/telemetry/xai.rs:249:13
+    |
+249 | /             serde_json::json!({
+250 | |                 "backend": "cpu",
+251 | |                 "requested_backend": "auto",
+252 | |                 "kind": "st_core_graph_flow_drain",
+...   |
+258 | |                 "roundtable_layers": roundtable_layers,
+259 | |             })
+    | |______________^ expected `serde_json::value::Value`, found `serde_json::Value`
+    |
+note: there are multiple different versions of crate `serde_json` in the dependency graph
+   --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | -------------- this is the found type
+    |
+   ::: /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:116:1
+    |
+116 | pub enum Value {
+    | ^^^^^^^^^^^^^^ this is the expected type
+    = help: you can use `cargo tree` to explore your dependency tree
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `serde_json::json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+Some errors have detailed explanations: E0277, E0308.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `st-core` (lib) due to 71 previous errors

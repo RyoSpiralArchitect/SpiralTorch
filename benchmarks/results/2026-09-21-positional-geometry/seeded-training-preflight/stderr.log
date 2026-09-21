@@ -1,0 +1,16 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+    Finished `release` profile [optimized] target(s) in 41.41s
+     Running tests/nerf_regression.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/nerf_regression-3cf6a6faf02cdb75)
+NERF_TRAINING seed=0 steps=20 before=0.178837707 after=0.178081063 epoch_losses=[0.17590356, 0.17542046, 0.17570092, 0.17510328]
+NERF_TRAINING seed=1 steps=20 before=0.222844912 after=0.182834947 epoch_losses=[0.21888737, 0.20963225, 0.19853187, 0.1890659]
+NERF_TRAINING seed=7 steps=20 before=0.160307817 after=0.153144493 epoch_losses=[0.15833542, 0.15666571, 0.15437941, 0.15299508]
+NERF_TRAINING seed=13 steps=20 before=0.179999995 after=0.179999995 epoch_losses=[0.18000028, 0.18000029, 0.18000036, 0.18000035]
+
+thread 'seeded_training_improves_fixed_evaluation_not_just_the_black_image_baseline' (1916384) panicked at crates/st-vision/tests/nerf_regression.rs:154:5:
+fixed evaluation failed: [(0, 0.17883770726948553, 0.17808106311996205), (1, 0.22284491189603708, 0.18283494691640023), (13, 0.17999999493360522, 0.17999999493360522)]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p st-vision --test nerf_regression`

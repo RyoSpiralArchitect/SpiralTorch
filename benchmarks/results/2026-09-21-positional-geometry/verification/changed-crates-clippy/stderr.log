@@ -1,0 +1,636 @@
+    Checking st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+    Checking spiral-config v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config)
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+    Checking st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kdsl)
+    Checking st-kernel-contracts v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kernel-contracts)
+    Checking st-softlogic v0.2.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-softlogic)
+    Checking bit-vec v0.6.3
+    Checking bit-set v0.5.3
+    Checking naga v0.20.0
+    Checking st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Checking st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+    Checking st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+    Checking st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+warning: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+   --> crates/st-nn/src/language/automation.rs:359:61
+    |
+359 |             for (value, sanitised) in values.iter_mut().zip(sanitised.values.into_iter()) {
+    |                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+   --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+    = note: `#[warn(clippy::useless_conversion)]` on by default
+help: consider removing the `.into_iter()`
+    |
+359 -             for (value, sanitised) in values.iter_mut().zip(sanitised.values.into_iter()) {
+359 +             for (value, sanitised) in values.iter_mut().zip(sanitised.values) {
+    |
+
+warning: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+   --> crates/st-nn/src/language/automation.rs:388:54
+    |
+388 |         for (value, scaled) in values.iter_mut().zip(scaled.into_iter()) {
+    |                                                      ^^^^^^^^^^^^^^^^^^
+    |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+   --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+help: consider removing the `.into_iter()`
+    |
+388 -         for (value, scaled) in values.iter_mut().zip(scaled.into_iter()) {
+388 +         for (value, scaled) in values.iter_mut().zip(scaled) {
+    |
+
+warning: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+   --> crates/st-nn/src/language/gw.rs:372:51
+    |
+372 |     for (value, scaled) in weights.iter_mut().zip(scaled.into_iter()) {
+    |                                                   ^^^^^^^^^^^^^^^^^^
+    |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+   --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+help: consider removing the `.into_iter()`
+    |
+372 -     for (value, scaled) in weights.iter_mut().zip(scaled.into_iter()) {
+372 +     for (value, scaled) in weights.iter_mut().zip(scaled) {
+    |
+
+warning: this function has too many arguments (10/7)
+  --> crates/st-nn/src/layers/activation.rs:31:1
+   |
+31 | / fn emit_relu_meta(
+32 | |     op_name: &'static str,
+33 | |     rows: usize,
+34 | |     cols: usize,
+...  |
+41 | |     fallback_message: Option<&str>,
+42 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+   = note: `#[warn(clippy::too_many_arguments)]` on by default
+
+warning: this function has too many arguments (10/7)
+  --> crates/st-nn/src/layers/continuous_wavelet.rs:12:1
+   |
+12 | / fn emit_continuous_wavelet_meta(
+13 | |     op_name: &'static str,
+14 | |     rows: usize,
+15 | |     cols: usize,
+...  |
+22 | |     gradient_scale: Option<f32>,
+23 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: the loop variable `c` is used to index `profile`
+   --> crates/st-nn/src/layers/continuous_wavelet.rs:173:18
+    |
+173 |         for c in 0..cols {
+    |                  ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+    = note: `#[warn(clippy::needless_range_loop)]` on by default
+help: consider using an iterator and enumerate()
+    |
+173 -         for c in 0..cols {
+173 +         for (c, <item>) in profile.iter_mut().enumerate().take(cols) {
+    |
+
+warning: this function has too many arguments (9/7)
+  --> crates/st-nn/src/layers/dropout.rs:33:1
+   |
+33 | / fn emit_dropout_meta(
+34 | |     op_name: &'static str,
+35 | |     rows: usize,
+36 | |     cols: usize,
+...  |
+42 | |     mask_backend: Option<String>,
+43 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: derefed type is same as origin
+  --> crates/st-nn/src/layers/embedding.rs:83:30
+   |
+83 |         if let Some(stats) = stats.as_deref_mut() {
+   |                              ^^^^^^^^^^^^^^^^^^^^ help: try: `stats`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_option_as_deref
+   = note: `#[warn(clippy::needless_option_as_deref)]` on by default
+
+warning: this function has too many arguments (13/7)
+   --> crates/st-nn/src/layers/embedding.rs:145:1
+    |
+145 | / fn emit_embedding_meta(
+146 | |     op_name: &'static str,
+147 | |     input_shape: (usize, usize),
+148 | |     output_shape: (usize, usize),
+...   |
+158 | |     fallback_message: Option<&str>,
+159 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (28/7)
+   --> crates/st-nn/src/layers/lstm.rs:116:1
+    |
+116 | / fn emit_lstm_meta(
+117 | |     op_name: &'static str,
+118 | |     timesteps: usize,
+119 | |     input_dim: usize,
+...   |
+144 | |     bptt_scan_parallel_axis: Option<&'static str>,
+145 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (13/7)
+   --> crates/st-nn/src/layers/non_liner.rs:262:1
+    |
+262 | / fn emit_non_liner_meta(
+263 | |     op_name: &'static str,
+264 | |     rows: usize,
+265 | |     cols: usize,
+...   |
+275 | |     gradient_scale: Option<f32>,
+276 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: the loop variable `col` is used to index `gain`
+    --> crates/st-nn/src/layers/non_liner.rs:1021:24
+     |
+1021 |             for col in 0..cols {
+     |                        ^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+     |
+1021 -             for col in 0..cols {
+1021 +             for (col, <item>) in gain.iter().enumerate().take(cols) {
+     |
+
+warning: the loop variable `col` is used to index `gain`
+    --> crates/st-nn/src/layers/non_liner.rs:1043:24
+     |
+1043 |             for col in 0..cols {
+     |                        ^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+     |
+1043 -             for col in 0..cols {
+1043 +             for (col, <item>) in gain.iter().enumerate().take(cols) {
+     |
+
+warning: this function has too many arguments (11/7)
+  --> crates/st-nn/src/layers/normalization.rs:23:1
+   |
+23 | / fn emit_normalization_backward_meta(
+24 | |     op_name: &'static str,
+25 | |     rows: usize,
+26 | |     cols: usize,
+...  |
+34 | |     affine_gradient_backend: Option<String>,
+35 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (8/7)
+   --> crates/st-nn/src/layers/normalization.rs:176:1
+    |
+176 | / fn checked_projector_gain_update(
+177 | |     current_gain: f32,
+178 | |     target_radius: f32,
+179 | |     smoothing: f32,
+...   |
+184 | |     gain_label: &'static str,
+185 | | ) -> PureResult<Option<f32>> {
+    | |____________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (13/7)
+  --> crates/st-nn/src/layers/wave_gate.rs:71:1
+   |
+71 | / fn emit_wave_gate_backward_meta(
+72 | |     rows: usize,
+73 | |     cols: usize,
+74 | |     backend: &'static str,
+...  |
+84 | |     fallback_message: Option<&str>,
+85 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (9/7)
+  --> crates/st-nn/src/layers/zspace_projector.rs:20:1
+   |
+20 | / fn emit_zspace_projector_meta(
+21 | |     op_name: &'static str,
+22 | |     layer_backend: &'static str,
+23 | |     rows: usize,
+...  |
+29 | |     saturation_gradient: &'static str,
+30 | | ) {
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (8/7)
+   --> crates/st-nn/src/z_rba/cov_head.rs:263:1
+    |
+263 | / fn emit_cov_head_meta(
+264 | |     rows: usize,
+265 | |     cols: usize,
+266 | |     rank: usize,
+...   |
+271 | |     telemetry: &CovHeadTelemetry,
+272 | | ) {
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (8/7)
+    --> crates/st-nn/src/zspace_coherence/sequencer.rs:1812:5
+     |
+1812 | /     fn build_coherence_diagnostics(
+1813 | |         &self,
+1814 | |         aggregated: &Tensor,
+1815 | |         coherence_weights: &[f32],
+...    |
+1820 | |         pre_discard: Option<PreDiscardTelemetry>,
+1821 | |     ) -> CoherenceDiagnostics {
+     | |_____________________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+    --> crates/st-nn/src/zspace_coherence/sequencer.rs:2481:64
+     |
+2481 |             for ((_, weight), scaled) in window.iter_mut().zip(scaled.into_iter()) {
+     |                                                                ^^^^^^^^^^^^^^^^^^
+     |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+    --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/iter/traits/iterator.rs:632:11
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#useless_conversion
+help: consider removing the `.into_iter()`
+     |
+2481 -             for ((_, weight), scaled) in window.iter_mut().zip(scaled.into_iter()) {
+2481 +             for ((_, weight), scaled) in window.iter_mut().zip(scaled) {
+     |
+
+warning: this `impl` can be derived
+   --> crates/st-nn/src/zspace_coherence/vae.rs:128:1
+    |
+128 | / impl Default for ZSpaceVaeOptimizerKind {
+129 | |     fn default() -> Self {
+130 | |         Self::Sgd
+131 | |     }
+132 | | }
+    | |_^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#derivable_impls
+    = note: `#[warn(clippy::derivable_impls)]` on by default
+help: replace the manual implementation with a derive attribute and mark the default variant
+    |
+101 + #[derive(Default)]
+102 | pub enum ZSpaceVaeOptimizerKind {
+103 ~     #[default]
+104 ~     Sgd,
+    |
+
+warning: this function has too many arguments (9/7)
+   --> crates/st-nn/src/zspace_coherence/vae.rs:224:5
+    |
+224 | /     fn configure(
+225 | |         &mut self,
+226 | |         input_dim: usize,
+227 | |         latent_dim: usize,
+...   |
+233 | |         grad_clip: Option<f64>,
+234 | |     ) -> PureResult<()> {
+    | |_______________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: `st-nn` (lib) generated 22 warnings (run `cargo clippy --fix --lib -p st-nn -- --no-deps` to apply 6 suggestions)
+warning: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do
+   --> crates/st-nn/../../examples/modelzoo_lightning_selfsup_minimal.rs:267:31
+    |
+267 |     fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+    |                               ^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#ptr_arg
+    = note: `#[warn(clippy::ptr_arg)]` on by default
+help: change this to
+    |
+267 -     fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+267 +     fn run_json_path(run_dir: &Path, name: &str) -> String {
+    |
+
+warning: `st-nn` (example "modelzoo_lightning_selfsup_minimal") generated 1 warning
+warning: struct update has no effect, all the fields in the struct have already been specified
+  --> crates/st-nn/../../examples/modelzoo_zconv_classification.rs:86:11
+   |
+86 |         ..Default::default()
+   |           ^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_update
+   = note: `#[warn(clippy::needless_update)]` on by default
+
+warning: `st-nn` (example "modelzoo_zconv_classification") generated 1 warning
+warning: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do
+   --> crates/st-nn/../../examples/modelzoo_vision_conv_pool_classification.rs:291:27
+    |
+291 | fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+    |                           ^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#ptr_arg
+    = note: `#[warn(clippy::ptr_arg)]` on by default
+help: change this to
+    |
+291 - fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+291 + fn run_json_path(run_dir: &Path, name: &str) -> String {
+    |
+
+warning: `st-nn` (example "modelzoo_vision_conv_pool_classification") generated 1 warning
+warning: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do
+   --> crates/st-nn/../../examples/modelzoo_wave_rnn_sequence.rs:219:27
+    |
+219 | fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+    |                           ^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#ptr_arg
+    = note: `#[warn(clippy::ptr_arg)]` on by default
+help: change this to
+    |
+219 - fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+219 + fn run_json_path(run_dir: &Path, name: &str) -> String {
+    |
+
+warning: `st-nn` (example "modelzoo_wave_rnn_sequence") generated 1 warning
+warning: the loop variable `row` is used to index `previous`
+   --> crates/st-nn/../../examples/_shared/char_lm_eval.rs:778:16
+    |
+778 |     for row in 0..rows {
+    |                ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+    = note: `#[warn(clippy::needless_range_loop)]` on by default
+help: consider using an iterator and enumerate()
+    |
+778 -     for row in 0..rows {
+778 +     for (row, <item>) in previous.iter().enumerate().take(rows) {
+    |
+
+warning: the loop variable `row` is used to index `previous`
+   --> crates/st-nn/../../examples/_shared/char_lm_eval.rs:978:20
+    |
+978 |         for row in 0..rows {
+    |                    ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+    |
+978 -         for row in 0..rows {
+978 +         for (row, <item>) in previous.iter().enumerate().take(rows) {
+    |
+
+warning: this function has too many arguments (9/7)
+    --> crates/st-nn/../../examples/_shared/char_lm_eval.rs:1525:5
+     |
+1525 | /     pub fn new(
+1526 | |         vocab_size: usize,
+1527 | |         train_tokens: &[usize],
+1528 | |         topk_weight: f32,
+...    |
+1534 | |         soft_weight: f32,
+1535 | |     ) -> PureResult<Option<Self>> {
+     | |_________________________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+     = note: `#[warn(clippy::too_many_arguments)]` on by default
+
+warning: this function has too many arguments (10/7)
+    --> crates/st-nn/../../examples/_shared/char_lm_eval.rs:2106:1
+     |
+2106 | / fn metric_from_sums(
+2107 | |     tokens: usize,
+2108 | |     windows: usize,
+2109 | |     vocab_size: usize,
+...    |
+2116 | |     lift_sums: Option<ContextLiftSums>,
+2117 | | ) -> LanguageEvalMetric {
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (13/7)
+   --> crates/st-nn/../../examples/modelzoo_llm_char_coherence_scan.rs:216:5
+    |
+216 | /     fn new(
+217 | |         steps: usize,
+218 | |         embed_dim: usize,
+219 | |         char_feature: String,
+...   |
+229 | |         vocab: &Vocab,
+230 | |     ) -> Self {
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (14/7)
+   --> crates/st-nn/../../examples/modelzoo_llm_char_coherence_scan.rs:605:1
+    |
+605 | / fn build_model(
+606 | |     vocab_size: usize,
+607 | |     steps: usize,
+608 | |     embed_dim: usize,
+...   |
+619 | |     temperature: f32,
+620 | | ) -> PureResult<Sequential> {
+    | |___________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: `st-nn` (example "modelzoo_llm_char_coherence_scan") generated 6 warnings
+warning: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do
+   --> crates/st-nn/../../examples/modelzoo_lstm_sequence_probe.rs:196:27
+    |
+196 | fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+    |                           ^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#ptr_arg
+    = note: `#[warn(clippy::ptr_arg)]` on by default
+help: change this to
+    |
+196 - fn run_json_path(run_dir: &PathBuf, name: &str) -> String {
+196 + fn run_json_path(run_dir: &Path, name: &str) -> String {
+    |
+
+warning: `st-nn` (example "modelzoo_lstm_sequence_probe") generated 1 warning
+warning: this function has too many arguments (9/7)
+    --> crates/st-nn/src/layers/lstm.rs:1288:5
+     |
+1288 | /     fn lstm_loss_with_weight_ih_delta(
+1289 | |         weight_ih: &Tensor,
+1290 | |         weight_hh: &Tensor,
+1291 | |         bias_ih: &Tensor,
+...    |
+1297 | |         scale: f32,
+1298 | |     ) -> PureResult<f32> {
+     | |________________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (9/7)
+    --> crates/st-nn/src/layers/lstm.rs:1306:5
+     |
+1306 | /     fn lstm_loss_with_input_delta(
+1307 | |         weight_ih: &Tensor,
+1308 | |         weight_hh: &Tensor,
+1309 | |         bias_ih: &Tensor,
+...    |
+1315 | |         scale: f32,
+1316 | |     ) -> PureResult<f32> {
+     | |________________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: the loop variable `unit` is used to index `grad_h_next`
+    --> crates/st-nn/src/layers/lstm.rs:1396:25
+     |
+1396 |             for unit in 0..hidden_dim {
+     |                         ^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+     |
+1396 -             for unit in 0..hidden_dim {
+1396 +             for (unit, <item>) in grad_h_next.iter_mut().enumerate().take(hidden_dim) {
+     |
+
+warning: this function has too many arguments (10/7)
+   --> crates/st-nn/../../examples/modelzoo_llm_char_finetune.rs:205:5
+    |
+205 | /     fn new(
+206 | |         steps: usize,
+207 | |         hidden: usize,
+208 | |         embed_dim: Option<usize>,
+...   |
+215 | |         vocab: &Vocab,
+216 | |     ) -> Self {
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: this function has too many arguments (10/7)
+   --> crates/st-nn/../../examples/modelzoo_llm_char_finetune.rs:651:1
+    |
+651 | / fn build_model(
+652 | |     vocab_size: usize,
+653 | |     embed_dim: Option<usize>,
+654 | |     recurrent: &str,
+...   |
+661 | |     temperature: f32,
+662 | | ) -> PureResult<Sequential> {
+    | |___________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: `st-nn` (example "modelzoo_llm_char_finetune") generated 6 warnings (4 duplicates)
+warning: struct update has no effect, all the fields in the struct have already been specified
+     --> crates/st-nn/src/trainer.rs:11933:19
+      |
+11933 |                 ..RoundtableConfig::default()
+      |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_update
+      = note: `#[warn(clippy::needless_update)]` on by default
+
+warning: unnecessary use of `get("tensor_ops_total").is_none()`
+     --> crates/st-nn/src/trainer.rs:13593:23
+      |
+13593 |         assert!(extra.get("tensor_ops_total").is_none());
+      |                 ------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |                 |
+      |                 help: replace it with: `!extra.contains_key("tensor_ops_total")`
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_get_then_check
+      = note: `#[warn(clippy::unnecessary_get_then_check)]` on by default
+
+warning: unnecessary use of `get("tensor_op_backend_requested_wgpu_component_fallback_dropout_forward_rng_cpu")
+                     .is_none()`
+     --> crates/st-nn/src/trainer.rs:14666:14
+      |
+14665 |            assert!(extra
+      |  __________________-
+14666 | |              .get("tensor_op_backend_requested_wgpu_component_fallback_dropout_forward_rng_cpu")
+      | | ______________^
+14667 | ||             .is_none());
+      | ||______________________^ help: replace it with: `!extra.contains_key("tensor_op_backend_requested_wgpu_component_fallback_dropout_forward_rng_cpu")`
+      |  |______________________|
+      |
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_get_then_check
+
+warning: unnecessary use of `get(
+                             "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_forward_rng_cpu"
+                         )
+                         .is_none()`
+     --> crates/st-nn/src/trainer.rs:14690:18
+      |
+14689 | /              extra
+14690 | |                  .get(
+      | | __________________^
+14691 | ||                     "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_forward_rng_cpu"
+14692 | ||                 )
+14693 | ||                 .is_none()
+      | ||__________________________^ help: replace it with: `!extra.contains_key("tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_forward_rng_cpu")`
+      |  |__________________________|
+      |
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_get_then_check
+
+warning: unnecessary use of `get("tensor_op_backend_wgpu_runtime_fallback_sum_abs_cpu")
+                     .is_none()`
+     --> crates/st-nn/src/trainer.rs:14824:14
+      |
+14823 |            assert!(extra
+      |  __________________-
+14824 | |              .get("tensor_op_backend_wgpu_runtime_fallback_sum_abs_cpu")
+      | | ______________^
+14825 | ||             .is_none());
+      | ||______________________^ help: replace it with: `!extra.contains_key("tensor_op_backend_wgpu_runtime_fallback_sum_abs_cpu")`
+      |  |______________________|
+      |
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_get_then_check
+
+warning: the loop variable `j` is used to index `row`
+   --> crates/st-nn/src/z_rba/attention.rs:711:30
+    |
+711 |                     for j in 0..rows {
+    |                              ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#needless_range_loop
+help: consider using an iterator and enumerate()
+    |
+711 -                     for j in 0..rows {
+711 +                     for (j, <item>) in row.iter().enumerate().take(rows) {
+    |
+
+warning: `st-nn` (example "modelzoo_llm_char_coherence_wave") generated 4 warnings (4 duplicates)
+warning: `st-nn` (lib test) generated 31 warnings (22 duplicates)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.55s
