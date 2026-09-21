@@ -92,7 +92,7 @@ def publish(raw, output, prefix="final"):
         shutil.copytree(raw / "initial-tests", output / "failed-long-prefix")
     else:
         failures = []
-        for name in ["review-legacy-before", "review-sampler-before"]:
+        for name in ["review-legacy-before", "review-sampler-before", "review-final-browser"]:
             stage = raw / name
             receipt = read(stage / "receipt.json")
             assert receipt["exit_code"] != 0 and receipt["source_unchanged"] is True
@@ -101,6 +101,8 @@ def publish(raw, output, prefix="final"):
                 "files": {p.name: sha(p) for p in stage.iterdir() if p.is_file()},
                 "stderr_tail": (stage / "stderr.log").read_text().splitlines()[-9:],
             })
+            if name == "review-final-browser":
+                failures[-1]["browser_report"] = read(raw / "browser-review-final.json")
         write(output / "negative-attempts.json", failures)
     write(output / "local-raw-manifest.json", {
         str(p): {"sha256": sha(p), "bytes": p.stat().st_size}
@@ -118,7 +120,7 @@ if __name__ == "__main__":
         })
         sys.exit(0)
     if sys.argv[1] == "--review":
-        result = publish(Path(sys.argv[2]), Path(sys.argv[3]), prefix="review-final")
+        result = publish(Path(sys.argv[2]), Path(sys.argv[3]), prefix=sys.argv[4])
     else:
         result = publish(Path(sys.argv[1]), Path(sys.argv[2]))
     print(json.dumps({"commit": result["measured_commit"], "cases": len(result["cases"]),

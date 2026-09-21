@@ -72,7 +72,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if global_id.x < uniforms.num_rays && !sample_ray(global_id.x) {
         // The legacy ABI has no validity flag. Poison the entire ray, including
         // any prefix written before a later sample failed.
-        let invalid = bitcast<f32>(0x7fc00000u);
+        // Keep NaN construction runtime-only for the browser WGSL compiler.
+        let invalid = bitcast<f32>(0x7fc00000u | (global_id.x & 0x003fffffu));
         let base = global_id.x * uniforms.samples_per_ray;
         for (var i = 0u; i < uniforms.samples_per_ray; i += 1u) {
             samples[base + i] = SamplePoint(vec3<f32>(invalid), invalid);

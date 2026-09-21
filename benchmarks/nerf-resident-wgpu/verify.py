@@ -58,7 +58,8 @@ def verify(root, raw=False, source_root=None):
         assert fixed["cases"] == result["cases"], "resident results changed after legacy repair"
         assert fixed["guards"] == result["guards"]
         failures = read(review / "negative-attempts.json")
-        assert {f["stage"] for f in failures} == {"review-legacy-before", "review-sampler-before"}
+        assert {f["stage"] for f in failures} == {
+            "review-legacy-before", "review-sampler-before", "review-final-browser"}
         assert all(f["receipt"]["exit_code"] != 0 and
                    f["receipt"]["source_unchanged"] is True for f in failures)
     if raw:

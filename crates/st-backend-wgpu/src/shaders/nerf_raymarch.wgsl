@@ -120,7 +120,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if state.valid {
         accum[ray_index] = vec4<f32>(state.rgb, state.opacity);
     } else {
-        accum[ray_index] = vec4<f32>(bitcast<f32>(0x7fc00000u));
+        // WGSL const-expressions cannot produce NaN. The ray payload keeps
+        // this a runtime bitcast while preserving a quiet-NaN exponent.
+        accum[ray_index] = vec4<f32>(bitcast<f32>(0x7fc00000u | (ray_index & 0x003fffffu)));
     }
 }
 
