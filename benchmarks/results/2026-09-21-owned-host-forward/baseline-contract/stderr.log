@@ -1,0 +1,47 @@
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+error[E0599]: no associated function or constant named `ones` found for struct `st_tensor::Tensor` in the current scope
+    --> crates/st-nn/tests/gelu_layout_contract.rs:224:36
+     |
+ 224 |         .backward(&input, &Tensor::ones(2, 6).unwrap())
+     |                                    ^^^^ associated function or constant not found in `st_tensor::Tensor`
+     |
+note: if you're trying to build a new `st_tensor::Tensor` consider using one of the following associated functions:
+      st_tensor::Tensor::zeros
+      st_tensor::Tensor::from_vec
+      st_tensor::Tensor::random_uniform
+      st_tensor::Tensor::random_normal
+      and 5 others
+    --> crates/st-tensor/src/pure.rs:1529:5
+     |
+1529 |       pub fn zeros(rows: usize, cols: usize) -> PureResult<Self> {
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1536 |       pub fn from_vec(rows: usize, cols: usize, data: Vec<f32>) -> PureResult<Self> {
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1545 | /     pub fn random_uniform(
+1546 | |         rows: usize,
+1547 | |         cols: usize,
+1548 | |         min: f32,
+1549 | |         max: f32,
+1550 | |         seed: Option<u64>,
+1551 | |     ) -> PureResult<Self> {
+     | |_________________________^
+...
+1571 | /     pub fn random_normal(
+1572 | |         rows: usize,
+1573 | |         cols: usize,
+1574 | |         mean: f32,
+1575 | |         std: f32,
+1576 | |         seed: Option<u64>,
+1577 | |     ) -> PureResult<Self> {
+     | |_________________________^
+help: there is a method `ne` with a similar name, but with different arguments
+    --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/cmp.rs:263:4
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `st-nn` (test "gelu_layout_contract") due to 1 previous error

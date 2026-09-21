@@ -1,0 +1,6 @@
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.87s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_tensor-4d97b0b4220e61f6)
+     Running tests/autograd_observability.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/autograd_observability-9c3bdee1cdf275fa)
+     Running tests/autograd_sgd.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/autograd_sgd-a66f942a0d439d22)
+     Running tests/classification.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/classification-085e3e299595b5bf)

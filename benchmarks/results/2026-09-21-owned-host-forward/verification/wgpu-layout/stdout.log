@@ -1,0 +1,17 @@
+
+running 12 tests
+test backward_pairs_logical_input_and_seed_across_mixed_layouts ... ok
+test checked_forward_matches_scalar_bits_across_exponents_and_bounds ... ok
+test checked_forward_preserves_error_precedence_and_signed_zero ... ok
+test checked_forward_scans_past_large_finite_inputs_before_arithmetic ... ok
+test forward_preserves_logical_values_for_every_layout ... ok
+test nested_sequential_forward_and_backward_match_independent_chain ... ok
+test owned_gelu_materializes_shared_snapshot_external_and_nonrow_inputs ... ok
+test owned_gelu_preserves_outlier_errors_and_aliases_on_failure ... ok
+test owned_gelu_reuses_unique_storage_and_revokes_weak_stamps ... ok
+test owned_sequential_and_default_custom_module_preserve_contracts ... ok
+test sequential_keeps_custom_module_retained_inputs_intact ... ok
+test strict_wgpu_backward_pairs_logical_layouts ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
