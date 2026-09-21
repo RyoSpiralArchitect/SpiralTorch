@@ -1,5 +1,6 @@
 //! Immutable ray sampling and compositing on an existing tensor device.
 use crate::{
+    resident_graph::{GraphInferenceError, ResidentGraph},
     resident_tensor::{
         capture::allocate_whole_outputs, storage_limit, ResidentTensor, TensorDevice, TensorError,
     },
@@ -16,6 +17,8 @@ pub enum NerfError {
     Tensor(#[from] TensorError),
     #[error(transparent)]
     Runtime(#[from] WgpuRuntimeError),
+    #[error(transparent)]
+    Graph(#[from] GraphInferenceError),
     #[error("NeRF ray {index} has non-finite coordinates, unordered bounds or an unrepresentable f32 span")]
     InvalidRay { index: usize },
     #[error("NeRF requires nonempty rays and a positive sample count")]
@@ -24,6 +27,10 @@ pub enum NerfError {
     WidthUnderflow,
     #[error("NeRF field must have shape [rays, samples_per_ray, 4] (sigma, r, g, b)")]
     FieldShape,
+    #[error(
+        "NeRF position graph must map [rays, samples_per_ray, 3] to [rays, samples_per_ray, 4]"
+    )]
+    GraphShape,
 }
 
 /// A physical ray, parameterized as origin + direction * t. Directions need not
@@ -239,6 +246,39 @@ impl ResidentNerf {
 
     pub fn tensor_device(&self) -> &TensorDevice {
         &self.0.device
+    }
+
+    /// Sample rays, evaluate a position-only NN graph and composite RGBA, without
+    /// host observation. Layout/device admission precedes sampling. The graph's
+    /// direct tensor path packs positions and writes its owning field output in
+    /// one submission, avoiding stable-workspace input/output value copies.
+    ///
+    /// This is forward-only, not an automatic conversion of NerfField or its
+    /// direction conditioning/positional encoding. Graph failures may occur
+    /// after sampling; no rollback of already submitted GPU work is promised.
+    pub fn render_graph(
+        &self,
+        rays: &ResidentRays,
+        samples_per_ray: usize,
+        mode: RaySampling,
+        graph: &mut ResidentGraph,
+    ) -> Result<ResidentTensor, NerfError> {
+        let context = self.0.device.runtime().context();
+        if !context.shares_handles_with(rays.device.runtime().context())
+            || !context.shares_handles_with(graph.tensor_device().runtime().context())
+        {
+            return Err(TensorError::DeviceMismatch.into());
+        }
+        dimensions(rays.count, samples_per_ray, &context.device().limits())?;
+        validate_width(rays.smallest_span, samples_per_ray)?;
+        if graph.input_layout().shape() != [rays.count, samples_per_ray, 3]
+            || graph.output_layout().shape() != [rays.count, samples_per_ray, 4]
+        {
+            return Err(NerfError::GraphShape);
+        }
+        let samples = self.sample(rays, samples_per_ray, mode)?;
+        let field = graph.forward_tensor(&samples.positions()?)?;
+        self.composite(&samples, &field)
     }
 
     pub fn upload_rays(&self, rays: &[NerfRay]) -> Result<ResidentRays, NerfError> {

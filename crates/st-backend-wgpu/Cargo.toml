@@ -28,5 +28,9 @@ wasm-bindgen-futures = "0.4"
 name = "resident_nerf_browser"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "resident_nerf_bench_browser"
+crate-type = ["cdylib"]
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
