@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Matched resident NeRF graph benchmark</title>
+<pre id="result" data-status="running">Measuring complete resident renders</pre>
+<script type="module">
+import init, {run_resident_nerf_bench} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference:"high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback browser adapter not confirmed");
+  await init();
+  const report = JSON.parse(await run_resident_nerf_bench());
+  report.browser_adapter_probe = {
+    vendor:adapter.info?.vendor ?? null, architecture:adapter.info?.architecture ?? null,
+    is_fallback_adapter:fallback,
+    boundary:"Separate probe, not attestation of the Rust runtime device"
+  };
+  if (report.status !== "passed" || report.cases?.length !== 12 ||
+      !report.cases.every(c => c.intervals?.length === 36))
+    throw Error("Incomplete matched NeRF benchmark");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error",error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>
