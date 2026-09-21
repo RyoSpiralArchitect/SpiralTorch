@@ -68,6 +68,25 @@ class ArchiveTests(unittest.TestCase):
         self.edit("source.json", lambda r: r.__setitem__("status", " M source.rs"))
         self.rejects()
 
+    def test_review_result_drift(self):
+        self.edit("review-legacy/results.json",
+                  lambda r: r["cases"][0].__setitem__("input_sha256", "0" * 64))
+        self.rejects()
+
+    def test_missing_review_validation(self):
+        self.edit("review-legacy/validation.json", lambda r: r.pop())
+        self.rejects()
+
+    def test_dirty_review_source(self):
+        self.edit("review-legacy/source.json",
+                  lambda r: r.__setitem__("status", " M shader.wgsl"))
+        self.rejects()
+
+    def test_fabricated_review_failure(self):
+        self.edit("review-legacy/negative-attempts.json",
+                  lambda r: r[0]["receipt"].__setitem__("exit_code", 0))
+        self.rejects()
+
 
 if __name__ == "__main__":
     unittest.main()

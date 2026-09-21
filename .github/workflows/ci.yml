@@ -30,6 +30,8 @@ jobs:
           python3 -I tests/test_nd_tensor_bench.py
           python3 -I tests/test_pointwise_vjp_bench.py
           python3 -I -B benchmarks/nerf-resident-wgpu/test_compare.py
+          python3 -I -B benchmarks/nerf-resident-wgpu/test_verify.py
+          python3 -I -B benchmarks/nerf-resident-wgpu/verify.py benchmarks/results/2026-09-21-nerf-resident-wgpu
       - name: Verify generated workspace inventory
         run: python3 tools/list_workspace_crates.py --check-doc docs/development/workspace_crates.md
 

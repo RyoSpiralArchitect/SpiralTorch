@@ -58,7 +58,7 @@ retained files. Numerical/GPU replay is distinct from archive verification:
 
 ```sh
 python3 -I -B benchmarks/nerf-resident-wgpu/verify.py benchmarks/results/2026-09-21-nerf-resident-wgpu
-python3 -I -B benchmarks/nerf-resident-wgpu/verify.py benchmarks/results/2026-09-21-nerf-resident-wgpu --raw --source-root .
+python3 -I -B benchmarks/nerf-resident-wgpu/verify.py benchmarks/results/2026-09-21-nerf-resident-wgpu --raw --source-root /absolute/checkout/of/4dbb4352
 python3 -I -B benchmarks/nerf-resident-wgpu/test_verify.py
 ```
 
@@ -106,3 +106,10 @@ source snapshot, complete compact results, stage receipts, negative attempts and
 local payload hashes. Original result/source/log bytes are unchanged.
 `--source-root` checks this latest source snapshot; `--raw` checks both retained
 payload manifests. Neither option is a GPU/numerical replay.
+
+A follow-up review added the archive tests and direct archive verification to
+the CI inventory job. Four more verifier regressions cover review-result drift,
+missing review validation, dirty review source and a fabricated successful
+negative reproduction (11 verifier tests total). These workflow/test-only edits
+do not alter the measured Rust/shader code. Use a checkout of the pinned
+measurement commit for `--source-root`, not the later moving PR/main checkout.
