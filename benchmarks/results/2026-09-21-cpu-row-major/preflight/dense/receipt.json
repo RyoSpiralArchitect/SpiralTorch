@@ -1,0 +1,72 @@
+{
+  "steps": [
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-dense"
+      ],
+      "mode": "serial",
+      "name": "baseline-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-dense"
+      ],
+      "mode": "serial",
+      "name": "candidate-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-dense"
+      ],
+      "mode": "serial",
+      "name": "candidate-b",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-dense"
+      ],
+      "mode": "serial",
+      "name": "baseline-b",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-dense"
+      ],
+      "mode": "parallel",
+      "name": "baseline-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-dense"
+      ],
+      "mode": "parallel",
+      "name": "candidate-a",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-dense"
+      ],
+      "mode": "parallel",
+      "name": "candidate-b",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-dense"
+      ],
+      "mode": "parallel",
+      "name": "baseline-b",
+      "exit_code": 0
+    }
+  ],
+  "binaries": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-dense": "aa8748eb073ff705009464b4c8b2aab5b45886dbc3aa71df83a6223be5ee4c12",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-a/candidate-dense": "659981e89ee07f3433e9a01a479bf0e8c56d94407c523b43ba08a8b66dbe31f2"
+  }
+}

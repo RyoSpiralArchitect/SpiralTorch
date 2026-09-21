@@ -1,0 +1,3 @@
+* -text
+*.log whitespace=-blank-at-eof
+*.patch whitespace=-blank-at-eol

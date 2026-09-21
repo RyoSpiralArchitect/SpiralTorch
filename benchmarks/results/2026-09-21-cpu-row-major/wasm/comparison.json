@@ -1,0 +1,174 @@
+{
+  "measured_condition_runs": 48,
+  "preconditioning_condition_runs": 24,
+  "runtime": [
+    "v24.14.0",
+    "arm64",
+    "darwin"
+  ],
+  "comparisons": [
+    {
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.4908473601593724,
+        1.3451863342898693
+      ]
+    },
+    {
+      "shape": [
+        8,
+        768,
+        3072
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.0437715670847612,
+        1.0524368586192614
+      ]
+    },
+    {
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.1268203751176185,
+        1.0940192010112426
+      ]
+    },
+    {
+      "shape": [
+        32,
+        768,
+        3072
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9427838055968741,
+        0.9838071579589986
+      ]
+    },
+    {
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.074514414769066,
+        1.086036994766114
+      ]
+    },
+    {
+      "shape": [
+        64,
+        256,
+        1024
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        1.010440140315486,
+        0.9526930153711358
+      ]
+    },
+    {
+      "shape": [
+        128,
+        256,
+        256
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.056029648088729,
+        1.0363375247255557
+      ]
+    },
+    {
+      "shape": [
+        128,
+        256,
+        256
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9819479101684342,
+        0.9679165453224795
+      ]
+    },
+    {
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.2490753392385978,
+        1.1992415619476873
+      ]
+    },
+    {
+      "shape": [
+        17,
+        137,
+        195
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9279503351780928,
+        0.9665006620528462
+      ]
+    },
+    {
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "packed": false,
+      "baseline_over_candidate": [
+        1.1626725901963646,
+        1.1490622479110195
+      ]
+    },
+    {
+      "shape": [
+        65,
+        1025,
+        97
+      ],
+      "packed": true,
+      "baseline_over_candidate": [
+        0.9831099011767155,
+        0.9744689049214563
+      ]
+    }
+  ],
+  "summaries": [
+    {
+      "packed": false,
+      "geometric_mean": 1.1660544032271185,
+      "minimum": 1.0363375247255557,
+      "maximum": 1.4908473601593724,
+      "favorable": 12,
+      "count": 12
+    },
+    {
+      "packed": true,
+      "geometric_mean": 0.9816745687411031,
+      "minimum": 0.9279503351780928,
+      "maximum": 1.0524368586192614,
+      "favorable": 3,
+      "count": 12
+    }
+  ],
+  "numerical_replay": false
+}

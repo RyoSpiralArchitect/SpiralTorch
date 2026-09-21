@@ -1,0 +1,58 @@
+{
+  "commit": "64e500768abe4cdf7e78e0674e1c07cc588ab163",
+  "dirty": "M bindings/st-wasm/tests/cpu_dense_matmul.cjs\n M crates/st-tensor/src/backend/cpu_dense.rs\n?? bindings/st-wasm/tests/cpu_dense_bench.cjs",
+  "source_hashes": {
+    "crates/st-tensor/src/backend/cpu_dense.rs": "3d2626401e148f0736e663ed3e1591eefeaaafe9394f513f0d03c75496fb710c",
+    "crates/st-bench/examples/cpu_dense_workspace.rs": "c3c08cfacecf0d19986df7a8f79a4e2bf1c13015d79d3d54ef629474fcb13864",
+    "crates/st-bench/examples/cpu_dense_extended.rs": "12ba1714b4a025bb9f6556759d7367691fa5e086588d65c519907517b7340ea5",
+    "crates/st-bench/examples/source_crosscut.rs": "cb900f6dc310670a26455f9d8a79394c22e68bc5295ce837c7315216be63f624"
+  },
+  "steps": [
+    {
+      "name": "cpu-kernels",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu",
+        "--lib",
+        "backend::cpu_dense",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 5.144403458005399
+    },
+    {
+      "name": "benchmark-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-bench",
+        "--example",
+        "cpu_dense_workspace",
+        "--example",
+        "cpu_dense_extended",
+        "--example",
+        "source_crosscut"
+      ],
+      "exit_code": 0,
+      "seconds": 46.199437917006435
+    }
+  ],
+  "products": {
+    "candidate-dense": "6ec771e17c7ab11d1096cd8f58cd7cd5e8af1db0c264e71344a7084fd38d0ff9",
+    "candidate-extended": "0c20a3d7745503329aa72a2fab9addc3cf63603c951684a04624c58845d68db3",
+    "candidate-crosscut": "64f847aa0b9ff4954d7fb184c92ac409c00b99d5845a79aa9cfc95a349133209"
+  },
+  "status": "passed"
+}

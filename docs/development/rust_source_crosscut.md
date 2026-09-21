@@ -68,10 +68,18 @@ results and an excluded shared-build-cache attempt are preserved. The comparison
 now checks source/build identity before trusting timing or numerical success.
 PyTorch is still faster across this grid; Auto routing is not changed.
 
-1. CPU dense packing and small-batch dispatch: profile the remaining deep-inner
-   unpacked path, SIMD/microkernel throughput, and high-level Auto dispatch as
-   separate boundaries. Reusing A panels is useful, but does not close the wide
-   matrix-product gap with PyTorch or prove end-to-end training improvement.
+The [row-major follow-up](../../benchmarks/results/2026-09-21-cpu-row-major/README.md)
+removes unpacked A/B packing entirely, uses fixed-width tail accumulators, and
+avoids parallel launch for a lone partial row group. The extended native grid
+improves 2.173x/3.458x serial/four-thread relative to the panel-reuse implementation;
+the real WASM/Node ordinary-layout grid improves 1.166x. Packed controls and tiny
+cases remain mixed. Layout-specific tuning now measures and caches the actual
+execution path; the public prepacked format and high-level routing stay intact.
+
+1. CPU dense throughput and NN dispatch: profile actual Linear/MLP workloads,
+   prepacked versus ordinary weights, and SIMD/microkernel throughput. The native
+   ordinary-layout PyTorch gap is still about 18.41x/11.72x on the extended grid;
+   neither zero packing allocations nor Node timing proves browser or FT gains.
 2. `st-core/src/util/rope_lru.rs`: epsilon-based equality and bitwise hashing do
    not define the same key identity; equality is also non-transitive. Review
    exact angle identity, finite values, eviction, and real consumers before

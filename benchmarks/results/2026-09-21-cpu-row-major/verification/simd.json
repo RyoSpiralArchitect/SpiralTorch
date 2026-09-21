@@ -1,0 +1,26 @@
+{
+  "source": "634222f991502f1a84b518180e240f4f976c4bf7",
+  "command": [
+    "cargo",
+    "+nightly-2026-04-15",
+    "test",
+    "--locked",
+    "-p",
+    "st-tensor",
+    "--no-default-features",
+    "--features",
+    "cpu,simd",
+    "--lib",
+    "backend::cpu_dense",
+    "--",
+    "--test-threads=1"
+  ],
+  "exit_code": 0,
+  "seconds": 22.12123099999735,
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRALTORCH_AUTOTUNE": "1",
+    "SPIRALTORCH_AUTOTUNE_STORE": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/simd-tuning.json"
+  }
+}

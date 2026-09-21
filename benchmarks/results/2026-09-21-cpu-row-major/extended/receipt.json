@@ -1,0 +1,125 @@
+{
+  "steps": [
+    {
+      "name": "serial-warm-baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-warm-candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-baseline-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-candidate-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-candidate-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-baseline-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "serial-torch",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-S",
+        "-c",
+        "import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=sys.argv[2:];runpy.run_path(sys.argv[0],run_name='__main__')",
+        "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/benchmarks/results/2026-09-21-cpu-panel-reuse/measure_extended.py",
+        "torch",
+        "--threads",
+        "1"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-warm-baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-warm-candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-baseline-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-candidate-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-candidate-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-baseline-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "parallel-torch",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-S",
+        "-c",
+        "import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=sys.argv[2:];runpy.run_path(sys.argv[0],run_name='__main__')",
+        "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/benchmarks/results/2026-09-21-cpu-panel-reuse/measure_extended.py",
+        "torch",
+        "--threads",
+        "4"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "binaries": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/baseline-extended": "86ebc3d25239aa81f60743b7598eeb9c1351a8890800625562e9c025d578dc6d",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/probe-b/candidate-extended": "0c20a3d7745503329aa72a2fab9addc3cf63603c951684a04624c58845d68db3"
+  },
+  "policy": "One complete recorded preconditioning grid per binary/mode, then fixed AB/BA; no interval trimming"
+}

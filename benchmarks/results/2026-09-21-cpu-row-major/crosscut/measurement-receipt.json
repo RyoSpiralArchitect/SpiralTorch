@@ -1,0 +1,55 @@
+{
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "steps": [
+    [
+      "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/crosscut-a/baseline-worker",
+      "baseline-a"
+    ],
+    [
+      "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/crosscut-a/candidate-worker",
+      "candidate-a"
+    ],
+    [
+      "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/crosscut-a/candidate-worker",
+      "candidate-b"
+    ],
+    [
+      "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/crosscut-a/baseline-worker",
+      "baseline-b"
+    ],
+    [
+      "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+      "-I",
+      "-S",
+      "-c",
+      "import sys, runpy\nsys.path.insert(0, sys.argv[1])\nsys.argv = sys.argv[2:]\nrunpy.run_path(sys.argv[0], run_name='__main__')",
+      "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages",
+      "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/benchmarks/results/2026-09-21-cpu-panel-reuse/measure_crosscut.py",
+      "torch"
+    ]
+  ],
+  "hashes": {
+    "baseline-worker": "d97d8ab265bed811942efa0b759bf09ee311b3d4b06de2b04084141e84707f9c",
+    "candidate-worker": "64f847aa0b9ff4954d7fb184c92ac409c00b99d5845a79aa9cfc95a349133209",
+    "baseline-a.json": "37b321f7675d12e56d66ed8e2963b5a61786d1fdacc2c8fd387c3689d0af9601",
+    "candidate-a.json": "74d186bdb1cdbcebf55bcdc342dc8b11fef3c04d4f087dfeb214b845490c2307",
+    "candidate-b.json": "371cc3f6d9948166f9551b4c9b387f13ea6cb504dfa9c2bda6144095647e6936",
+    "baseline-b.json": "6c293d8019d7ced3cf1743ad3cbc323fdf5599dd8672e74df412707b7cc148af",
+    "torch.json": "26d383e7d98c3d513d98810c72409d3289618821b7071e41c787a51b778dc820"
+  },
+  "hardware": [
+    "Apple M4",
+    "25769803776",
+    "10"
+  ],
+  "rust_environment": {
+    "RAYON_NUM_THREADS": "1",
+    "SPIRAL_DETERMINISTIC": "1",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "1",
+    "SPIRAL_DETERMINISTIC_SEED": "17",
+    "HOME": null,
+    "SPIRALTORCH_AUTOTUNE_STORE": null
+  },
+  "kernel_policy": "No store path: cpu_autotune_key returns None; fixed default kernel; serial reduction"
+}

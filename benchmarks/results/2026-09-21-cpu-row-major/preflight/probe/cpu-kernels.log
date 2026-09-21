@@ -1,0 +1,19 @@
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.57s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_tensor-2519e2e452b748e0)
+
+running 11 tests
+test backend::cpu_dense::tests::autotune_cache_recovers_after_poison ... ok
+test backend::cpu_dense::tests::direct_panels_preserve_every_small_width_and_tail ... ok
+test backend::cpu_dense::tests::every_kernel_preserves_sequential_reduction_with_tails ... ok
+test backend::cpu_dense::tests::invalid_lengths_and_overflow_are_errors_before_writing ... ok
+test backend::cpu_dense::tests::matmul_into_matches_reference_m8n12 ... ok
+test backend::cpu_dense::tests::matmul_into_matches_reference_with_tail_and_partial_rows ... ok
+test backend::cpu_dense::tests::matmul_packed_into_matches_unpacked ... ok
+test backend::cpu_dense::tests::matmul_with_kernel_spec_matches_reference_m4n16 ... ok
+test backend::cpu_dense::tests::public_paths_preserve_sequential_reduction_and_overwrite_destination ... ok
+test backend::cpu_dense::tests::row_major_kernels_respect_strides_and_output_guards ... ok
+test backend::cpu_dense::tests::serial_panel_storage_is_reused_between_rhs_blocks ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 443 filtered out; finished in 1.43s
+
