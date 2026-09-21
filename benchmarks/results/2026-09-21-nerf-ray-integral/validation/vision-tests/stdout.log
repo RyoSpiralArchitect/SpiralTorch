@@ -1,0 +1,115 @@
+
+running 66 tests
+test analysis::tests::feature_map_bridge_detects_boundary ... ok
+test analysis::tests::profile_extracts_dominant_scale ... ok
+test analysis::tests::shape_mismatch_reported ... ok
+test analysis::tests::similarity_detects_alignment ... ok
+test datasets::tests::adapter_samples_consistent_batches ... ok
+test datasets::tests::adapter_samples_contiguous_span ... ok
+test datasets::tests::invalid_spans_and_allocation_overflow_fail_before_sampling ... ok
+test datasets::tests::malformed_public_frames_and_batches_are_revalidated ... ok
+test datasets::tests::random_span_respects_stride_constraints ... ok
+test datasets::tests::sampling_and_stacking_preserve_logical_layouts ... ok
+test datasets::tests::stacking_batches_concatenates_inputs ... ok
+test datasets::tests::weighted_sampling_honours_zero_weights ... ok
+test datasets::tests::zero_sampling_threshold_skips_zero_weights_and_large_totals_stay_finite ... ok
+test models::tests::compute_all_grad_cam_drains_layers ... ok
+test models::tests::hooks_produce_grad_cam_reports ... ok
+test models::tests::integrated_gradients_hook_wraps_metadata ... ok
+test nerf::encoding::tests::encoding_preserves_expected_dimensions ... ok
+test nerf::field::tests::backward_streams_gradients ... ok
+test nerf::field::tests::field_forward_produces_density_and_color ... ok
+test nerf::integral::tests::invalid_shapes_values_widths_and_unrepresentable_loss_are_errors ... ok
+test nerf::integral::tests::transparent_and_opaque_slabs_have_stable_values_and_gradients ... ok
+test nerf::integral::tests::vjp_matches_finite_differences_for_multiple_rays_and_layouts ... ok
+test tensor_contract::tests::checks_element_and_byte_overflow_without_allocation ... ok
+test tests::aggregator_telemetry_and_prune_behave ... ok
+test tests::blend_sequence_respects_weights ... ok
+test tests::color_jitter_produces_finite_values ... ok
+test tests::color_jitter_validates_hue_bounds ... ok
+test tests::dataloader_produces_batches ... ok
+test tests::decoder_is_deterministic_for_seed ... ok
+test tests::diffuser_softens_sharp_transitions ... ok
+test tests::image_tensor_volume_roundtrip ... ok
+test tests::multi_view_biases_respect_orientation_and_baseline ... ok
+test tests::projector_multi_view_temporal_projection_matches_manual_smoothing ... ok
+test tests::projector_respects_atlas_calibration ... ok
+test tests::projector_temporal_projection_matches_manual_smoothing ... ok
+test tests::resonance_generator_produces_projectable_resonance ... ok
+test tests::resonance_generator_respects_feedback_history ... ok
+test tests::resonance_projection_matches_manual_weighting ... ok
+test tests::simple_cnn_forward_produces_logits ... ok
+test tests::slice_profile_matches_manual_stats ... ok
+test tests::slice_profile_summary_computes_entropy ... ok
+test tests::stream_frame_aggregator_merges_metadata ... ok
+test tests::stream_frame_aggregator_respects_depth_limit ... ok
+test tests::streamed_volume_telemetry_matches_frame_report ... ok
+test tests::temporal_buffer_applies_decay_and_handles_resets ... ok
+test tests::transform_pipeline_matches_torchvision_basics ... ok
+test tests::video_stream_projector_handles_sequences ... ok
+test tests::volume_accumulate_performs_temporal_ema ... ok
+test tests::volume_from_slices_respects_shapes ... ok
+test tests::volume_interpolation_and_upscale_refine_geometry ... ok
+test tests::volume_profile_matches_slice_statistics ... ok
+test tests::volume_zeros_with_temporal_allocates_expected_buffers ... ok
+test transforms::audit::tests::pipeline_audit_matches_registered_ops ... ok
+test transforms::audit::tests::summarize_pipeline_counts_gpu_support ... ok
+test transforms::audit::tests::summarize_pipelines_accumulates_unknowns ... ok
+test video::tests::pipeline_emits_annotations ... ok
+test xai::grad_cam::tests::grad_cam_allows_raw_heatmap ... ok
+test xai::grad_cam::tests::grad_cam_normalises_heatmap ... ok
+test xai::integrated_gradients::tests::integrated_gradients_identity_matches_difference ... ok
+test xai::integrated_gradients::tests::integrated_gradients_rejects_zero_steps ... ok
+test xai::tests::normalised_overlay_and_stats ... ok
+test xai::tests::overlay_blends_with_base ... ok
+test xai::tests::smoothing_returns_blurred_map ... ok
+test xai::utils::tests::blend_heatmap_interpolates ... ok
+test xai::utils::tests::box_blur_applies_local_average ... ok
+test xai::utils::tests::normalise_and_threshold ... ok
+
+test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+
+running 9 tests
+test assembly_preserves_mixed_input_layouts_and_missing_directions ... ok
+test dimension_preflight_and_repeated_residual_removal_are_checked ... ok
+test empty_encodings_and_signed_zero_remain_well_defined ... ok
+test encoding_matches_logical_coordinates_and_f64_reference ... ok
+test encoding_rejects_nonfinite_frequencies_phases_and_dimensions ... ok
+test field_gradients_and_optimizer_steps_preserve_input_and_seed_layouts ... ok
+test field_initialization_is_seeded_with_an_active_density_head ... ok
+test field_parameter_vjp_matches_finite_differences ... ok
+test malformed_seeds_fail_before_parameter_gradients_change ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 7 tests
+test constant_density_integrates_the_entire_interval_independent_of_jitter ... ok
+test disabling_direction_conditioning_does_not_disable_ray_motion ... ok
+test invalid_render_inputs_leave_the_sampling_rng_unchanged ... ok
+test rendering_observes_logical_ray_layouts ... ok
+test thin_and_zero_width_intervals_do_not_invent_opacity ... ok
+test training_uses_the_same_full_interval_and_analytic_gradient ... ok
+test unsupported_ray_layout_and_sample_overflow_are_rejected_at_construction ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test seeded_training_makes_progress_on_fixed_evaluation ... ok
+test synthetic_constant_color_regression ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 6 tests
+test channel_shrink_and_regrow_reuse_existing_storage ... ok
+test harmonic_resize_preserves_each_voxel ... ok
+test integration_keeps_voxel_identity_when_drive_adds_channels ... ok
+test interpolation_handles_a_keyframe_without_harmonics ... ok
+test interpolation_zero_pads_channels_not_adjacent_voxels ... ok
+test resize_matches_independent_row_remap_for_all_small_channel_counts ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

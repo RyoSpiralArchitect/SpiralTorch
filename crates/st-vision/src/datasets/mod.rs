@@ -3,9 +3,75 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::tensor_contract::{checked_elements, row_major, validate_finite};
 use rand::Rng;
 use st_tensor::{PureResult, Tensor, TensorError};
-use std::cmp::Ordering;
+use std::borrow::Cow;
+
+pub(crate) struct RayTensors<'a> {
+    pub origins: Cow<'a, Tensor>,
+    pub directions: Cow<'a, Tensor>,
+    pub colors: Cow<'a, Tensor>,
+    pub bounds: Cow<'a, Tensor>,
+}
+
+impl<'a> RayTensors<'a> {
+    fn validate(
+        origins: &'a Tensor,
+        directions: &'a Tensor,
+        colors: &'a Tensor,
+        bounds: &'a Tensor,
+    ) -> PureResult<Self> {
+        let (rows, dims) = origins.shape();
+        if rows == 0 || dims == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols: dims });
+        }
+        for (tensor, cols) in [(directions, dims), (colors, 3), (bounds, 2)] {
+            if tensor.shape() != (rows, cols) {
+                return Err(TensorError::ShapeMismatch {
+                    left: (rows, cols),
+                    right: tensor.shape(),
+                });
+            }
+        }
+        checked_buffers(rows, dims)?;
+        let rays = Self {
+            origins: row_major(origins)?,
+            directions: row_major(directions)?,
+            colors: row_major(colors)?,
+            bounds: row_major(bounds)?,
+        };
+        for (tensor, label) in [
+            (&rays.origins, "ray_origins"),
+            (&rays.directions, "ray_directions"),
+            (&rays.colors, "ray_colors"),
+            (&rays.bounds, "ray_bounds"),
+        ] {
+            validate_finite(tensor.data(), label)?;
+        }
+        if rays
+            .bounds
+            .data()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .any(|b| b[0] > b[1])
+        {
+            return Err(TensorError::InvalidValue {
+                label: "ray_bounds_order",
+            });
+        }
+        Ok(rays)
+    }
+}
+
+fn checked_buffers(rows: usize, dims: usize) -> PureResult<(usize, usize, usize)> {
+    Ok((
+        checked_elements(rows, dims)?,
+        checked_elements(rows, 3)?,
+        checked_elements(rows, 2)?,
+    ))
+}
 
 /// Bundle describing rays originating from a single calibrated view.
 #[derive(Clone, Debug)]
@@ -24,25 +90,7 @@ impl MultiViewFrame {
         colors: Tensor,
         bounds: Tensor,
     ) -> PureResult<Self> {
-        let (rows, ocols) = origins.shape();
-        if rows == 0 {
-            return Err(TensorError::EmptyInput("multiview_rays"));
-        }
-        let (drows, dcols) = directions.shape();
-        let (crows, ccols) = colors.shape();
-        let (brows, bcols) = bounds.shape();
-        if rows != drows || rows != crows || rows != brows {
-            return Err(TensorError::ShapeMismatch {
-                left: (rows, ocols),
-                right: (drows, dcols),
-            });
-        }
-        if dcols != ocols || ccols != 3 || bcols != 2 {
-            return Err(TensorError::InvalidDimensions {
-                rows: rows.max(1),
-                cols: dcols.max(ccols).max(bcols),
-            });
-        }
+        RayTensors::validate(&origins, &directions, &colors, &bounds)?;
         Ok(Self {
             origins,
             directions,
@@ -68,17 +116,19 @@ pub struct MultiViewDatasetAdapter {
     frames: Vec<MultiViewFrame>,
     origin_dims: usize,
     frame_weights: Vec<f32>,
-    cumulative_weights: Vec<f32>,
-    total_weight: f32,
+    cumulative_weights: Vec<f64>,
+    total_weight: f64,
 }
 
 impl MultiViewDatasetAdapter {
-    /// Constructs an adapter from precomputed multi-view frames.
+    /// Validates and snapshots frames into owned row-major storage. Sampling
+    /// never reinterprets a foreign layout or observes later external writes.
     pub fn new(frames: Vec<MultiViewFrame>) -> PureResult<Self> {
         if frames.is_empty() {
             return Err(TensorError::EmptyInput("multiview_frames"));
         }
         let origin_dims = frames[0].origins.shape().1;
+        let mut snapshots = Vec::with_capacity(frames.len());
         for frame in &frames {
             if frame.origins.shape().1 != origin_dims || frame.is_empty() {
                 return Err(TensorError::InvalidDimensions {
@@ -86,9 +136,22 @@ impl MultiViewDatasetAdapter {
                     cols: frame.origins.shape().1,
                 });
             }
+            let rays = RayTensors::validate(
+                &frame.origins,
+                &frame.directions,
+                &frame.colors,
+                &frame.bounds,
+            )?;
+            let own = |t: &Tensor| Tensor::from_vec(t.shape().0, t.shape().1, t.data().to_vec());
+            snapshots.push(MultiViewFrame {
+                origins: own(&rays.origins)?,
+                directions: own(&rays.directions)?,
+                colors: own(&rays.colors)?,
+                bounds: own(&rays.bounds)?,
+            });
         }
         let mut adapter = Self {
-            frames,
+            frames: snapshots,
             origin_dims,
             frame_weights: Vec::new(),
             cumulative_weights: Vec::new(),
@@ -109,14 +172,14 @@ impl MultiViewDatasetAdapter {
             return Err(TensorError::EmptyInput("frame_weights"));
         }
         let mut cumulative = Vec::with_capacity(weights.len());
-        let mut total = 0.0f32;
+        let mut total = 0.0f64;
         for weight in &weights {
             if !weight.is_finite() || *weight < 0.0 {
                 return Err(TensorError::InvalidValue {
                     label: "frame_weight",
                 });
             }
-            total += *weight;
+            total += f64::from(*weight);
             cumulative.push(total);
         }
         if total <= 0.0 {
@@ -154,18 +217,9 @@ impl MultiViewDatasetAdapter {
         if self.frames.len() == 1 {
             return 0;
         }
-        let sample = if self.total_weight.is_finite() {
-            rng.gen::<f32>() * self.total_weight
-        } else {
-            rng.gen_range(0..self.frames.len()) as f32
-        };
-        match self
-            .cumulative_weights
-            .binary_search_by(|probe| probe.partial_cmp(&sample).unwrap_or(Ordering::Greater))
-        {
-            Ok(index) => index,
-            Err(index) => index,
-        }
+        let sample = f64::from(rng.gen::<f32>()) * self.total_weight;
+        self.cumulative_weights
+            .partition_point(|&weight| weight <= sample)
     }
 
     /// Samples a batch of rays using replacement across all frames.
@@ -173,10 +227,11 @@ impl MultiViewDatasetAdapter {
         if batch_size == 0 {
             return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
         }
-        let mut origin_buffer = Vec::with_capacity(batch_size * self.origin_dims);
-        let mut dir_buffer = Vec::with_capacity(batch_size * self.origin_dims);
-        let mut color_buffer = Vec::with_capacity(batch_size * 3);
-        let mut bound_buffer = Vec::with_capacity(batch_size * 2);
+        let (coordinates, colors, bounds) = checked_buffers(batch_size, self.origin_dims)?;
+        let mut origin_buffer = Vec::with_capacity(coordinates);
+        let mut dir_buffer = Vec::with_capacity(coordinates);
+        let mut color_buffer = Vec::with_capacity(colors);
+        let mut bound_buffer = Vec::with_capacity(bounds);
         for _ in 0..batch_size {
             let frame_idx = self.sample_frame_index(rng);
             let frame = &self.frames[frame_idx];
@@ -226,15 +281,19 @@ impl MultiViewDatasetAdapter {
             .ok_or(TensorError::InvalidValue {
                 label: "frame_index",
             })?;
-        let mut origin_buffer = Vec::with_capacity(count * self.origin_dims);
-        let mut dir_buffer = Vec::with_capacity(count * self.origin_dims);
-        let mut color_buffer = Vec::with_capacity(count * 3);
-        let mut bound_buffer = Vec::with_capacity(count * 2);
+        let last = (count - 1)
+            .checked_mul(stride)
+            .and_then(|offset| start.checked_add(offset));
+        if !last.is_some_and(|last| last < frame.len()) {
+            return Err(TensorError::InvalidValue { label: "ray_index" });
+        }
+        let (coordinates, colors, bounds) = checked_buffers(count, self.origin_dims)?;
+        let mut origin_buffer = Vec::with_capacity(coordinates);
+        let mut dir_buffer = Vec::with_capacity(coordinates);
+        let mut color_buffer = Vec::with_capacity(colors);
+        let mut bound_buffer = Vec::with_capacity(bounds);
         for i in 0..count {
-            let ray_index = start + i.saturating_mul(stride);
-            if ray_index >= frame.len() {
-                return Err(TensorError::InvalidValue { label: "ray_index" });
-            }
+            let ray_index = start + i * stride;
             copy_row(
                 frame.origins.data(),
                 self.origin_dims,
@@ -304,7 +363,7 @@ impl MultiViewDatasetAdapter {
         self.sample_contiguous_span(frame_index, start, span, stride)
     }
 
-    /// Returns an immutable view over the underlying frames.
+    /// Returns an immutable view over the owned row-major frame snapshots.
     pub fn frames(&self) -> &[MultiViewFrame] {
         &self.frames
     }
@@ -320,6 +379,10 @@ pub struct RayBatch {
 }
 
 impl RayBatch {
+    pub(crate) fn validated(&self) -> PureResult<RayTensors<'_>> {
+        RayTensors::validate(&self.origins, &self.directions, &self.colors, &self.bounds)
+    }
+
     /// Number of rays in the batch.
     pub fn len(&self) -> usize {
         self.origins.shape().0
@@ -338,6 +401,7 @@ impl RayBatch {
         let expected_shape = batches[0].origins.shape();
         let origin_dims = expected_shape.1;
         let mut total = 0usize;
+        let mut validated = Vec::with_capacity(batches.len());
         for batch in batches {
             if batch.origins.shape().1 != origin_dims {
                 return Err(TensorError::ShapeMismatch {
@@ -345,13 +409,20 @@ impl RayBatch {
                     right: batch.origins.shape(),
                 });
             }
-            total += batch.len();
+            validated.push(batch.validated()?);
+            total = total
+                .checked_add(batch.len())
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: total,
+                    cols: origin_dims,
+                })?;
         }
-        let mut origins = Vec::with_capacity(total * origin_dims);
-        let mut directions = Vec::with_capacity(total * origin_dims);
-        let mut colors = Vec::with_capacity(total * 3);
-        let mut bounds = Vec::with_capacity(total * 2);
-        for batch in batches {
+        let (coordinates, color_len, bound_len) = checked_buffers(total, origin_dims)?;
+        let mut origins = Vec::with_capacity(coordinates);
+        let mut directions = Vec::with_capacity(coordinates);
+        let mut colors = Vec::with_capacity(color_len);
+        let mut bounds = Vec::with_capacity(bound_len);
+        for batch in validated {
             origins.extend_from_slice(batch.origins.data());
             directions.extend_from_slice(batch.directions.data());
             colors.extend_from_slice(batch.colors.data());
@@ -374,8 +445,132 @@ fn copy_row(source: &[f32], cols: usize, row: usize, target: &mut Vec<f32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::mock::StepRng;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use st_tensor::Layout;
+
+    fn indexed_frame() -> MultiViewFrame {
+        MultiViewFrame::new(
+            Tensor::from_vec(3, 2, vec![0.0, 0.1, 1.0, 1.1, 2.0, 2.1]).unwrap(),
+            Tensor::from_vec(3, 2, vec![1.0, 0.0, 0.0, 1.0, 0.5, 0.5]).unwrap(),
+            Tensor::from_vec(3, 3, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]).unwrap(),
+            Tensor::from_vec(3, 2, vec![0.0, 1.0, 0.1, 1.1, 0.2, 1.2]).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn assert_same_batch(a: &RayBatch, b: &RayBatch) {
+        for (a, b) in [
+            (&a.origins, &b.origins),
+            (&a.directions, &b.directions),
+            (&a.colors, &b.colors),
+            (&a.bounds, &b.bounds),
+        ] {
+            assert_eq!(a.shape(), b.shape());
+            assert_eq!(a.data(), b.data());
+        }
+    }
+
+    #[test]
+    fn sampling_and_stacking_preserve_logical_layouts() {
+        let mut frame = indexed_frame();
+        let reference = MultiViewDatasetAdapter::new(vec![frame.clone()]).unwrap();
+        for tensor in [
+            &mut frame.origins,
+            &mut frame.directions,
+            &mut frame.colors,
+            &mut frame.bounds,
+        ] {
+            *tensor = tensor.to_layout(Layout::ColMajor).unwrap();
+        }
+        let dataset = MultiViewDatasetAdapter::new(vec![frame.clone()]).unwrap();
+        assert_eq!(dataset.frames()[0].origins.layout(), Layout::RowMajor);
+        let expected = reference.sample_contiguous_span(0, 0, 3, 1).unwrap();
+        assert_same_batch(
+            &dataset.sample_contiguous_span(0, 0, 3, 1).unwrap(),
+            &expected,
+        );
+        assert_same_batch(
+            &dataset
+                .sample_batch(&mut StdRng::seed_from_u64(17), 20)
+                .unwrap(),
+            &reference
+                .sample_batch(&mut StdRng::seed_from_u64(17), 20)
+                .unwrap(),
+        );
+        let column_major = RayBatch {
+            origins: frame.origins,
+            directions: frame.directions,
+            colors: frame.colors,
+            bounds: frame.bounds,
+        };
+        assert_same_batch(
+            &RayBatch::stack(&[column_major.clone(), column_major]).unwrap(),
+            &RayBatch::stack(&[expected.clone(), expected]).unwrap(),
+        );
+    }
+
+    #[test]
+    fn malformed_public_frames_and_batches_are_revalidated() {
+        let mut bad = indexed_frame();
+        bad.directions = Tensor::zeros(2, 2).unwrap();
+        assert!(MultiViewDatasetAdapter::new(vec![bad.clone()]).is_err());
+        let bad_batch = RayBatch {
+            origins: bad.origins,
+            directions: bad.directions,
+            colors: bad.colors,
+            bounds: bad.bounds,
+        };
+        assert!(RayBatch::stack(&[bad_batch]).is_err());
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut bad = indexed_frame();
+            bad.colors.data_mut()[0] = value;
+            assert!(MultiViewDatasetAdapter::new(vec![bad]).is_err());
+        }
+        let mut reversed = indexed_frame();
+        reversed.bounds.data_mut()[0] = 2.0;
+        assert!(MultiViewDatasetAdapter::new(vec![reversed]).is_err());
+    }
+
+    #[test]
+    fn invalid_spans_and_allocation_overflow_fail_before_sampling() {
+        let dataset = MultiViewDatasetAdapter::new(vec![indexed_frame()]).unwrap();
+        for (start, count, stride) in [
+            (usize::MAX, 2, 1),
+            (0, usize::MAX, 2),
+            (0, 2, usize::MAX),
+            (2, 2, 1),
+        ] {
+            assert!(dataset
+                .sample_contiguous_span(0, start, count, stride)
+                .is_err());
+        }
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut control = rng.clone();
+        assert!(dataset.sample_batch(&mut rng, usize::MAX).is_err());
+        assert_eq!(rng.gen::<u64>(), control.gen::<u64>());
+    }
+
+    #[test]
+    fn zero_sampling_threshold_skips_zero_weights_and_large_totals_stay_finite() {
+        let mut second = indexed_frame();
+        second.origins.data_mut().fill(99.0);
+        let mut dataset = MultiViewDatasetAdapter::new(vec![indexed_frame(), second]).unwrap();
+        dataset.set_frame_weights(&[0.0, 1.0]).unwrap();
+        let batch = dataset.sample_batch(&mut StepRng::new(0, 0), 1).unwrap();
+        assert_eq!(batch.origins.data(), &[99.0, 99.0]);
+        dataset.set_frame_weights(&[f32::MAX, f32::MAX]).unwrap();
+        assert!(dataset.total_weight.is_finite());
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut counts = [0, 0];
+        for _ in 0..100 {
+            counts[dataset.sample_frame_index(&mut rng)] += 1;
+        }
+        assert!(counts.iter().all(|&n| n > 20));
+        assert!(dataset.set_frame_weights(&[0.0, 0.0]).is_err());
+        assert_eq!(dataset.frame_weights(), &[f32::MAX; 2]);
+    }
 
     #[test]
     fn adapter_samples_consistent_batches() {

@@ -152,7 +152,7 @@ jobs:
           cargo test --locked -p st-nn --release --test gelu_layout_contract
           cargo test --locked -p spiral-selfsup --release --test info_nce_tensor
           cargo test --locked -p st-vision --release --test temporal_channels
-          cargo test --locked -p st-vision --release --features nerf --test nerf_geometry --test nerf_regression
+          cargo test --locked -p st-vision --release --features nerf --lib --test nerf_geometry --test nerf_regression --test nerf_ray_integral
           cargo test --locked -p st-frac --release --lib fractal_field
 
   windows-core:

@@ -1,0 +1,22 @@
+[package]
+name = "nerf-ray-integral-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+st-vision = { path = "../../crates/st-vision", features = ["nerf"] }
+st-nn = { path = "../../crates/st-nn" }
+st-core = { path = "../../crates/st-core", default-features = false }
+st-tensor = { path = "../../crates/st-tensor", default-features = false, features = ["cpu"] }
+serde_json = "1"
+wasm-bindgen = "=0.2.104"
+
+[patch.crates-io]
+spindle = { path = "../../vendor/spindle" }
+wgpu = { path = "../../vendor/wgpu-0.20.1" }

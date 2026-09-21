@@ -93,7 +93,7 @@ impl NerfField {
     }
 
     /// Constructs independently seeded Xavier layers and a constant positive
-    /// density head. Initial density is 0.1 in inverse ray-distance units,
+    /// density head. Initial density is 0.1 in inverse ray-parameter units,
     /// avoiding a fully inactive ReLU density field before the first update.
     pub fn new_with_seed(config: NerfFieldConfig, seed: u64) -> PureResult<Self> {
         if config.position_dims == 0 {

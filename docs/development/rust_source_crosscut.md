@@ -133,7 +133,7 @@ ramp initialization. `st_nn::Linear::new_xavier(name, in, out, seed)` offers
 seed-local, fan-scaled uniform weights and zero biases; `Linear::new` keeps
 its old values for compatibility. `NerfField::new_with_seed(config, seed)`
 uses independent Xavier layers, except its density head begins at constant
-0.1 in inverse ray-distance units to avoid an entirely inactive ReLU field.
+0.1 in inverse ray-parameter units to avoid an entirely inactive ReLU field.
 `NerfField::new` uses seed 13. New NeRF models therefore initialize differently;
 parameter names and shapes are unchanged. The four-seed, 20-step synthetic
 regression measures fixed-evaluation progress, not convergence or scene quality.
@@ -142,6 +142,16 @@ Node/WASM, while new finite checks regress zero-band cases and the all-condition
 aggregate. Torch remains faster overall at 1,024 rows; tiny Python/Rust entry
 cost differences are not a general PyTorch speed claim. All conditions and
 failed preflight attempts are preserved.
+
+The [ray-integral follow-up](../../benchmarks/results/2026-09-21-nerf-ray-integral/README.md)
+fixes the trainer's half-bin/minimum-width quadrature, shares stable compositing
+and its VJP, and validates/snapshots logical ray datasets. Physical ray motion
+no longer disappears when field direction conditioning is disabled. Direct
+sample-input assembly and one-ray VJP scratch reduce intermediates, but do not
+establish a measured peak-memory reduction. Native/Node-WASM and an independent
+PyTorch/autograd control agree across all 324 measured records. The largest
+condition still favors PyTorch by about 2x versus native and 4.6x versus WASM;
+small-input entry-cost wins are not a universal backend-speed claim.
 
 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
    steps. The fixed harness now covers the first two, not training throughput.
@@ -152,9 +162,11 @@ failed preflight attempts are preserved.
    high-level NN calls; neither Node timing nor packing wins prove browser/FT gains.
 2. RoPE: design finite-angle/size admission and actual attention ownership before
    introducing public bindings or claiming attention performance improvements.
-3. NeRF: larger nonconstant scenes, compositing/sampling contracts, camera-input
-   derivatives and public browser ownership remain separate work. The current
-   training check is intentionally a small synthetic progress regression.
+3. NeRF: the Rust trainer's sampling/compositing contract is now tested; its
+   separate WGSL sampler still contains the old half-bin expression and needs
+   independent execution/parity tests. Profile the larger-render CPU path.
+   Larger scenes, camera-input derivatives, resident training and public browser
+   ownership remain separate work. Training checks are small synthetic regressions.
 4. Contrastive backend policy: profile small-batch WGPU transfer cost separately
    from CPU kernels, and design explicit execution ownership before introducing
    a resident loss or sharing the trainer's gradient implementation.

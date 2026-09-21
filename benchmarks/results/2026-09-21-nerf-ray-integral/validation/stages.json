@@ -1,0 +1,50 @@
+[
+  {
+    "stage": "format",
+    "exit_code": 0
+  },
+  {
+    "stage": "fixture-format",
+    "exit_code": 0
+  },
+  {
+    "stage": "clippy",
+    "exit_code": 0
+  },
+  {
+    "stage": "vision-tests",
+    "exit_code": 0
+  },
+  {
+    "stage": "vision-no-default",
+    "exit_code": 0
+  },
+  {
+    "stage": "vision-wasm",
+    "exit_code": 0
+  },
+  {
+    "stage": "fixture-native",
+    "exit_code": 0
+  },
+  {
+    "stage": "fixture-wasm",
+    "exit_code": 0
+  },
+  {
+    "stage": "fixture-bindgen",
+    "exit_code": 0
+  },
+  {
+    "stage": "native-preflight",
+    "exit_code": 0
+  },
+  {
+    "stage": "wasm-preflight",
+    "exit_code": 0
+  },
+  {
+    "stage": "torch-preflight",
+    "exit_code": 0
+  }
+]

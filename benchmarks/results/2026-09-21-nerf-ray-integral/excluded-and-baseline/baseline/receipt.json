@@ -1,0 +1,35 @@
+{
+  "command": [
+    "rustc",
+    "+1.98.0",
+    "--edition=2021",
+    "-O",
+    "--test",
+    "--cfg",
+    "feature=\"nerf\"",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/nerf_ray_integral.rs",
+    "-L",
+    "dependency=/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/positional-geometry-fixture-v1/release/deps",
+    "-o",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/tests",
+    "--extern",
+    "st_core=/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/positional-geometry-fixture-v1/release/deps/libst_core-4ef877240449eb1e.rlib",
+    "--extern",
+    "st_nn=/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/positional-geometry-fixture-v1/release/deps/libst_nn-cf4471e0c22762a7.rlib",
+    "--extern",
+    "st_tensor=/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/positional-geometry-fixture-v1/release/deps/libst_tensor.rlib",
+    "--extern",
+    "st_vision=/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/positional-geometry-fixture-v1/release/deps/libst_vision-96ac910030bf28c3.rlib"
+  ],
+  "inputs_sha256": {
+    "test_source": "0f6835610d5bd1c7e609fcb0b1dce0ac8b734202ebd08b7458ab65b7884f769d",
+    "st_core": "7e103de1e0743bd193125d23626b38bf93aa1cdb5d7bf2bf02238310e631c713",
+    "st_nn": "b9de16af41e5a49d6a60a8987a9bf34f3be25f0e36c1312a66ac4070aa78847a",
+    "st_tensor": "0caef8687b1a997924722e7ee6b78445b30dc60dbf35f9b345af1565baa0fc06",
+    "st_vision": "27f80b5bba48beb88c2f894595b610f912d921e97a428fe010d90681c3f64431"
+  },
+  "build_exit": 1,
+  "runtime_commit": "2ab49c1ffa2f05a9df7461e9981ec1ca788f5174",
+  "note": "Read-only linkage to admitted #2109 rlibs with the same source tree as main",
+  "inputs_unchanged": true
+}

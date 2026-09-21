@@ -1,0 +1,16 @@
+..........F
+======================================================================
+FAIL: test_untouched_archive (__main__.ArchiveTests.test_untouched_archive)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/review-pycache-before/plain-archive-tests/archive/test_verify.py", line 35, in test_untouched_archive
+    module.verify(self.root)
+  File "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/review-pycache-before/plain-archive-tests/archive/verify.py", line 18, in verify
+    assert files == set(manifest["files"])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.372s
+
+FAILED (failures=1)

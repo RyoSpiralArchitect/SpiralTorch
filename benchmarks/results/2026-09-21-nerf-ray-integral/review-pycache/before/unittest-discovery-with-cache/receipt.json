@@ -1,0 +1,22 @@
+{
+  "case": "unittest-discovery-with-cache",
+  "command": [
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/review-pycache-before/unittest-discovery-with-cache/archive",
+    "-p",
+    "test_*.py"
+  ],
+  "exit_code": 1,
+  "source_sha256": {
+    "manifest.json": "5c406445bce6dd4689cc2b768060fe401074ae905948d2303c6ad26b1638f314",
+    "test_verify.py": "dd1b2d9f6badebe13d5cfa9d9393de0a6a1cb2a833fb76d8907541c72a919c6f",
+    "test_analyze.py": "22bbc16b313fa47796b53124be85e3c8a6949f0f9c33caf31137a333ae64c3cf",
+    "verify.py": "8f060030d5cf673e0272f49391672bc9961732e9dcc38a2ebb7a86234575dec9",
+    "analyze.py": "01262d6d408131b639f1fc337a4d86f2d1f9d148b298b118a0f3f0940bb5a765"
+  },
+  "source_unchanged": true
+}
