@@ -4,7 +4,42 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_nn::execution::{push_backend_policy, BackendPolicy};
 use st_nn::Module;
 use st_tensor::{Layout, Tensor, TensorError};
-use st_vision::nerf::{NerfField, NerfFieldConfig, PositionalEncoding};
+use st_vision::nerf::{FieldSampleLayout, NerfField, NerfFieldConfig, PositionalEncoding};
+
+#[test]
+fn dimension_preflight_and_repeated_residual_removal_are_checked() {
+    assert!(FieldSampleLayout {
+        position_dims: usize::MAX,
+        direction_dims: 1
+    }
+    .try_total_dims()
+    .is_err());
+    for config in [
+        NerfFieldConfig {
+            position_dims: usize::MAX,
+            ..NerfFieldConfig::default()
+        },
+        NerfFieldConfig {
+            feature_dim: usize::MAX,
+            ..NerfFieldConfig::default()
+        },
+        NerfFieldConfig {
+            hidden_width: usize::MAX,
+            ..NerfFieldConfig::default()
+        },
+        NerfFieldConfig {
+            color_hidden_width: usize::MAX,
+            ..NerfFieldConfig::default()
+        },
+    ] {
+        assert!(NerfField::new(config).is_err());
+    }
+    let encoding = PositionalEncoding::new(3, 4)
+        .unwrap()
+        .without_input()
+        .without_input();
+    assert_eq!(encoding.output_dims(), 24);
+}
 
 fn layouts(cols: usize) -> [Layout; 3] {
     [
@@ -316,5 +351,40 @@ fn field_parameter_vjp_matches_finite_differences() {
                 gradients[index][element]
             );
         }
+    }
+}
+
+#[test]
+fn field_initialization_is_seeded_with_an_active_density_head() {
+    let config = NerfFieldConfig {
+        hidden_width: 8,
+        hidden_layers: 2,
+        feature_dim: 4,
+        color_hidden_width: 8,
+        ..NerfFieldConfig::default()
+    };
+    let a = NerfField::new_with_seed(config.clone(), 7).unwrap();
+    let b = NerfField::new_with_seed(config.clone(), 7).unwrap();
+    let c = NerfField::new_with_seed(config.clone(), 8).unwrap();
+    assert_eq!(parameters(&a, false), parameters(&b, false));
+    assert_ne!(parameters(&a, false), parameters(&c, false));
+    let default = NerfField::new(config.clone()).unwrap();
+    let explicit = NerfField::new_with_seed(config, 13).unwrap();
+    assert_eq!(parameters(&default, false), parameters(&explicit, false));
+    let input = Tensor::from_vec(3, 6, (0..18).map(|i| (i as f32 - 9.0) / 10.0).collect()).unwrap();
+    for mut field in [a, b, c, default, explicit] {
+        let output = field.forward(&input).unwrap();
+        assert!(output.data().iter().all(|v| v.is_finite()));
+        assert!(output.data().chunks_exact(4).all(|row| row[0] == 0.1));
+        let seed = Tensor::from_vec(3, 4, [1.0, 0.0, 0.0, 0.0].repeat(3)).unwrap();
+        field.backward(&input, &seed).unwrap();
+        field
+            .visit_parameters(&mut |p| {
+                if p.name() == "density::bias" {
+                    assert_eq!(p.gradient().unwrap().data(), &[3.0]);
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 }

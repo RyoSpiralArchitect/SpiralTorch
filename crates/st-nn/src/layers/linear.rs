@@ -47,14 +47,10 @@ pub struct Linear {
 }
 
 impl Linear {
-    /// Creates a new linear layer with deterministic small parameters.
+    /// Creates a layer with the legacy deterministic ramp parameters.
+    /// Use [`Self::new_xavier`] for size-scaled model initialization.
     pub fn new(name: impl Into<String>, input_dim: usize, output_dim: usize) -> PureResult<Self> {
-        if input_dim == 0 || output_dim == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: input_dim,
-                cols: output_dim,
-            });
-        }
+        Self::validate_dimensions(input_dim, output_dim)?;
         let name = name.into();
         let mut scale = 0.01f32;
         let weights = Tensor::from_fn(input_dim, output_dim, |_r, _c| {
@@ -62,7 +58,42 @@ impl Linear {
             scale += 0.01;
             value
         })?;
-        let bias = Tensor::zeros(1, output_dim)?;
+        Self::from_initial_weights(name, weights)
+    }
+
+    /// Creates reproducible Xavier-uniform weights and zero bias.
+    /// The weight bound is `sqrt(6 / (fan_in + fan_out))`. The explicit seed
+    /// controls initialization without changing the process-wide random state.
+    pub fn new_xavier(
+        name: impl Into<String>,
+        input_dim: usize,
+        output_dim: usize,
+        seed: u64,
+    ) -> PureResult<Self> {
+        Self::validate_dimensions(input_dim, output_dim)?;
+        let bound = (6.0 / (input_dim as f64 + output_dim as f64)).sqrt() as f32;
+        let weights = Tensor::random_uniform(input_dim, output_dim, -bound, bound, Some(seed))?;
+        Self::from_initial_weights(name.into(), weights)
+    }
+
+    fn validate_dimensions(input_dim: usize, output_dim: usize) -> PureResult<()> {
+        if input_dim == 0
+            || output_dim == 0
+            || input_dim
+                .checked_mul(output_dim)
+                .filter(|&len| len <= isize::MAX as usize / std::mem::size_of::<f32>())
+                .is_none()
+        {
+            return Err(TensorError::InvalidDimensions {
+                rows: input_dim,
+                cols: output_dim,
+            });
+        }
+        Ok(())
+    }
+
+    fn from_initial_weights(name: String, weights: Tensor) -> PureResult<Self> {
+        let bias = Tensor::zeros(1, weights.shape().1)?;
         Ok(Self {
             weight: Parameter::new(format!("{name}::weight"), weights),
             bias: Parameter::new(format!("{name}::bias"), bias),
@@ -278,6 +309,73 @@ mod tests {
         let mut expected = expected;
         expected.add_row_inplace(layer.bias.value().data()).unwrap();
         assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn xavier_initialization_is_seeded_bounded_and_zero_biased() {
+        for (rows, cols) in [(1, 1), (3, 7), (64, 64), (256, 32)] {
+            let a = Linear::new_xavier("fc", rows, cols, 7).unwrap();
+            let b = Linear::new_xavier("fc", rows, cols, 7).unwrap();
+            let c = Linear::new_xavier("fc", rows, cols, 8).unwrap();
+            assert_eq!(a.weight().value(), b.weight().value());
+            assert_ne!(a.weight().value(), c.weight().value());
+            let bound = (6.0 / (rows + cols) as f64).sqrt() as f32;
+            assert!(a
+                .weight()
+                .value()
+                .data()
+                .iter()
+                .all(|v| { v.is_finite() && *v >= -bound && *v < bound }));
+            assert_eq!(a.bias().value().shape(), (1, cols));
+            assert!(a.bias().value().data().iter().all(|v| *v == 0.0));
+        }
+    }
+
+    #[test]
+    fn constructors_reject_empty_and_overflowing_shapes() {
+        for (rows, cols) in [
+            (0, 1),
+            (1, 0),
+            (usize::MAX, 2),
+            (1, isize::MAX as usize / std::mem::size_of::<f32>() + 1),
+        ] {
+            assert!(matches!(
+                Linear::new("fc", rows, cols),
+                Err(TensorError::InvalidDimensions { .. })
+            ));
+            assert!(matches!(
+                Linear::new_xavier("fc", rows, cols, 0),
+                Err(TensorError::InvalidDimensions { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn xavier_layer_keeps_the_linear_gradient_and_optimizer_contract() {
+        let mut layer = Linear::new_xavier("fc", 3, 2, 7).unwrap();
+        let x = Tensor::from_vec(2, 3, vec![1.0, -2.0, 0.5, 0.25, 1.0, -0.5]).unwrap();
+        let seed = Tensor::from_vec(2, 2, vec![0.5, -1.0, 0.25, 0.75]).unwrap();
+        let weights = layer.weight().value().clone();
+        let expected_input = seed.matmul(&weights.transpose()).unwrap();
+        let expected_weight = x.transpose().matmul(&seed).unwrap();
+        let expected_bias = Tensor::from_vec(1, 2, seed.sum_axis0()).unwrap();
+        let actual_input = layer.backward(&x, &seed).unwrap();
+        for (a, b) in actual_input.data().iter().zip(expected_input.data()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+        assert_eq!(layer.weight().gradient().unwrap(), &expected_weight);
+        assert_eq!(layer.bias().gradient().unwrap(), &expected_bias);
+        layer.apply_step(0.01).unwrap();
+        for ((a, b), g) in layer
+            .weight()
+            .value()
+            .data()
+            .iter()
+            .zip(weights.data())
+            .zip(expected_weight.data())
+        {
+            assert!((a - (b - 0.01 * g)).abs() < 1e-6);
+        }
     }
 
     #[test]

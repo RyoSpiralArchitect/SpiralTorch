@@ -113,6 +113,30 @@ improve 1.079x native and 1.098x through a test-only Node/WASM host adapter.
 Whole-MLP latency remains mixed and non-tiny Torch remains faster. Python uses
 the same Rust path; backward and resident/autograd kernels remain unchanged.
 
+The positional-geometry follow-up addresses the next two old-source candidates:
+`RopeKey` now uses one exact float-bit identity for equality and hashing, so
+nearby-angle requests do not depend on cache history. This utility still has no
+production attention caller; its phase recurrence and non-finite-key behavior
+are not redesigned. NeRF encoding and field assembly/backward now honor logical
+row/column/Chimera layouts, reject invalid phases and overflowing dimensions, and
+write encoding results directly into aligned Tensor storage with paired sin/cos.
+
+The actual `st-vision/nerf` WASM dependency graph now excludes native-only Faer;
+a test-only Node adapter exercises the real crate rather than a path-imported
+substitute. This does not add a public browser NeRF API or GPU NeRF kernel.
+Parameter VJPs and one optimizer step are checked across input/seed layouts;
+the documented zero gradient for raw ray inputs is preserved.
+
+Re-enabling the dormant NeRF training regression also exposed unbounded legacy
+ramp initialization. `st_nn::Linear::new_xavier(name, in, out, seed)` offers
+seed-local, fan-scaled uniform weights and zero biases; `Linear::new` keeps
+its old values for compatibility. `NerfField::new_with_seed(config, seed)`
+uses independent Xavier layers, except its density head begins at constant
+0.1 in inverse ray-distance units to avoid an entirely inactive ReLU field.
+`NerfField::new` uses seed 13. New NeRF models therefore initialize differently;
+parameter names and shapes are unchanged. The four-seed, 20-step synthetic
+regression measures fixed-evaluation progress, not convergence or scene quality.
+
 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
    steps. The fixed harness now covers the first two, not training throughput.
    Profile the remaining checked GELU/transcendental cost and explicit
@@ -120,14 +144,11 @@ the same Rust path; backward and resident/autograd kernels remain unchanged.
    packed representation. The earlier 18.41x/11.72x
    PyTorch gap applies to a different, explicit ordinary-kernel grid, not to all
    high-level NN calls; neither Node timing nor packing wins prove browser/FT gains.
-2. `st-core/src/util/rope_lru.rs`: epsilon-based equality and bitwise hashing do
-   not define the same key identity; equality is also non-transitive. Review
-   exact angle identity, finite values and eviction before optimizing trigonometry
-   or wiring it into attention. Current Rust references to `RopeLRU`/`RopeKey` are
-   confined to the utility itself and its tests, not production attention callers.
-3. `st-vision/src/nerf/encoding.rs`: benchmark paired sine/cosine evaluation and
-   validate output-size arithmetic; do not assume an intrinsic is faster on
-   native and WASM targets without measurements.
+2. RoPE: design finite-angle/size admission and actual attention ownership before
+   introducing public bindings or claiming attention performance improvements.
+3. NeRF: larger nonconstant scenes, compositing/sampling contracts, camera-input
+   derivatives and public browser ownership remain separate work. The current
+   training check is intentionally a small synthetic progress regression.
 4. Contrastive backend policy: profile small-batch WGPU transfer cost separately
    from CPU kernels, and design explicit execution ownership before introducing
    a resident loss or sharing the trainer's gradient implementation.

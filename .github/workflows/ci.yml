@@ -152,6 +152,7 @@ jobs:
           cargo test --locked -p st-nn --release --test gelu_layout_contract
           cargo test --locked -p spiral-selfsup --release --test info_nce_tensor
           cargo test --locked -p st-vision --release --test temporal_channels
+          cargo test --locked -p st-vision --release --features nerf --test nerf_geometry --test nerf_regression
           cargo test --locked -p st-frac --release --lib fractal_field
 
   windows-core:
@@ -245,6 +246,7 @@ jobs:
           cargo clippy --locked -p st-tensor --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu_dense -- -D warnings
           cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
+          cargo check --locked -p st-vision --target wasm32-unknown-unknown --features nerf
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_graph_training_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_graph_forward_browser
