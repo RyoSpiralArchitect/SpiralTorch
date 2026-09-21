@@ -1,0 +1,581 @@
+{
+  "gelu": {
+    "comparisons": [
+      {
+        "condition": [
+          1,
+          64,
+          false
+        ],
+        "round": "a",
+        "ratio": 1.1194817658349328
+      },
+      {
+        "condition": [
+          1,
+          64,
+          false
+        ],
+        "round": "b",
+        "ratio": 1.1401824291886702
+      },
+      {
+        "condition": [
+          1,
+          64,
+          true
+        ],
+        "round": "a",
+        "ratio": 1.0357142857142858
+      },
+      {
+        "condition": [
+          1,
+          64,
+          true
+        ],
+        "round": "b",
+        "ratio": 1.0352907961603615
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          false
+        ],
+        "round": "a",
+        "ratio": 1.0425970526315789
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          false
+        ],
+        "round": "b",
+        "ratio": 1.037473154362416
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          true
+        ],
+        "round": "a",
+        "ratio": 1.0063963365505744
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          true
+        ],
+        "round": "b",
+        "ratio": 1.01205853954566
+      },
+      {
+        "condition": [
+          17,
+          195,
+          false
+        ],
+        "round": "a",
+        "ratio": 1.0323716663324645
+      },
+      {
+        "condition": [
+          17,
+          195,
+          false
+        ],
+        "round": "b",
+        "ratio": 1.0503133461298892
+      },
+      {
+        "condition": [
+          17,
+          195,
+          true
+        ],
+        "round": "a",
+        "ratio": 1.0025936659219963
+      },
+      {
+        "condition": [
+          17,
+          195,
+          true
+        ],
+        "round": "b",
+        "ratio": 1.0104590111353606
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          false
+        ],
+        "round": "a",
+        "ratio": 1.0585931294593518
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          false
+        ],
+        "round": "b",
+        "ratio": 1.0584206438483168
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          true
+        ],
+        "round": "a",
+        "ratio": 0.9973310207267366
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          true
+        ],
+        "round": "b",
+        "ratio": 1.0042971262665275
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          false
+        ],
+        "round": "a",
+        "ratio": 1.0433180677576857
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          false
+        ],
+        "round": "b",
+        "ratio": 1.0603147250138008
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          true
+        ],
+        "round": "a",
+        "ratio": 0.9990023127888168
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          true
+        ],
+        "round": "b",
+        "ratio": 1.0075899868675187
+      },
+      {
+        "condition": [
+          65,
+          97,
+          false
+        ],
+        "round": "a",
+        "ratio": 1.0374713145381558
+      },
+      {
+        "condition": [
+          65,
+          97,
+          false
+        ],
+        "round": "b",
+        "ratio": 1.0651431485295992
+      },
+      {
+        "condition": [
+          65,
+          97,
+          true
+        ],
+        "round": "a",
+        "ratio": 1.0027409776153495
+      },
+      {
+        "condition": [
+          65,
+          97,
+          true
+        ],
+        "round": "b",
+        "ratio": 1.0087530497468065
+      }
+    ],
+    "groups": {
+      "False": {
+        "geomean": 1.0616675784441425,
+        "min": 1.0323716663324645,
+        "max": 1.1401824291886702,
+        "favorable": 12,
+        "count": 12
+      },
+      "True": {
+        "geomean": 1.0101142871307116,
+        "min": 0.9973310207267366,
+        "max": 1.0357142857142858,
+        "favorable": 10,
+        "count": 12
+      }
+    }
+  },
+  "torch": {
+    "comparisons": [
+      {
+        "condition": [
+          1,
+          64,
+          false
+        ],
+        "round": "a",
+        "ratio": 5.018234165067178
+      },
+      {
+        "condition": [
+          1,
+          64,
+          true
+        ],
+        "round": "a",
+        "ratio": 17.61885714285714
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          false
+        ],
+        "round": "a",
+        "ratio": 0.4260345263157895
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          true
+        ],
+        "round": "a",
+        "ratio": 0.6363001170413292
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          false
+        ],
+        "round": "a",
+        "ratio": 0.4700094973412569
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          true
+        ],
+        "round": "a",
+        "ratio": 0.25744144769172955
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          false
+        ],
+        "round": "a",
+        "ratio": 0.3072227451326201
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          true
+        ],
+        "round": "a",
+        "ratio": 0.35045671248187876
+      },
+      {
+        "condition": [
+          17,
+          195,
+          false
+        ],
+        "round": "a",
+        "ratio": 1.008873069981953
+      },
+      {
+        "condition": [
+          17,
+          195,
+          true
+        ],
+        "round": "a",
+        "ratio": 0.9804057185146248
+      },
+      {
+        "condition": [
+          65,
+          97,
+          false
+        ],
+        "round": "a",
+        "ratio": 0.9490175849321139
+      },
+      {
+        "condition": [
+          65,
+          97,
+          true
+        ],
+        "round": "a",
+        "ratio": 0.7907720420283234
+      },
+      {
+        "condition": [
+          1,
+          64,
+          false
+        ],
+        "round": "b",
+        "ratio": 5.020643302928469
+      },
+      {
+        "condition": [
+          1,
+          64,
+          true
+        ],
+        "round": "b",
+        "ratio": 16.91614906832298
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          false
+        ],
+        "round": "b",
+        "ratio": 0.41981375838926177
+      },
+      {
+        "condition": [
+          8,
+          3072,
+          true
+        ],
+        "round": "b",
+        "ratio": 0.6377259220203204
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          false
+        ],
+        "round": "b",
+        "ratio": 0.2798663656823827
+      },
+      {
+        "condition": [
+          32,
+          3072,
+          true
+        ],
+        "round": "b",
+        "ratio": 0.23577483935092514
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          false
+        ],
+        "round": "b",
+        "ratio": 0.3086085945860543
+      },
+      {
+        "condition": [
+          64,
+          1024,
+          true
+        ],
+        "round": "b",
+        "ratio": 0.3530343864026371
+      },
+      {
+        "condition": [
+          17,
+          195,
+          false
+        ],
+        "round": "b",
+        "ratio": 1.0222456684505574
+      },
+      {
+        "condition": [
+          17,
+          195,
+          true
+        ],
+        "round": "b",
+        "ratio": 0.9909913050754094
+      },
+      {
+        "condition": [
+          65,
+          97,
+          false
+        ],
+        "round": "b",
+        "ratio": 0.9614267215061627
+      },
+      {
+        "condition": [
+          65,
+          97,
+          true
+        ],
+        "round": "b",
+        "ratio": 0.8011343952471861
+      }
+    ],
+    "groups": {
+      "False": {
+        "geomean": 0.7827253411773537,
+        "min": 0.2798663656823827,
+        "max": 5.020643302928469,
+        "favorable": 4,
+        "count": 12
+      },
+      "True": {
+        "geomean": 0.9526928725209064,
+        "min": 0.23577483935092514,
+        "max": 17.61885714285714,
+        "favorable": 2,
+        "count": 12
+      }
+    }
+  },
+  "nn_groups": {
+    "column_transpose_pack/None/None": {
+      "geomean": 1.0020827648100135,
+      "minimum": 0.9768426998023158,
+      "maximum": 1.0624351734470439,
+      "favorable": 7,
+      "count": 12
+    },
+    "linear/auto/False": {
+      "geomean": 0.9835956125152656,
+      "minimum": 0.8247503704001988,
+      "maximum": 1.048114088159032,
+      "favorable": 6,
+      "count": 12
+    },
+    "linear/auto/True": {
+      "geomean": 0.9995838438959336,
+      "minimum": 0.9814366896551724,
+      "maximum": 1.0160103804308853,
+      "favorable": 5,
+      "count": 12
+    },
+    "linear/cpu_simd/False": {
+      "geomean": 1.0141908521404683,
+      "minimum": 0.9765714285714285,
+      "maximum": 1.1387472687545521,
+      "favorable": 8,
+      "count": 12
+    },
+    "linear/cpu_simd/True": {
+      "geomean": 1.0034863424724523,
+      "minimum": 0.9753242488606446,
+      "maximum": 1.0516423520988096,
+      "favorable": 8,
+      "count": 12
+    },
+    "linear/faer/False": {
+      "geomean": 0.9940701407297332,
+      "minimum": 0.952,
+      "maximum": 1.020896011133624,
+      "favorable": 7,
+      "count": 12
+    },
+    "linear/faer/True": {
+      "geomean": 0.9996496021201526,
+      "minimum": 0.973089883540973,
+      "maximum": 1.0476975160000925,
+      "favorable": 3,
+      "count": 12
+    },
+    "mlp/auto/False": {
+      "geomean": 1.0261690796429965,
+      "minimum": 0.9382218696172728,
+      "maximum": 1.1455246444318512,
+      "favorable": 9,
+      "count": 12
+    },
+    "mlp/auto/True": {
+      "geomean": 0.9963927259193364,
+      "minimum": 0.9300336978230933,
+      "maximum": 1.0259609481912944,
+      "favorable": 6,
+      "count": 12
+    },
+    "mlp/cpu_simd/False": {
+      "geomean": 1.0153715375674603,
+      "minimum": 0.9914245069511801,
+      "maximum": 1.0899056188113072,
+      "favorable": 10,
+      "count": 12
+    },
+    "mlp/cpu_simd/True": {
+      "geomean": 1.0036448926399932,
+      "minimum": 0.9929460158229484,
+      "maximum": 1.0159571072955895,
+      "favorable": 10,
+      "count": 12
+    },
+    "mlp/faer/False": {
+      "geomean": 0.9900300891493191,
+      "minimum": 0.9213357943309163,
+      "maximum": 1.0508921493212886,
+      "favorable": 4,
+      "count": 12
+    },
+    "mlp/faer/True": {
+      "geomean": 1.004323508302296,
+      "minimum": 0.9857188951911338,
+      "maximum": 1.04725080555449,
+      "favorable": 7,
+      "count": 12
+    },
+    "pack/None/None": {
+      "geomean": 0.9748191930477129,
+      "minimum": 0.7567494300240782,
+      "maximum": 1.019867645358918,
+      "favorable": 4,
+      "count": 12
+    },
+    "transpose/None/None": {
+      "geomean": 0.9972402392669808,
+      "minimum": 0.9768350544236674,
+      "maximum": 1.0222658902743862,
+      "favorable": 5,
+      "count": 12
+    }
+  }
+}

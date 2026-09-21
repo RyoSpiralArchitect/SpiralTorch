@@ -1,0 +1,21 @@
+
+running 11 tests
+test layers::gelu::tests::gelu_backward_preserves_finite_saturated_backend_output ... ok
+test layers::gelu::tests::gelu_backward_rejects_non_finite_grad_output ... ok
+test layers::gelu::tests::gelu_backward_rejects_overflowing_backend_output ... ok
+test layers::gelu::tests::gelu_backward_respects_cpu_policy ... ok
+test layers::gelu::tests::gelu_backward_uses_derivative ... ok
+test layers::gelu::tests::gelu_empty_axes_forward_backward_pass_through ... ok
+test layers::gelu::tests::gelu_empty_backward_emits_backend_meta ... ok
+test layers::gelu::tests::gelu_fallback_derivative_matches_saturated_tensor_backend ... ok
+test layers::gelu::tests::gelu_forward_matches_reference ... ok
+test layers::gelu::tests::gelu_forward_rejects_non_finite_input ... ok
+test layers::gelu::tests::gelu_forward_rejects_overflowing_scalar_intermediate ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 704 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+

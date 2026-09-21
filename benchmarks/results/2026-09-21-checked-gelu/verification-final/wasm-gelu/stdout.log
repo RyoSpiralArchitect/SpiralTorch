@@ -1,0 +1,4 @@
+WASM GELU 1x1: independent forward/VJP checks passed
+WASM GELU 2x6: independent forward/VJP checks passed
+WASM GELU 33x195: independent forward/VJP checks passed
+WASM GELU 1x257: independent forward/VJP checks passed

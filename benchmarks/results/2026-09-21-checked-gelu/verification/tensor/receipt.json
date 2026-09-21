@@ -1,0 +1,41 @@
+{
+  "source": {
+    "commit": "1308592db0dce79f4ff5c078a10b240475f8f06e",
+    "status": "",
+    "files": {
+      "crates/st-tensor/src/pure.rs": "79a1be8b367b8d79fed3abca0f1d892f31fb78a73f640c16b96e6e473bd4468a",
+      "crates/st-nn/src/layers/gelu.rs": "1faaff86ca2272f1e2f4bbf3d751fc12210dc96f555c006fcabd6d28449f9f04",
+      "crates/st-nn/tests/gelu_layout_contract.rs": "154baddcdd7bab01d1b15bb7d80c7e663025c4f6e6c864002af570c44be0051f",
+      "crates/st-bench/examples/cpu_gelu.rs": "179a79563baa8955a1b963a4bb78496402e08444e5e6c5b59c1d4538afcf6cd9",
+      "crates/st-bench/examples/cpu_nn_layout.rs": "8ec08a37cde1d7f2b304617cc200eb6a4d022d4e11e060b7f72fe0cdfc65f137"
+    }
+  },
+  "command": [
+    "cargo",
+    "+1.98.0",
+    "test",
+    "--locked",
+    "-p",
+    "st-tensor",
+    "--no-default-features",
+    "--features",
+    "cpu,faer",
+    "--lib",
+    "--test",
+    "autograd_observability",
+    "--test",
+    "autograd_sgd",
+    "--test",
+    "classification",
+    "--",
+    "--test-threads=1"
+  ],
+  "exit_code": 0,
+  "seconds": 7.939553000003798,
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+    "CARGO_BUILD_JOBS": "4",
+    "RAYON_NUM_THREADS": "4"
+  },
+  "source_unchanged": true
+}

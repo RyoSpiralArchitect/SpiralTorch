@@ -1,0 +1,68 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/baseline-build/cpu_nn_layout",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/candidate-build/cpu_nn_layout"
+  },
+  "sha256": {
+    "baseline": "9e84ba1a3c1a095a84bd38c10b81d3358fabd4e4169d1e31eb350b50718284f7",
+    "candidate": "20f3a9699a473bfcead6d9e30b5c062a4bf6322d0ead2e1920d571c63ea1c52e"
+  },
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  },
+  "home_removed": true,
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/baseline-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 3.5777410000009695
+    },
+    {
+      "name": "warm-candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/candidate-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 5.568296708996058
+    },
+    {
+      "name": "baseline-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/baseline-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 2.946681334011373
+    },
+    {
+      "name": "candidate-a",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/candidate-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 2.9300815829919884
+    },
+    {
+      "name": "candidate-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/candidate-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 2.9596465000067838
+    },
+    {
+      "name": "baseline-b",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921/baseline-build/cpu_nn_layout"
+      ],
+      "exit_code": 0,
+      "seconds": 2.9496547089947853
+    }
+  ],
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown"
+}
