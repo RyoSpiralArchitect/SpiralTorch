@@ -2,6 +2,8 @@
 use pyo3::prelude::*;
 mod pointwise;
 #[cfg(feature = "wgpu")]
+pub(crate) use pointwise::{PyPointwiseInputs, PyPointwisePlan};
+#[cfg(feature = "wgpu")]
 use pyo3::{
     exceptions::{PyRuntimeError, PyTypeError, PyValueError},
     types::{PyBool, PyDict, PyTuple},

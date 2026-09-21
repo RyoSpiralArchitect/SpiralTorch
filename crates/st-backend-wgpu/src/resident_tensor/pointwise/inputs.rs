@@ -61,6 +61,11 @@ impl PointwiseInputs {
         self.values.is_empty()
     }
 
+    /// Borrow immutable handles, for example when seeding a graph VJP directly.
+    pub fn as_slice(&self) -> &[ResidentTensor] {
+        &self.values
+    }
+
     /// No upload, copy, or submission. Inputs must share the same device/queue.
     pub fn add(&mut self, tensor: &ResidentTensor) -> Result<(), TensorError> {
         if self.len() == 16 {

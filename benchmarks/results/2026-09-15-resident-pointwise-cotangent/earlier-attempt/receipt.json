@@ -1,0 +1,240 @@
+{
+  "status": "error",
+  "pid": 62937,
+  "source": {
+    "commit": "db33159a4a846517a9d629df6375535aceaa1894",
+    "tree": "62f79ac7d596322759b29eb7d5d21c4a6d16e4ff"
+  },
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 5.614873166981852,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "admission",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-S",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_resident_training_bench.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.10521479201270267,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "backend-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 6.295171167002991,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "backend-wasm-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--lib",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 6.1423837920010556,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "backend-gpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 41.98408308299258,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "nn-gpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--features",
+        "wgpu",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 132.50850625001476,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "native-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--features",
+        "wgpu",
+        "--example",
+        "resident_training_bench"
+      ],
+      "exit_code": 0,
+      "seconds": 22.929966916999547,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "python-gpu-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "spiraltorch-py"
+      ],
+      "exit_code": 0,
+      "seconds": 143.08489937501145,
+      "gpu_opt_in": false
+    },
+    {
+      "name": "gpu-test_nn_pointwise_cotangent",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-cotangent-20260915/verified-a/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_nn_pointwise_cotangent.py"
+      ],
+      "exit_code": 0,
+      "seconds": 2.6160012079926673,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_graph_autograd",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-cotangent-20260915/verified-a/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_nn_resident_graph_autograd.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0186336250044405,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_graph_learner",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-cotangent-20260915/verified-a/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_nn_resident_graph_learner.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2399123339855578,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_wgpu_pointwise",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-cotangent-20260915/verified-a/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_wgpu_pointwise.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.1301445410063025,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_nn_resident_exports",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-cotangent-20260915/verified-a/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_nn_resident_exports.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0349923750036396,
+      "gpu_opt_in": true
+    },
+    {
+      "name": "gpu-test_runtime_imports",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-pointwise-cotangent-20260915/verified-a/python-gpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_runtime_imports.py"
+      ],
+      "exit_code": 1,
+      "seconds": 1.011054292001063,
+      "gpu_opt_in": true
+    }
+  ],
+  "products": {
+    "native-worker": "9ee200b7fca2d88f152112206c397382ad42733416126592f3d35182472d31b2",
+    "python-gpu.dylib": "0c12385119d55af496143394139cb051f24b14f1172c937c5f749e8231e46f2a"
+  },
+  "error": "RuntimeError('gpu-test_runtime_imports')",
+  "seconds": 368.027813875
+}

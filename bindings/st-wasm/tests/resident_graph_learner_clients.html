@@ -4,7 +4,7 @@
 <title>Rust custom-objective resident learning</title>
 <pre id="result" data-status="running">Checking weighted VJPs, updates and checkpoints</pre>
 <script type="module">
-import init, {InferencePlan, GraphGradientBatch} from "./module/spiraltorch_wasm.js";
+import init, {InferencePlan, GraphGradientBatch, WgpuPointwiseInputs} from "./module/spiraltorch_wasm.js";
 const element=document.querySelector("#result");
 const report={status:"error",schema:"spiraltorch.graph_learner_clients.v1",cases:[]};
 const f32=v=>new Float32Array(v);
@@ -14,6 +14,7 @@ const fail=fn=>{let caught=false;try{fn();}catch{caught=true;}if(!caught)throw E
 const reject=async fn=>{let caught=false;try{await fn();}catch{caught=true;}if(!caught)throw Error("invalid transaction accepted");};
 async function checkpoint(gpu){const s=gpu.parameterSnapshot();try{return await s.readPlan();}finally{s.free();}}
 async function weight(gpu){const p=await checkpoint(gpu);try{return JSON.parse(p.toJson()).parameters[0].values[0];}finally{p.free();}}
+async function values(tensor){const s=tensor.snapshot();try{return [...await s.readValues()];}finally{s.free();}}
 try {
   await init();
   const source=InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[2,2,1],
@@ -21,6 +22,34 @@ try {
       {kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1}]},
       {kind:"pointwise",parameters:[],steps:[{op:"relu",rhs:null}]}]}));
   const plan=source.fusePointwise();
+  // Same public seed program on the immutable tape and on the mutable learner.
+  for(const learning of [false,true]) {
+    const owner=learning?await plan.compileGraphLearnerWebGpu("exact"):await plan.compileGraphAutogradWebGpu();
+    const d=owner.tensorDevice();owner.upload(f32([1,1,1,1]));
+    const original=d.upload([2,2,1],f32([1,2,3,4])), input=original.permute([1,0,2]), scale=d.upload([],f32([.5]));
+    const bound=new WgpuPointwiseInputs();bound.add(input);bound.add(scale);
+    const program=bound.compile(JSON.stringify([["multiply",1],["add",0]]));
+    const f=owner.forward(), empty=new WgpuPointwiseInputs();
+    fail(()=>owner.backwardPointwise(f,program,empty));same(String(owner.submittedBackwards),"0");
+    const seed=program.run(bound,"fused"), old=owner.backward(f,seed), direct=owner.backwardPointwise(f,program,bound);
+    const held=direct.inputGradientTensor(), a=direct.parameterGradientTensor(0), b=old.parameterGradientTensor(0);
+    same(await values(held),[3,9,6,12]);same(await values(a),[15]);same(await values(b),[15]);
+    const max=d.upload([],f32([3.4028234663852886e38])), negative=d.upload([],f32([-2]));
+    const badInputs=new WgpuPointwiseInputs();badInputs.add(input);badInputs.add(max);badInputs.add(negative);
+    const badPlan=badInputs.compile(JSON.stringify([["multiply",1],["multiply",2],["relu",null]]));
+    const bad=owner.backwardPointwise(f,badPlan,badInputs), good=owner.backwardPointwise(f,program,bound);
+    const badTensor=bad.inputGradientTensor(), valid=good.parameterGradientTensor(0);
+    same(await values(valid),[15]);
+    if(learning) {
+      const batch=new GraphGradientBatch();batch.add(good,1);batch.add(bad,0);owner.sgdWeighted(batch,.1);
+      const receipt=owner.updateSnapshot();await reject(()=>receipt.read());same(await weight(owner),2);
+      batch.free();receipt.free();
+    } else {const later=owner.forward();later.free();}
+    fail(()=>owner.backwardPointwise(f,program,bound));
+    for(const h of [owner,d,original,input,scale,bound,program,f,empty,seed,old,direct,a,b,max,negative,badInputs,badPlan,bad,good,valid])h.free();
+    same(await values(held),[3,9,6,12]);await reject(()=>values(badTensor));held.free();badTensor.free();
+  }
+  report.pointwise_cotangent_equivalence_rejection_ownership="passed";
   fail(()=>plan.compileGraphLearnerWebGpu("unknown"));
   for(const [policy,scale] of [["exact",1],["module_compatible",.25]]){
     const gpu=await plan.compileGraphLearnerWebGpu(policy), device=gpu.tensorDevice();

@@ -1,0 +1,44 @@
+{
+  "status": "passed",
+  "schema": "spiraltorch.graph_learner_clients.v1",
+  "cases": [
+    {
+      "policy": "exact",
+      "updates": 32,
+      "gain": 1.0702553610510797,
+      "resume": "bit_identical"
+    },
+    {
+      "policy": "module_compatible",
+      "updates": 32,
+      "gain": 1.4896127003921353,
+      "resume": "bit_identical"
+    }
+  ],
+  "pointwise_cotangent_equivalence_rejection_ownership": "passed",
+  "adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "identity_limits_zero_weight_rollback_ownership": "passed",
+  "wasm_sha256": "05985269c15dc753399afac460b0d75158e4865092dda7aaf6cbe1806d1ba80f",
+  "page_sha256": "df4a50090b7a31a839f7fd55ba273fdeb05e3d6a017f008d1becd77789cfe358",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "nn-learner-clients",
+  "asset_sha256": {
+    "/": "df4a50090b7a31a839f7fd55ba273fdeb05e3d6a017f008d1becd77789cfe358",
+    "/module/spiraltorch_wasm.js": "42e84f27c528cf5de96be09a5698506c4c01397158e307b80c70d75d199d2354",
+    "/module/spiraltorch_wasm_bg.wasm": "05985269c15dc753399afac460b0d75158e4865092dda7aaf6cbe1806d1ba80f",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+  },
+  "browser_version": "152.0.7977.84",
+  "page_errors": [],
+  "console_messages": []
+}

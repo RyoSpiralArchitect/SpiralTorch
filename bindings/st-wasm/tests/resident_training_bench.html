@@ -13,10 +13,11 @@ const matrix=new URL(location.href).searchParams.get("matrix")??"standard";
 const optimization=new URL(location.href).searchParams.get("optimization")??"none";
 const fusion=optimization==="fuse-pointwise";
 const seedFusion=optimization==="fuse-learner-seeds";
+const directSeeds=optimization==="direct-learner-seeds";
 const optimizer=new URL(location.href).searchParams.get("optimizer")??"none";
 const learnerOptimizer=optimizer==="none"?null:optimizer;
 const report={schema:"spiraltorch.resident_training_browser_comparison.v1",status:"error",cases:[],
-  workload,matrix,pointwise_fusion:fusion,learner_seed_fusion:seedFusion,learner_optimizer:learnerOptimizer,
+  workload,matrix,pointwise_fusion:fusion,learner_seed_fusion:seedFusion,direct_learner_seeds:directSeeds,learner_optimizer:learnerOptimizer,
   boundary:"paired rotating Rust WebGPU workloads; all step losses/finite flags captured and read; 2 warmups+8 samples; no cross-framework timing ratio or exact physical-adapter attestation"};
 if(learner)report.boundary="paired rotating Rust weighted-learning workloads; quadratic/quartic cotangents and exact VJPs; all update receipts read; no timed loss observations; 2 warmups+8 samples; no cross-framework timing ratio";
 if(learnerOptimizer)report.boundary+="; zero-initialized Topos EMA damping 0.5, optional norm limit 1/1024; history observed outside timing";
@@ -59,7 +60,7 @@ function compare(a,b) {
 }
 try {
   require(["standard","wide"].includes(matrix)&&(matrix!=="wide"||graph),"invalid workload matrix");
-  require(["none","fuse-pointwise","fuse-learner-seeds"].includes(optimization)&&(!fusion||(graph&&!learner))&&(!seedFusion||learner),"invalid optimization");
+  require(["none","fuse-pointwise","fuse-learner-seeds","direct-learner-seeds"].includes(optimization)&&(!fusion||(graph&&!learner))&&(!(seedFusion||directSeeds)||learner),"invalid optimization");
   require(["none","topos_ema","clipped_topos_ema"].includes(optimizer)&&(!learnerOptimizer||learner),"invalid learner optimizer");
   await progress({stage:"initialize_modules"});
   await initA(); await initB();
@@ -104,7 +105,12 @@ try {
           row.samples.push(sample);
           for(const lane of order) {
             await progress({stage:"sample_started",config,cadence,block,lane});
-            const value=JSON.parse(await workers[lane][learner?"learn":"sample"](JSON.stringify(cadence),!captures[lane]));
+            const value=JSON.parse(await (directSeeds ?
+              workers[lane].learnPointwise(JSON.stringify(cadence),!captures[lane],lane==="candidate") :
+              workers[lane][learner?"learn":"sample"](JSON.stringify(cadence),!captures[lane])));
+            const route=directSeeds?(lane==="candidate"?"direct":"materialized"):null;
+            require((value.pointwise_cotangent_route??null)===route,"wrong pointwise cotangent route");
+            if(directSeeds)(sample.pointwise_cotangent_routes??={})[lane]=route;
             require(value.status==="passed"&&value.steps===8&&value.cadence===cadence&&value.losses.length===(learner?0:8)&&
               Number.isFinite(value.elapsed_ms)&&value.elapsed_ms>0,"sample identity/timing differs");
             require((value.learner??false)===learner,"wrong learner workload");
@@ -123,7 +129,7 @@ try {
             close(value.losses,captures[lane].losses);
             sample.times_ms[lane]=value.elapsed_ms;
             await progress({stage:"sample_finished",config,cadence,block,lane,
-              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256,fused_learner_seeds:value.fused_learner_seeds??false,learner_optimizer:value.learner_optimizer??null});
+              elapsed_ms:value.elapsed_ms,setup_ms:value.setup_ms,state_sha256:value.state_sha256,fused_learner_seeds:value.fused_learner_seeds??false,learner_optimizer:value.learner_optimizer??null,pointwise_cotangent_route:value.pointwise_cotangent_route??null});
           }
         }
         row.captures[cadence+"_baseline"]=captures.baseline;

@@ -3,7 +3,7 @@
 use super::training::training_error;
 use super::*;
 #[cfg(feature = "wgpu")]
-use crate::wgpu_tensor::{PyWgpuTensor, PyWgpuTensorDevice};
+use crate::wgpu_tensor::{PyPointwiseInputs, PyPointwisePlan, PyWgpuTensor, PyWgpuTensorDevice};
 #[cfg(feature = "wgpu")]
 use st_backend_wgpu::{
     resident_training::graph::{GraphForward, GraphGradients, ResidentGraphAutograd},
@@ -100,6 +100,25 @@ impl PyResidentGraphAutograd {
     fn forward(&mut self, py: Python<'_>) -> PyResult<PyGraphForward> {
         Ok(PyGraphForward {
             inner: py.detach(|| self.inner.forward()).map_err(training_error)?,
+        })
+    }
+    fn backward_pointwise(
+        &mut self,
+        py: Python<'_>,
+        forward: &PyGraphForward,
+        plan: &PyPointwisePlan,
+        inputs: &PyPointwiseInputs,
+    ) -> PyResult<PyGraphGradients> {
+        Ok(PyGraphGradients {
+            inner: py
+                .detach(|| {
+                    self.inner.backward_pointwise(
+                        &forward.inner,
+                        &plan.inner,
+                        &inputs.inner.as_slice().iter().collect::<Vec<_>>(),
+                    )
+                })
+                .map_err(training_error)?,
         })
     }
     fn backward(

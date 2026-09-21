@@ -37,11 +37,20 @@ def manifest_binding(manifest, source):
     return binding
 
 
-def summarize_case(row, config, lanes, *, learner=False, seed_fusion=False):
+def pointwise_route(lane, direct):
+    return ("direct" if lane == "candidate" else "materialized") if direct and lane != "torch" else None
+
+
+def summarize_case(row, config, lanes, *, learner=False, seed_fusion=False, direct_seeds=False):
+    require(type(direct_seeds) is bool and (not direct_seeds or (learner and not seed_fusion)),
+            "invalid direct cotangent selection")
     require(row["config"] == config and row["fixture"]["config"] == config, "recipe differs")
     samples = row["samples"]
     require(len(samples) == 20, "expected two warmups and eight retained blocks per cadence")
     for index, sample in enumerate(samples):
+        routes = sample.get("pointwise_cotangent_routes", {lane: None for lane in lanes})
+        require(set(routes) == set(lanes) and all(routes[lane] == pointwise_route(lane, direct_seeds) for lane in lanes),
+                "per-interval pointwise cotangent route differs")
         optimizers = sample.get("learner_optimizers", {lane: None for lane in lanes})
         require(set(optimizers) == set(lanes) and all(optimizers[lane] == config.get("learner_optimizer") for lane in lanes),
                 "per-interval learner optimizer differs")
@@ -64,7 +73,7 @@ def summarize_case(row, config, lanes, *, learner=False, seed_fusion=False):
             statistics_by_lane[lane] = dict(median_ms=statistics.median(values), min_ms=min(values),
                                              max_ms=max(values), retained=len(values))
             capture = row["captures"][cadence + "_" + lane]
-            bench.validate_sample(capture, cadence, config["steps"], learner=learner, lane=lane, seed_fusion=seed_fusion and lane=="candidate", learner_optimizer=config.get("learner_optimizer"))
+            bench.validate_sample(capture, cadence, config["steps"], learner=learner, lane=lane, seed_fusion=seed_fusion and lane=="candidate", learner_optimizer=config.get("learner_optimizer"), pointwise_route=pointwise_route(lane, direct_seeds))
             bench.close_values(capture["losses"], capture["losses"])
             require(positive(capture["initial_loss"]), "invalid initial loss")
             if lane != "torch":
@@ -81,7 +90,7 @@ def summarize_case(row, config, lanes, *, learner=False, seed_fusion=False):
     return result
 
 
-def validate_progress(path, cases, seed_fusion=False):
+def validate_progress(path, cases, seed_fusion=False, direct_seeds=False):
     expected = []
     for row in cases:
         for sample in row["samples"]:
@@ -102,6 +111,8 @@ def validate_progress(path, cases, seed_fusion=False):
                 require(started is None, "overlapping browser samples")
                 started = identity
             else:
+                require(event.get("pointwise_cotangent_route") == pointwise_route(lane, direct_seeds),
+                        "browser interval pointwise cotangent route differs")
                 require(event.get("learner_optimizer") == row["config"].get("learner_optimizer"), "browser interval optimizer differs")
                 require(event.get("fused_learner_seeds", False) is (seed_fusion and lane=="candidate"), "browser interval seed fusion differs")
                 require(started == identity and event["elapsed_ms"] == sample["times_ms"][lane] and
@@ -135,6 +146,10 @@ def run(args, result):
     require(type(seed_fusion) is bool and browser.get("learner_seed_fusion", False) is seed_fusion and (not seed_fusion or learner),
             "seed fusion selection differs")
     result["learner_seed_fusion"] = seed_fusion
+    direct_seeds = native.get("direct_learner_seeds", False)
+    require(type(direct_seeds) is bool and browser.get("direct_learner_seeds", False) is direct_seeds
+            and (not direct_seeds or (learner and not seed_fusion)), "direct cotangent selection differs")
+    result["direct_learner_seeds"] = direct_seeds
     graph = workload in ("graph", "learner")
     result["workload"] = workload
     matrix = native.get("matrix", "standard")
@@ -161,8 +176,8 @@ def run(args, result):
     result["device_admission"] = native["device_admission"]
     result["torch"] = dict(version=native["torch"], device=native["torch_device"])
     for config, n, b in zip(configs, native["cases"], browser["cases"]):
-        row = dict(config=config, native=summarize_case(n, config, ("baseline", "candidate", "torch"), learner=learner, seed_fusion=seed_fusion),
-                   browser=summarize_case(b, config, ("baseline", "candidate"), learner=learner, seed_fusion=seed_fusion), max_abs_errors={})
+        row = dict(config=config, native=summarize_case(n, config, ("baseline", "candidate", "torch"), learner=learner, seed_fusion=seed_fusion, direct_seeds=direct_seeds),
+                   browser=summarize_case(b, config, ("baseline", "candidate"), learner=learner, seed_fusion=seed_fusion, direct_seeds=direct_seeds), max_abs_errors={})
         result["cases"].append(row)
         for key in ("config", "plan_json", "input", "target", "learning_rate", "kernel", "accumulation"):
             require(n["fixture"][key] == b["fixture"][key], "native/browser fixture differs: " + key)
@@ -190,7 +205,7 @@ def run(args, result):
                          max(reference.compare(capture["state"], fixed["state"]).values()))
                 row["max_abs_errors"][origin + "_" + key] = error
         row["losses"] = fixed["losses"]
-    result["browser_intervals_revalidated"] = validate_progress(args.browser_progress, browser["cases"], seed_fusion)
+    result["browser_intervals_revalidated"] = validate_progress(args.browser_progress, browser["cases"], seed_fusion, direct_seeds)
     require(identities == [bench.audit.file_identity(path) for path in paths], "evidence changed during validation")
 
 

@@ -101,11 +101,15 @@ These are bounded learning/correctness fixtures, not model-quality or throughput
 claims. Composition uses prepared weight/flag/shape buffers and writes groups of
 up to four contributions directly into the graph's gradient buffers. Each product
 and ordered intermediate sum retains the shared finite checks; one unit-weight
-source uses a direct copy. The derivative outputs are still owning GPU snapshots,
+source uses a direct copy. The derivative outputs are owning guarded GPU versions,
 and composing updates still creates bind groups and dispatches. This is not
 a fused optimizer or a general reverse-mode tape for arbitrary `WgpuTensor`
-expressions. External objectives supply their cotangents. Cross-forward
-microbatch accumulation, Adam/momentum and mixed precision are not provided.
+expressions. External objectives supply their cotangents.
+[Pointwise seed programs](resident_pointwise_cotangent.md) can write directly
+into the VJP tape without materializing an intermediate seed tensor.
+[Microbatch accumulation](module_resident_microbatch.md) and
+[Topos EMA](resident_momentum_fusion.md) have explicit APIs; Adam and mixed
+precision are not provided.
 
 The source-bound training benchmark has a separate `--graph --learner` workload.
 It times full quadratic/quartic seed construction, both VJPs and weighted SGD.

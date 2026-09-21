@@ -4,7 +4,9 @@ use super::autograd::{WasmGraphForward, WasmGraphGradients};
 use super::graph::WasmGraphTrainingParametersSnapshot;
 use super::*;
 #[cfg(feature = "webgpu")]
-use crate::wgpu_tensor::{WasmWgpuTensor, WasmWgpuTensorDevice};
+use crate::wgpu_tensor::{
+    WasmPointwiseInputs, WasmPointwisePlan, WasmWgpuTensor, WasmWgpuTensorDevice,
+};
 #[cfg(feature = "webgpu")]
 use st_backend_wgpu::resident_training::graph as backend;
 
@@ -170,6 +172,24 @@ impl WasmResidentGraphLearner {
     pub fn forward(&mut self) -> Result<WasmGraphForward, JsValue> {
         Ok(WasmGraphForward {
             inner: self.inner.forward().map_err(js_error)?,
+        })
+    }
+    #[wasm_bindgen(js_name = backwardPointwise)]
+    pub fn backward_pointwise(
+        &mut self,
+        forward: &WasmGraphForward,
+        plan: &WasmPointwisePlan,
+        inputs: &WasmPointwiseInputs,
+    ) -> Result<WasmGraphGradients, JsValue> {
+        Ok(WasmGraphGradients {
+            inner: self
+                .inner
+                .backward_pointwise(
+                    &forward.inner,
+                    &plan.inner,
+                    &inputs.inner.as_slice().iter().collect::<Vec<_>>(),
+                )
+                .map_err(js_error)?,
         })
     }
     pub fn backward(

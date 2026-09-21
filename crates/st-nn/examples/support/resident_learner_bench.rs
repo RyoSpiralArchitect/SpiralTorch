@@ -86,9 +86,24 @@ fn vjps<const PROFILE: bool>(
     negative: &ResidentTensor,
     norm: &ResidentTensor,
     cube: Option<&PointwisePlan>,
+    pointwise: Option<&CotangentPlans>,
     phases: &mut HostPhases<PROFILE>,
 ) -> Result<(GraphForward, [GraphGradients; 2])> {
     let f = phases.measure(0, || gpu.forward())?;
+    if let Some(programs) = pointwise {
+        let error = phases.measure(1, || f.prediction().add(negative))?;
+        let inputs = [&error, norm];
+        let mut seed = |plan: &PointwisePlan| -> Result<_> {
+            Ok(if programs.direct {
+                gpu.backward_pointwise(&f, plan, &inputs)?
+            } else {
+                gpu.backward(&f, &plan.run(&inputs, PointwiseExecution::Fused)?)?
+            })
+        };
+        let first = phases.measure(2, || seed(&programs.quadratic))?;
+        let second = phases.measure(4, || seed(&programs.quartic))?;
+        return Ok((f, [first, second]));
+    }
     let (e, seed) = phases.measure(1, || -> Result<_> {
         let e = f.prediction().add(negative)?;
         let seed = e.mul(norm)?;
@@ -106,6 +121,12 @@ fn vjps<const PROFILE: bool>(
     Ok((f, [first, second]))
 }
 
+struct CotangentPlans {
+    quadratic: PointwisePlan,
+    quartic: PointwisePlan,
+    direct: bool,
+}
+
 fn objective(prediction: &[f32], target: &[f32]) -> f32 {
     prediction
         .iter()
@@ -119,7 +140,24 @@ fn objective(prediction: &[f32], target: &[f32]) -> f32 {
 
 impl Benchmark {
     pub async fn learn(&self, cadence: Cadence, capture: bool, now: fn() -> f64) -> Result<Value> {
-        self.learn_inner::<false>(cadence, capture, now).await
+        self.learn_inner::<false>(cadence, capture, now, None).await
+    }
+
+    /// Matched seed programs; only their materialization/submission route differs.
+    pub async fn learn_pointwise(
+        &self,
+        cadence: Cadence,
+        capture: bool,
+        direct: bool,
+        now: fn() -> f64,
+    ) -> Result<Value> {
+        if self.config.fuse_learner_seeds {
+            return Err(
+                "pointwise route comparison cannot select the legacy seed-fusion trial".into(),
+            );
+        }
+        self.learn_inner::<false>(cadence, capture, now, Some(direct))
+            .await
     }
 
     pub async fn learn_host_profile(
@@ -128,7 +166,7 @@ impl Benchmark {
         capture: bool,
         now: fn() -> f64,
     ) -> Result<Value> {
-        self.learn_inner::<true>(cadence, capture, now).await
+        self.learn_inner::<true>(cadence, capture, now, None).await
     }
 
     async fn learn_inner<const PROFILE: bool>(
@@ -136,6 +174,7 @@ impl Benchmark {
         cadence: Cadence,
         capture: bool,
         now: fn() -> f64,
+        direct: Option<bool>,
     ) -> Result<Value> {
         if !self.config.graph {
             return Err("learner benchmark requires a graph".into());
@@ -177,8 +216,35 @@ impl Benchmark {
         } else {
             None
         };
+        let pointwise = direct
+            .map(|direct| -> Result<_> {
+                let prepare = |steps| -> Result<_> {
+                    Ok(PointwisePlan::new(
+                        d.clone(),
+                        PointwiseChain::new(2, steps)?,
+                        vec![gpu.output_layout().clone(), norm.layout().clone()],
+                    )?)
+                };
+                Ok(CotangentPlans {
+                    direct,
+                    quadratic: prepare(vec![PointwiseStep::named("multiply", Some(1))?])?,
+                    quartic: prepare(vec![
+                        PointwiseStep::named("multiply", Some(0))?,
+                        PointwiseStep::named("multiply", Some(0))?,
+                        PointwiseStep::named("multiply", Some(1))?,
+                    ])?,
+                })
+            })
+            .transpose()?;
         let mut unprofiled = HostPhases::<false>::new(now);
-        let (initial, g) = vjps(&mut gpu, &negative, &norm, cube.as_ref(), &mut unprofiled)?;
+        let (initial, g) = vjps(
+            &mut gpu,
+            &negative,
+            &norm,
+            cube.as_ref(),
+            pointwise.as_ref(),
+            &mut unprofiled,
+        )?;
         gpu.sgd_weighted(&[(&g[0], 0.75), (&g[1], 0.25)], 0.)?;
         if accepted(gpu.update_snapshot()?).await? != 1 {
             return Err("initial update identity".into());
@@ -191,7 +257,14 @@ impl Benchmark {
         let mut phases = HostPhases::<PROFILE>::new(now);
         let start = now();
         for _ in 0..self.config.steps {
-            let (_, g) = vjps(&mut gpu, &negative, &norm, cube.as_ref(), &mut phases)?;
+            let (_, g) = vjps(
+                &mut gpu,
+                &negative,
+                &norm,
+                cube.as_ref(),
+                pointwise.as_ref(),
+                &mut phases,
+            )?;
             phases.measure(5, || {
                 gpu.sgd_weighted(&[(&g[0], 0.75), (&g[1], 0.25)], 0.01)
             })?;
@@ -218,7 +291,14 @@ impl Benchmark {
             return Err("invalid learner interval or missing acceptance".into());
         }
         // Final full state observation is outside timing, including the host objective.
-        let (f, g) = vjps(&mut gpu, &negative, &norm, cube.as_ref(), &mut unprofiled)?;
+        let (f, g) = vjps(
+            &mut gpu,
+            &negative,
+            &norm,
+            cube.as_ref(),
+            pointwise.as_ref(),
+            &mut unprofiled,
+        )?;
         let prediction = values(f.prediction()).await?;
         let final_loss = objective(&prediction, self.target.data());
         let mut input_gradients = Vec::new();
@@ -256,6 +336,10 @@ impl Benchmark {
             "boundary":"quadratic/quartic GPU seeds and two exact VJPs; weighted SGD; every update acceptance captured/read; no per-step loss read; reset, zero-rate warmup and terminal state/host objective outside timing"});
         if PROFILE {
             result["host_profile"] = phases.report(elapsed_ms);
+        }
+        if let Some(direct) = direct {
+            result["pointwise_cotangent_route"] =
+                json!(if direct { "direct" } else { "materialized" });
         }
         Ok(result)
     }

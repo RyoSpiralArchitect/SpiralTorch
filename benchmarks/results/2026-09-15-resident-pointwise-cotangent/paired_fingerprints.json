@@ -1,0 +1,1802 @@
+[
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "a-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-clipped_topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "clipped_topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-plain",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "native",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 17,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 29,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        16,
+        32
+      ],
+      "depth": 2,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        2,
+        129,
+        32
+      ],
+      "depth": 4,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  },
+  {
+    "run": "b-topos_ema",
+    "client": "browser",
+    "config": {
+      "shape": [
+        4,
+        32,
+        64
+      ],
+      "depth": 8,
+      "seed": 43,
+      "steps": 8,
+      "graph": true,
+      "learner_optimizer": "topos_ema"
+    },
+    "paired_fingerprints_equal": true
+  }
+]

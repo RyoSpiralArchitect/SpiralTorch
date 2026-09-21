@@ -216,6 +216,17 @@ impl ResidentGraphLearner {
         self.autograd.backward(forward, cotangent)
     }
 
+    /// Checked seed evaluation and exact graph VJP in one GPU submission.
+    /// See [ResidentGraphAutograd::backward_pointwise].
+    pub fn backward_pointwise(
+        &mut self,
+        forward: &GraphForward,
+        plan: &crate::resident_tensor::pointwise::PointwisePlan,
+        inputs: &[&ResidentTensor],
+    ) -> Result<GraphGradients, TrainingError> {
+        self.autograd.backward_pointwise(forward, plan, inputs)
+    }
+
     pub fn sgd(&mut self, gradients: &GraphGradients, rate: f32) -> Result<u64, TrainingError> {
         self.sgd_weighted(&[(gradients, 1.)], rate)
     }

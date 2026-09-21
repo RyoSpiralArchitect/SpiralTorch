@@ -6,9 +6,9 @@ use st_backend_wgpu::resident_tensor::pointwise::{PointwiseInputs, PointwisePlan
 use st_tensor::{PointwiseChain, PointwiseStep};
 
 #[pyclass(name = "WgpuPointwiseInputs", module = "spiraltorch.wgpu")]
-struct PyPointwiseInputs {
+pub(crate) struct PyPointwiseInputs {
     #[cfg(feature = "wgpu")]
-    inner: PointwiseInputs,
+    pub(crate) inner: PointwiseInputs,
 }
 
 #[pymethods]
@@ -68,9 +68,9 @@ impl PyPointwiseInputs {
 }
 
 #[pyclass(name = "WgpuPointwisePlan", module = "spiraltorch.wgpu", frozen)]
-struct PyPointwisePlan {
+pub(crate) struct PyPointwisePlan {
     #[cfg(feature = "wgpu")]
-    inner: PointwisePlan,
+    pub(crate) inner: PointwisePlan,
 }
 #[cfg(feature = "wgpu")]
 #[pymethods]
