@@ -1,0 +1,16 @@
+
+running 11 tests
+test layers::linear::tests::constructors_reject_empty_and_overflowing_shapes ... ok
+test layers::linear::tests::linear_backward_rejects_non_finite_grad_without_updates ... ok
+test layers::linear::tests::linear_backward_rejects_non_finite_input_grad_without_updates ... ok
+test layers::linear::tests::linear_backward_streams_hypergrad ... ok
+test layers::linear::tests::linear_empty_batch_backward_returns_empty_input_grad_without_updates ... ok
+test layers::linear::tests::linear_forward_forced_wgpu_prepacked_matches_cpu_reference_on_edge_tiles ... ok
+test layers::linear::tests::linear_forward_matches_manual ... ok
+test layers::linear::tests::linear_forward_rejects_non_finite_input ... ok
+test layers::linear::tests::linear_forward_rejects_non_finite_parameter_before_pack ... ok
+test layers::linear::tests::xavier_initialization_is_seeded_bounded_and_zero_biased ... ok
+test layers::linear::tests::xavier_layer_keeps_the_linear_gradient_and_optimizer_contract ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 761 filtered out; finished in 0.17s
+

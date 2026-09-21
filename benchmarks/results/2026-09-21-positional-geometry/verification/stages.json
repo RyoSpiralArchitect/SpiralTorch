@@ -1,0 +1,58 @@
+[
+  {
+    "name": "format",
+    "exit_code": 0
+  },
+  {
+    "name": "vision-clippy",
+    "exit_code": 0
+  },
+  {
+    "name": "contracts",
+    "exit_code": 0
+  },
+  {
+    "name": "changed-crates-clippy",
+    "exit_code": 0
+  },
+  {
+    "name": "vision-wasm",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-build",
+    "exit_code": 0
+  },
+  {
+    "name": "bindgen",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-gelu",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-autograd",
+    "exit_code": 0
+  },
+  {
+    "name": "python-build",
+    "exit_code": 0
+  },
+  {
+    "name": "python-gelu",
+    "exit_code": 0
+  },
+  {
+    "name": "python-autograd",
+    "exit_code": 0
+  },
+  {
+    "name": "wgpu-linear",
+    "exit_code": 0
+  },
+  {
+    "name": "wgpu-resident",
+    "exit_code": 0
+  }
+]

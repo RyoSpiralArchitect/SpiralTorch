@@ -1,0 +1,31 @@
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling naga v0.20.0
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+error[E0599]: no method named `unwrap` found for struct `st_tensor::Tensor` in the current scope
+   --> crates/st-nn/src/layers/linear.rs:359:63
+    |
+359 |         let expected_input = seed.matmul(&weights.transpose().unwrap()).unwrap();
+    |                                                               ^^^^^^ method not found in `st_tensor::Tensor`
+
+error[E0599]: no method named `unwrap` found for struct `st_tensor::Tensor` in the current scope
+   --> crates/st-nn/src/layers/linear.rs:360:45
+    |
+360 |         let expected_weight = x.transpose().unwrap().matmul(&seed).unwrap();
+    |                                             ^^^^^^ method not found in `st_tensor::Tensor`
+
+error[E0599]: no method named `unwrap` found for struct `Vec<f32>` in the current scope
+   --> crates/st-nn/src/layers/linear.rs:361:46
+    |
+361 |         let expected_bias = seed.sum_axis0().unwrap();
+    |                                              ^^^^^^
+    |
+help: there is a method `swap` with a similar name, but with different arguments
+   --> /rustc/88d9e12ae178fab0fb5cc050a94da85685d449ea/library/core/src/slice/mod.rs:908:4
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `st-nn` (lib test) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...

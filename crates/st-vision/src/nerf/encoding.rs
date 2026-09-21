@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use super::{checked_elements, row_major, validate_finite};
 use st_tensor::{PureResult, Tensor, TensorError};
 
 /// Classic NeRF-style positional encoding that expands low dimensional inputs
@@ -12,12 +13,14 @@ pub struct PositionalEncoding {
     input_dims: usize,
     frequencies: Vec<f32>,
     include_input: bool,
+    output_dims: usize,
 }
 
 impl PositionalEncoding {
     /// Builds a positional encoding for the given dimensionality and number of
     /// frequency bands. Frequencies follow a power-of-two progression matching
-    /// the original NeRF formulation.
+    /// the original NeRF formulation. At most 128 bands have finite float32
+    /// frequencies. Output dimension arithmetic is checked before allocation.
     pub fn new(input_dims: usize, num_frequencies: usize) -> PureResult<Self> {
         if input_dims == 0 {
             return Err(TensorError::InvalidDimensions {
@@ -25,6 +28,17 @@ impl PositionalEncoding {
                 cols: num_frequencies.max(1),
             });
         }
+        if num_frequencies > 128 {
+            return Err(TensorError::InvalidValue {
+                label: "nerf_frequency_count",
+            });
+        }
+        let output_dims = input_dims.checked_mul(2 * num_frequencies + 1).ok_or(
+            TensorError::InvalidDimensions {
+                rows: input_dims,
+                cols: num_frequencies,
+            },
+        )?;
         let mut frequencies = Vec::with_capacity(num_frequencies);
         for idx in 0..num_frequencies {
             let freq = 2f32.powi(idx as i32);
@@ -34,13 +48,17 @@ impl PositionalEncoding {
             input_dims,
             frequencies,
             include_input: true,
+            output_dims,
         })
     }
 
     /// Disables the residual copy of the original coordinates in the encoded
     /// representation.
     pub fn without_input(mut self) -> Self {
-        self.include_input = false;
+        if self.include_input {
+            self.include_input = false;
+            self.output_dims -= self.input_dims;
+        }
         self
     }
 
@@ -51,12 +69,7 @@ impl PositionalEncoding {
 
     /// Returns the dimensionality of the encoded output.
     pub fn output_dims(&self) -> usize {
-        let base = if self.include_input {
-            self.input_dims
-        } else {
-            0
-        };
-        base + self.input_dims * self.frequencies.len() * 2
+        self.output_dims
     }
 
     /// Returns the number of active frequency bands.
@@ -64,7 +77,9 @@ impl PositionalEncoding {
         self.frequencies.len()
     }
 
-    /// Encodes a batch of coordinates.
+    /// Encodes logical coordinates into a row-major tensor, preserving inputs.
+    /// Rejects non-finite coordinates, even for a zero-feature encoding, and
+    /// overflowing frequency-scaled phases before evaluating trigonometry.
     pub fn encode(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         if cols != self.input_dims {
@@ -73,22 +88,46 @@ impl PositionalEncoding {
                 right: (rows, cols),
             });
         }
-        let mut encoded = Vec::with_capacity(rows * self.output_dims());
-        let data = input.data();
-        for row in 0..rows {
-            let offset = row * cols;
-            if self.include_input {
-                encoded.extend_from_slice(&data[offset..offset + cols]);
-            }
-            for &freq in &self.frequencies {
-                for dim in 0..cols {
-                    let value = data[offset + dim] * freq;
-                    encoded.push(value.sin());
-                    encoded.push(value.cos());
+        checked_elements(rows, self.output_dims)?;
+        validate_finite(input.data(), "nerf_input")?;
+        if let Some(&largest) = self.frequencies.last() {
+            // Powers of two are ordered and positive: a finite largest phase
+            // bounds every band, so no per-band finite checks are needed.
+            for &value in input.data() {
+                let phase = value * largest;
+                if !phase.is_finite() {
+                    return Err(TensorError::NonFiniteValue {
+                        label: "nerf_phase",
+                        value: phase,
+                    });
                 }
             }
         }
-        Tensor::from_vec(rows, self.output_dims(), encoded)
+        let mut output = Tensor::zeros(rows, self.output_dims)?;
+        if output.is_empty() {
+            return Ok(output);
+        }
+        let input = row_major(input)?;
+        for (source, target) in input
+            .data()
+            .chunks_exact(cols)
+            .zip(output.data_mut().chunks_exact_mut(self.output_dims))
+        {
+            let mut offset = 0;
+            if self.include_input {
+                target[..cols].copy_from_slice(source);
+                offset = cols;
+            }
+            for &freq in &self.frequencies {
+                for &value in source {
+                    let (sin, cos) = (value * freq).sin_cos();
+                    target[offset] = sin;
+                    target[offset + 1] = cos;
+                    offset += 2;
+                }
+            }
+        }
+        Ok(output)
     }
 }
 

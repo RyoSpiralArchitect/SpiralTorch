@@ -1,0 +1,27 @@
+   Compiling syn v3.0.4
+    Checking rand_chacha v0.3.1
+    Checking serde_json v1.0.151
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+    Checking rand v0.8.8
+    Checking tracing-chrome v0.7.2
+    Checking rand_distr v0.4.3
+    Checking st-frac v0.1.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-frac)
+    Checking nalgebra v0.29.0
+    Checking ordered-float v4.6.0
+   Compiling serde_derive v1.0.229
+   Compiling futures-macro v0.3.34
+    Checking futures-util v0.3.34
+    Checking serde v1.0.229
+    Checking statrs v0.16.1
+    Checking futures-executor v0.3.34
+    Checking futures v0.3.34
+    Checking spiral-config v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config)
+    Checking st-kdsl v0.3.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kdsl)
+    Checking st-softlogic v0.2.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-softlogic)
+    Checking bincode v1.3.3
+    Checking st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+    Checking st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+    Checking st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+    Checking st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+    Checking st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 14.07s

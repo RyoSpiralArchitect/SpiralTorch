@@ -1,0 +1,58 @@
+warning: patch `wgpu v0.20.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/wgpu-0.20.1)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling bytemuck v1.25.2
+   Compiling pulp v0.21.5
+   Compiling reborrow v0.5.5
+   Compiling raw-cpuid v11.6.0
+   Compiling nano-gemm-core v0.1.0
+   Compiling nano-gemm-c32 v0.1.0
+   Compiling num-complex v0.4.6
+   Compiling dyn-stack v0.13.2
+   Compiling safe_arch v0.7.4
+   Compiling wide v0.7.33
+   Compiling nano-gemm-c64 v0.1.0
+   Compiling gemm-common v0.18.2
+   Compiling nano-gemm-f64 v0.1.0
+   Compiling nano-gemm-f32 v0.1.0
+   Compiling crossbeam-queue v0.3.12
+   Compiling crossbeam-channel v0.5.16
+   Compiling equator v0.2.2
+   Compiling equator v0.4.2
+   Compiling crossbeam v0.8.4
+   Compiling gemm-f64 v0.18.2
+   Compiling gemm-f32 v0.18.2
+   Compiling gemm-c32 v0.18.2
+   Compiling gemm-c64 v0.18.2
+   Compiling qd v0.7.7
+   Compiling generativity v1.1.0
+   Compiling atomic-wait v1.1.0
+error[E0433]: cannot find module or crate `platform` in this scope
+  --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/atomic-wait-1.1.0/src/lib.rs:28:5
+   |
+28 |     platform::wait(atomic, value)
+   |     ^^^^^^^^ use of unresolved module or unlinked crate `platform`
+   |
+   = help: if you wanted to use a crate named `platform`, use `cargo add platform` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `platform` in this scope
+  --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/atomic-wait-1.1.0/src/lib.rs:36:5
+   |
+36 |     platform::wake_one(atomic);
+   |     ^^^^^^^^ use of unresolved module or unlinked crate `platform`
+   |
+   = help: if you wanted to use a crate named `platform`, use `cargo add platform` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `platform` in this scope
+  --> /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/atomic-wait-1.1.0/src/lib.rs:44:5
+   |
+44 |     platform::wake_all(atomic);
+   |     ^^^^^^^^ use of unresolved module or unlinked crate `platform`
+   |
+   = help: if you wanted to use a crate named `platform`, use `cargo add platform` to add it to your `Cargo.toml`
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `atomic-wait` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...

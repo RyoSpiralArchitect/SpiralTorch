@@ -1,0 +1,26 @@
+[
+  {
+    "name": "format",
+    "exit_code": 0
+  },
+  {
+    "name": "vision-clippy",
+    "exit_code": 0
+  },
+  {
+    "name": "contracts",
+    "exit_code": 0
+  },
+  {
+    "name": "changed-crates-clippy",
+    "exit_code": 0
+  },
+  {
+    "name": "vision-wasm",
+    "exit_code": 0
+  },
+  {
+    "name": "wasm-build",
+    "exit_code": 101
+  }
+]

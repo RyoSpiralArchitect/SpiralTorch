@@ -1,0 +1,144 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+    Finished `release` profile [optimized] target(s) in 1m 22s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/st_core-e7a1fb705e2cc146)
+
+thread '<unnamed>' (1941407) panicked at crates/st-core/src/distributed/collective.rs:894:13:
+poison collective queue
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'distributed::collective::tests::panicking_gradient_lease_restores_batches' (1941409) panicked at crates/st-core/src/distributed/collective.rs:860:13:
+abort asynchronous gradient merge
+
+thread 'ecosystem::tests::panicking_capacity_update_is_transactional_and_keeps_registry_live' (1941500) panicked at crates/st-core/src/ecosystem/mod.rs:718:17:
+capacity update failed
+
+thread 'ecosystem::tests::registry_recovers_from_an_already_poisoned_state_lock' (1941501) panicked at crates/st-core/src/ecosystem/mod.rs:733:13:
+poison registry state
+
+thread 'engine::hook_points::tests::panicking_callbacks_do_not_poison_hook_registration' (1941504) panicked at crates/st-core/src/engine/hook_points.rs:212:9:
+gradient hook panic
+
+thread 'engine::hook_points::tests::panicking_callbacks_do_not_poison_hook_registration' (1941504) panicked at crates/st-core/src/engine/hook_points.rs:216:9:
+partition hook panic
+
+thread 'ops::operator_registry::tests::poisoned_registry_recovers_across_read_and_write_operations' (1941613) panicked at crates/st-core/src/ops/operator_registry.rs:437:13:
+poison operator registry
+
+thread 'ops::operator_registry::tests::poisoned_registry_recovers_across_read_and_write_operations' (1941613) panicked at crates/st-core/src/ops/operator_registry.rs:437:13:
+poison operator registry
+
+thread 'ops::operator_registry::tests::poisoned_registry_recovers_across_read_and_write_operations' (1941613) panicked at crates/st-core/src/ops/operator_registry.rs:437:13:
+poison operator registry
+
+thread '<unnamed>' (1941661) panicked at crates/st-core/src/plugin/context.rs:358:13:
+poison config
+
+thread '<unnamed>' (1941662) panicked at crates/st-core/src/plugin/context.rs:363:13:
+poison services
+
+thread 'plugin::context::tests::test_input_conversion_happens_before_config_lock' (1941663) panicked at crates/st-core/src/plugin/context.rs:233:13:
+conversion failed
+
+thread '<unnamed>' (1941665) panicked at crates/st-core/src/plugin/context.rs:340:13:
+poison owned service store
+
+thread '<unnamed>' (1941674) panicked at crates/st-core/src/plugin/events.rs:364:13:
+poison listeners
+
+thread 'plugin::events::tests::test_publish_report_does_not_drop_unknown_panic_payload' (1941677) panicked at crates/st-core/src/plugin/events.rs:445:26:
+Box<dyn Any>
+
+thread 'plugin::events::tests::test_publish_report_does_not_drop_unknown_panic_payload' (1941677) panicked at crates/st-core/src/plugin/events.rs:438:17:
+payload drop panic
+
+thread 'plugin::events::tests::test_publish_report_isolates_listener_panics' (1941678) panicked at crates/st-core/src/plugin/events.rs:405:17:
+listener failed
+
+thread 'plugin::events::tests::test_publish_report_isolates_listener_panics' (1941678) panicked at crates/st-core/src/plugin/events.rs:405:17:
+listener failed
+
+thread '<unnamed>' (1941683) panicked at crates/st-core/src/plugin/registry.rs:967:13:
+poison outer context
+
+thread 'plugin::registry::tests::test_failed_unload_does_not_poison_registry' (1941685) panicked at crates/st-core/src/plugin/registry.rs:783:42:
+unload panic
+
+thread 'plugin::registry::tests::test_listener_panic_does_not_roll_back_registration' (1941688) panicked at crates/st-core/src/plugin/registry.rs:835:17:
+observer panic
+
+thread 'plugin::registry::tests::test_load_panic_releases_transition' (1941689) panicked at crates/st-core/src/plugin/registry.rs:770:17:
+load panic
+
+thread 'plugin::registry::tests::test_plugin_metadata_panic_does_not_poison_registry' (1941690) panicked at crates/st-core/src/plugin/registry.rs:803:17:
+metadata panic
+
+thread 'telemetry::hub::tests::atlas_frame_recovers_after_poison' (1941975) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::atlas_initial_replay_panic_does_not_leak_observer' (1941976) panicked at crates/st-core/src/telemetry/hub.rs:2040:17:
+initial atlas replay failed
+
+thread 'telemetry::hub::tests::atlas_route_recovers_after_poison' (1941977) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::atlas_subscription_drop_recovers_poisoned_observer_store' (1941980) panicked at crates/st-core/src/telemetry/hub.rs:2080:13:
+poison atlas observer store
+
+thread 'telemetry::hub::tests::config_events_recover_after_poison' (1941983) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::dashboard_ring_recovers_after_poison' (1941985) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::loopback_queue_recovers_after_poison' (1941988) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::realgrad_cache_recovers_after_poison' (1941991) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::region_report_cache_recovers_after_poison' (1941994) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/st_nn-4ee7e8f7e9f3c5da)
+
+thread 'discovery::tests::factory_panic_is_returned_without_poisoning_registry' (1942224) panicked at crates/st-nn/src/discovery.rs:420:51:
+factory boom
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'discovery::tests::panicking_factory_payload_destructor_is_contained' (1942226) panicked at crates/st-nn/src/discovery.rs:443:51:
+Box<dyn Any>
+
+thread 'discovery::tests::panicking_factory_payload_destructor_is_contained' (1942226) panicked at crates/st-nn/src/discovery.rs:438:17:
+payload drop panic
+
+thread 'discovery::tests::poisoned_registry_lock_is_recovered' (1942229) panicked at crates/st-nn/src/discovery.rs:459:13:
+poison registry
+
+thread '<unnamed>' (1942343) panicked at crates/st-nn/src/language/pipeline.rs:1692:13:
+poison roundtable runtime for atomic restore test
+
+thread '<unnamed>' (1942714) panicked at crates/st-nn/src/roundtable.rs:1342:13:
+poison GNN bridge for recovery coverage
+
+thread 'zspace_coherence::psi_synchro::tests::publish_delivery_panic_does_not_poison_registry' (1942869) panicked at crates/st-nn/src/zspace_coherence/psi_synchro.rs:1478:17:
+subscriber delivery panicked
+
+thread 'zspace_coherence::psi_synchro::tests::publish_recovers_after_subscriber_registry_poison' (1942871) panicked at crates/st-nn/src/zspace_coherence/psi_synchro.rs:1406:13:
+poison subscriber registry
+
+thread 'zspace_coherence::psi_synchro::tests::state_recovers_after_external_lock_poison' (1942872) panicked at crates/st-nn/src/zspace_coherence/psi_synchro.rs:1443:13:
+poison synchronization state
+
+thread 'zspace_coherence::psi_synchro::tests::update_state_rolls_back_after_callback_panic' (1942873) panicked at crates/st-nn/src/zspace_coherence/psi_synchro.rs:1426:17:
+abort synchronization state update
+     Running tests/linear_layout_contract.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/linear_layout_contract-816f0c6ed6d2d8a0)
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/st_vision-f8a1c6b4d364b54d)
+     Running tests/nerf_geometry.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/nerf_geometry-ffff0a5c67924ec9)
+     Running tests/nerf_regression.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/nerf_regression-a9d7d5b4267ac14a)
+NERF_TRAINING seed=0 steps=20 before=0.175710159 after=0.174930237 epoch_losses=[0.17567615, 0.17539993, 0.17535743, 0.1750855]
+NERF_TRAINING seed=1 steps=20 before=0.179923527 after=0.179631091 epoch_losses=[0.17984587, 0.17983863, 0.17973363, 0.17967737]
+NERF_TRAINING seed=7 steps=20 before=0.171884669 after=0.170912373 epoch_losses=[0.17156856, 0.17124243, 0.17098448, 0.17081773]
+NERF_TRAINING seed=13 steps=20 before=0.182344755 after=0.181931201 epoch_losses=[0.18215026, 0.18208587, 0.1819891, 0.1818118]

@@ -1,0 +1,110 @@
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+    Finished `release` profile [optimized] target(s) in 1m 30s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/st_core-e7a1fb705e2cc146)
+
+thread '<unnamed>' (1924858) panicked at crates/st-core/src/distributed/collective.rs:894:13:
+poison collective queue
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'distributed::collective::tests::panicking_gradient_lease_restores_batches' (1924860) panicked at crates/st-core/src/distributed/collective.rs:860:13:
+abort asynchronous gradient merge
+
+thread 'ecosystem::tests::panicking_capacity_update_is_transactional_and_keeps_registry_live' (1924951) panicked at crates/st-core/src/ecosystem/mod.rs:718:17:
+capacity update failed
+
+thread 'ecosystem::tests::registry_recovers_from_an_already_poisoned_state_lock' (1924952) panicked at crates/st-core/src/ecosystem/mod.rs:733:13:
+poison registry state
+
+thread 'engine::hook_points::tests::panicking_callbacks_do_not_poison_hook_registration' (1924955) panicked at crates/st-core/src/engine/hook_points.rs:212:9:
+gradient hook panic
+
+thread 'engine::hook_points::tests::panicking_callbacks_do_not_poison_hook_registration' (1924955) panicked at crates/st-core/src/engine/hook_points.rs:216:9:
+partition hook panic
+
+thread 'ops::operator_registry::tests::poisoned_registry_recovers_across_read_and_write_operations' (1925064) panicked at crates/st-core/src/ops/operator_registry.rs:437:13:
+poison operator registry
+
+thread 'ops::operator_registry::tests::poisoned_registry_recovers_across_read_and_write_operations' (1925064) panicked at crates/st-core/src/ops/operator_registry.rs:437:13:
+poison operator registry
+
+thread 'ops::operator_registry::tests::poisoned_registry_recovers_across_read_and_write_operations' (1925064) panicked at crates/st-core/src/ops/operator_registry.rs:437:13:
+poison operator registry
+
+thread '<unnamed>' (1925112) panicked at crates/st-core/src/plugin/context.rs:358:13:
+poison config
+
+thread '<unnamed>' (1925113) panicked at crates/st-core/src/plugin/context.rs:363:13:
+poison services
+
+thread 'plugin::context::tests::test_input_conversion_happens_before_config_lock' (1925114) panicked at crates/st-core/src/plugin/context.rs:233:13:
+conversion failed
+
+thread '<unnamed>' (1925116) panicked at crates/st-core/src/plugin/context.rs:340:13:
+poison owned service store
+
+thread '<unnamed>' (1925125) panicked at crates/st-core/src/plugin/events.rs:364:13:
+poison listeners
+
+thread 'plugin::events::tests::test_publish_report_does_not_drop_unknown_panic_payload' (1925128) panicked at crates/st-core/src/plugin/events.rs:445:26:
+Box<dyn Any>
+
+thread 'plugin::events::tests::test_publish_report_does_not_drop_unknown_panic_payload' (1925128) panicked at crates/st-core/src/plugin/events.rs:438:17:
+payload drop panic
+
+thread 'plugin::events::tests::test_publish_report_isolates_listener_panics' (1925129) panicked at crates/st-core/src/plugin/events.rs:405:17:
+listener failed
+
+thread 'plugin::events::tests::test_publish_report_isolates_listener_panics' (1925129) panicked at crates/st-core/src/plugin/events.rs:405:17:
+listener failed
+
+thread '<unnamed>' (1925134) panicked at crates/st-core/src/plugin/registry.rs:967:13:
+poison outer context
+
+thread 'plugin::registry::tests::test_failed_unload_does_not_poison_registry' (1925136) panicked at crates/st-core/src/plugin/registry.rs:783:42:
+unload panic
+
+thread 'plugin::registry::tests::test_listener_panic_does_not_roll_back_registration' (1925139) panicked at crates/st-core/src/plugin/registry.rs:835:17:
+observer panic
+
+thread 'plugin::registry::tests::test_load_panic_releases_transition' (1925140) panicked at crates/st-core/src/plugin/registry.rs:770:17:
+load panic
+
+thread 'plugin::registry::tests::test_plugin_metadata_panic_does_not_poison_registry' (1925141) panicked at crates/st-core/src/plugin/registry.rs:803:17:
+metadata panic
+
+thread 'telemetry::hub::tests::atlas_frame_recovers_after_poison' (1925418) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::atlas_initial_replay_panic_does_not_leak_observer' (1925419) panicked at crates/st-core/src/telemetry/hub.rs:2040:17:
+initial atlas replay failed
+
+thread 'telemetry::hub::tests::atlas_route_recovers_after_poison' (1925420) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::atlas_subscription_drop_recovers_poisoned_observer_store' (1925423) panicked at crates/st-core/src/telemetry/hub.rs:2080:13:
+poison atlas observer store
+
+thread 'telemetry::hub::tests::config_events_recover_after_poison' (1925426) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::dashboard_ring_recovers_after_poison' (1925428) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::loopback_queue_recovers_after_poison' (1925431) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::realgrad_cache_recovers_after_poison' (1925434) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'telemetry::hub::tests::region_report_cache_recovers_after_poison' (1925437) panicked at crates/st-core/src/telemetry/hub.rs:1987:13:
+poison telemetry state
+
+thread 'util::rope_lru::tests::finite_phases_keep_the_existing_recurrence_and_empty_sequence' (1925630) panicked at crates/st-core/src/util/rope_lru.rs:217:17:
+assertion `left == right` failed
+  left: 13827686912531336974
+ right: 13827686912531336973
+error: test failed, to rerun pass `-p st-core --lib`

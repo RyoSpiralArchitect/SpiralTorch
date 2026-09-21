@@ -1,0 +1,61 @@
+{
+  "source": {
+    "commit": "6899536b46bea49d70d901330451bfbe275cf446",
+    "status": "",
+    "files": {
+      "crates/st-core/src/util/rope_lru.rs": "c4d3ed68d0875d47c7016557850db6eaa40006c1c4ff7481b92afefae34acfc0",
+      "crates/st-vision/src/nerf/mod.rs": "ac5593b349ede2a9295cd146a85c51aa8f6abfe3ae5bc07e458f74d1e4500df9",
+      "crates/st-vision/src/nerf/encoding.rs": "f322ae48a2d24c27e769d3bf9efa89517ac0ea0772bfc0d5ed34586daaeba60e",
+      "crates/st-vision/src/nerf/field.rs": "1b59bcaa377955c73b520c73b7f9e89ee88627e693e090f97172432f0bfbb949",
+      "crates/st-vision/src/nerf/trainer.rs": "b1fc6c56865a2075123f5956def70f1763eacd94fe72ce4f64a9335017810c9d",
+      "crates/st-vision/Cargo.toml": "75a679a8764c1431ff26fa0690c8d9536102691b9b4ead27eef5d0ca8e5caebf",
+      "crates/st-vision/tests/nerf_geometry.rs": "91a81e6674260d8a9a6c8098cd4132bd5e6c3958ff2c874bf881a033996e6680",
+      "crates/st-vision/tests/nerf_regression.rs": "027621565f0bec1361b9ad25d7831827fbed9d27eb78caf8abc8f7e854c23fe3",
+      "crates/st-nn/src/layers/linear.rs": "0e175a6ef425f17e52ed0fb45815aa45c84f16d6757d825a795d1860e8ef60d1",
+      "crates/st-tensor/src/pure.rs": "3fad918b591dbb8d58dcbe79513f06766e0c81ad81dfc6aabdd536c006f2a34d",
+      "crates/st-nn/src/module.rs": "1a0ef33275a6da2504670c952d998139582c54a00b46ecfedf25e13327eecf59",
+      "crates/st-nn/src/layers/sequential.rs": "5131b06a029fdef416fba2d674a9ebd3737e01e54e6a27c6090d5b7e553b04c1",
+      ".github/workflows/ci.yml": "738901de62f5a326484d9c4df95c4c7e95ee9281bd013e93343958ddde700166",
+      "Cargo.lock": "93a69465042036581e6b247a657c4974c563dc53b5ab821d0bf8a9a114dfdf4b"
+    },
+    "fixture_files": {
+      "Cargo.toml": "41f1a4c565f1aed09a1f4babbbf9e78bda81c10fd8e7c52cce6c37033a718ab4",
+      "Cargo.lock": "5d89fd4a4cd9e97b464a2e6165b8712f4879fdfe08675cc3a663336bc4406b9b",
+      "src/lib.rs": "70ec6a7ede68e9e2cbb5c2f07cb06d46ce972580ba185cf74f6b2789d5e798d2",
+      "src/main.rs": "fb07b8db67ac6ade59f7e2393f09bea94faad2e59343208d1740bb16006f8af0"
+    }
+  },
+  "command": [
+    "cargo",
+    "+1.98.0",
+    "test",
+    "--locked",
+    "--release",
+    "-p",
+    "st-vision",
+    "-p",
+    "st-nn",
+    "-p",
+    "st-core",
+    "--features",
+    "st-vision/nerf",
+    "--lib",
+    "--test",
+    "nerf_geometry",
+    "--test",
+    "nerf_regression",
+    "--test",
+    "linear_layout_contract",
+    "--",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "exit_code": 0,
+  "seconds": 89.90721537500212,
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+    "CARGO_BUILD_JOBS": "4",
+    "RAYON_NUM_THREADS": "4"
+  },
+  "source_unchanged": true
+}

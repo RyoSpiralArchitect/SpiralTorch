@@ -268,7 +268,7 @@ impl NerfTrainer {
         let colors_target = batch.colors.data();
         let mut predicted = vec![0.0f32; batch_size * 3];
         let mut final_transmittance = vec![0.0f32; batch_size];
-        for ray in 0..batch_size {
+        for (ray, final_trans) in final_transmittance.iter_mut().enumerate() {
             let mut trans = 1.0f32;
             let mut accum = [0.0f32; 3];
             for sample in 0..samples_per_ray {
@@ -292,7 +292,7 @@ impl NerfTrainer {
                 accum[2] += weight * outputs_data[off + 3];
                 trans *= 1.0 - alpha;
             }
-            final_transmittance[ray] = trans;
+            *final_trans = trans;
             let base = ray * 3;
             predicted[base] = accum[0];
             predicted[base + 1] = accum[1];

@@ -1,0 +1,22 @@
+[package]
+name = "positional-geometry-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+st-vision = { path = "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision", features = ["nerf"] }
+st-nn = { path = "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn" }
+st-core = { path = "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core", default-features = false }
+st-tensor = { path = "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor", default-features = false, features = ["cpu"] }
+serde_json = "1"
+wasm-bindgen = "=0.2.104"
+
+[patch.crates-io]
+spindle = { path = "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/spindle" }
+wgpu = { path = "/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/wgpu-0.20.1" }

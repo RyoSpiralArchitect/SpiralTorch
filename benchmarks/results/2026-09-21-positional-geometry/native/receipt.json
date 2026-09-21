@@ -1,0 +1,83 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/baseline-build/positional-geometry-fixture",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/candidate-build/positional-geometry-fixture",
+    "harness": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/measure.py"
+  },
+  "sha256": {
+    "baseline": "2d55433a759df0507f4889ad8b824e17250e68b8feed9b31e0cdfa5866ad3af8",
+    "candidate": "a8d623b7e5202e35a5f4513821f6da13fae179b93a254278fe40442d64702908",
+    "harness": "cf40e9fde70501794a45deb3667a1a8ea460dc8fd1f3fa51ef00b252d68c9829"
+  },
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/baseline-build/positional-geometry-fixture"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2125995829992462,
+      "raw_sha256": "90ae77107c72ad7a51ffc47e27d5a62e138b5f1209c8be56b2734d8456636407"
+    },
+    {
+      "name": "warm-candidate",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/candidate-build/positional-geometry-fixture"
+      ],
+      "exit_code": 0,
+      "seconds": 0.786920917002135,
+      "raw_sha256": "d9e55571b98cb805f19fc8c8686cadf449b6f07043855ea9ff727066fb59e715"
+    },
+    {
+      "name": "baseline-a",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/baseline-build/positional-geometry-fixture"
+      ],
+      "exit_code": 0,
+      "seconds": 0.19026420899899676,
+      "raw_sha256": "e7d665848f82aec712190e4cf69cd87ff40a060241a39058e7fd05428134de53"
+    },
+    {
+      "name": "candidate-a",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/candidate-build/positional-geometry-fixture"
+      ],
+      "exit_code": 0,
+      "seconds": 0.1865387909929268,
+      "raw_sha256": "4d7f7c52f7170a497e55343d45a75b2d3cac7852c571a81b5a7eae4bcc5ccd61"
+    },
+    {
+      "name": "candidate-b",
+      "lane": "candidate",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/candidate-build/positional-geometry-fixture"
+      ],
+      "exit_code": 0,
+      "seconds": 0.18672166699252557,
+      "raw_sha256": "198410e1cf338df382067eb53e075ac11c209e9a1384b7393a819bac8793a225"
+    },
+    {
+      "name": "baseline-b",
+      "lane": "baseline",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/baseline-build/positional-geometry-fixture"
+      ],
+      "exit_code": 0,
+      "seconds": 0.18646154199086595,
+      "raw_sha256": "7af68b0f845b10d4bde560bc9540cd70006b362f9fb8fe34aedb81086fd07a2a"
+    }
+  ],
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  }
+}

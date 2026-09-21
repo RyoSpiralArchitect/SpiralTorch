@@ -1,0 +1,91 @@
+warning: patch `wgpu v0.20.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/wgpu-0.20.1)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+error[E0308]: mismatched types
+  --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution.rs:50:9
+   |
+49 |     let tensor_fallback_guard = st_tensor::execution::push_accelerator_fallback(
+   |                                 ----------------------------------------------- arguments to this function are incorrect
+50 |         policy.execution_config().accelerator_fallback,
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+   |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+  --> crates/spiral-config/src/execution.rs:17:0
+   |
+   = note: this is the expected type
+   |
+  ::: /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+   |
+17 | pub enum AcceleratorFallback {
+   | ---------------------------- this is the found type
+   = help: you can use `cargo tree` to explore your dependency tree
+note: function defined here
+  --> crates/st-tensor/src/execution.rs:576:7
+
+error[E0308]: mismatched types
+  --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution.rs:68:13
+   |
+57 |         let binding = TensorExecutionPlanBinding::try_new_with_workloads(
+   |                       -------------------------------------------------- arguments to this function are incorrect
+...
+68 |             policy.execution_config().accelerator_fallback,
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+   |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+  --> crates/spiral-config/src/execution.rs:17:0
+   |
+   = note: this is the expected type
+   |
+  ::: /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+   |
+17 | pub enum AcceleratorFallback {
+   | ---------------------------- this is the found type
+   = help: you can use `cargo tree` to explore your dependency tree
+note: associated function defined here
+  --> crates/st-tensor/src/execution.rs:379:11
+
+error[E0308]: mismatched types
+  --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution.rs:97:5
+   |
+96 | pub fn current_accelerator_fallback() -> AcceleratorFallback {
+   |                                          ------------------- expected `spiral_config::execution::AcceleratorFallback` because of return type
+97 |     st_tensor::execution::current_accelerator_fallback()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+   |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+  --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+   |
+17 | pub enum AcceleratorFallback {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type
+  --> crates/spiral-config/src/execution.rs:17:0
+   |
+   = note: this is the found type
+   = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution_plan.rs:920:9
+    |
+912 |     TensorExecutionPlanBinding::try_new_with_workloads(
+    |     -------------------------------------------------- arguments to this function are incorrect
+...
+920 |         plan.request.execution_config.accelerator_fallback,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AcceleratorFallback`, found a different `AcceleratorFallback`
+    |
+note: there are multiple different versions of crate `spiral_config` in the dependency graph
+   --> crates/spiral-config/src/execution.rs:17:0
+    |
+    = note: this is the expected type
+    |
+   ::: /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/spiral-config/src/execution.rs:17:1
+    |
+ 17 | pub enum AcceleratorFallback {
+    | ---------------------------- this is the found type
+    = help: you can use `cargo tree` to explore your dependency tree
+note: associated function defined here
+   --> crates/st-tensor/src/execution.rs:379:11
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `st-core` (lib) due to 4 previous errors

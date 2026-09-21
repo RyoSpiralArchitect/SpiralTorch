@@ -3,7 +3,9 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use super::{checked_elements, row_major, validate_finite};
 use crate::nerf::encoding::PositionalEncoding;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use st_nn::layers::activation::Relu;
 use st_nn::layers::linear::Linear;
 use st_nn::layers::sequential::Sequential;
@@ -20,8 +22,23 @@ pub struct FieldSampleLayout {
 impl FieldSampleLayout {
     /// Returns the total number of scalar features that need to be supplied to
     /// the field per sample.
+    ///
+    /// # Panics
+    /// Panics if a manually constructed layout overflows. Use
+    /// [`Self::try_total_dims`] for unvalidated external layouts.
     pub fn total_dims(&self) -> usize {
-        self.position_dims + self.direction_dims
+        self.try_total_dims()
+            .expect("NeRF sample dimensions overflow")
+    }
+
+    /// Checks the combined dimension of an external sample layout.
+    pub fn try_total_dims(&self) -> PureResult<usize> {
+        self.position_dims
+            .checked_add(self.direction_dims)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: self.position_dims,
+                cols: self.direction_dims,
+            })
     }
 }
 
@@ -70,8 +87,15 @@ pub struct NerfField {
 }
 
 impl NerfField {
-    /// Constructs a field from the provided configuration.
+    /// Constructs a field with deterministic initialization (seed 13).
     pub fn new(config: NerfFieldConfig) -> PureResult<Self> {
+        Self::new_with_seed(config, 13)
+    }
+
+    /// Constructs independently seeded Xavier layers and a constant positive
+    /// density head. Initial density is 0.1 in inverse ray-distance units,
+    /// avoiding a fully inactive ReLU density field before the first update.
+    pub fn new_with_seed(config: NerfFieldConfig, seed: u64) -> PureResult<Self> {
         if config.position_dims == 0 {
             return Err(TensorError::InvalidDimensions {
                 rows: config.position_dims,
@@ -82,6 +106,7 @@ impl NerfField {
             position_dims: config.position_dims,
             direction_dims: config.direction_dims,
         };
+        checked_elements(1, layout.try_total_dims()?)?;
         let position_encoding =
             PositionalEncoding::new(config.position_dims, config.position_frequencies)?;
         let direction_encoding = if config.direction_dims > 0 {
@@ -93,40 +118,83 @@ impl NerfField {
             None
         };
 
-        let mut trunk = Sequential::new();
+        let dir_out = direction_encoding
+            .as_ref()
+            .map(|enc| enc.output_dims())
+            .unwrap_or(0);
+        let color_input_dim =
+            config
+                .feature_dim
+                .checked_add(dir_out)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: config.feature_dim,
+                    cols: dir_out,
+                })?;
         let mut last_dim = position_encoding.output_dims();
-        if config.hidden_layers == 0 {
-            last_dim = position_encoding.output_dims();
+        if config.hidden_layers > 0 {
+            checked_elements(last_dim, config.hidden_width)?;
+            if config.hidden_layers > 1 {
+                checked_elements(config.hidden_width, config.hidden_width)?;
+            }
         }
+        let trunk_dim = if config.hidden_layers == 0 {
+            last_dim
+        } else {
+            config.hidden_width
+        };
+        checked_elements(trunk_dim, config.feature_dim)?;
+        if config.color_layers > 0 {
+            checked_elements(color_input_dim, config.color_hidden_width)?;
+            if config.color_layers > 1 {
+                checked_elements(config.color_hidden_width, config.color_hidden_width)?;
+            }
+        }
+        checked_elements(
+            if config.color_layers == 0 {
+                color_input_dim
+            } else {
+                config.color_hidden_width
+            },
+            3,
+        )?;
+        let mut trunk = Sequential::new();
+        let mut rng = StdRng::seed_from_u64(seed);
         for idx in 0..config.hidden_layers {
-            trunk.push(Linear::new(
+            trunk.push(Linear::new_xavier(
                 format!("trunk_fc{idx}"),
                 last_dim,
                 config.hidden_width,
+                rng.gen(),
             )?);
             trunk.push(Relu::new());
             last_dim = config.hidden_width;
         }
 
-        let density_head = Linear::new("density", last_dim, 1)?;
-        let feature_head = Linear::new("feature", last_dim, config.feature_dim)?;
+        let mut density_head = Linear::new_xavier("density", last_dim, 1, rng.gen())?;
+        density_head.visit_parameters_mut(&mut |parameter| {
+            let value = if parameter.name() == "density::bias" {
+                0.1
+            } else {
+                0.0
+            };
+            parameter.value_mut().data_mut().fill(value);
+            Ok(())
+        })?;
+        let feature_head = Linear::new_xavier("feature", last_dim, config.feature_dim, rng.gen())?;
 
         let mut color_head = Sequential::new();
-        let dir_out = direction_encoding
-            .as_ref()
-            .map(|enc| enc.output_dims())
-            .unwrap_or(0);
-        let mut color_in = config.feature_dim + dir_out;
+        let mut color_in = color_input_dim;
         for idx in 0..config.color_layers {
-            color_head.push(Linear::new(
+            color_head.push(Linear::new_xavier(
                 format!("color_fc{idx}"),
                 color_in,
                 config.color_hidden_width,
+                rng.gen(),
             )?);
             color_head.push(Relu::new());
             color_in = config.color_hidden_width;
         }
-        color_head.push(Linear::new("color_out", color_in, 3)?);
+        color_head.push(Linear::new_xavier("color_out", color_in, 3, rng.gen())?);
 
         Ok(Self {
             layout,
@@ -137,7 +205,7 @@ impl NerfField {
             feature_head,
             color_head,
             feature_dim: config.feature_dim,
-            color_input_dim: config.feature_dim + dir_out,
+            color_input_dim,
         })
     }
 
@@ -160,7 +228,7 @@ impl NerfField {
                 right: (rows, cols),
             });
         }
-        let mut buffer = Vec::with_capacity(rows * self.layout.total_dims());
+        let elements = checked_elements(rows, self.layout.total_dims())?;
         let dir_dims = self.layout.direction_dims;
         let dir_tensor = match (dir_dims, directions) {
             (0, _) => None,
@@ -176,8 +244,11 @@ impl NerfField {
             }
             (_, None) => None,
         };
+        let positions = row_major(positions)?;
+        let directions = dir_tensor.map(row_major).transpose()?;
         let pos_data = positions.data();
-        let dir_data = dir_tensor.map(|tensor| tensor.data());
+        let dir_data = directions.as_ref().map(|tensor| tensor.data());
+        let mut buffer = Vec::with_capacity(elements);
         for row in 0..rows {
             let pos_off = row * cols;
             buffer.extend_from_slice(&pos_data[pos_off..pos_off + cols]);
@@ -185,7 +256,7 @@ impl NerfField {
                 let dir_off = row * dir_dims;
                 buffer.extend_from_slice(&dir_slice[dir_off..dir_off + dir_dims]);
             } else if dir_dims > 0 {
-                buffer.extend(std::iter::repeat(0.0).take(dir_dims));
+                buffer.extend(std::iter::repeat_n(0.0, dir_dims));
             }
         }
         Tensor::from_vec(rows, self.layout.total_dims(), buffer)
@@ -199,9 +270,13 @@ impl NerfField {
                 right: (rows, cols),
             });
         }
-        let mut positions = Vec::with_capacity(rows * self.layout.position_dims);
+        let input = row_major(input)?;
+        let mut positions = Vec::with_capacity(checked_elements(rows, self.layout.position_dims)?);
         let mut directions = if self.layout.direction_dims > 0 {
-            Some(Vec::with_capacity(rows * self.layout.direction_dims))
+            Some(Vec::with_capacity(checked_elements(
+                rows,
+                self.layout.direction_dims,
+            )?))
         } else {
             None
         };
@@ -233,7 +308,12 @@ impl NerfField {
                     right: (rrows, rcols),
                 });
             }
-            let mut data = Vec::with_capacity(rows * (lcols + rcols));
+            let columns = lcols
+                .checked_add(rcols)
+                .ok_or(TensorError::InvalidDimensions { rows, cols: lcols })?;
+            let left = row_major(left)?;
+            let right = row_major(&right)?;
+            let mut data = Vec::with_capacity(checked_elements(rows, columns)?);
             let left_data = left.data();
             let right_data = right.data();
             for row in 0..rows {
@@ -242,7 +322,7 @@ impl NerfField {
                 let roff = row * rcols;
                 data.extend_from_slice(&right_data[roff..roff + rcols]);
             }
-            Tensor::from_vec(rows, lcols + rcols, data)
+            Tensor::from_vec(rows, columns, data)
         } else {
             Ok(left.clone())
         }
@@ -263,11 +343,13 @@ impl NerfField {
                 right: (crow, ccols),
             });
         }
-        let mut data = Vec::with_capacity(rows * 4);
+        let density = row_major(density)?;
+        let color = row_major(color)?;
+        let mut data = Vec::with_capacity(checked_elements(rows, 4)?);
         let density_data = density.data();
         let color_data = color.data();
-        for row in 0..rows {
-            data.push(density_data[row]);
+        for (row, &density) in density_data.iter().enumerate() {
+            data.push(density);
             let offset = row * 3;
             data.extend_from_slice(&color_data[offset..offset + 3]);
         }
@@ -310,8 +392,9 @@ impl NerfField {
                 right: (rows, cols),
             });
         }
-        let mut density = Vec::with_capacity(rows);
-        let mut color = Vec::with_capacity(rows * 3);
+        let grad_output = row_major(grad_output)?;
+        let mut density = Vec::with_capacity(checked_elements(rows, 1)?);
+        let mut color = Vec::with_capacity(checked_elements(rows, 3)?);
         let data = grad_output.data();
         for row in 0..rows {
             let offset = row * 4;
@@ -349,6 +432,14 @@ impl Module for NerfField {
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        if grad_output.shape() != (input.shape().0, 4) {
+            return Err(TensorError::ShapeMismatch {
+                left: (input.shape().0, 4),
+                right: grad_output.shape(),
+            });
+        }
+        validate_finite(grad_output.data(), "nerf_grad_output")?;
+        let (mut grad_density, grad_color) = self.split_grad_output(grad_output)?;
         let (positions, directions) = self.split_inputs(input)?;
         let encoded_pos = self.position_encoding.encode(&positions)?;
         let trunk = self.trunk.forward(&encoded_pos)?;
@@ -364,7 +455,6 @@ impl Module for NerfField {
         } else {
             features.clone()
         };
-        let (mut grad_density, grad_color) = self.split_grad_output(grad_output)?;
         Self::mask_density_gradients(&density_pre_activation, &mut grad_density)?;
         let grad_color_input = self.color_head.backward(&color_input, &grad_color)?;
 

@@ -1,0 +1,30 @@
+warning: patch `wgpu v0.20.1 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/vendor/wgpu-0.20.1)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling wasm-bindgen-shared v0.2.104
+   Compiling unicode-ident v1.0.19
+   Compiling wasm-bindgen v0.2.104
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+   Compiling positional-geometry-fixture v0.0.0 (/Users/ryospiralarchitect/Library/Logs/SpiralTorch/positional-geometry-20260921/fixture)
+error[E0432]: unresolved import `st_vision::nerf`
+   --> src/lib.rs:2:16
+    |
+  2 | use st_vision::nerf::PositionalEncoding;
+    |                ^^^^ could not find `nerf` in `st_vision`
+    |
+note: found an item that was configured out
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision/src/lib.rs:101:9
+    |
+100 | #[cfg(feature = "nerf")]
+    |       ---------------- the item is gated behind the `nerf` feature
+101 | pub mod nerf;
+    |         ^^^^
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `positional-geometry-fixture` (lib) due to 1 previous error
