@@ -99,6 +99,7 @@ use st_backend_wgpu::{
 pub mod datasets;
 #[cfg(feature = "nerf")]
 pub mod nerf;
+mod tensor_contract;
 pub mod transforms;
 /// Default number of conditioning features encoded for each Z-space slice.
 pub const RESONANCE_FEATURES_PER_SLICE: usize = 10;
