@@ -100,7 +100,7 @@ fn encoding_matches_logical_coordinates_and_f64_reference() {
                 encoder = encoder.without_input();
             }
             let mut expected = Vec::new();
-            for row in input.data().chunks_exact(6) {
+            for row in input.data().as_chunks::<6>().0 {
                 if residual {
                     expected.extend(row.iter().copied().map(f64::from));
                 }
@@ -235,8 +235,10 @@ fn assembly_preserves_mixed_input_layouts_and_missing_directions() {
             let missing = field.assemble_input(&p, None).unwrap();
             for (row, p) in missing
                 .data()
-                .chunks_exact(12)
-                .zip(positions.data().chunks_exact(6))
+                .as_chunks::<12>()
+                .0
+                .iter()
+                .zip(positions.data().as_chunks::<6>().0)
             {
                 assert_eq!(&row[..6], p);
                 assert_eq!(&row[6..], &[0.0; 6]);
@@ -375,7 +377,12 @@ fn field_initialization_is_seeded_with_an_active_density_head() {
     for mut field in [a, b, c, default, explicit] {
         let output = field.forward(&input).unwrap();
         assert!(output.data().iter().all(|v| v.is_finite()));
-        assert!(output.data().chunks_exact(4).all(|row| row[0] == 0.1));
+        assert!(output
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|row| row[0] == 0.1));
         let seed = Tensor::from_vec(3, 4, [1.0, 0.0, 0.0, 0.0].repeat(3)).unwrap();
         field.backward(&input, &seed).unwrap();
         field
