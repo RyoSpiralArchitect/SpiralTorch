@@ -18,6 +18,7 @@ pub(super) fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 pub mod cpu_dense;
 pub mod faer_dense;
+pub(crate) mod transpose;
 
 #[cfg(feature = "wgpu_frac")]
 pub mod wgpu_frac;

@@ -1383,13 +1383,7 @@ impl PackedB {
         let rows = tensor.rows;
         let cols = tensor.cols;
         let mut packed = aligned_zeroed(rows * cols);
-        let data = tensor.data();
-        for r in 0..rows {
-            let offset = r * cols;
-            for c in 0..cols {
-                packed[c * rows + r] = data[offset + c];
-            }
-        }
+        crate::backend::transpose::transpose_into(tensor.data(), &mut packed, rows, cols);
         Ok(Self {
             cols,
             inner: rows,
@@ -1445,11 +1439,20 @@ impl PackedB {
     }
 
     fn from_col_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
-        let transposed = tensor.transpose_with_backend(TensorUtilBackend::Auto)?;
-        let mut packed = PackedB::from_row_major(&transposed, tile)?;
-        packed.cols = tensor.rows;
-        packed.inner = tensor.cols;
-        Ok(packed)
+        let mut packed = aligned_zeroed(tensor.len());
+        crate::backend::transpose::transpose_into(
+            tensor.data(),
+            &mut packed,
+            tensor.cols,
+            tensor.rows,
+        );
+        Ok(Self {
+            cols: tensor.rows,
+            inner: tensor.cols,
+            tile,
+            layout: PackedLayout::ColMajor,
+            buf: Arc::new(packed),
+        })
     }
 
     #[inline]
@@ -1665,24 +1668,22 @@ impl Tensor {
         match (self.layout, layout) {
             (Layout::RowMajor, Layout::ColMajor) => {
                 let mut data = aligned_zeroed(self.len());
-                let source = self.data();
-                for r in 0..self.rows {
-                    let offset = r * self.cols;
-                    for c in 0..self.cols {
-                        data[c * self.rows + r] = source[offset + c];
-                    }
-                }
+                crate::backend::transpose::transpose_into(
+                    self.data(),
+                    &mut data,
+                    self.rows,
+                    self.cols,
+                );
                 Tensor::from_aligned(self.rows, self.cols, data, Layout::ColMajor)
             }
             (Layout::ColMajor, Layout::RowMajor) => {
                 let mut data = aligned_zeroed(self.len());
-                let source = self.data();
-                for c in 0..self.cols {
-                    let offset = c * self.rows;
-                    for r in 0..self.rows {
-                        data[r * self.cols + c] = source[offset + r];
-                    }
-                }
+                crate::backend::transpose::transpose_into(
+                    self.data(),
+                    &mut data,
+                    self.cols,
+                    self.rows,
+                );
                 Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
             }
             (Layout::RowMajor, Layout::Chimera { stripes, tile }) => {
@@ -6640,11 +6641,12 @@ impl Tensor {
                 &row_major
             };
             let mut data = aligned_zeroed(self.len());
-            for r in 0..self.rows {
-                for c in 0..self.cols {
-                    data[c * self.rows + r] = input.data[r * self.cols + c];
-                }
-            }
+            crate::backend::transpose::transpose_into(
+                input.data(),
+                &mut data,
+                self.rows,
+                self.cols,
+            );
             Arc::new(TensorBuffer::from_aligned(data))
         };
         let output = Tensor {
@@ -16550,6 +16552,52 @@ mod tests {
         let standard = unwrap_ok(lhs.matmul(&rhs_t));
         let prepacked = unwrap_ok(lhs.matmul_prepacked(&packed_t));
         assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn blocked_layout_and_pack_paths_preserve_bits_and_snapshot_isolation() {
+        for (rows, cols) in [
+            (0, 33),
+            (33, 0),
+            (1, 65),
+            (65, 1),
+            (31, 33),
+            (33, 65),
+            (137, 195),
+        ] {
+            let values: Vec<_> = (0..rows * cols).map(|i| (i as f32 - 31.0) / 64.0).collect();
+            let row = Tensor::from_vec(rows, cols, values.clone()).unwrap();
+            let mut column_values = vec![0.0; values.len()];
+            for r in 0..rows {
+                for c in 0..cols {
+                    column_values[c * rows + r] = values[r * cols + c];
+                }
+            }
+            let mut column = row.to_layout(Layout::ColMajor).unwrap();
+            assert_eq!(column.data(), column_values);
+            assert_eq!(column.to_layout(Layout::RowMajor).unwrap().data(), values);
+            let tile = Tile::new(8, 12, 32);
+            let pack = PackedB::from_tensor(&row, tile).unwrap();
+            assert_eq!(pack.as_slice(), column_values);
+            let transposed_pack = PackedB::from_tensor_transpose(&column, tile).unwrap();
+            assert_eq!(transposed_pack.as_slice(), values);
+            assert_eq!(
+                (transposed_pack.inner(), transposed_pack.cols()),
+                (cols, rows)
+            );
+            assert_eq!(transposed_pack.tile(), tile);
+            assert_eq!(transposed_pack.layout(), PackedLayout::ColMajor);
+            assert_eq!(
+                row.transpose_with_backend(TensorUtilBackend::Cpu)
+                    .unwrap()
+                    .data(),
+                column_values
+            );
+            if !values.is_empty() {
+                column.data_mut()[0] = 1000.0;
+                assert_eq!(transposed_pack.as_slice(), values);
+            }
+        }
     }
 
     #[test]

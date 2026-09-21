@@ -11,6 +11,26 @@ def node(rows, cols, values, trainable=True):
 
 
 class AutogradPrepackedTests(unittest.TestCase):
+    def test_blocked_pack_and_transpose_preserve_forward_and_gradients(self):
+        for rows, inner, cols in [(2, 33, 65), (3, 65, 31)]:
+            a = [(i % 13 - 6) / 16 for i in range(rows * inner)]
+            b = [(i % 17 - 8) / 32 for i in range(inner * cols)]
+            x, weight = node(rows, inner, a), node(inner, cols, b)
+            self.assertEqual(weight.transpose().value().tolist(),
+                             [[b[k * cols + c] for k in range(inner)] for c in range(cols)])
+            packed = weight.prepack_rhs()
+            expected = [[sum(a[r * inner + k] * b[k * cols + c] for k in range(inner))
+                         for c in range(cols)] for r in range(rows)]
+            output = x.matmul_prepacked(packed)
+            self.assertEqual(output.value().tolist(), expected)
+            output.sum().backward()
+            self.assertEqual(x.grad().tolist(),
+                             [[sum(b[k * cols + c] for c in range(cols))
+                               for k in range(inner)] for _ in range(rows)])
+            self.assertEqual(weight.grad().tolist(),
+                             [[sum(a[r * inner + k] for r in range(rows))] * cols
+                              for k in range(inner)])
+
     def test_public_export_is_the_native_class(self):
         native = import_module("spiraltorch.spiraltorch")
         self.assertIn("AutogradPackedRhs", native.__all__)
