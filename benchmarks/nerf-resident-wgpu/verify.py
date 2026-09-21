@@ -20,15 +20,7 @@ def read(path):
     return json.loads(path.read_text())
 
 
-def verify(root, raw=False, source_root=None):
-    files = {str(p.relative_to(root)): p for p in root.rglob("*")
-             if p.is_file() and p.name != "manifest.json"}
-    manifest = read(root / "manifest.json")
-    assert set(files) == set(manifest)
-    for name, digest in manifest.items():
-        path = Path(name)
-        assert not path.is_absolute() and ".." not in path.parts
-        assert not files[name].is_symlink() and sha(files[name]) == digest, name
+def validate_results(root):
     source, result = read(root / "source.json"), read(root / "results.json")
     assert source["status"] == "" and result["measured_commit"] == source["commit"]
     assert result["status"] == "passed"
@@ -45,12 +37,35 @@ def verify(root, raw=False, source_root=None):
     validation = read(root / "validation.json")
     assert len(validation) == len(STAGES) and {v["stage"] for v in validation} == STAGES
     assert all(v["exit_code"] == 0 and v["source_unchanged"] is True for v in validation)
+    return source, result
+
+
+def verify(root, raw=False, source_root=None):
+    files = {str(p.relative_to(root)): p for p in root.rglob("*")
+             if p.is_file() and p.name != "manifest.json"}
+    manifest = read(root / "manifest.json")
+    assert set(files) == set(manifest)
+    for name, digest in manifest.items():
+        path = Path(name)
+        assert not path.is_absolute() and ".." not in path.parts
+        assert not files[name].is_symlink() and sha(files[name]) == digest, name
+    source, result = validate_results(root)
     failure = read(root / "failed-long-prefix/receipt.json")
     assert failure["exit_code"] != 0 and failure["source_unchanged"] is True
+    review = root / "review-legacy"
+    if review.exists():
+        source, fixed = validate_results(review)
+        assert fixed["cases"] == result["cases"], "resident results changed after legacy repair"
+        assert fixed["guards"] == result["guards"]
+        failures = read(review / "negative-attempts.json")
+        assert {f["stage"] for f in failures} == {"review-legacy-before", "review-sampler-before"}
+        assert all(f["receipt"]["exit_code"] != 0 and
+                   f["receipt"]["source_unchanged"] is True for f in failures)
     if raw:
-        for name, item in read(root / "local-raw-manifest.json").items():
-            path = Path(name)
-            assert path.stat().st_size == item["bytes"] and sha(path) == item["sha256"], name
+        for directory in [root, *([review] if review.exists() else [])]:
+            for name, item in read(directory / "local-raw-manifest.json").items():
+                path = Path(name)
+                assert path.stat().st_size == item["bytes"] and sha(path) == item["sha256"], name
     if source_root:
         for name, digest in source["files"].items():
             assert sha(source_root / name) == digest, name
@@ -65,4 +80,4 @@ if __name__ == "__main__":
     parser.add_argument("--source-root", type=Path)
     args = parser.parse_args()
     count = verify(args.archive, args.raw, args.source_root)
-    print(f"Verified {count} files, 36 conditions and 14 stages; numerical replay not performed")
+    print(f"Verified {count} files, 36 conditions/14 stages per snapshot; numerical replay not performed")

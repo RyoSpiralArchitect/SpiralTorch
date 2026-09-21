@@ -115,7 +115,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         state = integrate_step(state, sample, step);
     }
 
-    accum[ray_index] = vec4<f32>(state.rgb, state.opacity);
+    // Legacy callers have no guard binding: never hide invalid data behind a
+    // finite partial integral. Keep failure observable in the output itself.
+    if state.valid {
+        accum[ray_index] = vec4<f32>(state.rgb, state.opacity);
+    } else {
+        accum[ray_index] = vec4<f32>(bitcast<f32>(0x7fc00000u));
+    }
 }
 
 // ResidentTensor's [sigma, r, g, b] rows need no padded FieldSample copy.

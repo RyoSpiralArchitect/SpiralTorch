@@ -189,6 +189,99 @@ mod gpu {
             1e-7,
             3e-6,
         );
+
+        // Legacy callers have no guard binding. First/later failures must not
+        // look like a finite empty ray or a valid partial integral.
+        for index in 0..2 {
+            for kind in 0..5 {
+                let mut values = [[1f32, 0., 0., 0., 0.25, 0.5, 0.75, 0.]; 2];
+                let mut deltas = [1f32; 2];
+                match kind {
+                    0 => values[index][0] = f32::NAN,
+                    1 => values[index][4] = f32::INFINITY,
+                    2 => deltas[index] = f32::NAN,
+                    3 => deltas[index] = -1.,
+                    _ => {
+                        values[index][0] = f32::MAX;
+                        deltas[index] = 2.;
+                    }
+                }
+                let field = runtime::upload_slice(gpu, "legacy.bad_field", &values, usage).unwrap();
+                let widths =
+                    runtime::upload_slice(gpu, "legacy.bad_widths", &deltas, usage).unwrap();
+                let bindings = bind(
+                    gpu,
+                    &compositor,
+                    &[(0, &rays), (1, &field), (2, &widths), (3, &out), (4, &b)],
+                );
+                let mut encoder = gpu.create_command_encoder(&Default::default());
+                dispatch(&mut encoder, &compositor, &bindings, 1);
+                context.queue().submit(Some(encoder.finish()));
+                let result = runtime::read_buffer::<f32>(
+                    gpu,
+                    context.queue(),
+                    &out,
+                    4,
+                    "legacy.invalid.read",
+                )
+                .unwrap();
+                assert!(
+                    result.iter().all(|v| v.is_nan()),
+                    "legacy invalid sample {index}, kind {kind}: {result:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nerf_real_gpu_legacy_sampler_failures_are_observable() {
+        let Some(device) = device() else { return };
+        let context = device.runtime().context();
+        let gpu = context.device();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shaders");
+        let sampler = crate::nerf::create_sampling_pipeline(gpu, dir.to_str().unwrap()).unwrap();
+        let params = runtime::upload_slice(
+            gpu,
+            "legacy.params",
+            &[1u32, 2, 0, 0],
+            wgpu::BufferUsages::UNIFORM,
+        )
+        .unwrap();
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+        for kind in 0..4 {
+            let mut ray = ray(2.).checked(0).unwrap();
+            match kind {
+                0 => ray.near = f32::NAN,
+                1 => ray.far = f32::INFINITY,
+                2 => ray.far = -1.,
+                _ => ray.direction = [f32::MAX; 3],
+            }
+            let rays = runtime::upload_slice(gpu, "legacy.invalid_ray", &[ray], usage).unwrap();
+            let points = runtime::empty_buffer::<[f32; 4]>(gpu, "legacy.points", 2, usage).unwrap();
+            let widths = runtime::empty_buffer::<f32>(gpu, "legacy.widths", 2, usage).unwrap();
+            let binding = bind(
+                gpu,
+                &sampler,
+                &[(0, &rays), (1, &points), (2, &widths), (3, &params)],
+            );
+            let mut encoder = gpu.create_command_encoder(&Default::default());
+            dispatch(&mut encoder, &sampler, &binding, 1);
+            context.queue().submit(Some(encoder.finish()));
+            for (buffer, len) in [(&points, 8), (&widths, 2)] {
+                let result = runtime::read_buffer::<f32>(
+                    gpu,
+                    context.queue(),
+                    buffer,
+                    len,
+                    "legacy.invalid_sample.read",
+                )
+                .unwrap();
+                assert!(
+                    result.iter().all(|v| v.is_nan()),
+                    "invalid ray {kind}: {result:?}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -28,25 +28,25 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
 
 
-def publish(raw, output):
+def publish(raw, output, prefix="final"):
     output.mkdir(parents=True, exist_ok=False)
-    source = read(raw / "final-native/receipt.json")["source"]
+    source = read(raw / f"{prefix}-native/receipt.json")["source"]
     assert source["status"] == ""
     validation = []
     for stage in STAGES:
-        receipt = read(raw / f"final-{stage}/receipt.json")
+        receipt = read(raw / f"{prefix}-{stage}/receipt.json")
         assert receipt.pop("source") == source
         assert receipt["exit_code"] == 0 and receipt["source_unchanged"] is True
         validation.append({"stage": stage, **receipt})
-    native = read(raw / "final-native/stdout.log")
-    browser = read(raw / "browser-final.json")
-    torch = read(raw / "final-torch/stdout.log")
+    native = read(raw / f"{prefix}-native/stdout.log")
+    browser = read(raw / f"browser-{prefix}.json")
+    torch = read(raw / f"{prefix}-torch/stdout.log")
     a, b = control.admit(native), control.admit(browser)
     assert torch["status"] == "passed" and len(torch["cases"]) == 36
     assert list(a) == [control.key(case) for case in torch["cases"]]
     assert browser["page_errors"] == [] and browser["console_messages"] == []
     assert browser["browser_adapter_probe"]["is_fallback_adapter"] is False
-    assert browser["wasm_sha256"] == sha(raw / "wasm-final/spiraltorch_wasm_bg.wasm")
+    assert browser["wasm_sha256"] == sha(raw / f"wasm-{prefix}/spiraltorch_wasm_bg.wasm")
     for name in ["weights", "bias"]:
         assert control.f32_bytes(native[name]) == control.f32_bytes(browser[name])
     cases = []
@@ -84,11 +84,24 @@ def publish(raw, output):
     write(output / "results.json", result)
     write(output / "source.json", source)
     write(output / "validation.json", validation)
-    shutil.copyfile(raw / "final-backend-tests/stdout.log", output / "backend-tests.log")
-    shutil.copyfile(raw / "final-admission/stderr.log", output / "admission-tests.log")
-    failure = read(raw / "initial-tests/receipt.json")
-    assert failure["exit_code"] != 0 and failure["source_unchanged"] is True
-    shutil.copytree(raw / "initial-tests", output / "failed-long-prefix")
+    shutil.copyfile(raw / f"{prefix}-backend-tests/stdout.log", output / "backend-tests.log")
+    shutil.copyfile(raw / f"{prefix}-admission/stderr.log", output / "admission-tests.log")
+    if prefix == "final":
+        failure = read(raw / "initial-tests/receipt.json")
+        assert failure["exit_code"] != 0 and failure["source_unchanged"] is True
+        shutil.copytree(raw / "initial-tests", output / "failed-long-prefix")
+    else:
+        failures = []
+        for name in ["review-legacy-before", "review-sampler-before"]:
+            stage = raw / name
+            receipt = read(stage / "receipt.json")
+            assert receipt["exit_code"] != 0 and receipt["source_unchanged"] is True
+            failures.append({
+                "stage": name, "receipt": receipt, "local_path": str(stage),
+                "files": {p.name: sha(p) for p in stage.iterdir() if p.is_file()},
+                "stderr_tail": (stage / "stderr.log").read_text().splitlines()[-9:],
+            })
+        write(output / "negative-attempts.json", failures)
     write(output / "local-raw-manifest.json", {
         str(p): {"sha256": sha(p), "bytes": p.stat().st_size}
         for p in sorted(raw.rglob("*")) if p.is_file()
@@ -104,6 +117,9 @@ if __name__ == "__main__":
             if p.is_file() and p.name != "manifest.json"
         })
         sys.exit(0)
-    result = publish(Path(sys.argv[1]), Path(sys.argv[2]))
+    if sys.argv[1] == "--review":
+        result = publish(Path(sys.argv[2]), Path(sys.argv[3]), prefix="review-final")
+    else:
+        result = publish(Path(sys.argv[1]), Path(sys.argv[2]))
     print(json.dumps({"commit": result["measured_commit"], "cases": len(result["cases"]),
                       "max_abs_errors": result["max_abs_errors"]}))

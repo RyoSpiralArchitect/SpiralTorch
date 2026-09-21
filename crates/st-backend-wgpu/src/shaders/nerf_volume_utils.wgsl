@@ -69,8 +69,15 @@ fn sample_ray(ray_index: u32) -> bool {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    if global_id.x < uniforms.num_rays {
-        let valid = sample_ray(global_id.x);
+    if global_id.x < uniforms.num_rays && !sample_ray(global_id.x) {
+        // The legacy ABI has no validity flag. Poison the entire ray, including
+        // any prefix written before a later sample failed.
+        let invalid = bitcast<f32>(0x7fc00000u);
+        let base = global_id.x * uniforms.samples_per_ray;
+        for (var i = 0u; i < uniforms.samples_per_ray; i += 1u) {
+            samples[base + i] = SamplePoint(vec3<f32>(invalid), invalid);
+            deltas[base + i] = invalid;
+        }
     }
 }
 
