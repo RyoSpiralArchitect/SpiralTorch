@@ -67,3 +67,5 @@ result; `--source-root CHECKOUT` checks measured source hashes. Neither option
 reexecutes the GPU or independent Torch oracle. Reexecution requires the commands
 above. The publication helper expects the source-stable stage layout recorded in
 `validation.json`; its command names are in `archive.py::STAGES`.
+Accepted stage logs live under `RAW/accepted/`; earlier attempts remain at the
+raw root, including the rejected MPS opacity calculation and metadata-gate run.

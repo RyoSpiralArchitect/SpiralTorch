@@ -92,6 +92,17 @@ class ContractTests(unittest.TestCase):
         browser=[fixture() for _ in range(3)]; browser[0]["page_errors"]=["device lost"]
         with self.assertRaises(ValueError): analyze([fixture()]*3,browser,[fixture("torch")]*3)
 
+    def test_browser_unknown_class_keeps_probe_boundary(self):
+        report=fixture()
+        report["adapter"]="device_type: Other, backend: BrowserWebGpu"
+        self.assertEqual(len(admit(report,"wgpu")),12)
+        for value in [None, True, 0]:
+            report["browser_adapter_probe"]["is_fallback_adapter"]=value
+            with self.assertRaises(ValueError): admit(report,"wgpu")
+        report["browser_adapter_probe"]["is_fallback_adapter"]=False
+        report["adapter"]="device_type: Other, backend: Metal"
+        with self.assertRaises(ValueError): admit(report,"wgpu")
+
     def test_published_timing_rejects_missing_or_duplicate(self):
         with self.assertRaises(ValueError): summarize([])
         report=analyze([fixture()]*3,[fixture()]*3,[fixture("torch")]*3)

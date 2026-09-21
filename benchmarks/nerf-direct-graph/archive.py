@@ -40,16 +40,17 @@ def raw_summary(raw):
 
 
 def publish(raw, output):
-    source = read(raw / "round-0-native/receipt.json")["source"]
+    accepted = raw / "accepted"
+    source = read(accepted / "round-0-native/receipt.json")["source"]
     if source["status"]:
         raise ValueError("final source must be committed and clean")
     receipts = []
     for stage in STAGES:
-        receipt = read(raw / stage / "receipt.json")
+        receipt = read(accepted / stage / "receipt.json")
         if receipt.pop("source") != source or receipt["exit_code"] != 0 or receipt["source_unchanged"] is not True:
             raise ValueError(f"unaccepted source/validation: {stage}")
         receipts.append({"stage":stage, **receipt})
-    result = raw_summary(raw)
+    result = raw_summary(accepted)
     output.mkdir(parents=True, exist_ok=False)
     write(output / "results.json", result)
     write(output / "source.json", source)
@@ -64,8 +65,8 @@ def publish(raw, output):
         "stage_diagnosis":read(raw / "torch-stages-v1/stdout.log"),
         "resolution":"Keep the tolerance and independent f64 oracle; stabilize f32 thin alpha with a fourth-order polynomial. These changed eager controls are the timed controls, not the rejected original MPS expm1 path.",
     })
-    shutil.copyfile(raw / "final-backend-tests/stdout.log", output / "backend-tests.log")
-    shutil.copyfile(raw / "final-admission/stderr.log", output / "admission-tests.log")
+    shutil.copyfile(accepted / "final-backend-tests/stdout.log", output / "backend-tests.log")
+    shutil.copyfile(accepted / "final-admission/stderr.log", output / "admission-tests.log")
     write(output / "local-raw-manifest.json", {str(p.relative_to(raw)):{"sha256":sha(p),"bytes":p.stat().st_size}
                                               for p in sorted(raw.rglob("*")) if p.is_file()})
     write(output / "manifest.json", files(output))
@@ -98,7 +99,7 @@ def verify(root, raw=None, source=None):
             path = safe_path(raw, name)
             if path.stat().st_size != record["bytes"] or sha(path) != record["sha256"]:
                 raise ValueError(f"raw bytes differ: {name}")
-        if result != raw_summary(raw):
+        if result != raw_summary(raw / "accepted"):
             raise ValueError("raw report recomputation differs")
     if source is not None:
         for name, expected in read(root / "source.json")["files"].items():

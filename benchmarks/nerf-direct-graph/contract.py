@@ -73,7 +73,12 @@ def admit(report, kind):
         raise ValueError("timing protocol")
     routes = ("staged", "direct") if kind == "wgpu" else ("cpu", "mps")
     if kind == "wgpu":
-        if report["guard_cases"] != 12 or "IntegratedGpu" not in report["adapter"] and "DiscreteGpu" not in report["adapter"]:
+        native_gpu = "IntegratedGpu" in report["adapter"] or "DiscreteGpu" in report["adapter"]
+        # Browser WGPU 0.20 withholds the device class/name. Preserve that limit:
+        # the separately recorded non-fallback probe is not runtime attestation.
+        browser_unknown = ("device_type: Other" in report["adapter"] and "backend: BrowserWebGpu" in report["adapter"]
+                           and report.get("browser_adapter_probe", {}).get("is_fallback_adapter") is False)
+        if report["guard_cases"] != 12 or not (native_gpu or browser_unknown):
             raise ValueError("GPU/guard admission")
         if report["kernel"] != "register_2x2" or report["accumulation"] != "sequential":
             raise ValueError("kernel mismatch")
