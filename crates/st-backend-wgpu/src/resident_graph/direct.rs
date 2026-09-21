@@ -31,6 +31,12 @@ fn retention_limit(elements: usize) -> usize {
 }
 
 impl ResidentGraph {
+    fn retain_output(&mut self, slot: OutputSlot) {
+        if self.output_slots.len() < retention_limit(self.output_layout().len()) {
+            self.output_slots.push(slot);
+        }
+    }
+
     fn checkout_output(&mut self) -> Result<OutputSlot, GraphInferenceError> {
         if let Some(index) = self
             .output_slots
@@ -83,9 +89,34 @@ impl ResidentGraph {
         &mut self,
         input: &ResidentTensor,
     ) -> Result<ResidentTensor, GraphInferenceError> {
-        input.require_context(self.device.runtime().context())?;
+        self.forward_composed(
+            |_| Ok((input.clone(), ())),
+            |_, output, ()| Ok(output.clone()),
+        )
+    }
+
+    /// Internal composition boundary: callbacks only encode on this device,
+    /// never submit/read back or expose unfinished outputs outside the call.
+    /// A typed failure drops all recorded commands without advancing graph
+    /// generations, replacing its current input/output, or changing binding keys.
+    /// Private allocation caches may still warm up. Acceptance remains deferred
+    /// to the output's numerical guard, not command submission.
+    pub(crate) fn forward_composed<S, O, E>(
+        &mut self,
+        produce: impl FnOnce(&mut wgpu::CommandEncoder) -> Result<(ResidentTensor, S), E>,
+        consume: impl FnOnce(&mut wgpu::CommandEncoder, &ResidentTensor, S) -> Result<O, E>,
+    ) -> Result<O, E>
+    where
+        E: From<GraphInferenceError>,
+    {
+        let context = self.device.runtime().context().clone();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let (input, state) = produce(&mut encoder)?;
+        input
+            .require_context(&context)
+            .map_err(GraphInferenceError::from)?;
         if input.layout().shape() != self.input_layout().shape() {
-            return Err(GraphInferenceError::InputShape);
+            return Err(GraphInferenceError::InputShape.into());
         }
         let generation = self
             .generation
@@ -95,34 +126,31 @@ impl ResidentGraph {
             .submitted_dispatches
             .checked_add(1)
             .ok_or(GraphInferenceError::CounterOverflow)?;
-        let context = self.device.runtime().context().clone();
-        let mut encoder = context.device().create_command_encoder(&Default::default());
-        let packed = input.contiguous_into(&mut encoder)?;
+        let packed = input
+            .contiguous_into(&mut encoder)
+            .map_err(GraphInferenceError::from)?;
         let slot = self.checkout_output()?;
         let singleton = self.nodes.len() == 1;
-        let single_binding = if singleton {
+        // Keep replacement bindings local until the consumer has also encoded
+        // successfully. An aborted composition must not cache a new binding
+        // under the previous input_source key.
+        let new_binding = if singleton {
             Some(self.bind_boundary(0, packed.values(), slot.tensor.values()))
-        } else {
-            if self.input_binding.is_none()
-                || !self
-                    .input_source
-                    .as_ref()
-                    .is_some_and(|source| source.shares_storage_with(&packed))
+        } else if self.input_binding.is_none()
+            || !self
+                .input_source
+                .as_ref()
+                .is_some_and(|source| source.shares_storage_with(&packed))
+        {
+            #[cfg(test)]
             {
-                self.input_binding =
-                    Some(self.bind_boundary(0, packed.values(), &self.activations[1]));
-                #[cfg(test)]
-                {
-                    self.direct_stats.input_bindings += 1;
-                }
+                self.direct_stats.input_bindings += 1;
             }
+            Some(self.bind_boundary(0, packed.values(), &self.activations[1]))
+        } else {
             None
         };
-        let first = if singleton {
-            single_binding.as_ref()
-        } else {
-            self.input_binding.as_ref()
-        };
+        let first = new_binding.as_ref().or(self.input_binding.as_ref());
         self.encode_graph(
             &mut encoder,
             Some(&packed),
@@ -130,18 +158,25 @@ impl ResidentGraph {
             slot.last.as_ref(),
             Some((self.guard_capture.as_ref().unwrap(), &slot.guard)),
         );
+        let result = match consume(&mut encoder, &slot.tensor, state) {
+            Ok(result) => result,
+            Err(error) => {
+                self.retain_output(slot);
+                return Err(error);
+            }
+        };
         context.queue().submit(Some(encoder.finish()));
-        let output = slot.tensor.clone();
         self.generation = generation;
         self.submitted_dispatches = dispatch;
         self.output_generation = Some(generation);
         self.input_source = Some(packed);
         self.input_direct = true;
-        self.resident_output = Some(output.clone());
-        if self.output_slots.len() < retention_limit(self.output_layout().len()) {
-            self.output_slots.push(slot);
+        self.resident_output = Some(slot.tensor.clone());
+        if !singleton && new_binding.is_some() {
+            self.input_binding = new_binding;
         }
-        Ok(output)
+        self.retain_output(slot);
+        Ok(result)
     }
 }
 

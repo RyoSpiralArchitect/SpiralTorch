@@ -249,13 +249,13 @@ impl ResidentNerf {
     }
 
     /// Sample rays, evaluate a position-only NN graph and composite RGBA, without
-    /// host observation. Layout/device admission precedes sampling. The graph's
-    /// direct tensor path packs positions and writes its owning field output in
-    /// one submission, avoiding stable-workspace input/output value copies.
+    /// host observation. The existing three submissions allow sampling to start
+    /// while later stages are encoded. Stable-workspace input/output copies are
+    /// avoided. Fewer submissions are not necessarily faster on every runtime.
     ///
     /// This is forward-only, not an automatic conversion of NerfField or its
-    /// direction conditioning/positional encoding. Graph failures may occur
-    /// after sampling; no rollback of already submitted GPU work is promised.
+    /// direction conditioning/positional encoding. Numerical acceptance still
+    /// requires reading the eventual output guard.
     pub fn render_graph(
         &self,
         rays: &ResidentRays,
@@ -263,6 +263,45 @@ impl ResidentNerf {
         mode: RaySampling,
         graph: &mut ResidentGraph,
     ) -> Result<ResidentTensor, NerfError> {
+        self.validate_graph(rays, samples_per_ray, graph)?;
+        let samples = self.sample(rays, samples_per_ray, mode)?;
+        let field = graph.forward_tensor(&samples.positions()?)?;
+        self.composite(&samples, &field)
+    }
+
+    /// Opt-in single-submission alternative to [Self::render_graph].
+    /// Sampling, position packing, the NN and compositing are recorded together.
+    /// A typed host failure discards the entire recorded render without
+    /// submitting it or replacing graph state. Private allocation caches may
+    /// warm up. This is not rollback for device loss or a numerical rejection:
+    /// acceptance remains deferred to the eventual output guard.
+    ///
+    /// Benchmark the complete path on the target runtime before choosing it.
+    /// This changes scheduling, not shaders, numerical work or forward-only
+    /// capabilities, and is deliberately not an automatic performance policy.
+    pub fn render_graph_single_submission(
+        &self,
+        rays: &ResidentRays,
+        samples_per_ray: usize,
+        mode: RaySampling,
+        graph: &mut ResidentGraph,
+    ) -> Result<ResidentTensor, NerfError> {
+        self.validate_graph(rays, samples_per_ray, graph)?;
+        graph.forward_composed(
+            |encoder| {
+                let samples = self.sample_into(rays, samples_per_ray, mode, encoder)?;
+                Ok((samples.positions()?, samples))
+            },
+            |encoder, field, samples| self.composite_into(&samples, field, encoder),
+        )
+    }
+
+    fn validate_graph(
+        &self,
+        rays: &ResidentRays,
+        samples_per_ray: usize,
+        graph: &ResidentGraph,
+    ) -> Result<(), NerfError> {
         let context = self.0.device.runtime().context();
         if !context.shares_handles_with(rays.device.runtime().context())
             || !context.shares_handles_with(graph.tensor_device().runtime().context())
@@ -276,9 +315,7 @@ impl ResidentNerf {
         {
             return Err(NerfError::GraphShape);
         }
-        let samples = self.sample(rays, samples_per_ray, mode)?;
-        let field = graph.forward_tensor(&samples.positions()?)?;
-        self.composite(&samples, &field)
+        Ok(())
     }
 
     pub fn upload_rays(&self, rays: &[NerfRay]) -> Result<ResidentRays, NerfError> {
@@ -311,6 +348,20 @@ impl ResidentNerf {
         rays: &ResidentRays,
         samples_per_ray: usize,
         mode: RaySampling,
+    ) -> Result<NerfSamples, NerfError> {
+        let context = self.0.device.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let samples = self.sample_into(rays, samples_per_ray, mode, &mut encoder)?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(samples)
+    }
+
+    fn sample_into(
+        &self,
+        rays: &ResidentRays,
+        samples_per_ray: usize,
+        mode: RaySampling,
+        encoder: &mut wgpu::CommandEncoder,
     ) -> Result<NerfSamples, NerfError> {
         let context = self.0.device.runtime().context();
         if !context.shares_handles_with(rays.device.runtime().context()) {
@@ -352,10 +403,8 @@ impl ResidentNerf {
                 (4, points.flags()),
             ],
         );
-        let mut encoder = gpu.create_command_encoder(&Default::default());
         encoder.clear_buffer(points.flags(), 0, None);
-        dispatch(&mut encoder, &self.0.sampling, &binding, rows);
-        context.queue().submit(Some(encoder.finish()));
+        dispatch(encoder, &self.0.sampling, &binding, rows);
         Ok(NerfSamples {
             points,
             widths,
@@ -376,6 +425,19 @@ impl ResidentNerf {
         field: &ResidentTensor,
     ) -> Result<ResidentTensor, NerfError> {
         let context = self.0.device.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let output = self.composite_into(samples, field, &mut encoder)?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(output)
+    }
+
+    fn composite_into(
+        &self,
+        samples: &NerfSamples,
+        field: &ResidentTensor,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<ResidentTensor, NerfError> {
+        let context = self.0.device.runtime().context();
         samples.points.require_context(context)?;
         field.require_context(context)?;
         let [rows, count] = samples.shape;
@@ -394,8 +456,7 @@ impl ResidentNerf {
             &[rows as u32, count as u32, 1f32.to_bits(), 0],
             wgpu::BufferUsages::UNIFORM,
         )?;
-        let mut encoder = gpu.create_command_encoder(&Default::default());
-        let field = field.contiguous_into(&mut encoder)?;
+        let field = field.contiguous_into(encoder)?;
         let binding = bind(
             gpu,
             &self.0.compositing,
@@ -409,8 +470,7 @@ impl ResidentNerf {
                 (8, samples.widths.flags()),
             ],
         );
-        dispatch(&mut encoder, &self.0.compositing, &binding, rows);
-        context.queue().submit(Some(encoder.finish()));
+        dispatch(encoder, &self.0.compositing, &binding, rows);
         Ok(output)
     }
 }

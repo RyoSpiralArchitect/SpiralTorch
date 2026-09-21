@@ -12,13 +12,17 @@ mod browser {
         fn now() -> f64;
     }
     #[wasm_bindgen]
-    pub async fn run_resident_nerf_bench() -> Result<String, JsValue> {
-        async fn run() -> fixture::Result<String> {
+    pub async fn run_resident_nerf_bench(compare_submissions: bool) -> Result<String, JsValue> {
+        async fn run(compare_submissions: bool) -> fixture::Result<String> {
             let runtime =
                 st_backend_wgpu::runtime::WgpuRuntime::request_headless("nerf.bench.browser")
                     .await?;
-            Ok(fixture::run(runtime, now).await?.to_string())
+            Ok(fixture::run(runtime, now, compare_submissions)
+                .await?
+                .to_string())
         }
-        run().await.map_err(|e| JsValue::from_str(&e.to_string()))
+        run(compare_submissions)
+            .await
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }

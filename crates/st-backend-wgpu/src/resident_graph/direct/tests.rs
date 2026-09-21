@@ -311,3 +311,138 @@ fn another_thread_retaining_a_version_prevents_its_reuse() {
     send.send(()).unwrap();
     assert_eq!(reader.join().unwrap(), vec![2.; 2]);
 }
+
+#[test]
+fn aborted_compositions_preserve_output_guards_counters_and_binding_keys() {
+    let Some(runtime) = runtime() else { return };
+    for kinds in ["p", "l", "pp", "pl", "lp", "ll"] {
+        for staged in [false, true] {
+            let mut graph = graph(&runtime, definition(kinds, false));
+            let device = graph.tensor_device().clone();
+            let old = device.upload(&[2, 3, 3], &[1.; 18]).unwrap();
+            let other = device.upload(&[2, 3, 3], &[4.; 18]).unwrap();
+            if staged {
+                graph.set_input_tensor(&old).unwrap();
+                graph.dispatch().unwrap();
+            } else {
+                graph.forward_tensor(&old).unwrap();
+            }
+            let held = graph.output_tensor().unwrap();
+            let expected = read(&held);
+            let counters = (graph.generation(), graph.submitted_dispatches());
+            for _ in 0..8 {
+                let result: Result<(), GraphInferenceError> = graph.forward_composed(
+                    |_| Ok((other.clone(), ())),
+                    |_, _, ()| Err(GraphInferenceError::Readback),
+                );
+                assert!(matches!(result, Err(GraphInferenceError::Readback)));
+                assert_eq!((graph.generation(), graph.submitted_dispatches()), counters);
+                assert_eq!(graph.input_direct, !staged);
+                assert_eq!(read(&graph.output_tensor().unwrap()), expected);
+                assert_eq!(graph.snapshot().unwrap().read().unwrap(), expected);
+                assert_eq!(read(&held), expected);
+            }
+            // In the direct case this reuses the old input-binding key. A
+            // prematurely replaced binding would silently use `other` instead.
+            assert_eq!(read(&graph.forward_tensor(&old).unwrap()), expected);
+            graph.dispatch().unwrap();
+            assert_eq!(graph.snapshot().unwrap().read().unwrap(), expected);
+            let next = read(&graph.forward_tensor(&other).unwrap());
+            assert_ne!(next, expected);
+            assert_eq!(read(&held), expected);
+        }
+    }
+    let mut graph = scale(&runtime, -f32::MAX);
+    let bad = graph.tensor_device().upload(&[2, 1], &[2.; 2]).unwrap();
+    let safe = graph.tensor_device().upload(&[2, 1], &[0.; 2]).unwrap();
+    let rejected = graph.forward_tensor(&bad).unwrap();
+    let attempt: Result<(), GraphInferenceError> = graph.forward_composed(
+        |_| Ok((safe, ())),
+        |_, _, ()| Err(GraphInferenceError::Readback),
+    );
+    assert!(attempt.is_err());
+    assert!(graph.snapshot().unwrap().read().is_err());
+    assert!(read_error(&rejected));
+}
+
+fn read_error(tensor: &ResidentTensor) -> bool {
+    matches!(
+        tensor.snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    )
+}
+
+#[test]
+fn composition_admission_and_counter_failures_never_reach_consumer() {
+    let Some(runtime) = runtime() else { return };
+    let mut graph = scale(&runtime, 2.);
+    let device = graph.tensor_device().clone();
+    let input = device.upload(&[2, 1], &[1.; 2]).unwrap();
+    graph.forward_tensor(&input).unwrap();
+    let expected = graph.snapshot().unwrap().read().unwrap();
+    let before = (graph.generation(), graph.submitted_dispatches());
+    let context = runtime.context();
+    let marker = runtime::upload_slice(
+        context.device(),
+        "composition.abort.marker",
+        &[7f32],
+        wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+    )
+    .unwrap();
+    for producer_fails in [true, false] {
+        let failed: Result<(), GraphInferenceError> = graph.forward_composed(
+            |encoder| {
+                encoder.clear_buffer(&marker, 0, None);
+                if producer_fails {
+                    Err(GraphInferenceError::Readback)
+                } else {
+                    Ok((input.clone(), ()))
+                }
+            },
+            |encoder, _, ()| {
+                encoder.clear_buffer(&marker, 0, None);
+                Err(GraphInferenceError::Readback)
+            },
+        );
+        assert!(failed.is_err());
+        assert_eq!(
+            runtime::read_buffer::<f32>(
+                context.device(),
+                context.queue(),
+                &marker,
+                1,
+                "composition.abort.read"
+            )
+            .unwrap(),
+            [7.]
+        );
+        assert_eq!((graph.generation(), graph.submitted_dispatches()), before);
+    }
+    let bad_shape = input.reshape(&[1, 2]).unwrap();
+    let failed: Result<(), GraphInferenceError> = graph.forward_composed(
+        |_| Ok((bad_shape, ())),
+        |_, _, ()| panic!("wrong shape reached consumer"),
+    );
+    assert!(matches!(failed, Err(GraphInferenceError::InputShape)));
+    let failed: Result<(), GraphInferenceError> = graph.forward_composed(
+        |_| Err::<(ResidentTensor, ()), _>(GraphInferenceError::Readback),
+        |_, _, ()| panic!("failed producer reached consumer"),
+    );
+    assert!(matches!(failed, Err(GraphInferenceError::Readback)));
+    assert_eq!((graph.generation(), graph.submitted_dispatches()), before);
+    for which in 0..2 {
+        if which == 0 {
+            graph.generation = u64::MAX;
+        } else {
+            graph.submitted_dispatches = u64::MAX;
+        }
+        let failed: Result<(), GraphInferenceError> = graph.forward_composed(
+            |_| Ok((input.clone(), ())),
+            |_, _, ()| panic!("counter exhaustion reached consumer"),
+        );
+        assert!(matches!(failed, Err(GraphInferenceError::CounterOverflow)));
+        graph.generation = before.0;
+        graph.submitted_dispatches = before.1;
+        assert_eq!(graph.snapshot().unwrap().read().unwrap(), expected);
+    }
+}

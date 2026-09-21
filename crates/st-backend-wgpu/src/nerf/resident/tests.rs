@@ -156,32 +156,35 @@ mod gpu {
         .unwrap()
     }
 
-    #[test]
-    fn nerf_real_gpu_graph_admission_preserves_dispatch_and_output() {
+    type Render = fn(
+        &ResidentNerf,
+        &ResidentRays,
+        usize,
+        RaySampling,
+        &mut ResidentGraph,
+    ) -> Result<ResidentTensor, NerfError>;
+
+    fn check_graph_admission(render: Render) {
         let Some(device) = device() else { return };
         let nerf = ResidentNerf::new(device.clone()).unwrap();
         let rays = nerf.upload_rays(&[ray(2.)]).unwrap();
         let mut graph = position_graph(&device, &[1, 2, 3], 4);
-        let held = nerf
-            .render_graph(&rays, 2, RaySampling::Midpoint, &mut graph)
-            .unwrap();
+        let held = render(&nerf, &rays, 2, RaySampling::Midpoint, &mut graph).unwrap();
         let values = held.snapshot().unwrap().read().unwrap();
         let before = graph.submitted_dispatches();
         for count in [0, 1, usize::MAX] {
-            assert!(nerf
-                .render_graph(&rays, count, RaySampling::Midpoint, &mut graph)
-                .is_err());
+            assert!(render(&nerf, &rays, count, RaySampling::Midpoint, &mut graph).is_err());
             assert_eq!(graph.submitted_dispatches(), before);
         }
         let narrow = nerf.upload_rays(&[ray(f32::MIN_POSITIVE)]).unwrap();
         assert!(matches!(
-            nerf.render_graph(&narrow, 2, RaySampling::Midpoint, &mut graph),
+            render(&nerf, &narrow, 2, RaySampling::Midpoint, &mut graph),
             Err(NerfError::WidthUnderflow)
         ));
         for (shape, channels) in [(&[2, 3][..], 4), (&[1, 2, 3][..], 3)] {
             let mut wrong = position_graph(&device, shape, channels);
             assert!(matches!(
-                nerf.render_graph(&rays, 2, RaySampling::Midpoint, &mut wrong),
+                render(&nerf, &rays, 2, RaySampling::Midpoint, &mut wrong),
                 Err(NerfError::GraphShape)
             ));
             assert_eq!(wrong.submitted_dispatches(), 0);
@@ -193,11 +196,11 @@ mod gpu {
         let other_rays = other.upload_rays(&[ray(2.)]).unwrap();
         let mut other_graph = position_graph(&foreign, &[1, 2, 3], 4);
         assert!(matches!(
-            nerf.render_graph(&rays, 2, RaySampling::Midpoint, &mut other_graph),
+            render(&nerf, &rays, 2, RaySampling::Midpoint, &mut other_graph),
             Err(NerfError::Tensor(TensorError::DeviceMismatch))
         ));
         assert!(matches!(
-            nerf.render_graph(&other_rays, 2, RaySampling::Midpoint, &mut graph),
+            render(&nerf, &other_rays, 2, RaySampling::Midpoint, &mut graph),
             Err(NerfError::Tensor(TensorError::DeviceMismatch))
         ));
         assert_eq!(other_graph.submitted_dispatches(), 0);
@@ -206,14 +209,21 @@ mod gpu {
     }
 
     #[test]
-    fn nerf_real_gpu_graph_guards_and_retained_output_survive_later_calls() {
+    fn nerf_real_gpu_graph_admission_preserves_dispatch_and_output() {
+        check_graph_admission(ResidentNerf::render_graph);
+    }
+
+    #[test]
+    fn nerf_real_gpu_single_submission_admission_preserves_dispatch_and_output() {
+        check_graph_admission(ResidentNerf::render_graph_single_submission);
+    }
+
+    fn check_graph_guards(render: Render) {
         let Some(device) = device() else { return };
         let nerf = ResidentNerf::new(device.clone()).unwrap();
         let rays = nerf.upload_rays(&[ray(2.)]).unwrap();
         let mut graph = position_graph(&device, &[1, 2, 3], 4);
-        let held = nerf
-            .render_graph(&rays, 2, RaySampling::Midpoint, &mut graph)
-            .unwrap();
+        let held = render(&nerf, &rays, 2, RaySampling::Midpoint, &mut graph).unwrap();
         let expected = held.snapshot().unwrap().read().unwrap();
         // Even a constant field may not hide invalid sampled positions.
         let bad = nerf
@@ -222,18 +232,14 @@ mod gpu {
                 ..ray(8.)
             }])
             .unwrap();
-        let invalid = nerf
-            .render_graph(&bad, 2, RaySampling::Midpoint, &mut graph)
-            .unwrap();
+        let invalid = render(&nerf, &bad, 2, RaySampling::Midpoint, &mut graph).unwrap();
         assert!(matches!(
             invalid.snapshot().unwrap().read(),
             Err(TensorError::NonFinite)
         ));
         for _ in 0..8 {
             let zero = nerf.upload_rays(&[ray(0.)]).unwrap();
-            let output = nerf
-                .render_graph(&zero, 2, RaySampling::Midpoint, &mut graph)
-                .unwrap();
+            let output = render(&nerf, &zero, 2, RaySampling::Midpoint, &mut graph).unwrap();
             assert_eq!(output.snapshot().unwrap().read().unwrap(), [0.; 4]);
         }
         drop(graph);
@@ -243,6 +249,16 @@ mod gpu {
             invalid.snapshot().unwrap().read(),
             Err(TensorError::NonFinite)
         ));
+    }
+
+    #[test]
+    fn nerf_real_gpu_graph_guards_and_retained_output_survive_later_calls() {
+        check_graph_guards(ResidentNerf::render_graph);
+    }
+
+    #[test]
+    fn nerf_real_gpu_single_submission_guards_and_retained_output_survive_later_calls() {
+        check_graph_guards(ResidentNerf::render_graph_single_submission);
     }
 
     #[test]
