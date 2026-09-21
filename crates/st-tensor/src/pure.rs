@@ -6388,17 +6388,7 @@ impl Tensor {
     /// Reject non-finite inputs and intermediate powers, preserving the neural
     /// layer's checked forward policy. The input and its aliases remain unchanged.
     pub fn try_gelu(&self) -> PureResult<Tensor> {
-        // At |x| <= 1e12, even x^3 is at most about 1e36, well below
-        // f32::MAX. All subsequent GELU intermediates are smaller. Establish
-        // that bound during input validation, not once per intermediate.
-        let mut bounded = true;
-        for &value in self.data() {
-            if value.abs() <= 1e12 {
-                continue;
-            }
-            Self::validate_finite_tensor_util_value("gelu_input", value)?;
-            bounded = false;
-        }
+        let bounded = validate_gelu_input(self.data())?;
         let row_major;
         let input = if self.layout == Layout::RowMajor {
             self
@@ -6417,6 +6407,34 @@ impl Tensor {
             }
         }
         Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+    }
+
+    /// Consume this tensor and apply the same checked policy as [`Self::try_gelu`].
+    ///
+    /// Reuse only uniquely owned, tracked row-major storage. Shared buffers,
+    /// snapshots, external storage and other layouts use a fresh output instead.
+    /// Weak content stamps are invalidated even when the values allocation is reused.
+    pub fn try_into_gelu(mut self) -> PureResult<Tensor> {
+        let reusable = self.layout == Layout::RowMajor
+            && Arc::strong_count(&self.data) == 1
+            && self.data.content_is_tracked()
+            && matches!(&self.data.backing, TensorBacking::Owned(values)
+                if Arc::strong_count(values) == 1);
+        if !reusable {
+            return self.try_gelu();
+        }
+        let bounded = validate_gelu_input(self.data())?;
+        let data = Arc::make_mut(&mut self.data).make_mut_slice();
+        if bounded {
+            for value in data {
+                *value = gelu(*value);
+            }
+        } else {
+            for value in data {
+                *value = checked_gelu_finite(*value)?;
+            }
+        }
+        Ok(self)
     }
 
     /// Apply the GELU activation in-place (`self[i] = GELU(self[i])`).
@@ -12089,6 +12107,21 @@ fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32
             *value = if sum > 0.0 { sum } else { 0.0 };
         }
     }
+}
+
+fn validate_gelu_input(values: &[f32]) -> PureResult<bool> {
+    // At |x| <= 1e12, even x^3 is at most about 1e36, well below
+    // f32::MAX. All subsequent GELU intermediates are smaller. Establish
+    // that bound during input validation, not once per intermediate.
+    let mut bounded = true;
+    for &value in values {
+        if value.abs() <= 1e12 {
+            continue;
+        }
+        Tensor::validate_finite_tensor_util_value("gelu_input", value)?;
+        bounded = false;
+    }
+    Ok(bounded)
 }
 
 fn gelu(x: f32) -> f32 {

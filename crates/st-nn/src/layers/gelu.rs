@@ -139,6 +139,10 @@ impl Module for Gelu {
         input.try_gelu()
     }
 
+    fn forward_owned(&self, input: Tensor) -> PureResult<Tensor> {
+        input.try_into_gelu()
+    }
+
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         if input.shape() != grad_output.shape() {

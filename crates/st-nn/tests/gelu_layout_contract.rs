@@ -265,6 +265,163 @@ fn nested_sequential_forward_and_backward_match_independent_chain() {
     }
 }
 
+fn owned_fixture() -> Tensor {
+    Tensor::from_vec(
+        2,
+        6,
+        vec![
+            -0.0, 0.0, -2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0, -3.0, 0.25, -0.25,
+        ],
+    )
+    .unwrap()
+}
+
+fn bits(tensor: &Tensor) -> Vec<u32> {
+    tensor.data().iter().map(|x| x.to_bits()).collect()
+}
+
+#[test]
+fn owned_gelu_reuses_unique_storage_and_revokes_weak_stamps() {
+    for via_module in [false, true] {
+        let input = owned_fixture();
+        let expected = input.try_gelu().unwrap();
+        let pointer = input.data().as_ptr();
+        let stamp = input.content_stamp().unwrap();
+        let output = if via_module {
+            Gelu::new().forward_owned(input)
+        } else {
+            input.try_into_gelu()
+        }
+        .unwrap();
+        assert_eq!(output.data().as_ptr(), pointer);
+        assert_eq!(bits(&output), bits(&expected));
+        assert!(!stamp.matches(&output));
+        assert!(output.content_stamp().unwrap().matches(&output));
+    }
+}
+
+#[test]
+fn owned_gelu_materializes_shared_snapshot_external_and_nonrow_inputs() {
+    use st_tensor::dlpack::{DlpackCopyPolicy, DlpackExportOptions, DlpackProtocol};
+    let options = DlpackExportOptions {
+        protocol: DlpackProtocol::Versioned,
+        copy: DlpackCopyPolicy::Never,
+    };
+    for kind in 0..8 {
+        let original = owned_fixture();
+        let expected = original.try_gelu().unwrap();
+        let mut alias = None;
+        let input = match kind {
+            0 => {
+                alias = Some(original.clone());
+                original
+            }
+            1 => original.into_snapshot(),
+            2 => {
+                alias = Some(
+                    Tensor::from_managed_dlpack(original.export_dlpack(options).unwrap()).unwrap(),
+                );
+                original
+            }
+            3 => {
+                let foreign =
+                    Tensor::from_managed_dlpack(original.export_dlpack(options).unwrap()).unwrap();
+                alias = Some(original);
+                foreign
+            }
+            4 => original.to_layout(Layout::ColMajor).unwrap(),
+            5 => original
+                .to_layout(Layout::Chimera {
+                    stripes: 3,
+                    tile: 2,
+                })
+                .unwrap(),
+            6 => {
+                drop(original.export_dlpack(options).unwrap());
+                assert!(original.content_stamp().is_none());
+                original
+            }
+            _ => {
+                let snapshot = original.into_snapshot();
+                let foreign =
+                    Tensor::from_managed_dlpack(snapshot.export_dlpack(options).unwrap()).unwrap();
+                alias = Some(snapshot);
+                foreign
+            }
+        };
+        let before = alias.as_ref().map(bits);
+        let pointer = input.data().as_ptr();
+        let output = input.try_into_gelu().unwrap();
+        assert_ne!(output.data().as_ptr(), pointer, "kind={kind}");
+        assert_eq!(bits(&output), bits(&expected), "kind={kind}");
+        assert_eq!(output.layout(), Layout::RowMajor);
+        assert!(!output.is_snapshot());
+        assert!(output.content_stamp().is_some());
+        assert_eq!(alias.as_ref().map(bits), before);
+    }
+}
+
+#[test]
+fn owned_gelu_preserves_outlier_errors_and_aliases_on_failure() {
+    for (values, label) in [
+        (vec![0.5, f32::MAX, f32::NAN], "gelu_input"),
+        (vec![0.5, f32::MAX], "gelu_square"),
+        (vec![0.5, 1e14], "gelu_cubic"),
+    ] {
+        for shared in [false, true] {
+            let input = Tensor::from_vec(1, values.len(), values.clone()).unwrap();
+            let alias = shared.then(|| input.clone());
+            assert!(
+                matches!(input.try_into_gelu(), Err(TensorError::NonFiniteValue { label: actual, .. }) if actual == label)
+            );
+            if let Some(alias) = alias {
+                assert_eq!(
+                    bits(&alias),
+                    values.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+    let input = Tensor::from_vec(1, 4, vec![-0.0, 0.0, 2e12, -5e12]).unwrap();
+    let expected = input.try_gelu().unwrap();
+    let pointer = input.data().as_ptr();
+    let output = input.try_into_gelu().unwrap();
+    assert_eq!(output.data().as_ptr(), pointer);
+    assert_eq!(bits(&output), bits(&expected));
+    for (rows, cols) in [(0, 6), (3, 0)] {
+        let output = Tensor::zeros(rows, cols).unwrap().try_into_gelu().unwrap();
+        assert_eq!(output.shape(), (rows, cols));
+        assert!(output.is_empty());
+    }
+}
+
+#[test]
+fn owned_sequential_and_default_custom_module_preserve_contracts() {
+    let saved = Rc::new(RefCell::new(Vec::new()));
+    let input = owned_fixture();
+    let before = input.clone();
+    let intermediate = RetainInput(saved.clone()).forward_owned(input).unwrap();
+    let expected = intermediate.try_gelu().unwrap();
+    let mut model = Sequential::new();
+    model.push(Sequential::new());
+    model.push(Gelu::new());
+    let output = model.forward_owned(intermediate).unwrap();
+    assert_eq!(bits(&output), bits(&expected));
+    assert_eq!(&*saved.borrow(), &[before]);
+
+    let mut inner = Sequential::new();
+    inner.push(Gelu::new());
+    let mut model = Sequential::new();
+    model.push(inner);
+    model.push(Gelu::new());
+    let input = owned_fixture();
+    let expected = input.try_gelu().unwrap().try_gelu().unwrap();
+    let pointer = input.data().as_ptr();
+    let output = model.forward_owned(input).unwrap();
+    assert_eq!(output.data().as_ptr(), pointer);
+    assert_eq!(bits(&output), bits(&expected));
+}
+
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 #[test]
 fn strict_wgpu_backward_pairs_logical_layouts() {
