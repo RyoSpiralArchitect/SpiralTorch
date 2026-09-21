@@ -68,17 +68,27 @@ destinations while intermediate contributions and reduction partials remain in
 the serial workspace. Producers check their results; one final guard-only
 dispatch freezes all forward, seed and backward failures, including late
 parameter reductions. There is no final full-gradient copy/check dispatch per
-tensor. Pointwise contribution copies, cotangent packing, forward prediction
-capture and shared intermediate scratch still exist; this is not a claim of
+tensor. Pointwise contribution copies, cotangent packing and shared intermediate
+scratch still exist; this is not a claim of
 copy-free execution or a measured speedup.
 
-The workspace retains at most four whole output versions within a 32 MiB
-output-data budget (values, empty padding and the shared guard, not all tape or
-binding resources). Bindings are prepared once per version. A version is reused
+Forward likewise rebinds the final dense/GELU or pointwise producer to an owning
+prediction buffer. It freezes all input and stage failures with a guard-only
+dispatch, rather than copying/rechecking the final values. The dense
+preactivation and intermediate activations still belong to the backward tape;
+the existing ordinary MSE encoder keeps its fixed terminal destination. Its
+legacy terminal scratch allocation is not removed by this change.
+
+The prediction and gradient pools each retain at most four output versions
+within a separate 32 MiB output-data budget (values, empty padding and guards,
+not all tape or binding resources). Bindings are prepared once per version. A version is reused
 only when no member, view, strong or weak owner can observe its values or guard.
 Held or oversized versions spill into separate allocations without waiting or
 aliasing. Pending snapshots and already-submitted consumers precede reuse on the
 same queue. Every returned tensor and its whole-VJP guard survive workspace drop.
+Resident input tensors also pin their prediction version when feeding a later
+forward, even after the original forward token is dropped. Python and WASM's
+existing `forward` calls use this same Rust path, without a new client policy.
 Explicit optimizer/history snapshots still use the independent checked-copy
 path. The general tensor/view evaluator and ordinary MSE/SGD encoder remain
 separate.
@@ -95,7 +105,10 @@ This is a composable prerequisite for richer losses and band replays, **not** an
 automatic migration of `ModuleTrainer`, generic autograd, GNN, or `pure::Tensor`.
 Their existing learning policies must be connected explicitly rather than
 silently replaced. The source Module and published wheels are not changed by
-compiling a resident graph. Performance is unclaimed until separately measured.
+compiling a resident graph. The
+[matched direct-prediction comparison](../benchmarks/results/2026-09-21-resident-direct-prediction/README.md)
+passes its bounded numerical suite but does not show a consistent latency win;
+all measured regressions and the Torch comparison boundaries are retained.
 
 The shared `resident_graph_training` native/browser fixture includes arbitrary
 cotangents, GPU-derived seeds, ranks 1/2/3, fusion on/off, retained snapshots,

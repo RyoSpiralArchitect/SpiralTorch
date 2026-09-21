@@ -1,0 +1,7 @@
+{
+  "stage": "published-byte-and-aggregation-verifier",
+  "first_attempt": "KeyError: 'pointwise_cotangent_routes'; publication tamper test also failed on the same assumption",
+  "cause": "The earlier direct-seed archive's verifier expected route labels in every sample. These unchanged ordinary-seed harnesses omit that optional field entirely, rather than recording a null-valued map.",
+  "correction": "Require the optional route map to be absent, keep all fused_learner_seeds false, and reject a tampered sample that introduces a route map.",
+  "boundary": "Publication-validator schema correction only. No measured interval, validation result, runtime code, frozen product or source identity was changed or rerun. The original raw artifacts remain hash-bound."
+}

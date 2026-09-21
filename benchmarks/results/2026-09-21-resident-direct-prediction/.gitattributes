@@ -1,0 +1,4 @@
+# Hash-bound evidence retains its recorded bytes on every platform.
+* -text
+*.json linguist-generated=true
+*.log linguist-generated=true whitespace=-blank-at-eof

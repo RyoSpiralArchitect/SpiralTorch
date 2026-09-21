@@ -1,0 +1,17 @@
+{
+  "source": {
+    "commit": "e4dc7493de5e08bf3e29f19d4fd6be826c9efb38",
+    "tree": "fa05c2c961d51c9484fd8d748b29c6984fe74ffc"
+  },
+  "measured_source": {
+    "commit": "2a50f54aad83b5095047f65907327ec58b088b65",
+    "tree": "0d673543ce52c771d93a510894c46ebc3a106c3c"
+  },
+  "changed": [
+    "crates/st-backend-wgpu/src/resident_tensor.rs"
+  ],
+  "old_sha256": "6e80078447de6a79fc588e2787c146a94e5e2d6d4b60dfafdd4e3224708a04ac",
+  "new_sha256": "96820c3421cdf86606cbd68929bf4155cd775a9e008b14462f6801d7e634a0d7",
+  "diff": "diff --git a/crates/st-backend-wgpu/src/resident_tensor.rs b/crates/st-backend-wgpu/src/resident_tensor.rs\nindex 201f8054..6926119f 100644\n--- a/crates/st-backend-wgpu/src/resident_tensor.rs\n+++ b/crates/st-backend-wgpu/src/resident_tensor.rs\n@@ -369,7 +369,7 @@ impl TensorDevice {\n     }\n \n     /// Freeze within the caller's submission, retaining every upstream guard.\n-    #[cfg(test)]\n+    #[cfg(all(test, not(target_arch = \"wasm32\")))]\n     pub(crate) fn capture_into(\n         &self,\n         encoder: &mut wgpu::CommandEncoder,\n",
+  "boundary": "The only source change after timing narrows a test-only helper to native tests. Production paths were not changed; timings remain pinned to the measured commit, not relabeled as a newer build."
+}

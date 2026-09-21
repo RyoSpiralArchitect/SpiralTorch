@@ -52,9 +52,13 @@ Both clients delegate validation, seed evaluation and VJP to the same Rust code.
   Weighted updates, clipping, Topos EMA and transaction rollback are unchanged.
 - Relative to `plan.run(inputs, Fused)` followed by `backward`, this avoids one
   seed-value buffer, its seed-to-tape copy, and one submission per VJP. It does
-  not remove the owning prediction capture, input-to-tape copy, intermediate
+  not itself remove the input-to-tape copy, intermediate
   gradient scratch, or acceptance receipt reads. It is not an automatic
   migration of `pure::Tensor` or `ModuleTrainer`.
+- Forward predictions now use independently versioned terminal destinations in
+  the Rust autograd workspace, shared by Python and WASM. This removes the
+  prediction-value copy, not its whole-forward guard dispatch; see the
+  [forward ownership contract](resident_graph_autograd.md).
 
 ## Matched Measurement
 
@@ -74,3 +78,5 @@ alone do not establish a speedup; inspect the retained results per client.
 The [two-round matched results](../benchmarks/results/2026-09-15-resident-pointwise-cotangent/README.md)
 retain all conditions, including regressions. Saved-state validation passed;
 group speed ratios were close to one, so this is not a universal speed win.
+That record predates direct forward-prediction destinations and does not measure
+their performance.

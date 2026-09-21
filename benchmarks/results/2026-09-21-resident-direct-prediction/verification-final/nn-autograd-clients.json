@@ -1,0 +1,31 @@
+{
+  "status": "passed",
+  "schema": "spiraltorch.graph_autograd_clients.v1",
+  "adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "prediction_versions_views_delayed_guards_and_updates": "passed",
+  "exact_gain_gradient": 5,
+  "identity_recovery_ownership": "passed",
+  "wasm_sha256": "2c26ad8223a128ea0d4d7b0254409800601e2d01d31deb5b2813ac3955f4a178",
+  "page_sha256": "b872f72d16990d13fd4356442895fd734887b4279c705cd849ba69240e7d0712",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "nn-autograd-clients",
+  "asset_sha256": {
+    "/": "b872f72d16990d13fd4356442895fd734887b4279c705cd849ba69240e7d0712",
+    "/module/spiraltorch_wasm.js": "dfd0a8f80240223750a429020cdfcb176a7f3c9f8f62656d53f7e6f762544bfb",
+    "/module/spiraltorch_wasm_bg.wasm": "2c26ad8223a128ea0d4d7b0254409800601e2d01d31deb5b2813ac3955f4a178",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+  },
+  "browser_version": "153.0.8010.48",
+  "page_errors": [],
+  "console_messages": []
+}

@@ -51,6 +51,46 @@ try {
   await rejected(invalid.predictionTensor());await rejected(invalidGrad.inputGradientTensor());await rejected(invalidGrad.parameterGradientTensor(0));
   same(await read(prediction),[0,0,2,4]);same(await read(result.parameterGradientTensor(0)),[5]);
   for(const h of [source,plan,one,zeroScalar,forward,alien,seed,result,zero,poisoned,bad,recovered,invalid,invalidGrad,fresh,good])h.free();
+  for(const dense of [false,true]) {
+    const fixture=InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[1,3,2],
+      parameters:dense?[{role:"weight",shape:[2,2],values:[2,0,0,2]},{role:"bias",shape:[2],values:[0,0]}]:
+        [{role:"gain",shape:[2],values:[2,2]}],
+      stages:dense?[{kind:"linear",weight:0,bias:1,gelu:false}]:
+        [{kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1},{op:"relu",rhs:null}]}]}));
+    for(const learning of [false,true]) {
+      const owner=learning?await fixture.compileGraphLearnerWebGpu("exact"):await fixture.compileGraphAutogradWebGpu();
+      owner.upload(f32(Array(6).fill(1)));
+      const initial=owner.forward(), original=initial.predictionTensor(), view=original.reshape([6]), pending=view.snapshot();
+      original.free();initial.free();
+      const held=[];
+      for(let value=2;value<8;value++) {
+        owner.upload(f32(Array(6).fill(value)));
+        const f=owner.forward();held.push(f.predictionTensor());f.free();
+      }
+      owner.upload(f32(Array(6).fill(3.4028234663852886e38)));
+      const badForward=owner.forward(), badValue=badForward.predictionTensor(), delayed=badValue.snapshot();
+      badValue.free();badForward.free();
+      for(let repeat=0;repeat<12;repeat++) {
+        owner.upload(f32(Array(6).fill(1)));
+        const f=owner.forward();same(await read(f.predictionTensor()),Array(6).fill(2));f.free();
+      }
+      if(learning) {
+        const d=owner.tensorDevice(), seed=d.upload([1,3,2],f32(Array(6).fill(1)));
+        const f=owner.forward(), g=owner.backward(f,seed);owner.sgd(g,.1);
+        const receipt=owner.updateSnapshot();same((await receipt.read()).toString(),"1");receipt.free();
+        const changed=owner.forward(), values=await read(changed.predictionTensor());
+        if(values.every(v=>v===2))throw Error("parameter update was not observed");
+        for(const h of [d,seed,f,g,changed])h.free();
+      }
+      owner.free();
+      same([...await pending.readValues()],Array(6).fill(2));pending.free();same(await read(view),Array(6).fill(2));
+      for(let i=0;i<held.length;i++)same(await read(held[i]),Array(6).fill(2*(i+2)));
+      let caught=false;try{await delayed.readValues();}catch{caught=true;}finally{delayed.free();}
+      if(!caught)throw Error("recycling erased an invalid prediction guard");
+    }
+    fixture.free();
+  }
+  report.prediction_versions_views_delayed_guards_and_updates="passed";
   report.status="passed";report.exact_gain_gradient=5;report.identity_recovery_ownership="passed";
 }catch(error){report.error=String(error.stack||error);}
 element.textContent=JSON.stringify(report);element.dataset.status=report.status;

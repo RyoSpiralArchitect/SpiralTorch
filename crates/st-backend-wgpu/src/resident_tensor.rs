@@ -369,6 +369,7 @@ impl TensorDevice {
     }
 
     /// Freeze within the caller's submission, retaining every upstream guard.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn capture_into(
         &self,
         encoder: &mut wgpu::CommandEncoder,

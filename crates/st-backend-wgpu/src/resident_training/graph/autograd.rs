@@ -3,6 +3,7 @@ use super::*;
 mod cotangent;
 mod learner;
 mod outputs;
+mod prediction;
 pub use learner::{
     GraphGradientAccumulator, GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner,
 };
@@ -79,6 +80,7 @@ impl GraphGradients {
 pub struct ResidentGraphAutograd {
     graph: ResidentGraphTraining,
     outputs: outputs::GradientOutputs,
+    predictions: prediction::PredictionOutputs,
     forward_validation: wgpu::Buffer,
     cotangent_inherited: Option<wgpu::Buffer>,
     input_source: Option<ResidentTensor>,
@@ -108,6 +110,7 @@ impl ResidentGraphAutograd {
 
     fn from_prepared(graph: ResidentGraphTraining) -> Result<Self, TrainingError> {
         let outputs = outputs::GradientOutputs::new(&graph)?;
+        let predictions = prediction::PredictionOutputs::new(&graph);
         let forward_validation = runtime::empty_buffer::<u32>(
             graph.device.runtime().context().device(),
             "graph.autograd.forward_flags",
@@ -117,6 +120,7 @@ impl ResidentGraphAutograd {
         Ok(Self {
             graph,
             outputs,
+            predictions,
             forward_validation,
             cotangent_inherited: None,
             input_source: None,
@@ -211,7 +215,7 @@ impl ResidentGraphAutograd {
         Ok(())
     }
 
-    /// Enqueue the shared forward kernels and freeze a resident prediction.
+    /// Write an owning prediction directly with the shared forward kernels.
     pub fn forward(&mut self) -> Result<GraphForward, TrainingError> {
         if self.input_generation() == 0 {
             return Err(TrainingError::MissingInput);
@@ -234,14 +238,7 @@ impl ResidentGraphAutograd {
                 4,
             );
         }
-        g.encode_forward(&mut encoder, &mut Default::default());
-        encoder.copy_buffer_to_buffer(
-            &g.pointwise_flags,
-            0,
-            &g.validation,
-            (g.nodes.len() + 2) as u64 * 4,
-            4,
-        );
+        let prediction = self.predictions.encode(g, &mut encoder)?;
         encoder.copy_buffer_to_buffer(
             &g.validation,
             0,
@@ -249,12 +246,6 @@ impl ResidentGraphAutograd {
             0,
             g.validation.size(),
         );
-        let prediction = g.device.capture_into(
-            &mut encoder,
-            g.output_layout(),
-            g.activations.last().unwrap(),
-            &g.validation,
-        )?;
         context.queue().submit(Some(encoder.finish()));
         let identity = Shared::new(ForwardIdentity {
             generation: self.input_generation(),
