@@ -4,6 +4,12 @@ mod fixture;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> fixture::Result<()> {
+    let mut args = std::env::args().skip(1);
+    let compare_submissions = match (args.next().as_deref(), args.next()) {
+        (None, None) => false,
+        (Some("--compare-submissions"), None) => true,
+        _ => return Err("usage: resident_nerf_bench [--compare-submissions]".into()),
+    };
     fn now() -> f64 {
         static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
         START
@@ -15,7 +21,10 @@ fn main() -> fixture::Result<()> {
     let runtime = pollster::block_on(st_backend_wgpu::runtime::WgpuRuntime::request_headless(
         "nerf.bench.native",
     ))?;
-    println!("{}", pollster::block_on(fixture::run(runtime, now))?);
+    println!(
+        "{}",
+        pollster::block_on(fixture::run(runtime, now, compare_submissions))?
+    );
     Ok(())
 }
 

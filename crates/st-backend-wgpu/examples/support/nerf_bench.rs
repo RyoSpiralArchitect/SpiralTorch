@@ -77,21 +77,30 @@ fn graph(rows: usize, count: usize, hidden: usize) -> Result<GraphDefinition> {
     )?)
 }
 
+#[derive(Clone, Copy)]
+enum Connection {
+    Staged,
+    Separate,
+    Single,
+}
+
 fn render(
     nerf: &ResidentNerf,
     rays: &ResidentRays,
     count: usize,
-    direct: bool,
+    connection: Connection,
     graph: &mut ResidentGraph,
 ) -> Result<ResidentTensor> {
     let mode = RaySampling::Stratified { seed: SEED };
-    if direct {
-        Ok(nerf.render_graph(rays, count, mode, graph)?)
-    } else {
-        let samples = nerf.sample(rays, count, mode)?;
-        graph.set_input_tensor(&samples.positions()?)?;
-        graph.dispatch()?;
-        Ok(nerf.composite(&samples, &graph.output_tensor()?)?)
+    match connection {
+        Connection::Single => Ok(nerf.render_graph_single_submission(rays, count, mode, graph)?),
+        Connection::Separate => Ok(nerf.render_graph(rays, count, mode, graph)?),
+        Connection::Staged => {
+            let samples = nerf.sample(rays, count, mode)?;
+            graph.set_input_tensor(&samples.positions()?)?;
+            graph.dispatch()?;
+            Ok(nerf.composite(&samples, &graph.output_tensor()?)?)
+        }
     }
 }
 
@@ -110,11 +119,33 @@ fn close(a: &[f32], b: &[f32]) -> Result<f64> {
     Ok(maximum)
 }
 
-pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
+pub async fn run(
+    runtime: WgpuRuntime,
+    now: fn() -> f64,
+    compare_submissions: bool,
+) -> Result<Value> {
     if runtime.adapter_info().device_type == wgpu::DeviceType::Cpu {
         return Err("software adapter is not real-GPU coverage".into());
     }
     let adapter = format!("{:?}", runtime.adapter_info());
+    let (connections, names, schema) = if compare_submissions {
+        (
+            [Connection::Separate, Connection::Single],
+            ["separate", "single"],
+            "spiraltorch.nerf_submit_bench.v1",
+        )
+    } else {
+        (
+            [Connection::Staged, Connection::Separate],
+            ["staged", "direct"],
+            "spiraltorch.nerf_direct_bench.v1",
+        )
+    };
+    let direct_render = if compare_submissions {
+        ResidentNerf::render_graph_single_submission
+    } else {
+        ResidentNerf::render_graph
+    };
     let mut cases = Vec::new();
     let mut guard_checks = 0;
     for (rows, count) in [(1, 1), (1, 64), (65, 64), (256, 64), (1024, 64), (256, 256)] {
@@ -145,23 +176,43 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
                 })
                 .collect();
             let uploaded = nerf.upload_rays(&rays)?;
-            let reference = read(&render(&nerf, &uploaded, count, false, &mut graphs[0])?).await?;
+            let reference = read(&render(
+                &nerf,
+                &uploaded,
+                count,
+                connections[0],
+                &mut graphs[0],
+            )?)
+            .await?;
             close(
                 &reference,
-                &read(&render(&nerf, &uploaded, count, true, &mut graphs[1])?).await?,
+                &read(&render(
+                    &nerf,
+                    &uploaded,
+                    count,
+                    connections[1],
+                    &mut graphs[1],
+                )?)
+                .await?,
             )?;
             let before = graphs[1].submitted_dispatches();
             if !matches!(
-                nerf.render_graph(&uploaded, 0, RaySampling::Midpoint, &mut graphs[1]),
+                direct_render(&nerf, &uploaded, 0, RaySampling::Midpoint, &mut graphs[1]),
                 Err(NerfError::Empty)
             ) || !matches!(
-                nerf.render_graph(&uploaded, count + 1, RaySampling::Midpoint, &mut graphs[1]),
+                direct_render(
+                    &nerf,
+                    &uploaded,
+                    count + 1,
+                    RaySampling::Midpoint,
+                    &mut graphs[1]
+                ),
                 Err(NerfError::GraphShape)
             ) || graphs[1].submitted_dispatches() != before
             {
                 return Err("graph admission mutated workspace".into());
             }
-            let held = render(&nerf, &uploaded, count, true, &mut graphs[1])?;
+            let held = render(&nerf, &uploaded, count, connections[1], &mut graphs[1])?;
             let bad = nerf.upload_rays(&vec![
                 NerfRay {
                     origin: [0.; 3],
@@ -171,7 +222,8 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
                 };
                 rows
             ])?;
-            let rejected = nerf.render_graph(&bad, count, RaySampling::Midpoint, &mut graphs[1])?;
+            let rejected =
+                direct_render(&nerf, &bad, count, RaySampling::Midpoint, &mut graphs[1])?;
             if !read(&rejected).await.is_err_and(|e| {
                 matches!(
                     e.downcast_ref::<TensorError>(),
@@ -197,7 +249,8 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
                         let start = now();
                         let mut output = None;
                         for _ in 0..burst {
-                            output = Some(render(&nerf, &uploaded, count, route == 1, graph)?);
+                            output =
+                                Some(render(&nerf, &uploaded, count, connections[route], graph)?);
                         }
                         let values = read(output.as_ref().unwrap()).await?;
                         let elapsed_ms = now() - start;
@@ -211,7 +264,7 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
                         last[route] = values;
                         if block >= WARMUP {
                             intervals.push(json!({"block":block-WARMUP,"burst":burst,
-                                "route":if route==0 {"staged"} else {"direct"},
+                                "route":names[route],
                                 "order":order,"elapsed_ms":elapsed_ms,"max_abs_error":error}));
                         }
                     }
@@ -223,11 +276,10 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
                 "parameters":parameter_data,"reference":reference,"last_outputs":last,"intervals":intervals}));
         }
     }
-    Ok(
-        json!({"schema":"spiraltorch.nerf_direct_bench.v1","status":"passed",
+    Ok(json!({"schema":schema,"status":"passed",
+        "comparison":if compare_submissions {"separate_direct_vs_single_submission"} else {"staged_vs_direct"},
         "guard_cases":guard_checks,
         "adapter":adapter,"warmup":WARMUP,"blocks":BLOCKS,"bursts":[1,4],"cases":cases,
         "kernel":"register_2x2","accumulation":"sequential",
-        "boundary":"Prepared identical rays/parameters; every iteration samples rays, evaluates the NN and composites. One owning RGBA/guard snapshot read at the end of each 1/4-render interval; queue completion and map included. Setup/compilation/uploads and numerical comparisons/serialization excluded. Paired correctness only until independent control is run; no isolated GPU timing or training claim."}),
-    )
+        "boundary":"Prepared identical rays/parameters; every iteration samples rays, evaluates the NN and composites. One owning RGBA/guard snapshot read at the end of each 1/4-render interval; queue completion and map included. Setup/compilation/uploads and numerical comparisons/serialization excluded. Paired correctness only until independent control is run; no isolated GPU timing or training claim."}))
 }
