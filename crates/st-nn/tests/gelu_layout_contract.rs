@@ -209,6 +209,7 @@ impl Module for RetainInput {
 
 #[test]
 fn sequential_keeps_custom_module_retained_inputs_intact() {
+    let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
     let saved = Rc::new(RefCell::new(Vec::new()));
     let mut model = Sequential::new();
     model.push(RetainInput(saved.clone()));
@@ -221,7 +222,7 @@ fn sequential_keeps_custom_module_retained_inputs_intact() {
     assert_eq!(model.forward(&input).unwrap(), second);
     assert_eq!(&*saved.borrow(), &[input.clone(), first.clone()]);
     model
-        .backward(&input, &Tensor::ones(2, 6).unwrap())
+        .backward(&input, &Tensor::from_vec(2, 6, vec![1.0; 12]).unwrap())
         .unwrap();
     assert_eq!(
         &*saved.borrow(),
