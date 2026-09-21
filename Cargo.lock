@@ -3160,6 +3160,8 @@ dependencies = [
  "serde_json",
  "st-kernel-contracts",
  "thiserror 2.0.17",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wgpu",
 ]
 

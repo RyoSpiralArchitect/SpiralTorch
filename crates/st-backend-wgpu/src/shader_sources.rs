@@ -14,6 +14,17 @@ pub const FUSED_ATTENTION_ONLINE_WGSL: &str = include_str!("shaders/fused_attent
 pub const DENSE_MATMUL_WGSL: &str = include_str!("shaders/dense_matmul.wgsl");
 pub const ROUNDED_ADD_WGSL: &str = include_str!("shaders/rounded_add.wgsl");
 
+pub const NERF_VOLUME_UTILS_WGSL: &str = include_str!("shaders/nerf_volume_utils.wgsl");
+
+pub(crate) fn expand_nerf_raymarch_source(source: &str) -> String {
+    source.replace("// ROUNDED_ADD", ROUNDED_ADD_WGSL)
+}
+
+/// Both raw and resident entry points share portable, non-reassociated sums.
+pub fn nerf_raymarch_source() -> String {
+    expand_nerf_raymarch_source(include_str!("shaders/nerf_raymarch.wgsl"))
+}
+
 /// Same matrix kernel, with on-device finite guards for high-level inference.
 /// Binding 7 is a u32 flag array; uniform word 5 selects the stage's flag.
 pub fn checked_dense_matmul_source(

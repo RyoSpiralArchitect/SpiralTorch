@@ -1,0 +1,17 @@
+
+running 7 tests
+test nerf::resident::tests::gpu::nerf_real_gpu_counter_jitter_is_replayable_and_versioned ... ok
+test nerf::resident::tests::gpu::nerf_real_gpu_full_bins_jitter_thin_zero_and_workgroup_edges ... ok
+test nerf::resident::tests::gpu::nerf_real_gpu_nn_graph_chains_without_intermediate_readback ... ok
+test nerf::resident::tests::gpu::nerf_real_gpu_rejects_invalid_shapes_devices_and_inherited_errors ... ok
+test nerf::resident::tests::gpu::nerf_real_gpu_thin_opacity_opaque_tail_and_long_prefix ... FAILED
+test nerf::resident::tests::nerf_shaders_validate_and_preserve_legacy_struct_layouts ... ok
+test nerf::resident::tests::nerf_shapes_and_ray_values_are_checked_before_allocation ... ok
+
+failures:
+
+failures:
+    nerf::resident::tests::gpu::nerf_real_gpu_thin_opacity_opaque_tail_and_long_prefix
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 160 filtered out; finished in 0.17s
+

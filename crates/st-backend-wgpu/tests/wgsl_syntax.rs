@@ -96,8 +96,6 @@ const SKIP: &[&str] = &[
     "fused_attention",
     "reduce_db",
     "fused_gelu_back",
-    "nerf_raymarch",
-    "nerf_volume_utils",
     "nd_indexer",
 ];
 
@@ -107,6 +105,13 @@ fn all_backend_shaders_parse() {
         if SKIP.contains(name) {
             continue;
         }
+        let expanded;
+        let source = if *name == "nerf_raymarch" {
+            expanded = st_backend_wgpu::shader_sources::nerf_raymarch_source();
+            expanded.as_str()
+        } else {
+            source
+        };
         let filtered = source
             .lines()
             .filter(|line| !line.trim_start().starts_with("enable "))

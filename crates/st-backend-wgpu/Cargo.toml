@@ -20,5 +20,13 @@ futures-channel = "0.3"
 [dev-dependencies]
 naga = { version = "0.20", default-features = false, features = ["wgsl-in"] }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+[[example]]
+name = "resident_nerf_browser"
+crate-type = ["cdylib"]
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

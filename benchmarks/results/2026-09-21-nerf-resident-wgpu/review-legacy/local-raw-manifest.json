@@ -1,0 +1,1570 @@
+{
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/README.md": {
+    "sha256": "8c874c444c5386c16dfe6558d6909159cd964c15dea3b976a19c32c1a2bf90d2",
+    "bytes": 945
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/receipt.json": {
+    "sha256": "6e3c646b27d23906074b52c32b760c0c3922cce661edcef94b410276cf6b1bb4",
+    "bytes": 18450
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/source.patch": {
+    "sha256": "e27da1b51a5e809d06fb3915eda717c58568bf7a36699575eedc14f437852964",
+    "bytes": 18909
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/stderr.log": {
+    "sha256": "60bb849356ffbc091f601e17fc6ae0b2eb5e26d734d433da020c6e775efbf97f",
+    "bytes": 106
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "5ec1c4b5c40b786cfc97b93c016b175c7aa06b848d945498a95f30e7d41dabb8",
+    "bytes": 5992
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/benchmarks/nerf-resident-wgpu/test_compare.py": {
+    "sha256": "778c5353be87675c291f6cbba1331dfaddbfae567f1f8c11fff531cd4a6a7dfe",
+    "bytes": 3119
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "72ad5a4103106b3edc66d348834243531e1c25cc3d7893050bff0e50e7df9b86",
+    "bytes": 1633
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/admission-tests-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/receipt.json": {
+    "sha256": "50232b4e368bb50c7e5922faf2cca8f49d2485c92665e5eb28b401466c43164a",
+    "bytes": 18561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/source.patch": {
+    "sha256": "e27da1b51a5e809d06fb3915eda717c58568bf7a36699575eedc14f437852964",
+    "bytes": 18909
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/stderr.log": {
+    "sha256": "3e951283d120f032617ee78d87bf42197bd3c6cea4d1c7a0a5981d8493960d2d",
+    "bytes": 120191
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/stdout.log": {
+    "sha256": "8c26ef67f49e5578a7f4c32c4ae13751e3670b8317d8685074a8037d6cc2fa58",
+    "bytes": 16600
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "5ec1c4b5c40b786cfc97b93c016b175c7aa06b848d945498a95f30e7d41dabb8",
+    "bytes": 5992
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/benchmarks/nerf-resident-wgpu/test_compare.py": {
+    "sha256": "778c5353be87675c291f6cbba1331dfaddbfae567f1f8c11fff531cd4a6a7dfe",
+    "bytes": 3119
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "72ad5a4103106b3edc66d348834243531e1c25cc3d7893050bff0e50e7df9b86",
+    "bytes": 1633
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/backend-tests-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/receipt.json": {
+    "sha256": "5f707258408b5d595fa692fa8894db95914600da318502efe2ee14f2014f3572",
+    "bytes": 18644
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/source.patch": {
+    "sha256": "cfd36926402e6a4c7faffa33a99474142fc11f514aa976a8ef8be629d832ef7a",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "1fe51e8fbf273535299ba78c108cbb4c197917c1bf653482045ef25dc0b4c289",
+    "bytes": 5230
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "7d0adaa347d0c4603b21b7985c61e0e2bcaa9ae2d681f4fd1dd6f4fae34957c8",
+    "bytes": 1010
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/bindgen-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-final.json": {
+    "sha256": "58412b628cc46cc424fa61e6aa6f21ba4dd6d6d1e114c52dd362139198af12f2",
+    "bytes": 1760371
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-review-final.json": {
+    "sha256": "c8c51d567290894e43917e3dab675a0630a108e263fa682fd5e8d891819e8397",
+    "bytes": 4469
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-review-fixed.json": {
+    "sha256": "efe51f2e8505f0b5f83433bb88f46254e26e11224f27645e1e59127fe059a586",
+    "bytes": 1760371
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/receipt.json": {
+    "sha256": "4119cfa28d545a3c2933a18d66112eb5baaf1640892e3eb9601acd58761936fb",
+    "bytes": 18641
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/source.patch": {
+    "sha256": "cfd36926402e6a4c7faffa33a99474142fc11f514aa976a8ef8be629d832ef7a",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/stdout.log": {
+    "sha256": "da4de866569b6b02e7b62e5459059f8455af65c4501e213cb6f9e833b90765a7",
+    "bytes": 137
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "1fe51e8fbf273535299ba78c108cbb4c197917c1bf653482045ef25dc0b4c289",
+    "bytes": 5230
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "7d0adaa347d0c4603b21b7985c61e0e2bcaa9ae2d681f4fd1dd6f4fae34957c8",
+    "bytes": 1010
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v1.json": {
+    "sha256": "9c74838a6ca0106549c61f91e5d8c8d46a550bffdac7b748671560c5f0eb9b8c",
+    "bytes": 1760135
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/receipt.json": {
+    "sha256": "7222d2d932dda3fe0f22aef867463f8af0041eb214968cdaef362eb8b971f754",
+    "bytes": 18786
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/source.patch": {
+    "sha256": "e27da1b51a5e809d06fb3915eda717c58568bf7a36699575eedc14f437852964",
+    "bytes": 18909
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/stdout.log": {
+    "sha256": "bb3fb941f8c518f77d6441b7adcc83516cf1b63afd167ce6bd793cca54be9308",
+    "bytes": 137
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "5ec1c4b5c40b786cfc97b93c016b175c7aa06b848d945498a95f30e7d41dabb8",
+    "bytes": 5992
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/benchmarks/nerf-resident-wgpu/test_compare.py": {
+    "sha256": "778c5353be87675c291f6cbba1331dfaddbfae567f1f8c11fff531cd4a6a7dfe",
+    "bytes": 3119
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "72ad5a4103106b3edc66d348834243531e1c25cc3d7893050bff0e50e7df9b86",
+    "bytes": 1633
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/browser-v2.json": {
+    "sha256": "a532eb2bd136de91c5d40544d77664d857962e285fa04157c138c4769e215a7e",
+    "bytes": 1760371
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/direct-tests/receipt.json": {
+    "sha256": "cdb2f396283331ca0521b16252c3e2fe6b9dd5975d46e0491948454720f281c1",
+    "bytes": 17307
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/direct-tests/source.patch": {
+    "sha256": "4cf4c63bf6e349cdcfaa3374fd27142500e2b396dc14a83e4bfda94ee0a2ddf7",
+    "bytes": 12323
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/direct-tests/stderr.log": {
+    "sha256": "385a2a425a257a46247b769f11e1b604c26c9aff7a57da1dbb7f928baf15546e",
+    "bytes": 115192
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/direct-tests/stdout.log": {
+    "sha256": "b8bc806967980633811271fd34a0a80dbd6c92059b86b6c8c957449460d8ddee",
+    "bytes": 891
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/direct-tests/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/direct-tests/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-admission/receipt.json": {
+    "sha256": "820f0b7b82cde29230e1b566dfd4dbb9951f8f92fe5fecd53184bba94126b1b4",
+    "bytes": 17777
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-admission/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-admission/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-admission/stderr.log": {
+    "sha256": "60bb849356ffbc091f601e17fc6ae0b2eb5e26d734d433da020c6e775efbf97f",
+    "bytes": 106
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-admission/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-backend-tests/receipt.json": {
+    "sha256": "b8d75272bfe2e135ef98cdff6869c054fb25be5e91dd1af286e10affff0bb570",
+    "bytes": 17843
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-backend-tests/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-backend-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-backend-tests/stderr.log": {
+    "sha256": "4f3d6f2ef377e652f19f9ce95bdbb46d82cda826b4c1af2ebd9c28775bff8b7e",
+    "bytes": 120030
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-backend-tests/stdout.log": {
+    "sha256": "bc78a9a0d78d076133605936f2da439deac9d4d22884055282af4bd4842b5da3",
+    "bytes": 16600
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-bindgen/receipt.json": {
+    "sha256": "ba7da01ef9a271698d78891fd7a6ddc9c3874ec937118696c4932d5534b445dd",
+    "bytes": 18030
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-bindgen/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-bindgen/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-bindgen/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-bindgen/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser/receipt.json": {
+    "sha256": "b5f4c8cf892d5753f754b94038f42a32152ae20bc889e55fe10d04d55608bc40",
+    "bytes": 18119
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser/stdout.log": {
+    "sha256": "4768e29e41a44a79c1c502f4fc19ad9ca4436fa1c649e2a707fe6ab812e1b359",
+    "bytes": 140
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser-syntax/receipt.json": {
+    "sha256": "01bae5f03917ac71ca34b69874e8b3b41d50d2837b13b02b937fa67b3f4c956c",
+    "bytes": 17698
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser-syntax/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser-syntax/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser-syntax/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-browser-syntax/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-format/receipt.json": {
+    "sha256": "2a38adac241b60b33e2bb60fc11f07a7709576473d5402ca5823e19b22cff299",
+    "bytes": 17719
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-format/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-format/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-format/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-format/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-native/receipt.json": {
+    "sha256": "93da284f89a9326b523cb7a18dc53cc35fe9ddf64fcf0d4eeb62a8ffed8968e6",
+    "bytes": 17916
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-native/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-native/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-wasm/receipt.json": {
+    "sha256": "c362cd69953a3bee65e7e9c356baf1616c1e0c7d1a0a419691faa6d1e410058c",
+    "bytes": 17957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-wasm/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-wasm/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-wasm/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-freeze-wasm/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-inventory/receipt.json": {
+    "sha256": "60552a3dbc92cfa8ae463fb086c76833d6ffb7ecdd46d653a2f1d8db4ac00371",
+    "bytes": 17825
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-inventory/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-inventory/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-inventory/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-inventory/stdout.log": {
+    "sha256": "fd3f9389615d865993cccfd60f4298504a639740c1f1f0f554e81d8e4e186640",
+    "bytes": 83
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native/receipt.json": {
+    "sha256": "fc8ff6885d4e208f146472f8fc190d495993980e707cc7e9d2a94ed68e151459",
+    "bytes": 17773
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native/stderr.log": {
+    "sha256": "132e80277a4021d750527387b44e98ae50d4d330e9c967adfde54f8410da031f",
+    "bytes": 114153
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native/stdout.log": {
+    "sha256": "ce0ba026ec775de68ae40bee25cb0d7cb8e95bd0dd4ca3b76f36ea182c00e0bb",
+    "bytes": 1069062
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native-clippy/receipt.json": {
+    "sha256": "b996c9b06288c3b2847bdeafb63efd1336dc5b18cdd96cfad1de7b3b7b702f8e",
+    "bytes": 17779
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native-clippy/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native-clippy/stderr.log": {
+    "sha256": "35635e95d237e38d4037037e406804417f1fae9610a5d60783e89507098c4fa1",
+    "bytes": 114010
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-native-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-torch/receipt.json": {
+    "sha256": "3120dad909baf4c003eb8b9459d2ded31170cd246398ddf833e62d568427fcc1",
+    "bytes": 17985
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-torch/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-torch/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-torch/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-torch/stdout.log": {
+    "sha256": "82364e88adf5226226c32d703b0bf52215c9cce9e672d1939d4c3df4ad8f047e",
+    "bytes": 334753
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm/receipt.json": {
+    "sha256": "d339049408b3660fb1f61a382879d89098bc06b238963e3cfcc6272ef52ef1ff",
+    "bytes": 17830
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm/stderr.log": {
+    "sha256": "7a31aa24da08e094ce66174f9a8a469bb62b3be0d4660fa1845ed841c73fec7b",
+    "bytes": 110814
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm-clippy/receipt.json": {
+    "sha256": "1229d464efbfed13e8ef1cdedf481fa6c4db6eab3750158d76b9524255c6e6e7",
+    "bytes": 17824
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm-clippy/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm-clippy/stderr.log": {
+    "sha256": "71d2e79e2ce95fd6c7776a6e150d732a48ef0e3c32484bb8075ae97ff7a7e5de",
+    "bytes": 110824
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/final-wasm-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/initial-tests/receipt.json": {
+    "sha256": "9035673c0b5980a8cf2e2b2a0a3d9be7fb0105d268ef1615486f2be7fde3fba2",
+    "bytes": 17311
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/initial-tests/source.patch": {
+    "sha256": "f4f2386323f19c86a326a6f2602fe30adfd94cda37164eba317202f9d2df5e4f",
+    "bytes": 9851
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/initial-tests/stderr.log": {
+    "sha256": "c5111146d935c03f2187c46fe872195e3ebc560b7078caf41470d265042a3e15",
+    "bytes": 115547
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/initial-tests/stdout.log": {
+    "sha256": "c9a4e02668dcefef1837805b888720ccd93c1e4bcd6bda872f805264a394b96e",
+    "bytes": 915
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/initial-tests/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "53e232d61e803172f85b3b0961e604e5c953e84d0299376661aca2754fcba140",
+    "bytes": 15330
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/initial-tests/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "6f5f0d95760ccc37e049cc71e7de0a88764e4951fce6e604f05914e94bf1f69e",
+    "bytes": 12752
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/receipt.json": {
+    "sha256": "2ca66bee9141300818ff56bf818221b115c4fe8d6ae2077e373df4545c0dddaf",
+    "bytes": 18305
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/source.patch": {
+    "sha256": "cfd36926402e6a4c7faffa33a99474142fc11f514aa976a8ef8be629d832ef7a",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/stderr.log": {
+    "sha256": "6cb7ff962112f7f83ef510d09e2ff3f542afafc012e4697d56ce5183691950a3",
+    "bytes": 114925
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "1fe51e8fbf273535299ba78c108cbb4c197917c1bf653482045ef25dc0b4c289",
+    "bytes": 5230
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "7d0adaa347d0c4603b21b7985c61e0e2bcaa9ae2d681f4fd1dd6f4fae34957c8",
+    "bytes": 1010
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-clippy-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/receipt.json": {
+    "sha256": "4163b8ee324f95508c3b94d81f53fb9b52391873302d5a1f3cd97873a7883240",
+    "bytes": 18300
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/source.patch": {
+    "sha256": "cfd36926402e6a4c7faffa33a99474142fc11f514aa976a8ef8be629d832ef7a",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/stderr.log": {
+    "sha256": "ceed69908aec1d00a345e70b09a477c3d4ba7ffd6c0b9babf8c2fb030b0a46f4",
+    "bytes": 114304
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/stdout.log": {
+    "sha256": "ce0ba026ec775de68ae40bee25cb0d7cb8e95bd0dd4ca3b76f36ea182c00e0bb",
+    "bytes": 1069062
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "1fe51e8fbf273535299ba78c108cbb4c197917c1bf653482045ef25dc0b4c289",
+    "bytes": 5230
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "7d0adaa347d0c4603b21b7985c61e0e2bcaa9ae2d681f4fd1dd6f4fae34957c8",
+    "bytes": 1010
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/native-fixture-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/pr-body.md": {
+    "sha256": "626a4b22bebdeb4bc1e74a38ea54d6faae6a335a45314c1541e0660896f89ff7",
+    "bytes": 2396
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/resident_nerf-review-fixed": {
+    "sha256": "e3f3d75b59e723745b8b7ffb06208e514fece1649577c60224f103e0ae226c83",
+    "bytes": 5487472
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/resident_nerf-review-fixed.wasm": {
+    "sha256": "aeb365927c855fa6e3ffcf24b28ce262c4dd2e59f534994b0b39a08e22fff4b5",
+    "bytes": 1344077
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/resident_nerf-review-v1": {
+    "sha256": "3ba09dea3a7e5ba8e38080dcc32f7665765114a4034b44840cad0ceac4e8d755",
+    "bytes": 5487472
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/resident_nerf-review-v1.wasm": {
+    "sha256": "0b4a7351a633931a14a5ba1efb30d71188a9309fe5dcca6a01003af0013503af",
+    "bytes": 1343814
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/resident_nerf-v1": {
+    "sha256": "bfbb3e777d743ff08c0cc2c43feb17230b4dce80ac13eadf3cd165ab1a7f42b9",
+    "bytes": 5487472
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/resident_nerf-v1.wasm": {
+    "sha256": "296603f38936abbcd827d780410f72a494b74c95bfe3abc05c6337ec104db3fa",
+    "bytes": 1343108
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-admission/receipt.json": {
+    "sha256": "f6e4c5fd4509fbd2948b6a53503e2dc592402ba63df285899b6f384301062788",
+    "bytes": 18134
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-admission/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-admission/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-admission/stderr.log": {
+    "sha256": "60bb849356ffbc091f601e17fc6ae0b2eb5e26d734d433da020c6e775efbf97f",
+    "bytes": 106
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-admission/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-backend-tests/receipt.json": {
+    "sha256": "67d743d8489d5ec950819daeac405fab1aa32bb1d2230b181e45a2b27157ef09",
+    "bytes": 18200
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-backend-tests/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-backend-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-backend-tests/stderr.log": {
+    "sha256": "856bf5200200fa345957c07eed64dcd65c5b50c8dd93f5646fd0d092a16b86b5",
+    "bytes": 120322
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-backend-tests/stdout.log": {
+    "sha256": "f2b957c133ce8cc3c5740bec9efafb50dfffca70b028e01ad9acac8814a4b6cc",
+    "bytes": 16693
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-bindgen/receipt.json": {
+    "sha256": "91ad4a3d207965273671ad41ef7042318e4b5c10032321e1af7deb1ede5a256c",
+    "bytes": 18400
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-bindgen/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-bindgen/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-bindgen/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-bindgen/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser/receipt.json": {
+    "sha256": "a06db028b70d9ab959dab2f7cf5487b9a5985826a0290392e00459e54b8c7aa4",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser/stdout.log": {
+    "sha256": "9995ca37e2c2e2fe4b0922679e42f0f865b29d37471011154c67f9e29f0f2367",
+    "bytes": 184
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser-syntax/receipt.json": {
+    "sha256": "993ce8da121990ddfd76300dfc233327f7d56ba443748681dfd1c08d1dd9317e",
+    "bytes": 18055
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser-syntax/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser-syntax/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser-syntax/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-browser-syntax/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-format/receipt.json": {
+    "sha256": "b4736c887d47c4057687f24e124b1ef4f8c020b11535ab6216a27572c8893255",
+    "bytes": 18076
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-format/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-format/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-format/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-format/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-native/receipt.json": {
+    "sha256": "513c753d0c01e87a1387647dc91dc76df3283a4dc97c058cfddc6087c7a6d0bd",
+    "bytes": 18280
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-native/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-native/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-wasm/receipt.json": {
+    "sha256": "e69f3b5716bfae60ad29478c7a05f84fdc4d7ba0c002b63e07c6433b925d5c59",
+    "bytes": 18322
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-wasm/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-wasm/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-wasm/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-freeze-wasm/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-inventory/receipt.json": {
+    "sha256": "de84c10c4966fe221af2d9055b38ddaf21da3c7b108ba1f48a942dabf56a4826",
+    "bytes": 18182
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-inventory/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-inventory/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-inventory/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-inventory/stdout.log": {
+    "sha256": "fd3f9389615d865993cccfd60f4298504a639740c1f1f0f554e81d8e4e186640",
+    "bytes": 83
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native/receipt.json": {
+    "sha256": "5061ac1363024149d6d18a616cfafaa2c5206aa5e03b54d296afd3817e0995f8",
+    "bytes": 18130
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native/stderr.log": {
+    "sha256": "f87ff18c66691c380e0e5e7906bef1a8e1b4b1fa610ca7c25d318e4f9e212a26",
+    "bytes": 114153
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native/stdout.log": {
+    "sha256": "ce0ba026ec775de68ae40bee25cb0d7cb8e95bd0dd4ca3b76f36ea182c00e0bb",
+    "bytes": 1069062
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native-clippy/receipt.json": {
+    "sha256": "32bbc0c5a7e0cfddcc16219ee95dd0017f794444e10c4170511bacab724a9cff",
+    "bytes": 18135
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native-clippy/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native-clippy/stderr.log": {
+    "sha256": "7eef19f5c6ce5bc275cc63c59bc3475f8f08bcc7f08cb815171938b55df44b59",
+    "bytes": 114161
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-native-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm/receipt.json": {
+    "sha256": "563de855c306d56e681f862070d69af5e44843333e0c814af80bf458f5174a9c",
+    "bytes": 18185
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm/stderr.log": {
+    "sha256": "e2510861d28102757371629c202e3e825bb697ced514d87883480f435a119c32",
+    "bytes": 110965
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm-clippy/receipt.json": {
+    "sha256": "63057c974736e747b0aeb903278101f20b0c4ea28633dc36a36ef9813b7043b6",
+    "bytes": 18181
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm-clippy/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm-clippy/stderr.log": {
+    "sha256": "c68a6188e4321d434c9cdcb4775b16d990e85373847c10bece3d5937ed70a55c",
+    "bytes": 110975
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-final-wasm-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-admission/receipt.json": {
+    "sha256": "9663079a1cacb47642e8cdca1a0f2708be0dae3e2f680291dd6e5af46c933b08",
+    "bytes": 18134
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-admission/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-admission/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-admission/stderr.log": {
+    "sha256": "60bb849356ffbc091f601e17fc6ae0b2eb5e26d734d433da020c6e775efbf97f",
+    "bytes": 106
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-admission/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-backend-tests/receipt.json": {
+    "sha256": "bffe227f2e17df600b72d90f9d02dedafadf269efd2f80b97ad9edb9cd6929e8",
+    "bytes": 18201
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-backend-tests/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-backend-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-backend-tests/stderr.log": {
+    "sha256": "54e50deeb547b0787290d61e7545b8dbf7f871dbfdfd603ae3cb781eaba17546",
+    "bytes": 120322
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-backend-tests/stdout.log": {
+    "sha256": "e3521fdba6a994ee01f059f48ad837047ffd4942e02b30c7f15c925ac18b61cc",
+    "bytes": 16693
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-bindgen/receipt.json": {
+    "sha256": "28ec4d6866393eccbbff6a3f9b49b8dbfa2861a585299f61b33122b637a96cee",
+    "bytes": 18404
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-bindgen/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-bindgen/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-bindgen/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-bindgen/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser/receipt.json": {
+    "sha256": "b73c97370174f68d4be963838b616aa9441bc9607568c2e8d725ce5aeef2f3cc",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser/stdout.log": {
+    "sha256": "b4f19d9051f4d6632f0e09d99d31ae91272a0af66e58318e6a6aae52bf0e8e35",
+    "bytes": 147
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser-syntax/receipt.json": {
+    "sha256": "657940a8e4991fb206c26c0aad7475c78f5532c93d470362e0a67b5091a4fa01",
+    "bytes": 18055
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser-syntax/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser-syntax/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser-syntax/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-browser-syntax/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-format/receipt.json": {
+    "sha256": "2fd105115a7d7c7cd05434dcbe85035ac1fe6233ef01019beb659cbc7087da1d",
+    "bytes": 18075
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-format/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-format/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-format/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-format/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-native/receipt.json": {
+    "sha256": "96d1e30eda9b290abf93a005c0e5b6eb24b173500a99722203bb4d979942c822",
+    "bytes": 18283
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-native/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-native/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-wasm/receipt.json": {
+    "sha256": "a6d29387076fe46bf7f439e2a1163a1c5de380b1d2c247dcfce4ab4f35b93193",
+    "bytes": 18324
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-wasm/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-wasm/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-wasm/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-freeze-wasm/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-inventory/receipt.json": {
+    "sha256": "b77d10d34ea519296c5f59307d6b9fd422516b24addeca24547f3eb2cb79d356",
+    "bytes": 18182
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-inventory/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-inventory/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-inventory/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-inventory/stdout.log": {
+    "sha256": "fd3f9389615d865993cccfd60f4298504a639740c1f1f0f554e81d8e4e186640",
+    "bytes": 83
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native/receipt.json": {
+    "sha256": "59136301453c8f8a2abf4a7b47f8f470e799c7d99e8790665f349cd1a7af4922",
+    "bytes": 18130
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native/stderr.log": {
+    "sha256": "132e80277a4021d750527387b44e98ae50d4d330e9c967adfde54f8410da031f",
+    "bytes": 114153
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native/stdout.log": {
+    "sha256": "ce0ba026ec775de68ae40bee25cb0d7cb8e95bd0dd4ca3b76f36ea182c00e0bb",
+    "bytes": 1069062
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native-clippy/receipt.json": {
+    "sha256": "e95beac8592248e58ce1ff145d59315e03757a13c5db53b8398a0ced092e5e4f",
+    "bytes": 18135
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native-clippy/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native-clippy/stderr.log": {
+    "sha256": "aa972cbf9968203395b3d7e2f7da2d0ca373fdd18d1e72058943e47aeac5d979",
+    "bytes": 114161
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-native-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-torch/receipt.json": {
+    "sha256": "18e93c6464d842d90d8e59389dabc0177319a556e0f04f085890675d9c267469",
+    "bytes": 18357
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-torch/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-torch/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-torch/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-torch/stdout.log": {
+    "sha256": "82364e88adf5226226c32d703b0bf52215c9cce9e672d1939d4c3df4ad8f047e",
+    "bytes": 334753
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm/receipt.json": {
+    "sha256": "418ee5c5ab7be85b2a25da5f6c3c5f924d73cb174d5185eae20930c12bec244f",
+    "bytes": 18185
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm/stderr.log": {
+    "sha256": "5d4563ec9dcd1f4f16b7d78a1eaaede7f7bcc9aaae84c27f8751e689a26d77da",
+    "bytes": 110965
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm-clippy/receipt.json": {
+    "sha256": "26afa6e1d47e034a464806b31fd2a8112dc8502bd3a731cbbf1203b15bb3e7fc",
+    "bytes": 18181
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm-clippy/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm-clippy/stderr.log": {
+    "sha256": "4def5631eea66890a2b3d5352aab8722dacc65a838bccf386d8ca2774b79f76c",
+    "bytes": 110975
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-fixed-wasm-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-after/receipt.json": {
+    "sha256": "ee40de4af0ddc94146783d1be73b336f316e56ed5462216b6cf85000e81b9336",
+    "bytes": 18421
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-after/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-after/source.patch": {
+    "sha256": "5fad96b2f38ce7128ac158a8401bff5a7333963acaf9a71067e92d2dd4ff4ac7",
+    "bytes": 6381
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-after/stderr.log": {
+    "sha256": "5973c1ee0d3335fb99ebe80dc64cbbba42ea906ce6121cb2cb324c0e5e210317",
+    "bytes": 115334
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-after/stdout.log": {
+    "sha256": "963fbd54003b50f714d70b64ac4d2c9cd52e6cd9bc5ea9ad54e2ca62bbdd5914",
+    "bytes": 984
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-before/receipt.json": {
+    "sha256": "98f2e132de4ec06b7c9ca0bd9941b69a07ee18dd70a4f51f2fab70d5f1da0b19",
+    "bytes": 18330
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-before/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-before/source.patch": {
+    "sha256": "6c534faebeeaa6053a352c2c1c2dddbee2c0787e16a4bd0c3d06659c5bbed46b",
+    "bytes": 2168
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-before/stderr.log": {
+    "sha256": "14cb5019db425796f6b95d3e9cb0f3cae0691ad769763e314b5b5b381590aa0b",
+    "bytes": 114846
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-legacy-before/stdout.log": {
+    "sha256": "c7c97a28c172d907028d88e20db5dca6939dfcc8673b37bfacd28beab449f18d",
+    "bytes": 322
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-sampler-before/receipt.json": {
+    "sha256": "85c53007310447dc8ed545a8953bf7f1fd1f76f017a20226b3e53968c40e87d9",
+    "bytes": 18329
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-sampler-before/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-sampler-before/source.patch": {
+    "sha256": "7ed6c6310ea02188aa50863d1992ed7113fd86b19da7321660d4c66137dfb703",
+    "bytes": 4115
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-sampler-before/stderr.log": {
+    "sha256": "2542e777de516f585c3f066fb3f719f2a389ce7a667216d14afd1541cc471023",
+    "bytes": 114848
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/review-sampler-before/stdout.log": {
+    "sha256": "cb12316587b2fb2749270929fcb0b59983d5f827efa42bf64f32f169ffcfa174",
+    "bytes": 322
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/rounded-tests/receipt.json": {
+    "sha256": "0bc44efc5e20ee4bbb978ca527cffae3990f18594c536a003aea8367e708375a",
+    "bytes": 17357
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/rounded-tests/source.patch": {
+    "sha256": "0c1c1d53b464db611cac1023d83b95b7573a56d2865f8acf91b800446b00b318",
+    "bytes": 12611
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/rounded-tests/stderr.log": {
+    "sha256": "99e414428c184c45abce67fa2fbf835b8ecd16897549f45a3c427efe0bb0c724",
+    "bytes": 115050
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/rounded-tests/stdout.log": {
+    "sha256": "cdf40f4f7232db109f22c9039ceff93fa3387463dbcba835d73a86ccb44226e6",
+    "bytes": 798
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/rounded-tests/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "faa2a7c53a67dbd525f62a0c507bef15c98d501a5db480dfd93b440ab94c1a47",
+    "bytes": 15399
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/rounded-tests/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "42126818fef89c3f346d585f86219955321d22c884754d27de6e6bcd1b3f8a14",
+    "bytes": 12775
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/run.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/receipt.json": {
+    "sha256": "55f313b1bb22af4b661cee910beb0599bfc98bc4f085351b5ce86801f682cac1",
+    "bytes": 18516
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/source.patch": {
+    "sha256": "cfd36926402e6a4c7faffa33a99474142fc11f514aa976a8ef8be629d832ef7a",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/stdout.log": {
+    "sha256": "82364e88adf5226226c32d703b0bf52215c9cce9e672d1939d4c3df4ad8f047e",
+    "bytes": 334753
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "1fe51e8fbf273535299ba78c108cbb4c197917c1bf653482045ef25dc0b4c289",
+    "bytes": 5230
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "7d0adaa347d0c4603b21b7985c61e0e2bcaa9ae2d681f4fd1dd6f4fae34957c8",
+    "bytes": 1010
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/torch-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/receipt.json": {
+    "sha256": "68ef7e5f7ecec23fdd1afba6f6889ee43e3d79bbdcb491858d3ef1a6fadd57c5",
+    "bytes": 18356
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/source.patch": {
+    "sha256": "cfd36926402e6a4c7faffa33a99474142fc11f514aa976a8ef8be629d832ef7a",
+    "bytes": 18490
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/stderr.log": {
+    "sha256": "0a051ed48a6297c96902fbf2c6dbd37851cd6d8a6ca579dcb51ba181ef94e13d",
+    "bytes": 111954
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "1fe51e8fbf273535299ba78c108cbb4c197917c1bf653482045ef25dc0b4c289",
+    "bytes": 5230
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "7d0adaa347d0c4603b21b7985c61e0e2bcaa9ae2d681f4fd1dd6f4fae34957c8",
+    "bytes": 1010
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-build-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/receipt.json": {
+    "sha256": "8290db4a816696dac4ea1b0009367a2e61076daa1c6e4aae5d146b22ca2a1c00",
+    "bytes": 18497
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/runner.py": {
+    "sha256": "3d83d92e2baf63033a3c771cd4015b602616997e8c2de7a1101d120c7d59a801",
+    "bytes": 2359
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/source.patch": {
+    "sha256": "e27da1b51a5e809d06fb3915eda717c58568bf7a36699575eedc14f437852964",
+    "bytes": 18909
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/stderr.log": {
+    "sha256": "315ca80b82889a30c2fbe979f08bdeeed6f48bf9df39ac0b270f7519aea2d434",
+    "bytes": 111033
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/benchmarks/nerf-resident-wgpu/compare.py": {
+    "sha256": "5ec1c4b5c40b786cfc97b93c016b175c7aa06b848d945498a95f30e7d41dabb8",
+    "bytes": 5992
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/benchmarks/nerf-resident-wgpu/test_compare.py": {
+    "sha256": "778c5353be87675c291f6cbba1331dfaddbfae567f1f8c11fff531cd4a6a7dfe",
+    "bytes": 3119
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/bindings/st-wasm/tests/resident_nerf.html": {
+    "sha256": "72ad5a4103106b3edc66d348834243531e1c25cc3d7893050bff0e50e7df9b86",
+    "bytes": 1633
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf.rs": {
+    "sha256": "14eec000e2c25ef603c9f4a30cbb652190c70883079a483c0bfa38b097770b9c",
+    "bytes": 405
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/crates/st-backend-wgpu/examples/resident_nerf_browser.rs": {
+    "sha256": "167804be678985bfb6c75bd038824807783ef2ff260dacd2ce0669d32941c9b1",
+    "bytes": 561
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/crates/st-backend-wgpu/examples/support/nerf.rs": {
+    "sha256": "e237cffea42a4d3454d86a9dbc0d9409e775fdd8b0476d4f97ec461d76bcd429",
+    "bytes": 8771
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/crates/st-backend-wgpu/src/nerf/resident/tests.rs": {
+    "sha256": "c0c4c5a921b0713e37fcff1367358a46e5318f80bd72e1a1087b4f24d26e0e9f",
+    "bytes": 18275
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-clippy-v1/untracked/crates/st-backend-wgpu/src/nerf/resident.rs": {
+    "sha256": "3bac08c7b63b2c260646123ca3300caf1e63923db05591220cd0b2af4dab3f51",
+    "bytes": 12957
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-final/spiraltorch_wasm.d.ts": {
+    "sha256": "be89627ba05ef32a2569396fd31578ee0888b14e6ba16aa2545240fc4e5e61c7",
+    "bytes": 1802
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-final/spiraltorch_wasm.js": {
+    "sha256": "78664bf4359bed27fbda9822d8906cf1eaeeda453583362eb5a44a6b444bddfd",
+    "bytes": 44209
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-final/spiraltorch_wasm_bg.wasm": {
+    "sha256": "00eb54c7c6b66f4ae93487e5f41a0d175574d2ebb0bdf69c21a2c00c65b06285",
+    "bytes": 602426
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-final/spiraltorch_wasm_bg.wasm.d.ts": {
+    "sha256": "064835254f6f553dbb37e8a5317d65f1ac7c6d64b405b78aef508ef0c7b7d09f",
+    "bytes": 794
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-final/spiraltorch_wasm.d.ts": {
+    "sha256": "37d57976486ec9eb0311e74383e5359daa17ee83b1f0a3ead8c2ec627c2a0eee",
+    "bytes": 1802
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-final/spiraltorch_wasm.js": {
+    "sha256": "9846d1bc27a1e768a7a427e05fcd76d379a51ec91f6692a961b32d80f643de5b",
+    "bytes": 44207
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-final/spiraltorch_wasm_bg.wasm": {
+    "sha256": "18f43252c9244e584758d1081649bacd0458e880070a3f109b3fa2009dc3aebe",
+    "bytes": 603130
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-final/spiraltorch_wasm_bg.wasm.d.ts": {
+    "sha256": "26a927a4a6e57ecd103e53abad09bcdb55c31c84f9898976c7ef4ad406db177f",
+    "bytes": 794
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-fixed/spiraltorch_wasm.d.ts": {
+    "sha256": "37d57976486ec9eb0311e74383e5359daa17ee83b1f0a3ead8c2ec627c2a0eee",
+    "bytes": 1802
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-fixed/spiraltorch_wasm.js": {
+    "sha256": "c9165aa29e8a6833550b87be7a0a768c1bd812821eb4573fce92b5f87370496a",
+    "bytes": 44205
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-fixed/spiraltorch_wasm_bg.wasm": {
+    "sha256": "a644c281d44888d1e0ccaed8ffc9627a82442826c24b607bed67943822b295a0",
+    "bytes": 603386
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-review-fixed/spiraltorch_wasm_bg.wasm.d.ts": {
+    "sha256": "26a927a4a6e57ecd103e53abad09bcdb55c31c84f9898976c7ef4ad406db177f",
+    "bytes": 794
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-v1/spiraltorch_wasm.d.ts": {
+    "sha256": "37d57976486ec9eb0311e74383e5359daa17ee83b1f0a3ead8c2ec627c2a0eee",
+    "bytes": 1802
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-v1/spiraltorch_wasm.js": {
+    "sha256": "19bc8face80966d34fc00e0ba8f5cf25727359997c3c7370f4b1d54e04f3758f",
+    "bytes": 44207
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-v1/spiraltorch_wasm_bg.wasm": {
+    "sha256": "60bb078f96f1a86bad2b32e59367dca3007e5e84306b5cd287480a11bd87f019",
+    "bytes": 602426
+  },
+  "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-resident-wgpu-20260921/wasm-v1/spiraltorch_wasm_bg.wasm.d.ts": {
+    "sha256": "26a927a4a6e57ecd103e53abad09bcdb55c31c84f9898976c7ef4ad406db177f",
+    "bytes": 794
+  }
+}
