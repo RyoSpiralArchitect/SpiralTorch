@@ -270,6 +270,7 @@ jobs:
           node bindings/st-wasm/tests/fft_numerics.cjs "$module"
           node bindings/st-wasm/tests/autograd_sgd.cjs "$module"
           node bindings/st-wasm/tests/autograd_nonlinear.cjs "$module"
+          node bindings/st-wasm/tests/gelu_host.cjs "$module"
           node bindings/st-wasm/tests/cpu_dense_matmul.cjs "$module"
           node bindings/st-wasm/tests/autograd_prepacked.cjs "$module"
           node bindings/st-wasm/tests/layer_norm_autograd.cjs "$module"
@@ -468,6 +469,7 @@ jobs:
           python -P bindings/st-py/tests/test_native_binding_ownership.py
           python -P bindings/st-py/tests/test_tensor_out.py
           python -P bindings/st-py/tests/test_autograd_prepacked.py
+          python -P bindings/st-py/tests/test_gelu_host.py
           python -P tests/test_configure_pypi_token_secret.py
           python -P tests/test_llm_char_vae_context_guidance.py
           python -P tests/test_publish_pypi_wheels.py
