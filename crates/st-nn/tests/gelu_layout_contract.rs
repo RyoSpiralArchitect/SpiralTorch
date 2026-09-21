@@ -1,7 +1,9 @@
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::execution::{push_backend_policy, BackendPolicy};
-use st_nn::{Gelu, Module};
+use st_nn::{Gelu, Module, Parameter, Sequential};
 use st_tensor::{Layout, Tensor, TensorError, TensorUtilBackend};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 fn layouts(cols: usize) -> [Layout; 3] {
     [
@@ -175,6 +177,90 @@ fn checked_forward_scans_past_large_finite_inputs_before_arithmetic() {
                 ));
             }
         }
+    }
+}
+
+struct RetainInput(Rc<RefCell<Vec<Tensor>>>);
+
+impl Module for RetainInput {
+    fn forward(&self, input: &Tensor) -> st_tensor::PureResult<Tensor> {
+        self.0.borrow_mut().push(input.clone());
+        Ok(input.clone())
+    }
+
+    fn backward(&mut self, _input: &Tensor, seed: &Tensor) -> st_tensor::PureResult<Tensor> {
+        Ok(seed.clone())
+    }
+
+    fn visit_parameters(
+        &self,
+        _visitor: &mut dyn FnMut(&Parameter) -> st_tensor::PureResult<()>,
+    ) -> st_tensor::PureResult<()> {
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        _visitor: &mut dyn FnMut(&mut Parameter) -> st_tensor::PureResult<()>,
+    ) -> st_tensor::PureResult<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn sequential_keeps_custom_module_retained_inputs_intact() {
+    let saved = Rc::new(RefCell::new(Vec::new()));
+    let mut model = Sequential::new();
+    model.push(RetainInput(saved.clone()));
+    model.push(Gelu::new());
+    model.push(RetainInput(saved.clone()));
+    model.push(Gelu::new());
+    let input = Tensor::from_vec(2, 6, (0..12).map(|i| i as f32 / 4.0 - 1.5).collect()).unwrap();
+    let first = input.try_gelu().unwrap();
+    let second = first.try_gelu().unwrap();
+    assert_eq!(model.forward(&input).unwrap(), second);
+    assert_eq!(&*saved.borrow(), &[input.clone(), first.clone()]);
+    model
+        .backward(&input, &Tensor::ones(2, 6).unwrap())
+        .unwrap();
+    assert_eq!(
+        &*saved.borrow(),
+        &[input.clone(), first.clone(), input, first]
+    );
+}
+
+#[test]
+fn nested_sequential_forward_and_backward_match_independent_chain() {
+    let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+    let values: Vec<_> = (0..18).map(|i| i as f32 / 4.0 - 2.0).collect();
+    let seeds: Vec<_> = (0..18).map(|i| (i as f32 - 9.0) / 8.0).collect();
+    let input = Tensor::from_vec(3, 6, values.clone()).unwrap();
+    let seed = Tensor::from_vec(3, 6, seeds.clone()).unwrap();
+    let (mut expected, mut gradient) = (Vec::new(), Vec::new());
+    for (&x, &g) in values.iter().zip(&seeds) {
+        let (mut x, mut dx) = (f64::from(x), f64::from(g));
+        for _ in 0..4 {
+            let (y, derivative) = reference(x);
+            x = y;
+            dx *= derivative;
+        }
+        expected.push(x);
+        gradient.push(dx);
+    }
+    for layout in layouts(6) {
+        let input = input.to_layout(layout).unwrap();
+        let before = input.clone();
+        let mut inner = Sequential::new();
+        inner.push(Gelu::new());
+        inner.push(Gelu::new());
+        let mut model = Sequential::new();
+        model.push(Gelu::new());
+        model.push(inner);
+        model.push(Gelu::new());
+        check(&model.forward(&input).unwrap(), &expected);
+        check(&model.backward(&input, &seed).unwrap(), &gradient);
+        check(&model.forward(&input).unwrap(), &expected);
+        assert_eq!(input, before);
     }
 }
 
