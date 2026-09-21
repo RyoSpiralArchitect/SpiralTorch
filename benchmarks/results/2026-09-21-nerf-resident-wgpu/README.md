@@ -81,3 +81,28 @@ apply `source.patch` and overlay the `untracked/` files in an isolated checkout;
 then run the recorded command. This failure precedes the owning-output
 optimization and is not the final source. All development/preflight attempts,
 including successful intermediate runs, remain in the local raw manifest.
+
+## Review closure
+
+The external review found that the legacy compositor could hide a nonfinite
+sample behind a finite zero/partial integral. A real-GPU regression reproduced
+that failure, and an additional audit reproduced the analogous legacy sampler
+issue. Legacy entry points now poison invalid results with NaNs without changing
+their bindings; checked resident entry points retain their guard contract.
+The new tests cover first/later sample failures, nonfinite density/radiance/
+widths, negative widths, depth overflow, and partial sampling failure.
+
+The first fix passed native tests but the browser WGSL compiler rejected a NaN
+constant expression. Runtime-dependent quiet-NaN payloads fixed browser
+compilation without changing the valid resident computation. This failed browser
+attempt is retained alongside both negative native reproductions.
+
+The final clean implementation is
+`4dbb4352a3012602c9ce18f9a07dbfda992bd17d`. All 14 stages were rerun; the
+backend suite now passes 169 unit tests plus one shader integration test.
+All 36 native/browser/PyTorch outputs, hashes, errors and five-per-runtime guards
+match the original fixture exactly. `review-legacy/` contains the additional
+source snapshot, complete compact results, stage receipts, negative attempts and
+local payload hashes. Original result/source/log bytes are unchanged.
+`--source-root` checks this latest source snapshot; `--raw` checks both retained
+payload manifests. Neither option is a GPU/numerical replay.
