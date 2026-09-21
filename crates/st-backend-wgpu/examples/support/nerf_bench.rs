@@ -82,6 +82,15 @@ enum Connection {
     Staged,
     Separate,
     Single,
+    Packed,
+    Rows,
+}
+
+#[derive(Clone, Copy)]
+pub enum Comparison {
+    StagedDirect,
+    Submissions,
+    InputRows,
 }
 
 fn render(
@@ -93,6 +102,16 @@ fn render(
 ) -> Result<ResidentTensor> {
     let mode = RaySampling::Stratified { seed: SEED };
     match connection {
+        Connection::Packed | Connection::Rows => {
+            let samples = nerf.sample(rays, count, mode)?;
+            let input = samples.positions()?;
+            let field = if matches!(connection, Connection::Packed) {
+                graph.forward_tensor_packed(&input)?
+            } else {
+                graph.forward_tensor(&input)?
+            };
+            Ok(nerf.composite(&samples, &field)?)
+        }
         Connection::Single => Ok(nerf.render_graph_single_submission(rays, count, mode, graph)?),
         Connection::Separate => Ok(nerf.render_graph(rays, count, mode, graph)?),
         Connection::Staged => {
@@ -119,29 +138,32 @@ fn close(a: &[f32], b: &[f32]) -> Result<f64> {
     Ok(maximum)
 }
 
-pub async fn run(
-    runtime: WgpuRuntime,
-    now: fn() -> f64,
-    compare_submissions: bool,
-) -> Result<Value> {
+pub async fn run(runtime: WgpuRuntime, now: fn() -> f64, comparison: Comparison) -> Result<Value> {
     if runtime.adapter_info().device_type == wgpu::DeviceType::Cpu {
         return Err("software adapter is not real-GPU coverage".into());
     }
     let adapter = format!("{:?}", runtime.adapter_info());
-    let (connections, names, schema) = if compare_submissions {
-        (
+    let (connections, names, schema, comparison_name) = match comparison {
+        Comparison::Submissions => (
             [Connection::Separate, Connection::Single],
             ["separate", "single"],
             "spiraltorch.nerf_submit_bench.v1",
-        )
-    } else {
-        (
+            "separate_direct_vs_single_submission",
+        ),
+        Comparison::InputRows => (
+            [Connection::Packed, Connection::Rows],
+            ["packed", "rows"],
+            "spiraltorch.nerf_row_input_bench.v1",
+            "packed_input_vs_row_addressing",
+        ),
+        Comparison::StagedDirect => (
             [Connection::Staged, Connection::Separate],
             ["staged", "direct"],
             "spiraltorch.nerf_direct_bench.v1",
-        )
+            "staged_vs_direct",
+        ),
     };
-    let direct_render = if compare_submissions {
+    let direct_render = if matches!(comparison, Comparison::Submissions) {
         ResidentNerf::render_graph_single_submission
     } else {
         ResidentNerf::render_graph
@@ -277,7 +299,7 @@ pub async fn run(
         }
     }
     Ok(json!({"schema":schema,"status":"passed",
-        "comparison":if compare_submissions {"separate_direct_vs_single_submission"} else {"staged_vs_direct"},
+        "comparison":comparison_name,
         "guard_cases":guard_checks,
         "adapter":adapter,"warmup":WARMUP,"blocks":BLOCKS,"bursts":[1,4],"cases":cases,
         "kernel":"register_2x2","accumulation":"sequential",

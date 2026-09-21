@@ -83,7 +83,9 @@ impl ResidentGraph {
     /// output version. Only completely unobserved output storage is recycled,
     /// within a four-slot / 32 MiB per-graph output-data budget. Busy/oversized
     /// slots never cause aliasing, waiting or CPU fallback: allocate separately.
-    /// View packing, the graph and the output guard share one queue submission.
+    /// A first linear stage can directly address regular rows, including offsets
+    /// and row broadcasts. Other views are packed on GPU. Any packing, the graph
+    /// and the output guard share one queue submission.
     /// The graph and its final guard capture also share one compute pass.
     pub fn forward_tensor(
         &mut self,
@@ -92,6 +94,20 @@ impl ResidentGraph {
         self.forward_composed(
             |_| Ok((input.clone(), ())),
             |_, output, ()| Ok(output.clone()),
+        )
+    }
+
+    /// Same owning output/guard contract, with input packing forced when needed.
+    /// Packing stays inside the graph submission. This provides a reference
+    /// route for runtime-specific comparisons without an extra submission.
+    pub fn forward_tensor_packed(
+        &mut self,
+        input: &ResidentTensor,
+    ) -> Result<ResidentTensor, GraphInferenceError> {
+        self.forward_composed_with_input(
+            |_| Ok((input.clone(), ())),
+            |_, output, ()| Ok(output.clone()),
+            false,
         )
     }
 
@@ -105,6 +121,18 @@ impl ResidentGraph {
         &mut self,
         produce: impl FnOnce(&mut wgpu::CommandEncoder) -> Result<(ResidentTensor, S), E>,
         consume: impl FnOnce(&mut wgpu::CommandEncoder, &ResidentTensor, S) -> Result<O, E>,
+    ) -> Result<O, E>
+    where
+        E: From<GraphInferenceError>,
+    {
+        self.forward_composed_with_input(produce, consume, true)
+    }
+
+    fn forward_composed_with_input<S, O, E>(
+        &mut self,
+        produce: impl FnOnce(&mut wgpu::CommandEncoder) -> Result<(ResidentTensor, S), E>,
+        consume: impl FnOnce(&mut wgpu::CommandEncoder, &ResidentTensor, S) -> Result<O, E>,
+        allow_rows: bool,
     ) -> Result<O, E>
     where
         E: From<GraphInferenceError>,
@@ -126,34 +154,31 @@ impl ResidentGraph {
             .submitted_dispatches
             .checked_add(1)
             .ok_or(GraphInferenceError::CounterOverflow)?;
-        let packed = input
-            .contiguous_into(&mut encoder)
-            .map_err(GraphInferenceError::from)?;
+        let (input, rows) = self.prepare_direct_input(&input, &mut encoder, allow_rows)?;
         let slot = self.checkout_output()?;
         let singleton = self.nodes.len() == 1;
         // Keep replacement bindings local until the consumer has also encoded
         // successfully. An aborted composition must not cache a new binding
         // under the previous input_source key.
         let new_binding = if singleton {
-            Some(self.bind_boundary(0, packed.values(), slot.tensor.values()))
+            Some(self.bind_direct_input(&input, slot.tensor.values(), rows))
         } else if self.input_binding.is_none()
-            || !self
-                .input_source
-                .as_ref()
-                .is_some_and(|source| source.shares_storage_with(&packed))
+            || !self.input_source.as_ref().is_some_and(|source| {
+                source.shares_storage_with(&input) && source.layout() == input.layout()
+            })
         {
             #[cfg(test)]
             {
                 self.direct_stats.input_bindings += 1;
             }
-            Some(self.bind_boundary(0, packed.values(), &self.activations[1]))
+            Some(self.bind_direct_input(&input, &self.activations[1], rows))
         } else {
             None
         };
         let first = new_binding.as_ref().or(self.input_binding.as_ref());
         self.encode_graph(
             &mut encoder,
-            Some(&packed),
+            Some(&input),
             first,
             slot.last.as_ref(),
             Some((self.guard_capture.as_ref().unwrap(), &slot.guard)),
@@ -169,7 +194,7 @@ impl ResidentGraph {
         self.generation = generation;
         self.submitted_dispatches = dispatch;
         self.output_generation = Some(generation);
-        self.input_source = Some(packed);
+        self.input_source = Some(input);
         self.input_direct = true;
         self.resident_output = Some(slot.tensor.clone());
         if !singleton && new_binding.is_some() {

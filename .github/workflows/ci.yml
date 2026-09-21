@@ -33,6 +33,9 @@ jobs:
           python3 -I -B benchmarks/nerf-direct-graph/test_contract.py
           python3 -I -B benchmarks/nerf-single-submit/test_protocol.py
           python3 -I -B benchmarks/nerf-single-submit/test_archive.py
+          python3 -I -B benchmarks/nerf-row-input/test_compare.py
+          python3 -I -B benchmarks/nerf-row-input/test_evidence.py
+          python3 -I -B benchmarks/nerf-row-input/evidence.py verify benchmarks/results/2026-09-22-nerf-row-input
           python3 -I -B benchmarks/nerf-single-submit/archive.py verify benchmarks/results/2026-09-21-nerf-single-submit
           python3 -I -B benchmarks/nerf-direct-graph/archive.py verify benchmarks/results/2026-09-21-nerf-direct-graph
           python3 -I -B benchmarks/nerf-resident-wgpu/test_verify.py
@@ -230,6 +233,7 @@ jobs:
         run: |
           cargo test --locked --release -p st-backend-wgpu resident_training -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1
+          cargo test --locked --release -p st-backend-wgpu resident_graph:: -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
         env:

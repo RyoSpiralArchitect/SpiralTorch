@@ -18,6 +18,8 @@ use thiserror::Error;
 
 mod direct;
 use direct::OutputSlot;
+mod row_input;
+use row_input::RowInputCache;
 
 #[derive(Debug, Error)]
 pub enum GraphInferenceError {
@@ -55,6 +57,7 @@ enum Node {
 
 enum BoundaryBinding {
     Linear(DenseDispatch),
+    RowLinear(DenseDispatch),
     Pointwise(wgpu::BindGroup),
 }
 
@@ -68,6 +71,7 @@ pub struct ResidentGraph {
     empty_flags: wgpu::Buffer,
     nodes: Vec<Node>,
     kernel: Option<DenseKernel>,
+    row_input: RowInputCache,
     validation: wgpu::Buffer,
     readbacks: runtime::ReadbackPool,
     generation: u64,
@@ -93,6 +97,7 @@ impl ResidentGraph {
         kernel: MatmulKernel,
         accumulation: MatmulAccumulation,
     ) -> Result<Self, GraphInferenceError> {
+        let row_input = RowInputCache::new(tile, kernel, accumulation);
         let device = TensorDevice::new(runtime)?;
         let context = device.runtime().context();
         let gpu = context.device();
@@ -228,6 +233,7 @@ impl ResidentGraph {
             empty_flags,
             nodes,
             kernel,
+            row_input,
             validation,
             readbacks,
             generation: 0,
@@ -365,7 +371,9 @@ impl ResidentGraph {
         }
     }
 
-    /// One submission, no per-dispatch buffer/binding allocation or readback.
+    /// One submission, no steady-state buffer/binding allocation or readback.
+    /// The first transition from direct input may pack a strided view and copy
+    /// it into the stable workspace; subsequent dispatches reuse that workspace.
     /// Returns the dispatch counter, which advances even for later-rejected output.
     pub fn dispatch(&mut self) -> Result<u64, GraphInferenceError> {
         if self.generation == 0 {
@@ -377,18 +385,29 @@ impl ResidentGraph {
             .ok_or(GraphInferenceError::CounterOverflow)?;
         let context = self.device.runtime().context();
         let mut encoder = context.device().create_command_encoder(&Default::default());
+        let packed;
+        let input = if self.input_direct {
+            packed = self
+                .input_source
+                .as_ref()
+                .unwrap()
+                .contiguous_into(&mut encoder)?;
+            Some(&packed)
+        } else {
+            self.input_source.as_ref()
+        };
         if self.input_direct {
             // Switching back to the explicit stable-workspace API preserves its
             // current-input semantics. Only this transition needs a bridge copy.
             encoder.copy_buffer_to_buffer(
-                self.input_source.as_ref().unwrap().values(),
+                input.unwrap().values(),
                 0,
                 &self.activations[0],
                 0,
                 self.activations[0].size(),
             );
         }
-        self.encode_graph(&mut encoder, self.input_source.as_ref(), None, None, None);
+        self.encode_graph(&mut encoder, input, None, None, None);
         context.queue().submit(Some(encoder.finish()));
         self.output_generation = Some(self.generation);
         self.submitted_dispatches = dispatch;
@@ -431,6 +450,9 @@ impl ResidentGraph {
                     None
                 };
                 match (node, boundary) {
+                    (Node::Linear(_), Some(BoundaryBinding::RowLinear(binding))) => {
+                        self.row_input.encode_in_pass(&mut pass, binding)
+                    }
                     (Node::Linear(_), Some(BoundaryBinding::Linear(binding))) => self
                         .kernel
                         .as_ref()

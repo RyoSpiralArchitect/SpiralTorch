@@ -11,17 +11,25 @@ mod browser {
         #[wasm_bindgen(js_name=nerfBenchNow)]
         fn now() -> f64;
     }
+    async fn run(comparison: fixture::Comparison) -> fixture::Result<String> {
+        let runtime =
+            st_backend_wgpu::runtime::WgpuRuntime::request_headless("nerf.bench.browser").await?;
+        Ok(fixture::run(runtime, now, comparison).await?.to_string())
+    }
     #[wasm_bindgen]
     pub async fn run_resident_nerf_bench(compare_submissions: bool) -> Result<String, JsValue> {
-        async fn run(compare_submissions: bool) -> fixture::Result<String> {
-            let runtime =
-                st_backend_wgpu::runtime::WgpuRuntime::request_headless("nerf.bench.browser")
-                    .await?;
-            Ok(fixture::run(runtime, now, compare_submissions)
-                .await?
-                .to_string())
-        }
-        run(compare_submissions)
+        run(if compare_submissions {
+            fixture::Comparison::Submissions
+        } else {
+            fixture::Comparison::StagedDirect
+        })
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[wasm_bindgen]
+    pub async fn run_resident_nerf_row_input_bench() -> Result<String, JsValue> {
+        run(fixture::Comparison::InputRows)
             .await
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }

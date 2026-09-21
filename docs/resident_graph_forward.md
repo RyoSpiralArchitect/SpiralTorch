@@ -161,9 +161,22 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
 - `set_input_tensor` accepts exact logical N-D shapes on the same device and
   queue. Narrow, permuted and broadcast views are packed on-device when needed,
   then copied to stable graph input storage. This is not zero-copy admission.
+- `forward_tensor` directly reads affine row views when the first stage is
+  Linear: unit-stride columns, one flattened leading-axis row stride, and an
+  optional offset. Row broadcasts are allowed; singleton strides do not matter.
+  Rust's shared `NdLayout::row_major_rows()` / `RowMajorRows` contract checks
+  addressing without granting mutable/nonoverlapping access. Irregular leading
+  axes, strided columns and pointwise-first graphs still pack on-device.
+  Contiguous offset-zero inputs retain the ordinary dense shader. The private
+  row-input shader preserves the existing host/training uniform ABI and guards.
+  Rust's `forward_tensor_packed` forces the packing reference path within the
+  same submission; it is not a new Python/JavaScript control option.
 - Parameters, bindings and activation buffers are prepared once. `dispatch`
-  uses one command submission, with no per-dispatch buffer/binding allocation
-  or host readback. Intermediate activation buffers are shared between stages.
+  uses one command submission, with no steady-state buffer/binding allocation
+  or host readback. The first `dispatch` after a direct forward bridges its
+  current input into stable storage, packing a strided view if needed. Row
+  pipelines/uniforms are lazy and cached; input binding keys include both
+  storage identity and exact layout. Intermediate activations are shared.
   All nodes execute in one compute pass. Dense and pointwise nodes write their
   own indexed words directly into one shared validation buffer. One whole-guard
   clear replaces per-pointwise clears/copies, without changing logical

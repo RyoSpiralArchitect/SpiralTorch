@@ -25,6 +25,32 @@ pub struct NdLayout {
     len: usize,
 }
 
+/// Read-only last-axis rows with unit column stride. Leading axes flatten in
+/// logical order: address = offset + row * row_stride + column. Row stride may
+/// be zero for broadcast rows. This does not grant mutable/nonoverlapping access.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowMajorRows {
+    rows: usize,
+    cols: usize,
+    row_stride: usize,
+    offset: usize,
+}
+
+impl RowMajorRows {
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
+    pub fn row_stride(&self) -> usize {
+        self.row_stride
+    }
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+}
+
 impl NdLayout {
     /// A scalar has shape `[]` and one element; zero-sized axes are allowed.
     pub fn contiguous(shape: &[usize]) -> Result<Self, NdLayoutError> {
@@ -75,6 +101,41 @@ impl NdLayout {
             expected *= self.shape[axis];
         }
         true
+    }
+
+    /// Describe nonempty last-axis rows without packing. Return None for a
+    /// scalar, strided columns, or non-affine flattened leading axes. Singleton
+    /// strides are unobservable; offsets and broadcast rows are preserved.
+    pub fn row_major_rows(&self) -> Option<RowMajorRows> {
+        let cols = *self.shape.last()?;
+        if self.is_empty() || (cols > 1 && *self.strides.last()? != 1) {
+            return None;
+        }
+        let mut rows = 1usize;
+        let mut row_stride: Option<usize> = None;
+        for axis in (0..self.rank() - 1).rev() {
+            let size = self.shape[axis];
+            if size > 1 {
+                if let Some(stride) = row_stride {
+                    if self.strides[axis] != stride.checked_mul(rows)? {
+                        return None;
+                    }
+                } else {
+                    row_stride = Some(self.strides[axis]);
+                }
+            }
+            rows = rows.checked_mul(size)?;
+        }
+        let row_stride = row_stride.unwrap_or(cols);
+        self.offset
+            .checked_add((rows - 1).checked_mul(row_stride)?)?
+            .checked_add(cols)?;
+        Some(RowMajorRows {
+            rows,
+            cols,
+            row_stride,
+            offset: self.offset,
+        })
     }
 
     pub fn permute(&self, axes: &[usize]) -> Result<Self, NdLayoutError> {
@@ -199,6 +260,99 @@ pub fn broadcast_shape(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdLay
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_rows(layout: &NdLayout) {
+        let actual = layout.row_major_rows();
+        let expected = layout
+            .shape()
+            .last()
+            .copied()
+            .filter(|_| !layout.is_empty())
+            .and_then(|cols| {
+                let rows = layout.len() / cols;
+                let stride = if rows > 1 {
+                    layout.storage_index(cols)?.checked_sub(layout.offset())?
+                } else {
+                    cols
+                };
+                (0..layout.len())
+                    .all(|i| {
+                        layout.storage_index(i)
+                            == Some(layout.offset() + (i / cols) * stride + i % cols)
+                    })
+                    .then_some((rows, cols, stride, layout.offset()))
+            });
+        assert_eq!(
+            actual.map(|r| (r.rows(), r.cols(), r.row_stride(), r.offset())),
+            expected,
+            "{layout:?}"
+        );
+    }
+
+    #[test]
+    fn row_addressing_matches_every_element_of_permuted_and_sliced_small_layouts() {
+        for a in 0..=3 {
+            for b in 0..=3 {
+                for c in 0..=3 {
+                    let base = NdLayout::contiguous(&[a, b, c]).unwrap();
+                    for axes in [
+                        [0, 1, 2],
+                        [0, 2, 1],
+                        [1, 0, 2],
+                        [1, 2, 0],
+                        [2, 0, 1],
+                        [2, 1, 0],
+                    ] {
+                        let permuted = base.permute(&axes).unwrap();
+                        check_rows(&permuted);
+                        for axis in 0..3 {
+                            for start in 0..=permuted.shape()[axis] {
+                                for length in 0..=permuted.shape()[axis] - start {
+                                    check_rows(&permuted.narrow(axis, start, length).unwrap());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn row_addressing_handles_broadcast_singletons_offsets_and_overflow() {
+        for shape in [&[3][..], &[1, 3], &[2, 1, 3], &[1, 2, 3], &[1, 1, 1]] {
+            let base = NdLayout::contiguous(shape).unwrap();
+            check_rows(&base);
+            for target in [&[2, 2, 3][..], &[4, 2, 1, 3], &[2, 3, 1], &[2, 2, 2]] {
+                if let Ok(view) = base.broadcast_to(target) {
+                    check_rows(&view);
+                }
+            }
+        }
+        assert!(NdLayout::contiguous(&[])
+            .unwrap()
+            .row_major_rows()
+            .is_none());
+        let positions = NdLayout::contiguous(&[65, 64, 4])
+            .unwrap()
+            .narrow(2, 0, 3)
+            .unwrap();
+        assert_eq!(positions.row_major_rows().unwrap().row_stride(), 4);
+        let offset = positions.narrow(0, 1, 64).unwrap();
+        assert_eq!(offset.row_major_rows().unwrap().offset(), 256);
+        assert!(positions
+            .narrow(1, 1, 63)
+            .unwrap()
+            .row_major_rows()
+            .is_none());
+        let overflowing = NdLayout {
+            shape: vec![2, 3],
+            strides: vec![usize::MAX, 1],
+            offset: 1,
+            len: 6,
+        };
+        assert!(overflowing.row_major_rows().is_none());
+    }
 
     #[test]
     fn broadcasting_uses_zero_strides_and_preserves_storage_bounds() {

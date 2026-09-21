@@ -50,7 +50,7 @@ pub use nd::{
     PointwiseExecution, PointwiseStep,
 };
 pub use st_kernel_contracts::elementwise::ElementwiseOp;
-pub use st_kernel_contracts::layout::{NdLayout, NdLayoutError};
+pub use st_kernel_contracts::layout::{NdLayout, NdLayoutError, RowMajorRows};
 
 #[cfg(feature = "wgpu_frac")]
 pub use backend::wgpu_frac;
