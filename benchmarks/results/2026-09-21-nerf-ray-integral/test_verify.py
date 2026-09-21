@@ -2,8 +2,11 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 import unittest
+
+sys.dont_write_bytecode = True
 
 spec = importlib.util.spec_from_file_location("archive_verify", Path(__file__).with_name("verify.py"))
 module = importlib.util.module_from_spec(spec)
@@ -15,7 +18,11 @@ class ArchiveTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "archive"
-        shutil.copytree(Path(__file__).parent, self.root)
+        shutil.copytree(
+            Path(__file__).parent,
+            self.root,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
 
     def rehash(self):
         manifest = self.root / "manifest.json"

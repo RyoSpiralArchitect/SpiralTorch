@@ -3,7 +3,10 @@ import importlib.util
 import math
 from pathlib import Path
 import struct
+import sys
 import unittest
+
+sys.dont_write_bytecode = True
 
 spec = importlib.util.spec_from_file_location("analyze", Path(__file__).with_name("analyze.py"))
 analyze = importlib.util.module_from_spec(spec)

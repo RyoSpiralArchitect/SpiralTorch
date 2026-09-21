@@ -112,6 +112,17 @@ An attempted offline lockfile refresh was also rejected by the resolver; no
 dependency refresh was adopted. Builds use the previously admitted lockfile
 versions, with only the fixture package name changed.
 
+External review also reproduced a normal-Python invocation failure: importing
+the verifier wrote bytecode into the archive before the test copied it. The
+tests now suppress helper bytecode writes and omit pre-existing Python caches
+from their isolated test snapshots. The archive verifier itself remains strict
+about unexpected files. `review-pycache` keeps before/after receipts for plain
+test runs and unittest discovery with an injected inert cache. All three final
+invocation checks pass without `-B`; the archive tests still run eleven cases
+and the numeric-validator tests eight. These isolated checks reference the
+pre-receipt manifest and exact test/helper hashes; the final archive was verified
+again after adding their receipts. No runtime code or measurement was changed.
+
 Separate WGSL sampling/compositing pipelines are not called by this trainer.
 Their parity, browser NeRF API exposure, GPU residency, training throughput,
 real-scene image quality and physical-distance reparameterization are not
