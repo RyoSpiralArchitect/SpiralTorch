@@ -43,6 +43,9 @@ fn main() {
     let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
     let mut cases = Vec::new();
     for (rows, cols) in [
+        (1, 1),
+        (1, 8),
+        (1, 32),
         (1, 64),
         (8, 3072),
         (32, 3072),

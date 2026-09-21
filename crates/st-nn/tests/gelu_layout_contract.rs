@@ -88,6 +88,96 @@ fn checked_forward_preserves_error_precedence_and_signed_zero() {
     );
 }
 
+// Snapshot the checked scalar evaluation order, independent of the implementation
+// under test. Wide exponent coverage catches changes hidden by an f64 tolerance.
+fn checked_scalar_bits(value: f32) -> u32 {
+    const C: f32 = std::f32::consts::FRAC_2_SQRT_PI * std::f32::consts::FRAC_1_SQRT_2;
+    let square = value * value;
+    let cubic = square * value;
+    let arg = value + 0.044715 * cubic;
+    let inner = C * arg;
+    let tanh = inner.tanh();
+    let output = 0.5 * value * (1.0 + tanh);
+    assert!([square, cubic, arg, inner, tanh, output]
+        .iter()
+        .all(|x| x.is_finite()));
+    output.to_bits()
+}
+
+#[test]
+fn checked_forward_matches_scalar_bits_across_exponents_and_bounds() {
+    let bound = 1e12f32;
+    let mut values = vec![
+        -0.0,
+        0.0,
+        f32::from_bits(1),
+        -f32::from_bits(1),
+        f32::MIN_POSITIVE,
+        -f32::MIN_POSITIVE,
+    ];
+    for bits in [bound.to_bits() - 1, bound.to_bits()] {
+        values.extend([f32::from_bits(bits), -f32::from_bits(bits)]);
+    }
+    let mut state = 0x6a09_e667u32;
+    while values.len() < 12_288 {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        let value = f32::from_bits(state);
+        if value.is_finite() && value.abs() <= bound {
+            values.push(value);
+        }
+    }
+    // Test the entirely bounded batch separately: an outlier must not hide a
+    // broken fast lane by sending every element through the fallback.
+    for outliers in [false, true] {
+        let mut values = values.clone();
+        if outliers {
+            values.extend([
+                f32::from_bits(bound.to_bits() + 1),
+                -f32::from_bits(bound.to_bits() + 1),
+                2e12,
+                -2e12,
+                5e12,
+                -5e12,
+            ]);
+        }
+        let expected: Vec<_> = values.iter().map(|&x| checked_scalar_bits(x)).collect();
+        let input = Tensor::from_vec(values.len() / 6, 6, values).unwrap();
+        for layout in layouts(6) {
+            let input = input.to_layout(layout).unwrap();
+            for output in [
+                input.try_gelu().unwrap(),
+                Gelu::new().forward(&input).unwrap(),
+            ] {
+                assert_eq!(output.layout(), Layout::RowMajor);
+                assert_eq!(output.shape(), input.shape());
+                let bits: Vec<_> = output.data().iter().map(|x| x.to_bits()).collect();
+                assert_eq!(bits, expected, "layout={layout:?}, outliers={outliers}");
+            }
+        }
+    }
+}
+
+#[test]
+fn checked_forward_scans_past_large_finite_inputs_before_arithmetic() {
+    for nonfinite in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let input = Tensor::from_vec(2, 3, vec![1.0, f32::MAX, 2.0, 1e14, 0.0, nonfinite]).unwrap();
+        for layout in layouts(3) {
+            let input = input.to_layout(layout).unwrap();
+            for result in [input.try_gelu(), Gelu::new().forward(&input)] {
+                assert!(matches!(
+                    result,
+                    Err(TensorError::NonFiniteValue {
+                        label: "gelu_input",
+                        ..
+                    })
+                ));
+            }
+        }
+    }
+}
+
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 #[test]
 fn strict_wgpu_backward_pairs_logical_layouts() {
