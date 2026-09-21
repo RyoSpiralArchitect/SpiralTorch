@@ -25,18 +25,23 @@ def setup(meta, gradients=False):
     directions = torch.tensor(meta["directions"], dtype=torch.float32).reshape(batch, 3)
     bounds = torch.tensor(meta["bounds"], dtype=torch.float32).reshape(batch, 2).double()
     targets = torch.tensor(meta["targets"], dtype=torch.float32).reshape(batch, 3)
+    frequencies = {
+        bands: (2.0 ** torch.arange(bands, dtype=torch.float32))[None, :, None]
+        for bands in [meta["position_bands"], meta["direction_bands"]]
+    }
+    midpoints = torch.arange(samples, dtype=torch.float64)[None, :] + 0.5
 
     def encode(x, bands, residual):
-        phases = x[:, None, :] * (2.0 ** torch.arange(bands, dtype=torch.float32))[None, :, None]
+        phases = x[:, None, :] * frequencies[bands]
         features = torch.stack((phases.sin(), phases.cos()), dim=-1).flatten(1)
         return torch.cat((x, features), dim=1) if residual else features
 
     def linear(x, name):
         return x @ params[name + "::weight"] + params[name + "::bias"]
 
-    def render():
+    def render(output_f32=False):
         width = (bounds[:, 1] - bounds[:, 0]) / samples
-        t = bounds[:, :1] + (torch.arange(samples, dtype=torch.float64)[None, :] + 0.5) * width[:, None]
+        t = bounds[:, :1] + midpoints * width[:, None]
         positions = (origins.double()[:, None, :] + directions.double()[:, None, :] * t[:, :, None]).float().reshape(-1, 3)
         dirs = directions[:, None, :].expand(batch, samples, 3).reshape(-1, 3)
         trunk = linear(encode(positions, meta["position_bands"], True), "trunk_fc0").relu()
@@ -51,7 +56,7 @@ def setup(meta, gradients=False):
         weights = (-exclusive).exp() * -(-tau).expm1()
         color = (weights[:, :, None] * rgb).sum(dim=1)
         trans = (-tau.sum(dim=1)).exp().mean()
-        return color, trans
+        return color.float() if output_f32 else color, trans
 
     return render, params, targets
 
@@ -62,14 +67,14 @@ for case in source["cases"]:
     render, _, _ = setup(case["metadata"])
     with torch.no_grad():
         for _ in range(5):
-            render()
+            render(output_f32=True)
         elapsed = []
         for _ in range(9):
             start = time.perf_counter_ns()
             for _ in range(4):
-                render()
+                render(output_f32=True)
             elapsed.append((time.perf_counter_ns() - start) / 4)
-        colors, _ = render()
+        colors, _ = render(output_f32=True)
     actual = colors.float().flatten().tolist()
     assert len(actual) == len(case["values"])
     max_abs = max(abs(a - b) for a, b in zip(actual, case["values"]))

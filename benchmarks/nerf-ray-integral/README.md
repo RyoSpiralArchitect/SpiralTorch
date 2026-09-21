@@ -33,7 +33,9 @@ renders; native/WASM timing includes result destruction, but excludes value
 export, parameter setup and JSON serialization. The WASM timing includes its
 JS call/free boundary. PyTorch is a vectorized eager CPU control, not its fastest
 possible implementation, and omits Rust's input validation. Both use f32 field
-arithmetic and f64 ray integration. Do not label timing ratios a generic backend
+arithmetic and f64 ray integration. The PyTorch control caches constant frequency
+tables and midpoint indices during setup, and its timed output conversion to
+f32 matches the Rust result dtype. Do not label timing ratios a generic backend
 or quality win. The historical half-interval renderer is numerically invalid
 for the full-interval task, so its speed is not a valid correctness-matched
 baseline.
