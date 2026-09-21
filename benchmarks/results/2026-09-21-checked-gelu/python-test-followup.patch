@@ -1,0 +1,13 @@
+diff --git a/bindings/st-py/tests/test_gelu_host.py b/bindings/st-py/tests/test_gelu_host.py
+index a3516253..279d3dd5 100644
+--- a/bindings/st-py/tests/test_gelu_host.py
++++ b/bindings/st-py/tests/test_gelu_host.py
+@@ -28,7 +28,7 @@ class GeluHostTests(unittest.TestCase):
+     def test_checked_forward_retains_errors_and_signed_zero(self):
+         for values, label in [([3e38, float("nan")], "gelu_input"),
+                               ([3e38], "gelu_square"), ([1e14], "gelu_cubic")]:
+-            with self.assertRaisesRegex(RuntimeError, label):
++            with self.assertRaisesRegex(ValueError, label):
+                 st.nn.Gelu()(st.Tensor(1, len(values), values))
+         result = st.nn.Gelu()(st.Tensor(1, 2, [-0.0, 0.0])).tolist()[0]
+         self.assertEqual([math.copysign(1, x) for x in result], [-1, 1])

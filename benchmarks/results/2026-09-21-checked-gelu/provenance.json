@@ -1,0 +1,57 @@
+{
+  "baseline_source": "9efb5bf58bdb14472a6fb709d16f70e1d9868ad9",
+  "candidate_source": "1308592db0dce79f4ff5c078a10b240475f8f06e",
+  "validated_source": "8a75683b83238468c0f66ee80f095b355f6feae6",
+  "products": {
+    "baseline/cpu_gelu": "850a79f08ea81f38cbf2aec80a80f4dade085011f361b69cf5c052e0899c8548",
+    "baseline/cpu_nn_layout": "9e84ba1a3c1a095a84bd38c10b81d3358fabd4e4169d1e31eb350b50718284f7",
+    "candidate/cpu_gelu": "0adb84bc31ca8465d1408cc29289e973ad720a12a123877909b762131a52d450",
+    "candidate/cpu_nn_layout": "20f3a9699a473bfcead6d9e30b5c062a4bf6322d0ead2e1920d571c63ea1c52e",
+    "final/python-cpu.dylib": "83db16849f98a94b42a84134bdf2513eac51b20e7274659dd0ab735e391e0d0f",
+    "final/wasm/spiraltorch_wasm.js": "bd2f83bd87143ebd0fb00161689f5fae963902d1b3443ae92f25346f8927ea1b",
+    "final/wasm/spiraltorch_wasm_bg.wasm": "7df5a70e3463a3211df21a53571f867ce3bab6aae63208d32a5072cd0f2a1f87"
+  },
+  "raw_root": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-gelu-layout-20260921",
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "toolchain_observed_at_publication": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n",
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown",
+  "numerical_replay": false,
+  "raw_gelu_files": [
+    {
+      "path": "gelu/baseline-a.raw.json",
+      "bytes": 4308337,
+      "sha256": "f5977cdffae1a3d4270675a1c3b5eac0d0199b94d2af4071a9a3ca05e59f22cb"
+    },
+    {
+      "path": "gelu/baseline-b.raw.json",
+      "bytes": 4308350,
+      "sha256": "3d7c57a5478dc90485397af49fc697708ead6da694034d38e04540b498d117a2"
+    },
+    {
+      "path": "gelu/candidate-a.raw.json",
+      "bytes": 4308333,
+      "sha256": "e83790fdfdd33d27326f16eadfe7f4fab6118afb6543e6a69849b8a855ff7130"
+    },
+    {
+      "path": "gelu/candidate-b.raw.json",
+      "bytes": 4308359,
+      "sha256": "a3db5d023de9625d28c763c90567b97b694b50e3d840c2e0699f4db048702e8a"
+    },
+    {
+      "path": "gelu/warm-baseline.raw.json",
+      "bytes": 4308414,
+      "sha256": "e55daf389fbce2f6a44fb54b0c707657f64eb2df3d90b3bb4ad88003cdfd02f9"
+    },
+    {
+      "path": "gelu/warm-candidate.raw.json",
+      "bytes": 4308377,
+      "sha256": "3468e2178e5735b225606029933bc5ecfbaa6c6fa85ad79e672a1b101bdd7e23"
+    }
+  ],
+  "ci_followup": {
+    "parent": "8a75683b83238468c0f66ee80f095b355f6feae6",
+    "source": "4cbf27b421bb5d0b47cfbb556cff9e2354a31985",
+    "sha256": "f87bce5fd21f63df5fc65aab8fce4021f65e801066610140f16487af33a3662a"
+  }
+}

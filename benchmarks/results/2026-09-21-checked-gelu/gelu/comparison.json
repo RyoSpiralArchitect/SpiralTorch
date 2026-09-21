@@ -1,0 +1,332 @@
+{
+  "comparisons": [
+    {
+      "condition": [
+        1,
+        64,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.1194817658349328,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 592,
+      "candidate_bytes": 336
+    },
+    {
+      "condition": [
+        1,
+        64,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.1401824291886702,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 592,
+      "candidate_bytes": 336
+    },
+    {
+      "condition": [
+        1,
+        64,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0357142857142858,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 592,
+      "candidate_bytes": 336
+    },
+    {
+      "condition": [
+        1,
+        64,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0352907961603615,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 592,
+      "candidate_bytes": 336
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.0425970526315789,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 196688,
+      "candidate_bytes": 98384
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.037473154362416,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 196688,
+      "candidate_bytes": 98384
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0063963365505744,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 196688,
+      "candidate_bytes": 98384
+    },
+    {
+      "condition": [
+        8,
+        3072,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.01205853954566,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 196688,
+      "candidate_bytes": 98384
+    },
+    {
+      "condition": [
+        17,
+        195,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.0323716663324645,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 26600,
+      "candidate_bytes": 13340
+    },
+    {
+      "condition": [
+        17,
+        195,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.0503133461298892,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 26600,
+      "candidate_bytes": 13340
+    },
+    {
+      "condition": [
+        17,
+        195,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0025936659219963,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 26600,
+      "candidate_bytes": 13340
+    },
+    {
+      "condition": [
+        17,
+        195,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0104590111353606,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 26600,
+      "candidate_bytes": 13340
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.0585931294593518,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 786512,
+      "candidate_bytes": 393296
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.0584206438483168,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 786512,
+      "candidate_bytes": 393296
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        true
+      ],
+      "round": "a",
+      "ratio": 0.9973310207267366,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 786512,
+      "candidate_bytes": 393296
+    },
+    {
+      "condition": [
+        32,
+        3072,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0042971262665275,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 786512,
+      "candidate_bytes": 393296
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.0433180677576857,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 524368,
+      "candidate_bytes": 262224
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.0603147250138008,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 524368,
+      "candidate_bytes": 262224
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        true
+      ],
+      "round": "a",
+      "ratio": 0.9990023127888168,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 524368,
+      "candidate_bytes": 262224
+    },
+    {
+      "condition": [
+        64,
+        1024,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0075899868675187,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 524368,
+      "candidate_bytes": 262224
+    },
+    {
+      "condition": [
+        65,
+        97,
+        false
+      ],
+      "round": "a",
+      "ratio": 1.0374713145381558,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 50520,
+      "candidate_bytes": 25300
+    },
+    {
+      "condition": [
+        65,
+        97,
+        false
+      ],
+      "round": "b",
+      "ratio": 1.0651431485295992,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 50520,
+      "candidate_bytes": 25300
+    },
+    {
+      "condition": [
+        65,
+        97,
+        true
+      ],
+      "round": "a",
+      "ratio": 1.0027409776153495,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 50520,
+      "candidate_bytes": 25300
+    },
+    {
+      "condition": [
+        65,
+        97,
+        true
+      ],
+      "round": "b",
+      "ratio": 1.0087530497468065,
+      "baseline_allocations": 4,
+      "candidate_allocations": 3,
+      "baseline_bytes": 50520,
+      "candidate_bytes": 25300
+    }
+  ],
+  "groups": {
+    "False": {
+      "geomean": 1.0616675784441425,
+      "min": 1.0323716663324645,
+      "max": 1.1401824291886702,
+      "favorable": 12,
+      "count": 12
+    },
+    "True": {
+      "geomean": 1.0101142871307116,
+      "min": 0.9973310207267366,
+      "max": 1.0357142857142858,
+      "favorable": 10,
+      "count": 12
+    }
+  }
+}

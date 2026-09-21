@@ -85,10 +85,21 @@ regression was measured. Column-major transpose packing no longer creates a
 temporary Tensor. Faer entry points now reject malformed lengths/overflow before
 mutation and construct safe slice views instead of unchecked pointer views.
 
+The [checked GELU follow-up](../../benchmarks/results/2026-09-21-checked-gelu/README.md)
+reproduces and fixes host forward/VJP layout errors, then moves checked Module
+forward into `Tensor::try_gelu`. Direct aligned output construction removes one
+allocation and full-buffer copy in both CPU directions. The scalar arithmetic,
+finite/error policy and runtime routing remain unchanged. Strict WGPU handoff now
+receives logical input/seed pairs, including column-major and Chimera storage.
+The fixed GELU grid improves 1.062x forward and 1.010x VJP, but warmed MLP and Torch
+comparisons remain mixed. Local Python/WASM/WGPU checks and all negative results
+are published separately from the timing claims.
+
 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
    steps. The fixed harness now covers the first two, not training throughput.
-   Profile GELU and explicit ordinary-versus-prepacked Faer execution before
-   changing Auto policy or the packed representation. The earlier 18.41x/11.72x
+   Profile the remaining checked GELU/transcendental cost and explicit
+   ordinary-versus-prepacked Faer execution before changing Auto policy or the
+   packed representation. The earlier 18.41x/11.72x
    PyTorch gap applies to a different, explicit ordinary-kernel grid, not to all
    high-level NN calls; neither Node timing nor packing wins prove browser/FT gains.
 2. `st-core/src/util/rope_lru.rs`: epsilon-based equality and bitwise hashing do

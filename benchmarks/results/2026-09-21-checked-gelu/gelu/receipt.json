@@ -1,0 +1,50 @@
+{
+  "workers": {
+    "baseline": "850a79f08ea81f38cbf2aec80a80f4dade085011f361b69cf5c052e0899c8548",
+    "candidate": "0adb84bc31ca8465d1408cc29289e973ad720a12a123877909b762131a52d450"
+  },
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "lane": "baseline",
+      "exit_code": 0,
+      "seconds": 1.8486592499975814,
+      "raw_sha256": "e55daf389fbce2f6a44fb54b0c707657f64eb2df3d90b3bb4ad88003cdfd02f9"
+    },
+    {
+      "name": "warm-candidate",
+      "lane": "candidate",
+      "exit_code": 0,
+      "seconds": 0.8362889580021147,
+      "raw_sha256": "3468e2178e5735b225606029933bc5ecfbaa6c6fa85ad79e672a1b101bdd7e23"
+    },
+    {
+      "name": "baseline-a",
+      "lane": "baseline",
+      "exit_code": 0,
+      "seconds": 0.2342035420006141,
+      "raw_sha256": "f5977cdffae1a3d4270675a1c3b5eac0d0199b94d2af4071a9a3ca05e59f22cb"
+    },
+    {
+      "name": "candidate-a",
+      "lane": "candidate",
+      "exit_code": 0,
+      "seconds": 0.2325605420046486,
+      "raw_sha256": "e83790fdfdd33d27326f16eadfe7f4fab6118afb6543e6a69849b8a855ff7130"
+    },
+    {
+      "name": "candidate-b",
+      "lane": "candidate",
+      "exit_code": 0,
+      "seconds": 0.23435158299980685,
+      "raw_sha256": "a3db5d023de9625d28c763c90567b97b694b50e3d840c2e0699f4db048702e8a"
+    },
+    {
+      "name": "baseline-b",
+      "lane": "baseline",
+      "exit_code": 0,
+      "seconds": 0.23826729199208785,
+      "raw_sha256": "3d7c57a5478dc90485397af49fc697708ead6da694034d38e04540b498d117a2"
+    }
+  ]
+}
