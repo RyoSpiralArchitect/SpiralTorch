@@ -1,0 +1,291 @@
+error[E0599]: no associated function or constant named `new` found for struct `BackendPolicy` in the current scope
+   --> /Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/nerf_ray_integral.rs:68:54
+    |
+ 68 |     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+    |                                                      ^^^ associated function or constant not found in `BackendPolicy`
+    |
+note: if you're trying to build a new `BackendPolicy` consider using one of the following associated functions:
+      BackendPolicy::from_device_caps
+      BackendPolicy::from_device_caps_with_config
+      BackendPolicy::explicit
+      BackendPolicy::explicit_with_config
+      BackendPolicy::try_from_runtime_plan
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution_plan.rs:444:5
+    |
+444 |       pub fn from_device_caps(caps: DeviceCaps) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+449 |       pub fn from_device_caps_with_config(caps: DeviceCaps, config: ExecutionConfig) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+474 | /     pub fn explicit(
+475 | |         caps: DeviceCaps,
+476 | |         matmul_backend: MatmulBackend,
+477 | |         prepacked_matmul_backend: MatmulBackend,
+...   |
+480 | |         softmax_backend: SoftmaxBackend,
+481 | |     ) -> Self {
+    | |_____________^
+...
+495 | /     pub fn explicit_with_config(
+496 | |         caps: DeviceCaps,
+497 | |         config: ExecutionConfig,
+498 | |         matmul_backend: MatmulBackend,
+...   |
+502 | |         softmax_backend: SoftmaxBackend,
+503 | |     ) -> Self {
+    | |_____________^
+...
+524 | /     pub fn try_from_runtime_plan(
+525 | |         plan: &RuntimeExecutionPlanPayload,
+526 | |     ) -> Result<Self, RuntimeExecutionPlanError> {
+    | |________________________________________________^
+help: there is a method `ne` with a similar name
+    |
+ 68 -     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+ 68 +     let _policy = push_backend_policy(BackendPolicy::ne(DeviceCaps::cpu()));
+    |
+
+error[E0599]: no associated function or constant named `new` found for struct `BackendPolicy` in the current scope
+   --> /Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/nerf_ray_integral.rs:90:54
+    |
+ 90 |     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+    |                                                      ^^^ associated function or constant not found in `BackendPolicy`
+    |
+note: if you're trying to build a new `BackendPolicy` consider using one of the following associated functions:
+      BackendPolicy::from_device_caps
+      BackendPolicy::from_device_caps_with_config
+      BackendPolicy::explicit
+      BackendPolicy::explicit_with_config
+      BackendPolicy::try_from_runtime_plan
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution_plan.rs:444:5
+    |
+444 |       pub fn from_device_caps(caps: DeviceCaps) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+449 |       pub fn from_device_caps_with_config(caps: DeviceCaps, config: ExecutionConfig) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+474 | /     pub fn explicit(
+475 | |         caps: DeviceCaps,
+476 | |         matmul_backend: MatmulBackend,
+477 | |         prepacked_matmul_backend: MatmulBackend,
+...   |
+480 | |         softmax_backend: SoftmaxBackend,
+481 | |     ) -> Self {
+    | |_____________^
+...
+495 | /     pub fn explicit_with_config(
+496 | |         caps: DeviceCaps,
+497 | |         config: ExecutionConfig,
+498 | |         matmul_backend: MatmulBackend,
+...   |
+502 | |         softmax_backend: SoftmaxBackend,
+503 | |     ) -> Self {
+    | |_____________^
+...
+524 | /     pub fn try_from_runtime_plan(
+525 | |         plan: &RuntimeExecutionPlanPayload,
+526 | |     ) -> Result<Self, RuntimeExecutionPlanError> {
+    | |________________________________________________^
+help: there is a method `ne` with a similar name
+    |
+ 90 -     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+ 90 +     let _policy = push_backend_policy(BackendPolicy::ne(DeviceCaps::cpu()));
+    |
+
+error[E0599]: no associated function or constant named `new` found for struct `BackendPolicy` in the current scope
+   --> /Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/nerf_ray_integral.rs:106:54
+    |
+106 |     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+    |                                                      ^^^ associated function or constant not found in `BackendPolicy`
+    |
+note: if you're trying to build a new `BackendPolicy` consider using one of the following associated functions:
+      BackendPolicy::from_device_caps
+      BackendPolicy::from_device_caps_with_config
+      BackendPolicy::explicit
+      BackendPolicy::explicit_with_config
+      BackendPolicy::try_from_runtime_plan
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution_plan.rs:444:5
+    |
+444 |       pub fn from_device_caps(caps: DeviceCaps) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+449 |       pub fn from_device_caps_with_config(caps: DeviceCaps, config: ExecutionConfig) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+474 | /     pub fn explicit(
+475 | |         caps: DeviceCaps,
+476 | |         matmul_backend: MatmulBackend,
+477 | |         prepacked_matmul_backend: MatmulBackend,
+...   |
+480 | |         softmax_backend: SoftmaxBackend,
+481 | |     ) -> Self {
+    | |_____________^
+...
+495 | /     pub fn explicit_with_config(
+496 | |         caps: DeviceCaps,
+497 | |         config: ExecutionConfig,
+498 | |         matmul_backend: MatmulBackend,
+...   |
+502 | |         softmax_backend: SoftmaxBackend,
+503 | |     ) -> Self {
+    | |_____________^
+...
+524 | /     pub fn try_from_runtime_plan(
+525 | |         plan: &RuntimeExecutionPlanPayload,
+526 | |     ) -> Result<Self, RuntimeExecutionPlanError> {
+    | |________________________________________________^
+help: there is a method `ne` with a similar name
+    |
+106 -     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+106 +     let _policy = push_backend_policy(BackendPolicy::ne(DeviceCaps::cpu()));
+    |
+
+error[E0599]: no associated function or constant named `new` found for struct `BackendPolicy` in the current scope
+   --> /Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/nerf_ray_integral.rs:129:54
+    |
+129 |     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+    |                                                      ^^^ associated function or constant not found in `BackendPolicy`
+    |
+note: if you're trying to build a new `BackendPolicy` consider using one of the following associated functions:
+      BackendPolicy::from_device_caps
+      BackendPolicy::from_device_caps_with_config
+      BackendPolicy::explicit
+      BackendPolicy::explicit_with_config
+      BackendPolicy::try_from_runtime_plan
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution_plan.rs:444:5
+    |
+444 |       pub fn from_device_caps(caps: DeviceCaps) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+449 |       pub fn from_device_caps_with_config(caps: DeviceCaps, config: ExecutionConfig) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+474 | /     pub fn explicit(
+475 | |         caps: DeviceCaps,
+476 | |         matmul_backend: MatmulBackend,
+477 | |         prepacked_matmul_backend: MatmulBackend,
+...   |
+480 | |         softmax_backend: SoftmaxBackend,
+481 | |     ) -> Self {
+    | |_____________^
+...
+495 | /     pub fn explicit_with_config(
+496 | |         caps: DeviceCaps,
+497 | |         config: ExecutionConfig,
+498 | |         matmul_backend: MatmulBackend,
+...   |
+502 | |         softmax_backend: SoftmaxBackend,
+503 | |     ) -> Self {
+    | |_____________^
+...
+524 | /     pub fn try_from_runtime_plan(
+525 | |         plan: &RuntimeExecutionPlanPayload,
+526 | |     ) -> Result<Self, RuntimeExecutionPlanError> {
+    | |________________________________________________^
+help: there is a method `ne` with a similar name
+    |
+129 -     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+129 +     let _policy = push_backend_policy(BackendPolicy::ne(DeviceCaps::cpu()));
+    |
+
+error[E0599]: no associated function or constant named `new` found for struct `BackendPolicy` in the current scope
+   --> /Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/nerf_ray_integral.rs:171:54
+    |
+171 |     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+    |                                                      ^^^ associated function or constant not found in `BackendPolicy`
+    |
+note: if you're trying to build a new `BackendPolicy` consider using one of the following associated functions:
+      BackendPolicy::from_device_caps
+      BackendPolicy::from_device_caps_with_config
+      BackendPolicy::explicit
+      BackendPolicy::explicit_with_config
+      BackendPolicy::try_from_runtime_plan
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution_plan.rs:444:5
+    |
+444 |       pub fn from_device_caps(caps: DeviceCaps) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+449 |       pub fn from_device_caps_with_config(caps: DeviceCaps, config: ExecutionConfig) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+474 | /     pub fn explicit(
+475 | |         caps: DeviceCaps,
+476 | |         matmul_backend: MatmulBackend,
+477 | |         prepacked_matmul_backend: MatmulBackend,
+...   |
+480 | |         softmax_backend: SoftmaxBackend,
+481 | |     ) -> Self {
+    | |_____________^
+...
+495 | /     pub fn explicit_with_config(
+496 | |         caps: DeviceCaps,
+497 | |         config: ExecutionConfig,
+498 | |         matmul_backend: MatmulBackend,
+...   |
+502 | |         softmax_backend: SoftmaxBackend,
+503 | |     ) -> Self {
+    | |_____________^
+...
+524 | /     pub fn try_from_runtime_plan(
+525 | |         plan: &RuntimeExecutionPlanPayload,
+526 | |     ) -> Result<Self, RuntimeExecutionPlanError> {
+    | |________________________________________________^
+help: there is a method `ne` with a similar name
+    |
+171 -     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+171 +     let _policy = push_backend_policy(BackendPolicy::ne(DeviceCaps::cpu()));
+    |
+
+error[E0599]: no associated function or constant named `new` found for struct `BackendPolicy` in the current scope
+   --> /Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/baseline/nerf_ray_integral.rs:224:54
+    |
+224 |     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+    |                                                      ^^^ associated function or constant not found in `BackendPolicy`
+    |
+note: if you're trying to build a new `BackendPolicy` consider using one of the following associated functions:
+      BackendPolicy::from_device_caps
+      BackendPolicy::from_device_caps_with_config
+      BackendPolicy::explicit
+      BackendPolicy::explicit_with_config
+      BackendPolicy::try_from_runtime_plan
+   --> /Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core/src/backend/execution_plan.rs:444:5
+    |
+444 |       pub fn from_device_caps(caps: DeviceCaps) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+449 |       pub fn from_device_caps_with_config(caps: DeviceCaps, config: ExecutionConfig) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+474 | /     pub fn explicit(
+475 | |         caps: DeviceCaps,
+476 | |         matmul_backend: MatmulBackend,
+477 | |         prepacked_matmul_backend: MatmulBackend,
+...   |
+480 | |         softmax_backend: SoftmaxBackend,
+481 | |     ) -> Self {
+    | |_____________^
+...
+495 | /     pub fn explicit_with_config(
+496 | |         caps: DeviceCaps,
+497 | |         config: ExecutionConfig,
+498 | |         matmul_backend: MatmulBackend,
+...   |
+502 | |         softmax_backend: SoftmaxBackend,
+503 | |     ) -> Self {
+    | |_____________^
+...
+524 | /     pub fn try_from_runtime_plan(
+525 | |         plan: &RuntimeExecutionPlanPayload,
+526 | |     ) -> Result<Self, RuntimeExecutionPlanError> {
+    | |________________________________________________^
+help: there is a method `ne` with a similar name
+    |
+224 -     let _policy = push_backend_policy(BackendPolicy::new(DeviceCaps::cpu()));
+224 +     let _policy = push_backend_policy(BackendPolicy::ne(DeviceCaps::cpu()));
+    |
+
+error: aborting due to 6 previous errors
+
+For more information about this error, try `rustc --explain E0599`.

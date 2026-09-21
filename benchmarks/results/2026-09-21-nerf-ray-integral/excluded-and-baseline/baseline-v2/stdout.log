@@ -1,0 +1,23 @@
+
+running 7 tests
+test constant_density_integrates_the_entire_interval_independent_of_jitter ... FAILED
+test disabling_direction_conditioning_does_not_disable_ray_motion ... FAILED
+test invalid_render_inputs_leave_the_sampling_rng_unchanged ... FAILED
+test rendering_observes_logical_ray_layouts ... FAILED
+test thin_and_zero_width_intervals_do_not_invent_opacity ... FAILED
+test training_uses_the_same_full_interval_and_analytic_gradient ... FAILED
+test unsupported_ray_layout_and_sample_overflow_are_rejected_at_construction ... FAILED
+
+failures:
+
+failures:
+    constant_density_integrates_the_entire_interval_independent_of_jitter
+    disabling_direction_conditioning_does_not_disable_ray_motion
+    invalid_render_inputs_leave_the_sampling_rng_unchanged
+    rendering_observes_logical_ray_layouts
+    thin_and_zero_width_intervals_do_not_invent_opacity
+    training_uses_the_same_full_interval_and_analytic_gradient
+    unsupported_ray_layout_and_sample_overflow_are_rejected_at_construction
+
+test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,59 @@
+{
+  "source": {
+    "commit": "9101f6e2410bfb5247f6a67669529a58eba9eb80",
+    "status": "",
+    "files": {
+      "crates/st-vision/src/analysis.rs": "eed1a41bdc8eda72251aeb98ccb54e863a1b81b7c0b82ef3c772da05c6296592",
+      "crates/st-vision/src/datasets/mod.rs": "18d31549744d7d8c84a15a001ccddc59df195d45648f8181aa3736345cafe101",
+      "crates/st-vision/src/lib.rs": "de19dad67f49d73d864fbc3736ad1abde072eec21e81b7bdf22ab040e801333e",
+      "crates/st-vision/src/models/convnext.rs": "b65bbd8180607cdf1872b30ccdd79cae98e418baa2c67fda491a12ec6e7db4f5",
+      "crates/st-vision/src/models/mod.rs": "1154e34bc1e16cd3c624d056c410add4478294a99c2190102c47485bce99dccd",
+      "crates/st-vision/src/models/resnet.rs": "813ea7be3002ae8c7c8775d9f11b2ae5dd879080c68700fe466cbaebf9235e89",
+      "crates/st-vision/src/models/vit.rs": "4a3f008384a7b5e0330ae0952e695d574bb22891545fd6a66a76c6e4bc3ac751",
+      "crates/st-vision/src/nerf/encoding.rs": "f322ae48a2d24c27e769d3bf9efa89517ac0ea0772bfc0d5ed34586daaeba60e",
+      "crates/st-vision/src/nerf/field.rs": "3437a1f8e83dbfb959efb5cd0096d876f0264c26db1e425d814456653ad13a58",
+      "crates/st-vision/src/nerf/integral.rs": "5bc3ec3f4d5c1f7caecb19736e378a3e4d50dee54650161dcdb1ea0023f41c04",
+      "crates/st-vision/src/nerf/mod.rs": "8495b49f7c53d6c57c548ae832128c36f2350aacd4fca1de9829eeb26af84abb",
+      "crates/st-vision/src/nerf/trainer.rs": "1eb249cf0d6d6c6d37c1b1f83681c4f4e23f3283454e7570fc0e9c502b415827",
+      "crates/st-vision/src/tensor_contract.rs": "a2867c639a7cff71c149447d8d15b6cb89a59dea04d5073547b719b8fdc4d8eb",
+      "crates/st-vision/src/transforms/audit.rs": "0d8bbb099407e81c4d093a8abcc196b2a483bfad5e2a5c09ef82dd1a800bc138",
+      "crates/st-vision/src/transforms/cpu.rs": "cbc5bc9166586db72ecafc378cf8dfad62a5297466e3e7044f9370321941a657",
+      "crates/st-vision/src/transforms/mod.rs": "2b4750117b672603231468348a78d77c099a3e7549e79da8302b92991ce344cf",
+      "crates/st-vision/src/video/mod.rs": "09e672049cb45d64ab41b6edeabc773141b8f7fc96e44c2a44b486530d847af3",
+      "crates/st-vision/src/xai/grad_cam.rs": "aecbfb48ae6b04d2c1bb2f98679ebb62ff195b7b9f5e182cd52dececb6258ce7",
+      "crates/st-vision/src/xai/integrated_gradients.rs": "c74b3980b8a356e228759421e001883a72dbc55f97f507902c3c7a46593c98d4",
+      "crates/st-vision/src/xai/mod.rs": "e8cbf08d0febf8d123cb7ee169647c42fa9cd3b325e8edb2aa237bc4c902ef25",
+      "crates/st-vision/src/xai/utils.rs": "1bc0da351fcbc6ca9e4f5a810294ee7c38b2406047cd10625f8f64388d005b64",
+      "crates/st-vision/tests/backbones.rs": "27c71311a84eb70382656573be08b89b81d493da356e4988ba5cc84d85b72003",
+      "crates/st-vision/tests/canvas_z_feedback_smoke.rs": "bf8e5cdafc01fb4c6bc2ca24ecce363b6b6b24aee604b75179defe9a7284d8ec",
+      "crates/st-vision/tests/nerf_geometry.rs": "91a81e6674260d8a9a6c8098cd4132bd5e6c3958ff2c874bf881a033996e6680",
+      "crates/st-vision/tests/nerf_ray_integral.rs": "57c0efa54b28d1aea58ac4c8307f2d0bc64d5d96ff80c3dee7922e8d0ef5e02b",
+      "crates/st-vision/tests/nerf_regression.rs": "027621565f0bec1361b9ad25d7831827fbed9d27eb78caf8abc8f7e854c23fe3",
+      "crates/st-vision/tests/temporal_channels.rs": "59ae8007c0e4073e10b25de532481345666d709ec88cabbec77e6deec0237188",
+      "crates/st-vision/tests/video_pipeline.rs": "0693d9bf87998805c021133dad580469feb7e2af074a3a353a3ae7c9b4d26a96",
+      "benchmarks/nerf-ray-integral/Cargo.lock": "a4fce48c06854e65adef6a45d6d9a58c9ee83394c50d1eb225b1604fe4c32e5f",
+      "benchmarks/nerf-ray-integral/Cargo.toml": "9eb54b4f5359ebf5f1d58964bb47b048d1a8bfb24e374cfb1dd03b1904440b2c",
+      "benchmarks/nerf-ray-integral/src/lib.rs": "9fbbb5ee48fff17a123f12d8fac08364c94082efc6d64faacf9d67b0aba8fae3",
+      "benchmarks/nerf-ray-integral/src/main.rs": "d974d6cb152ce5f947698a65c25392c1bd14ed1bc339b175cdbc775c6f4e6dff",
+      "benchmarks/nerf-ray-integral/torch_reference.py": "a01ca120d0fccaa809a1240d92a66d0a1983ac0499b97e3cc67b60273181870f",
+      "benchmarks/nerf-ray-integral/wasm.cjs": "a80a282e81bfd2d858dbaa4d89dd95b92ad38776b2750dc62554298375da4ae4",
+      "crates/st-vision/Cargo.toml": "75a679a8764c1431ff26fa0690c8d9536102691b9b4ead27eef5d0ca8e5caebf",
+      "Cargo.lock": "93a69465042036581e6b247a657c4974c563dc53b5ab821d0bf8a9a114dfdf4b",
+      ".github/workflows/ci.yml": "74499aca43ade912e4ad3f31f70278e28025274f775bbb166bf6e1c66f89d42f"
+    }
+  },
+  "command": [
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+    "-I",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/measurement-v3/workers/torch_reference.py",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/nerf-ray-integration-20260921/verification-v3/native-preflight/stdout.log"
+  ],
+  "exit_code": 0,
+  "seconds": 0.9187034999922616,
+  "environment": {
+    "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/nerf-ray-integral-fixture-v1",
+    "CARGO_BUILD_JOBS": "4",
+    "RAYON_NUM_THREADS": "4"
+  },
+  "source_unchanged": true
+}

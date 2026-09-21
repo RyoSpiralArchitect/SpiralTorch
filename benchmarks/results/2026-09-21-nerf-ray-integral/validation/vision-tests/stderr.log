@@ -1,0 +1,16 @@
+   Compiling st-tensor v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-tensor)
+   Compiling st-core v1.10.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-core)
+   Compiling st-logic v0.4.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-logic)
+   Compiling st-text v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-text)
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+   Compiling st-vision v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-vision)
+    Finished `release` profile [optimized] target(s) in 42.59s
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/st_vision-27ea551ab5630b08)
+     Running tests/nerf_geometry.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/nerf_geometry-23bb27446a972a49)
+     Running tests/nerf_ray_integral.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/nerf_ray_integral-73b2deb46af1ef12)
+     Running tests/nerf_regression.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/nerf_regression-3cf6a6faf02cdb75)
+NERF_TRAINING seed=0 steps=20 before=0.172355986 after=0.169822077 epoch_losses=[0.17234768, 0.17181882, 0.17117473, 0.17054878]
+NERF_TRAINING seed=1 steps=20 before=0.180692572 after=0.179541479 epoch_losses=[0.18043765, 0.18026584, 0.1799201, 0.17964397]
+NERF_TRAINING seed=7 steps=20 before=0.166019242 after=0.163451438 epoch_losses=[0.16570675, 0.16502813, 0.16437808, 0.16374278]
+NERF_TRAINING seed=13 steps=20 before=0.187015109 after=0.184917481 epoch_losses=[0.1865492, 0.18605226, 0.18547493, 0.18500209]
+     Running tests/temporal_channels.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/temporal_channels-3c777e7a9af060a5)

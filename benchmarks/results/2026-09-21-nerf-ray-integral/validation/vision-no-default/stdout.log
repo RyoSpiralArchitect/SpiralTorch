@@ -1,0 +1,49 @@
+
+running 44 tests
+test analysis::tests::feature_map_bridge_detects_boundary ... ok
+test analysis::tests::profile_extracts_dominant_scale ... ok
+test analysis::tests::shape_mismatch_reported ... ok
+test analysis::tests::similarity_detects_alignment ... ok
+test datasets::tests::adapter_samples_consistent_batches ... ok
+test datasets::tests::adapter_samples_contiguous_span ... ok
+test datasets::tests::invalid_spans_and_allocation_overflow_fail_before_sampling ... ok
+test datasets::tests::malformed_public_frames_and_batches_are_revalidated ... ok
+test datasets::tests::random_span_respects_stride_constraints ... ok
+test datasets::tests::sampling_and_stacking_preserve_logical_layouts ... ok
+test datasets::tests::stacking_batches_concatenates_inputs ... ok
+test datasets::tests::weighted_sampling_honours_zero_weights ... ok
+test datasets::tests::zero_sampling_threshold_skips_zero_weights_and_large_totals_stay_finite ... ok
+test tensor_contract::tests::checks_element_and_byte_overflow_without_allocation ... ok
+test tests::aggregator_telemetry_and_prune_behave ... ok
+test tests::blend_sequence_respects_weights ... ok
+test tests::color_jitter_produces_finite_values ... ok
+test tests::color_jitter_validates_hue_bounds ... ok
+test tests::dataloader_produces_batches ... ok
+test tests::decoder_is_deterministic_for_seed ... ok
+test tests::diffuser_softens_sharp_transitions ... ok
+test tests::image_tensor_volume_roundtrip ... ok
+test tests::multi_view_biases_respect_orientation_and_baseline ... ok
+test tests::projector_multi_view_temporal_projection_matches_manual_smoothing ... ok
+test tests::projector_respects_atlas_calibration ... ok
+test tests::projector_temporal_projection_matches_manual_smoothing ... ok
+test tests::resonance_projection_matches_manual_weighting ... ok
+test tests::simple_cnn_forward_produces_logits ... ok
+test tests::slice_profile_matches_manual_stats ... ok
+test tests::slice_profile_summary_computes_entropy ... ok
+test tests::stream_frame_aggregator_merges_metadata ... ok
+test tests::stream_frame_aggregator_respects_depth_limit ... ok
+test tests::streamed_volume_telemetry_matches_frame_report ... ok
+test tests::temporal_buffer_applies_decay_and_handles_resets ... ok
+test tests::transform_pipeline_matches_torchvision_basics ... ok
+test tests::volume_accumulate_performs_temporal_ema ... ok
+test tests::volume_from_slices_respects_shapes ... ok
+test tests::volume_interpolation_and_upscale_refine_geometry ... ok
+test tests::volume_profile_matches_slice_statistics ... ok
+test tests::volume_zeros_with_temporal_allocates_expected_buffers ... ok
+test transforms::audit::tests::pipeline_audit_matches_registered_ops ... ok
+test transforms::audit::tests::summarize_pipeline_counts_gpu_support ... ok
+test transforms::audit::tests::summarize_pipelines_accumulates_unknowns ... ok
+test video::tests::pipeline_emits_annotations ... ok
+
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+

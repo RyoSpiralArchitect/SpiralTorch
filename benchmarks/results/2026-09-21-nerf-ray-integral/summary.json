@@ -1,0 +1,418 @@
+{
+  "measured_commit": "9101f6e2410bfb5247f6a67669529a58eba9eb80",
+  "conditions": [
+    {
+      "batch": 1,
+      "samples": 1,
+      "varying": false,
+      "median_ns": {
+        "native": 2104.125,
+        "wasm": 4817.625,
+        "torch": 59260.375
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 23.64483262677328,
+          "min": 9.584350560681921,
+          "max": 29.81335282651072
+        },
+        "wasm": {
+          "geomean": 12.017557137958269,
+          "min": 11.123090909090909,
+          "max": 12.69753642384106
+        }
+      }
+    },
+    {
+      "batch": 1,
+      "samples": 1,
+      "varying": true,
+      "median_ns": {
+        "native": 2036.5,
+        "wasm": 4869.875,
+        "torch": 58703.25
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 24.172148969777073,
+          "min": 9.531579164773431,
+          "max": 30.607408373548974
+        },
+        "wasm": {
+          "geomean": 12.05737827201725,
+          "min": 11.757961783439491,
+          "max": 12.39300596022997
+        }
+      }
+    },
+    {
+      "batch": 1,
+      "samples": 8,
+      "varying": false,
+      "median_ns": {
+        "native": 3437.625,
+        "wasm": 11974.0,
+        "torch": 60375.125
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 14.990496020434332,
+          "min": 6.065211356466877,
+          "max": 19.097352433810844
+        },
+        "wasm": {
+          "geomean": 5.063344098653418,
+          "min": 4.851490504046799,
+          "max": 5.300049956288248
+        }
+      }
+    },
+    {
+      "batch": 1,
+      "samples": 8,
+      "varying": true,
+      "median_ns": {
+        "native": 3364.625,
+        "wasm": 12125.0,
+        "torch": 60270.875
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 14.965748621738026,
+          "min": 6.1643102300087085,
+          "max": 18.618031292723682
+        },
+        "wasm": {
+          "geomean": 4.9670330488157335,
+          "min": 4.870288659793815,
+          "max": 5.031597485307067
+        }
+      }
+    },
+    {
+      "batch": 1,
+      "samples": 64,
+      "varying": false,
+      "median_ns": {
+        "native": 12213.625,
+        "wasm": 54859.375,
+        "torch": 71880.25
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 4.922458566254998,
+          "min": 1.9489031091135807,
+          "max": 6.059524548445162
+        },
+        "wasm": {
+          "geomean": 1.3570623470015368,
+          "min": 1.1232166171173297,
+          "max": 1.7654025674523586
+        }
+      }
+    },
+    {
+      "batch": 1,
+      "samples": 64,
+      "varying": true,
+      "median_ns": {
+        "native": 12239.5,
+        "wasm": 30703.125,
+        "torch": 71807.25
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 4.897302702076174,
+          "min": 1.9483790167237283,
+          "max": 6.1728142788631954
+        },
+        "wasm": {
+          "geomean": 2.359981118315034,
+          "min": 2.0219163474625024,
+          "max": 2.6791131221719455
+        }
+      }
+    },
+    {
+      "batch": 32,
+      "samples": 1,
+      "varying": false,
+      "median_ns": {
+        "native": 7911.5,
+        "wasm": 18244.75,
+        "torch": 67177.125
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 7.3066713825701175,
+          "min": 3.2357813028969384,
+          "max": 8.86964347743708
+        },
+        "wasm": {
+          "geomean": 3.7071974037696838,
+          "min": 3.6385180514816744,
+          "max": 3.8519823909376414
+        }
+      }
+    },
+    {
+      "batch": 32,
+      "samples": 1,
+      "varying": true,
+      "median_ns": {
+        "native": 7885.5,
+        "wasm": 18171.875,
+        "torch": 67942.75
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 7.360937599328284,
+          "min": 3.3039580964362614,
+          "max": 9.021436811074084
+        },
+        "wasm": {
+          "geomean": 3.734206379828053,
+          "min": 3.640699785443142,
+          "max": 3.8855750917773055
+        }
+      }
+    },
+    {
+      "batch": 32,
+      "samples": 8,
+      "varying": false,
+      "median_ns": {
+        "native": 41385.375,
+        "wasm": 97099.0,
+        "torch": 98812.5
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 2.0487077753567564,
+          "min": 0.9556455336875209,
+          "max": 2.4240606520090977
+        },
+        "wasm": {
+          "geomean": 1.0164721108203059,
+          "min": 0.9966885974467343,
+          "max": 1.032643373655429
+        }
+      }
+    },
+    {
+      "batch": 32,
+      "samples": 8,
+      "varying": true,
+      "median_ns": {
+        "native": 41442.625,
+        "wasm": 96552.125,
+        "torch": 98822.875
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 2.07836332099103,
+          "min": 1.0403783242580487,
+          "max": 2.4321754916792737
+        },
+        "wasm": {
+          "geomean": 1.0230319525693405,
+          "min": 1.0108222903531376,
+          "max": 1.0394396211727404
+        }
+      }
+    },
+    {
+      "batch": 32,
+      "samples": 64,
+      "varying": false,
+      "median_ns": {
+        "native": 301447.875,
+        "wasm": 715161.5,
+        "torch": 299510.5
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 0.9234106949501282,
+          "min": 0.6349573610101144,
+          "max": 1.0459243748076588
+        },
+        "wasm": {
+          "geomean": 0.41948791055503154,
+          "min": 0.40386704323267436,
+          "max": 0.4358690735323535
+        }
+      }
+    },
+    {
+      "batch": 32,
+      "samples": 64,
+      "varying": true,
+      "median_ns": {
+        "native": 301286.375,
+        "wasm": 713375.0,
+        "torch": 300192.75
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 0.9404056213419079,
+          "min": 0.7652538722121052,
+          "max": 1.0096774193548388
+        },
+        "wasm": {
+          "geomean": 0.4175822989856331,
+          "min": 0.3923646297945143,
+          "max": 0.4388976529940776
+        }
+      }
+    },
+    {
+      "batch": 256,
+      "samples": 1,
+      "varying": false,
+      "median_ns": {
+        "native": 45151.125,
+        "wasm": 108250.0,
+        "torch": 95442.75
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 2.0335698106166054,
+          "min": 1.697792961336153,
+          "max": 2.168230220991067
+        },
+        "wasm": {
+          "geomean": 0.8786456065641269,
+          "min": 0.8656800710240429,
+          "max": 0.8914512968299712
+        }
+      }
+    },
+    {
+      "batch": 256,
+      "samples": 1,
+      "varying": true,
+      "median_ns": {
+        "native": 45182.375,
+        "wasm": 105849.0,
+        "torch": 94942.625
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 2.050541456342517,
+          "min": 1.7806047390747521,
+          "max": 2.180573978731536
+        },
+        "wasm": {
+          "geomean": 0.8923028929471215,
+          "min": 0.8634290667437157,
+          "max": 0.9208847147396213
+        }
+      }
+    },
+    {
+      "batch": 256,
+      "samples": 8,
+      "varying": false,
+      "median_ns": {
+        "native": 309031.375,
+        "wasm": 724427.125,
+        "torch": 302796.875
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 0.9718974201881856,
+          "min": 0.8922484962740871,
+          "max": 1.0327169784860142
+        },
+        "wasm": {
+          "geomean": 0.4204158080387081,
+          "min": 0.4077254531397646,
+          "max": 0.43862482143630144
+        }
+      }
+    },
+    {
+      "batch": 256,
+      "samples": 8,
+      "varying": true,
+      "median_ns": {
+        "native": 307864.5,
+        "wasm": 723531.25,
+        "torch": 302145.875
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 0.9840317607290384,
+          "min": 0.9522378073625916,
+          "max": 1.0156525627557453
+        },
+        "wasm": {
+          "geomean": 0.41918967413977404,
+          "min": 0.4079678426341672,
+          "max": 0.4285361578496202
+        }
+      }
+    },
+    {
+      "batch": 256,
+      "samples": 64,
+      "varying": false,
+      "median_ns": {
+        "native": 2425661.375,
+        "wasm": 5685057.25,
+        "torch": 1232078.125
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 0.5099412951965961,
+          "min": 0.4985543430994731,
+          "max": 0.5285043663203606
+        },
+        "wasm": {
+          "geomean": 0.21773855535825742,
+          "min": 0.21372591995029858,
+          "max": 0.22527974313240573
+        }
+      }
+    },
+    {
+      "batch": 256,
+      "samples": 64,
+      "varying": true,
+      "median_ns": {
+        "native": 2424093.875,
+        "wasm": 5659421.875,
+        "torch": 1235807.25
+      },
+      "torch_over_runtime": {
+        "native": {
+          "geomean": 0.5100485886133296,
+          "min": 0.5027189738073582,
+          "max": 0.5172218783212061
+        },
+        "wasm": {
+          "geomean": 0.21866565325367918,
+          "min": 0.21512163972935863,
+          "max": 0.22120810819133932
+        }
+      }
+    }
+  ],
+  "records": 324,
+  "preconditioning_records": 54,
+  "intervals_per_record": 9,
+  "iterations_per_interval": 4,
+  "ratio_definition": "Within-block torch median / runtime median, then geometric mean over six balanced blocks; >1 favors Rust runtime",
+  "aggregate": {
+    "native": {
+      "geomean": 3.0841970859948766,
+      "favorable_conditions": 12
+    },
+    "wasm": {
+      "geomean": 1.3398367070818702,
+      "favorable_conditions": 10
+    }
+  },
+  "max_render_abs_vs_native": 2.9802322387695312e-08,
+  "max_one_step_parameter_abs_vs_native": 9.094947000788623e-13
+}
