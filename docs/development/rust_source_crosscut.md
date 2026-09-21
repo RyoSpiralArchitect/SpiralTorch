@@ -153,6 +153,14 @@ PyTorch/autograd control agree across all 324 measured records. The largest
 condition still favors PyTorch by about 2x versus native and 4.6x versus WASM;
 small-input entry-cost wins are not a universal backend-speed claim.
 
+The [resident NeRF follow-up](../../benchmarks/nerf-resident-wgpu/README.md)
+repairs the dormant WGSL sampler/compositor and connects them through the
+existing ResidentTensor/ResidentGraph path. Embedded shaders run on native and
+browser WebGPU; both stages write directly into owning tensors. The 36-condition
+affine-field fixture and independent PyTorch control check numerical agreement,
+not speed or training. Thin opacity, opaque tails, long prefixes, legacy buffer
+layouts and immutable/error ownership have separate real-GPU regressions.
+
 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
    steps. The fixed harness now covers the first two, not training throughput.
    Profile the remaining checked GELU/transcendental cost and explicit
@@ -162,11 +170,12 @@ small-input entry-cost wins are not a universal backend-speed claim.
    high-level NN calls; neither Node timing nor packing wins prove browser/FT gains.
 2. RoPE: design finite-angle/size admission and actual attention ownership before
    introducing public bindings or claiming attention performance improvements.
-3. NeRF: the Rust trainer's sampling/compositing contract is now tested; its
-   separate WGSL sampler still contains the old half-bin expression and needs
-   independent execution/parity tests. Profile the larger-render CPU path.
-   Larger scenes, camera-input derivatives, resident training and public browser
-   ownership remain separate work. Training checks are small synthetic regressions.
+3. NeRF: CPU trainer quadrature/VJP and resident GPU forward stages are tested
+   separately. Profile larger renders with matched fields and full observation
+   boundaries; the affine GPU fixture is not the CPU trainer benchmark.
+   Positional-encoding/field migration, camera-input derivatives, resident VJP
+   and public browser/Python ownership remain separate work. Training checks
+   are small synthetic regressions.
 4. Contrastive backend policy: profile small-batch WGPU transfer cost separately
    from CPU kernels, and design explicit execution ownership before introducing
    a resident loss or sharing the trainer's gradient implementation.
