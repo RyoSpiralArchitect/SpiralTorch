@@ -95,6 +95,14 @@ The fixed GELU grid improves 1.062x forward and 1.010x VJP, but warmed MLP and T
 comparisons remain mixed. Local Python/WASM/WGPU checks and all negative results
 are published separately from the timing claims.
 
+The [bounded GELU follow-up](../../benchmarks/results/2026-09-21-bounded-gelu/README.md)
+uses the input-validation pass to prove intermediate finiteness for whole bounded
+batches, retaining the original checked fallback for outliers. Exact old/new bits,
+wide exponent coverage and error precedence pass on native and a test-only WASM
+host adapter. Non-tiny forward improves 1.216x native and 1.090x Node/WASM, while
+tiny WASM and full MLP remain mixed. Non-tiny Torch CPU remains faster overall.
+Public WASM autograd/resident paths are unchanged; no browser/FT speedup is claimed.
+
 1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
    steps. The fixed harness now covers the first two, not training throughput.
    Profile the remaining checked GELU/transcendental cost and explicit
