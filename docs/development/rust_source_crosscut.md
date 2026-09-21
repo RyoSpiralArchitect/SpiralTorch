@@ -76,14 +76,26 @@ the real WASM/Node ordinary-layout grid improves 1.166x. Packed controls and tin
 cases remain mixed. Layout-specific tuning now measures and caches the actual
 execution path; the public prepacked format and high-level routing stay intact.
 
-1. CPU dense throughput and NN dispatch: profile actual Linear/MLP workloads,
-   prepacked versus ordinary weights, and SIMD/microkernel throughput. The native
-   ordinary-layout PyTorch gap is still about 18.41x/11.72x on the extended grid;
-   neither zero packing allocations nor Node timing proves browser or FT gains.
+The [NN layout follow-up](../../benchmarks/results/2026-09-21-cpu-nn-layout/README.md)
+measures real `Sequential`/`Linear`/`Gelu` calls separately from layout preparation.
+Native prepacked Auto uses Faer for these shapes, rather than the ordinary-layout
+CPU kernel measured above. One blocked transpose now serves packing, layout
+conversion and CPU transpose; small matrices retain a simple loop after a WASM
+regression was measured. Column-major transpose packing no longer creates a
+temporary Tensor. Faer entry points now reject malformed lengths/overflow before
+mutation and construct safe slice views instead of unchecked pointer views.
+
+1. CPU NN throughput: separate warmed forward, cache refresh and complete optimizer
+   steps. The fixed harness now covers the first two, not training throughput.
+   Profile GELU and explicit ordinary-versus-prepacked Faer execution before
+   changing Auto policy or the packed representation. The earlier 18.41x/11.72x
+   PyTorch gap applies to a different, explicit ordinary-kernel grid, not to all
+   high-level NN calls; neither Node timing nor packing wins prove browser/FT gains.
 2. `st-core/src/util/rope_lru.rs`: epsilon-based equality and bitwise hashing do
    not define the same key identity; equality is also non-transitive. Review
-   exact angle identity, finite values, eviction, and real consumers before
-   optimizing trigonometry or broadening this currently lightly connected cache.
+   exact angle identity, finite values and eviction before optimizing trigonometry
+   or wiring it into attention. Current Rust references to `RopeLRU`/`RopeKey` are
+   confined to the utility itself and its tests, not production attention callers.
 3. `st-vision/src/nerf/encoding.rs`: benchmark paired sine/cosine evaluation and
    validate output-size arithmetic; do not assume an intrinsic is faster on
    native and WASM targets without measurements.

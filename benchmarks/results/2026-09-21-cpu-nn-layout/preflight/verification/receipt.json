@@ -1,0 +1,279 @@
+{
+  "commit": "b1ec9a157a500fc061ad1e35f6f7948b8e018da0",
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 2.4819764999992913
+    },
+    {
+      "name": "tensor-cpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,faer",
+        "--lib",
+        "--test",
+        "autograd_observability",
+        "--test",
+        "autograd_sgd",
+        "--test",
+        "classification",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 5.959234499998274
+    },
+    {
+      "name": "linear",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--lib",
+        "layers::linear::tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 8.021437125004013
+    },
+    {
+      "name": "linear-layout",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--test",
+        "linear_layout_contract",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 2.7993560419999994
+    },
+    {
+      "name": "native-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "-p",
+        "st-bench",
+        "--all-targets",
+        "--no-deps",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 5.137037458000123
+    },
+    {
+      "name": "wasm-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 0.2430001250031637
+    },
+    {
+      "name": "wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "-p",
+        "spiraltorch-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--release"
+      ],
+      "exit_code": 0,
+      "seconds": 34.17650324999704
+    },
+    {
+      "name": "wasm-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm",
+        "--target",
+        "nodejs",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-a/wasm"
+      ],
+      "exit_code": 0,
+      "seconds": 0.27990095799032133
+    },
+    {
+      "name": "wasm-numerics",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/numeric_boundaries.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.058004749997053295
+    },
+    {
+      "name": "wasm-autograd",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_dense_matmul.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07785204199899454
+    },
+    {
+      "name": "nn-cpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--lib",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 0.7467073340085335
+    },
+    {
+      "name": "python-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "spiraltorch-py",
+        "--no-default-features",
+        "--features",
+        "python-default"
+      ],
+      "exit_code": 0,
+      "seconds": 89.13224579200323
+    },
+    {
+      "name": "python-autograd",
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/resident-graph-forward-clients-20260910/python-client.py",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-a/python-cpu.dylib",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1",
+        "bindings/st-py/tests/test_autograd_prepacked.py"
+      ],
+      "exit_code": 0,
+      "seconds": 2.3888152500003343
+    },
+    {
+      "name": "wgpu-probe",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "spiral-selfsup",
+        "--features",
+        "wgpu",
+        "--test",
+        "info_nce_tensor",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 58.26360641600331
+    },
+    {
+      "name": "wgpu-prepacked",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,faer,wgpu",
+        "--lib",
+        "pure::tests::matmul_prepacked",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 41.579457375002676
+    }
+  ],
+  "status": "passed",
+  "source_hashes": {
+    "crates/st-tensor/src/pure.rs": "26a0c9bab96ffe530c402bf28374aa3bbdd01c2df365f95577e2855413930a10",
+    "crates/st-tensor/src/backend/faer_dense.rs": "9968c7b81f4c898de7df5d4bbc7081782cc93e7cf8e3860d3d8aca926334343e",
+    "crates/st-tensor/src/backend/transpose.rs": "825524ed85104f1f040bc851c93da5215a357c9a48b9c5e750ad8b1261c37356",
+    "crates/st-tensor/src/backend/mod.rs": "ce5f5caa4aa0a8c7739e6e6073650f957e9bb92660b56839673b410f6ec82a65",
+    "crates/st-nn/tests/linear_layout_contract.rs": "01801dd8b7e0aa7e68aa6e33bc81af6a37589043789210d3f560f3124bef1bbe",
+    "crates/st-bench/examples/cpu_nn_layout.rs": "8ec08a37cde1d7f2b304617cc200eb6a4d022d4e11e060b7f72fe0cdfc65f137",
+    "bindings/st-py/tests/test_autograd_prepacked.py": "31662b1004a0d32a1cc185fb03a5043111e59f57fb5168ff83dccd7971239204",
+    "bindings/st-wasm/tests/cpu_layout_bench.cjs": "2fbf5021be02d9d417b1d5666a76eb769ae0d54ee60b1a9a7e959c684d04375d"
+  },
+  "compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n",
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0",
+    "SPIRALTORCH_AUTOTUNE": "1",
+    "SPIRALTORCH_AUTOTUNE_STORE": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-a/tuning.json"
+  },
+  "products": {
+    "python-cpu.dylib": "c4f6c25463297bdfebae7bafd7a086e648b7e125a5013fc3142e200a4cbd77c3",
+    "wasm/spiraltorch_wasm.js": "bd2f83bd87143ebd0fb00161689f5fae963902d1b3443ae92f25346f8927ea1b",
+    "wasm/spiraltorch_wasm_bg.wasm": "65d9c1196218d431b09a79c11b82cf16479226076f7e92145d77034fa7f3fc65"
+  }
+}

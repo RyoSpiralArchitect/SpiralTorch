@@ -1,0 +1,83 @@
+{
+  "inputs": {
+    "baseline": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm.js",
+    "candidate": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-b/wasm/spiraltorch_wasm.js"
+  },
+  "sha256": {
+    "baseline": "bd2f83bd87143ebd0fb00161689f5fae963902d1b3443ae92f25346f8927ea1b",
+    "candidate": "bd2f83bd87143ebd0fb00161689f5fae963902d1b3443ae92f25346f8927ea1b",
+    "baseline_wasm": "1b5dec496646d22e628e52597ec5741cf2f1143f3955982c6d53e8b548926963",
+    "candidate_wasm": "8398e12f1da69db883f34b48177939f5dd0f4ceeae4ec148617a7f2afec330d9",
+    "harness": "2fbf5021be02d9d417b1d5666a76eb769ae0d54ee60b1a9a7e959c684d04375d"
+  },
+  "environment": {
+    "RAYON_NUM_THREADS": "4",
+    "SPIRAL_DETERMINISTIC": "0",
+    "SPIRAL_DETERMINISTIC_REDUCTION": "0"
+  },
+  "home_removed": true,
+  "steps": [
+    {
+      "name": "warm-baseline",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_layout_bench.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0177877919923048
+    },
+    {
+      "name": "warm-candidate",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_layout_bench.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-b/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.6093553750106366
+    },
+    {
+      "name": "baseline-a",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_layout_bench.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0020064169948455
+    },
+    {
+      "name": "candidate-a",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_layout_bench.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-b/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.6329108329955488
+    },
+    {
+      "name": "candidate-b",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_layout_bench.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-b/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.6478468749992317
+    },
+    {
+      "name": "baseline-b",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_layout_bench.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0300287499994738
+    }
+  ],
+  "host_exclusivity": "unknown",
+  "thermal_state": "unknown"
+}

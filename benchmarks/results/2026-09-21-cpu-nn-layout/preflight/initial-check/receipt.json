@@ -1,0 +1,169 @@
+{
+  "commit": "9847fb7fc992efd82fcb000236314319557adc0a",
+  "steps": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 2.4627182919939514
+    },
+    {
+      "name": "tensor-cpu",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,faer",
+        "--lib",
+        "--test",
+        "autograd_observability",
+        "--test",
+        "autograd_sgd",
+        "--test",
+        "classification",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 8.080352999997558
+    },
+    {
+      "name": "linear",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--lib",
+        "layers::linear::tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 30.81352241699642
+    },
+    {
+      "name": "linear-layout",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--test",
+        "linear_layout_contract",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 7.1181787499954225
+    },
+    {
+      "name": "native-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "-p",
+        "st-bench",
+        "--all-targets",
+        "--no-deps",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 6.198576792012318
+    },
+    {
+      "name": "wasm-clippy",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 2.020680750007159
+    },
+    {
+      "name": "wasm-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "-p",
+        "spiraltorch-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--release"
+      ],
+      "exit_code": 0,
+      "seconds": 35.97413299999607
+    },
+    {
+      "name": "wasm-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm",
+        "--target",
+        "nodejs",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/check-a/wasm"
+      ],
+      "exit_code": 0,
+      "seconds": 0.2944164170039585
+    },
+    {
+      "name": "wasm-numerics",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/numeric_boundaries.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/check-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.05981991600128822
+    },
+    {
+      "name": "wasm-autograd",
+      "command": [
+        "node",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-resident-graph-forward-v1/bindings/st-wasm/tests/cpu_dense_matmul.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/check-a/wasm/spiraltorch_wasm.js"
+      ],
+      "exit_code": 0,
+      "seconds": 0.0677430419891607
+    }
+  ],
+  "status": "passed"
+}

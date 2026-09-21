@@ -1,0 +1,16 @@
+{
+  "command": [
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+    "-B",
+    "-I",
+    "-S",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/torch_compare.py",
+    "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages"
+  ],
+  "exit_code": 0,
+  "environment": {
+    "OMP_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  }
+}

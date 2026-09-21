@@ -1,0 +1,450 @@
+{
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|prepacked_columns|128x1024x32|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961996,
+        "score": 0.013127986,
+        "params": {
+          "kernel": "m4n16"
+        },
+        "context": {
+          "cols": 32,
+          "inner": 1024,
+          "revision": 5,
+          "rhs_layout": "prepacked_columns",
+          "rows": 128,
+          "runs": 3,
+          "sample_cols": 32,
+          "sample_inner": 1024,
+          "sample_rows": 128
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 32.0
+          },
+          {
+            "key": "inner",
+            "value": 1024.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 128.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 32.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 1024.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 128.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|prepacked_columns|128x128x96|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961996,
+        "score": 0.013331347,
+        "params": {
+          "kernel": "m8n12"
+        },
+        "context": {
+          "cols": 96,
+          "inner": 128,
+          "revision": 5,
+          "rhs_layout": "prepacked_columns",
+          "rows": 128,
+          "runs": 3,
+          "sample_cols": 96,
+          "sample_inner": 128,
+          "sample_rows": 128
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 96.0
+          },
+          {
+            "key": "inner",
+            "value": 128.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 128.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 96.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 128.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 128.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|prepacked_columns|64x256x48|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961995,
+        "score": 0.006762666333333334,
+        "params": {
+          "kernel": "m8n12"
+        },
+        "context": {
+          "cols": 48,
+          "inner": 256,
+          "revision": 5,
+          "rhs_layout": "prepacked_columns",
+          "rows": 64,
+          "runs": 3,
+          "sample_cols": 48,
+          "sample_inner": 256,
+          "sample_rows": 64
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 48.0
+          },
+          {
+            "key": "inner",
+            "value": 256.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 64.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 48.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 256.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 64.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|prepacked_columns|96x128x96|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961995,
+        "score": 0.009899264,
+        "params": {
+          "kernel": "m8n12"
+        },
+        "context": {
+          "cols": 96,
+          "inner": 128,
+          "revision": 5,
+          "rhs_layout": "prepacked_columns",
+          "rows": 96,
+          "runs": 3,
+          "sample_cols": 96,
+          "sample_inner": 128,
+          "sample_rows": 96
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 96.0
+          },
+          {
+            "key": "inner",
+            "value": 128.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 96.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 96.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 128.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 96.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|row_major|128x1024x32|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961996,
+        "score": 0.009036708666666666,
+        "params": {
+          "kernel": "m4n16"
+        },
+        "context": {
+          "cols": 32,
+          "inner": 1024,
+          "revision": 5,
+          "rhs_layout": "row_major",
+          "rows": 128,
+          "runs": 3,
+          "sample_cols": 32,
+          "sample_inner": 1024,
+          "sample_rows": 128
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 32.0
+          },
+          {
+            "key": "inner",
+            "value": 1024.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 128.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 32.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 1024.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 128.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|row_major|128x128x96|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961995,
+        "score": 0.011949556,
+        "params": {
+          "kernel": "m4n16"
+        },
+        "context": {
+          "cols": 96,
+          "inner": 128,
+          "revision": 5,
+          "rhs_layout": "row_major",
+          "rows": 128,
+          "runs": 3,
+          "sample_cols": 96,
+          "sample_inner": 128,
+          "sample_rows": 128
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 96.0
+          },
+          {
+            "key": "inner",
+            "value": 128.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 128.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 96.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 128.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 128.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|row_major|64x256x48|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961995,
+        "score": 0.006088847333333334,
+        "params": {
+          "kernel": "m4n16"
+        },
+        "context": {
+          "cols": 48,
+          "inner": 256,
+          "revision": 5,
+          "rhs_layout": "row_major",
+          "rows": 64,
+          "runs": 3,
+          "sample_cols": 48,
+          "sample_inner": 256,
+          "sample_rows": 64
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 48.0
+          },
+          {
+            "key": "inner",
+            "value": 256.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 64.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 48.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 256.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 64.0
+          }
+        ]
+      }
+    ]
+  },
+  "cpu.matmul.v05|aarch64|macos|baseline|simd=false|row_major|96x128x96|runs3": {
+    "entries": [
+      {
+        "updated_unix": 1789961995,
+        "score": 0.009538139,
+        "params": {
+          "kernel": "m4n16"
+        },
+        "context": {
+          "cols": 96,
+          "inner": 128,
+          "revision": 5,
+          "rhs_layout": "row_major",
+          "rows": 96,
+          "runs": 3,
+          "sample_cols": 96,
+          "sample_inner": 128,
+          "sample_rows": 96
+        },
+        "features": [
+          {
+            "key": "cols",
+            "value": 96.0
+          },
+          {
+            "key": "inner",
+            "value": 128.0
+          },
+          {
+            "key": "revision",
+            "value": 5.0
+          },
+          {
+            "key": "rows",
+            "value": 96.0
+          },
+          {
+            "key": "runs",
+            "value": 3.0
+          },
+          {
+            "key": "sample_cols",
+            "value": 96.0
+          },
+          {
+            "key": "sample_inner",
+            "value": 128.0
+          },
+          {
+            "key": "sample_rows",
+            "value": 96.0
+          }
+        ]
+      }
+    ]
+  }
+}

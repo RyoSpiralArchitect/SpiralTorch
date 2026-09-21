@@ -1,0 +1,26 @@
+{
+  "source": {
+    "commit": "9847fb7fc992efd82fcb000236314319557adc0a",
+    "files": {
+      "crates/st-bench/examples/cpu_nn_layout.rs": "8ec08a37cde1d7f2b304617cc200eb6a4d022d4e11e060b7f72fe0cdfc65f137",
+      "crates/st-tensor/src/pure.rs": "4f3fee0c7f11edd270bfaf15e5ebbc1d0a805fa69c79ff9b802c76add050c4fa",
+      "crates/st-tensor/src/backend/faer_dense.rs": "72a27563ecf171c8fcf59d42817db4bd594d27a21ce74fe0e0d088e307c22292",
+      "crates/st-tensor/src/backend/transpose.rs": "825524ed85104f1f040bc851c93da5215a357c9a48b9c5e750ad8b1261c37356"
+    },
+    "status": "M crates/st-tensor/src/backend/faer_dense.rs\n M crates/st-tensor/src/backend/mod.rs\n M crates/st-tensor/src/pure.rs\n?? bindings/st-wasm/tests/cpu_layout_bench.cjs\n?? crates/st-bench/examples/cpu_nn_layout.rs\n?? crates/st-tensor/src/backend/transpose.rs"
+  },
+  "command": [
+    "cargo",
+    "+1.98.0",
+    "build",
+    "--locked",
+    "--release",
+    "-p",
+    "st-bench",
+    "--example",
+    "cpu_nn_layout"
+  ],
+  "exit_code": 0,
+  "seconds": 41.182167999999365,
+  "worker_sha256": "18a22dec95928d50bf9e781b9d53cdf21cc68ab589681ba4bfb88353043ca40b"
+}

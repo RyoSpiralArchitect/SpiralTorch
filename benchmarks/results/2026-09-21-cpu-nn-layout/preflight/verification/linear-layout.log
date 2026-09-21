@@ -1,0 +1,9 @@
+   Compiling st-nn v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-nn)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.92s
+     Running tests/linear_layout_contract.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/linear_layout_contract-597dd18e308d4029)
+
+running 1 test
+test linear_layouts_refresh_forward_and_transposed_gradient_packs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

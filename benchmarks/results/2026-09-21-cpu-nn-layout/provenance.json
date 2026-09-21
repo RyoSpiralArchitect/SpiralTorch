@@ -1,0 +1,31 @@
+{
+  "candidate_commit": "d5fa45129429675370c3570ef534051c24c6a9ef",
+  "baseline_commit": "9847fb7fc992efd82fcb000236314319557adc0a",
+  "source_hashes": {
+    "crates/st-tensor/src/pure.rs": "26a0c9bab96ffe530c402bf28374aa3bbdd01c2df365f95577e2855413930a10",
+    "crates/st-tensor/src/backend/faer_dense.rs": "9968c7b81f4c898de7df5d4bbc7081782cc93e7cf8e3860d3d8aca926334343e",
+    "crates/st-tensor/src/backend/transpose.rs": "1e25077595af159b2b4fc8304f9ad3aad06d7dfb20139265ecc64285cf673f32",
+    "crates/st-tensor/src/backend/mod.rs": "ce5f5caa4aa0a8c7739e6e6073650f957e9bb92660b56839673b410f6ec82a65",
+    "crates/st-nn/tests/linear_layout_contract.rs": "01801dd8b7e0aa7e68aa6e33bc81af6a37589043789210d3f560f3124bef1bbe",
+    "crates/st-bench/examples/cpu_nn_layout.rs": "8ec08a37cde1d7f2b304617cc200eb6a4d022d4e11e060b7f72fe0cdfc65f137",
+    "bindings/st-py/tests/test_autograd_prepacked.py": "31662b1004a0d32a1cc185fb03a5043111e59f57fb5168ff83dccd7971239204",
+    "bindings/st-wasm/tests/cpu_layout_bench.cjs": "2fbf5021be02d9d417b1d5666a76eb769ae0d54ee60b1a9a7e959c684d04375d"
+  },
+  "preflight_worker_identical_on_rebuild": true,
+  "preflight_commit": "b1ec9a157a500fc061ad1e35f6f7948b8e018da0",
+  "baseline_wasm_sha256": "1b5dec496646d22e628e52597ec5741cf2f1143f3955982c6d53e8b548926963",
+  "local_products": {
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/baseline/worker": "64623b7fb782310eb09221a4b10bf10f152ab4495bb2620ecff889ef38e5f755",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/candidate-a/worker": "18a22dec95928d50bf9e781b9d53cdf21cc68ab589681ba4bfb88353043ca40b",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/candidate-b/worker": "18a22dec95928d50bf9e781b9d53cdf21cc68ab589681ba4bfb88353043ca40b",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/candidate-c/worker": "9e84ba1a3c1a095a84bd38c10b81d3358fabd4e4169d1e31eb350b50718284f7",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-a/python-cpu.dylib": "c4f6c25463297bdfebae7bafd7a086e648b7e125a5013fc3142e200a4cbd77c3",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-a/wasm/spiraltorch_wasm_bg.wasm": "65d9c1196218d431b09a79c11b82cf16479226076f7e92145d77034fa7f3fc65",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-b/python-cpu.dylib": "a1423bf48c1f9d94fa74ace7069f4317ae1d51cfac242fb0d9f3e3abea26eaa1",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921/verified-b/wasm/spiraltorch_wasm_bg.wasm": "8398e12f1da69db883f34b48177939f5dd0f4ceeae4ec148617a7f2afec330d9",
+    "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-row-major-20260921/verified-a/wasm/spiraltorch_wasm_bg.wasm": "1b5dec496646d22e628e52597ec5741cf2f1143f3955982c6d53e8b548926963"
+  },
+  "baseline_note": "Native baseline is the pinned Git source plus the same new example; WASM baseline is the frozen previous archive product, whose production source is unchanged by its evidence commit.",
+  "local_logs": "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/cpu-nn-layout-20260921",
+  "publication_boundary": "all measurements, validation, hashes and replay scripts; native/Python/WASM products remain local"
+}
