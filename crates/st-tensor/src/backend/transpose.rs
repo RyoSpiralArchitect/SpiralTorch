@@ -11,6 +11,15 @@ pub(crate) fn transpose_into(src: &[f32], dst: &mut [f32], rows: usize, cols: us
         dst.copy_from_slice(src);
         return;
     }
+    // Below a 32 KiB two-buffer working set, tiling adds overhead (notably in WASM).
+    if len <= 4096 {
+        for row in 0..rows {
+            for col in 0..cols {
+                dst[col * rows + row] = src[row * cols + col];
+            }
+        }
+        return;
+    }
     // Keep both sides of a transpose tile hot instead of striding the full output.
     const TILE: usize = 32;
     for row_start in (0..rows).step_by(TILE) {
@@ -42,8 +51,8 @@ mod tests {
             1,
             0x3f80_0000,
         ];
-        for rows in [0, 1, 2, 7, 31, 32, 33, 65, 137] {
-            for cols in [0, 1, 3, 16, 31, 32, 33, 97] {
+        for rows in [0, 1, 2, 7, 31, 32, 33, 63, 64, 65, 137] {
+            for cols in [0, 1, 3, 16, 31, 32, 33, 64, 97] {
                 let source: Vec<_> = (0..rows * cols)
                     .map(|i| f32::from_bits(bits[i % bits.len()]))
                     .collect();
