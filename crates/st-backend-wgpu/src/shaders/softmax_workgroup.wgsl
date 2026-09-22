@@ -107,7 +107,7 @@ fn main_cs(
         row_mask_base = row * params.mask_stride;
     }
 
-    var local_max = -1e30;
+    var local_max = bitcast<f32>(0xff7fffffu);
     var idx = tid;
     loop {
         if (idx >= cols) {
@@ -119,7 +119,7 @@ fn main_cs(
     }
 
     shared_max[tid] = local_max;
-    workgroupBarrier();
+    // The reduction's first barrier publishes these writes.
     reduce_max(tid, WORKGROUP_SIZE);
 
     let row_max = shared_max[0];
@@ -165,7 +165,6 @@ fn main_cs(
     }
 
     shared_sum[tid] = local_sum;
-    workgroupBarrier();
     reduce_sum(tid, WORKGROUP_SIZE);
 
     let row_sum = shared_sum[0];

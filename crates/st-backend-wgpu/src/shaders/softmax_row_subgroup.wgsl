@@ -49,7 +49,7 @@ fn main_cs(
     let row_in_base = row * params.in_stride;
     let row_out_base = row * params.out_stride;
 
-    var local_max = -1e30;
+    var local_max = bitcast<f32>(0xff7fffffu);
     var idx = tid;
     loop {
         if (idx >= cols) {
@@ -68,7 +68,7 @@ fn main_cs(
     workgroupBarrier();
 
     if (tid == 0u) {
-        var global_max = -1e30;
+        var global_max = bitcast<f32>(0xff7fffffu);
         for (var i = 0u; i < subgroup_count; i = i + 1u) {
             global_max = max(global_max, shared_max[i]);
         }
