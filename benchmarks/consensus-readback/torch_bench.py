@@ -101,7 +101,8 @@ def run(report):
                             intervals.append(dict(block=block-3, burst=burst, route=("cpu", "mps")[route], order=order,
                                                   elapsed_ms=elapsed, max_abs_error=absolute, max_scaled_error=scaled))
             records.append(dict(rows=rows, cols=cols, count=count, input=case["input"], reference=reference,
-                                last_outputs=outputs, intervals=intervals))
+                                last_outputs=outputs, intervals=intervals,
+                                **({"order_scheme": case["order_scheme"]} if "order_scheme" in case else {})))
     result = dict(schema=protocol.TORCH, input_protocol=protocol.SCHEMA, status="passed",
                   torch_version=torch.__version__, devices=["cpu", "mps"], compiled=False, preallocated_outputs=True,
                   intra_op_threads=torch.get_num_threads(), inter_op_threads=torch.get_num_interop_threads(),

@@ -21,7 +21,10 @@ PROTOCOL = shared.ArchiveProtocol(protocol.analyze, protocol.validate_summary, S
     "from coupled barriers using all four factors; count=2 is a reduction placebo. Keep every slower/noisy "
     "condition. Public Tensor still blends consensus on CPU; raw GPU consensus is a separate tested boundary. "
     "Initial browser export crashed after all cells started; screen2 uses bounded per-case export. "
-    "Earlier failed and incomplete runs remain separate and are never overwritten.", screening_prefix="screen2")
+    "Earlier failed and incomplete runs remain separate and are never overwritten. "
+    "Final accepted-balanced rounds also fix the legacy reversal/rotation position imbalance; "
+    "screen2 remains a separate legacy-order diagnostic, not pooled with final data.",
+    screening_prefix="screen2", accepted_directory="accepted-balanced")
 publish = partial(shared.publish, protocol=PROTOCOL)
 verify = partial(shared.verify, protocol=PROTOCOL)
 

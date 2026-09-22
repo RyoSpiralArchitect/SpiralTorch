@@ -15,6 +15,12 @@ intervals across eight WGPU routes and eager Torch CPU/MPS. Report all cells,
 including regressions. Pair mode never dispatches consensus, so its reduction
 factor is a placebo. Use both single-factor ratios before attributing a change.
 
+The final balanced-cycle-v1 order rotates all four routes, reversing only after
+each complete four-block cycle. Every route occupies every position two or
+three times in the nine measured blocks. The initial alternating reversal put
+only routes 0/2 first. Legacy-order diagnostics remain separately identifiable
+and validated for preservation, but cannot be pooled with balanced rounds.
+
 ## What Is Timed
 
 Count=2 returns probabilities and **all tied maxima**. Count=4 additionally

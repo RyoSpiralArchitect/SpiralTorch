@@ -25,7 +25,7 @@ class EvidenceTests(unittest.TestCase):
         (self.source / "fixture").write_text("synthetic")
         identity = dict(commit="0" * 40, status="", files={"fixture": e.shared.sha(self.source / "fixture")})
         for stage in e.STAGES:
-            folder = self.raw / "accepted" / stage
+            folder = self.raw / e.PROTOCOL.accepted_directory / stage
             folder.mkdir(parents=True)
             receipt = dict(source=identity, exit_code=0, source_unchanged=True, command=["fixture"])
             e.shared.write(folder / "receipt.json", receipt)
@@ -37,9 +37,9 @@ class EvidenceTests(unittest.TestCase):
         (failed / "stderr.log").write_text("synthetic failed attempt")
         for r in range(3):
             for family in ("native", "browser", "torch"):
-                report = fixture(family)
-                for root, stem in [(self.raw / "accepted", f"round-{r}-{family}"),
+                for root, stem in [(self.raw / e.PROTOCOL.accepted_directory, f"round-{r}-{family}"),
                                    (self.raw, f"screen2-{family}-{r+1}")]:
+                    report = fixture(family, "balanced-cycle-v1" if root.name == e.PROTOCOL.accepted_directory else "legacy-alternating")
                     path = root / (stem + ".json" if family == "browser" else stem + "/stdout.log")
                     path.parent.mkdir(parents=True, exist_ok=True)
                     e.shared.write(path, report)
@@ -58,7 +58,7 @@ class EvidenceTests(unittest.TestCase):
             e.verify(self.output, self.raw)
 
     def test_dirty_source_missing_stage_and_tamper_rejected(self):
-        path = self.raw / "accepted/backend-tests/receipt.json"
+        path = self.raw / e.PROTOCOL.accepted_directory / "backend-tests/receipt.json"
         receipt = e.shared.read(path)
         e.shared.write(path, {**receipt, "source": {**receipt["source"], "status": " M fixture"}})
         with self.assertRaises(ValueError):

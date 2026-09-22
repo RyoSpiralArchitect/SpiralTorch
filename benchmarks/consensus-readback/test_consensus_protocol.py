@@ -13,7 +13,7 @@ TEST_KEYS = {(1, 31, 2), (1, 31, 4)}
 TEST_CONTROL = hashlib.sha256(b"synthetic").hexdigest()
 
 
-def fixture(family):
+def fixture(family, scheme="legacy-alternating"):
     torch = family == "torch"
     routes = ("cpu", "mps") if torch else p.VARIANTS
     report = dict(schema=p.TORCH if torch else p.SCHEMA, status="passed", warmup=3, blocks=9, bursts=[1, 4], cases=[])
@@ -30,6 +30,8 @@ def fixture(family):
                       consensus_state_artifacts=dict(path="synthetic.cases.jsonl", rows=12, bytes=1, sha256="0" * 64))
     for r, c, n in sorted(TEST_KEYS):
         case = dict(rows=r, cols=c, count=n, input=p.inputs(r, c))
+        if scheme != "legacy-alternating":
+            case["order_scheme"] = scheme
         reference = p.oracle(case["input"], r, c, n)
         case.update(reference=reference, last_outputs=[reference[:] for _ in routes], intervals=[])
         for b in range(9):
@@ -102,6 +104,21 @@ class ProtocolTests(unittest.TestCase):
         result["cases"][0]["summary"][0]["median_interval_ms"]["cpu"] *= 2
         with self.assertRaises(ValueError):
             p.validate_summary(result)
+
+    def test_balanced_order_covers_every_position(self):
+        for r, c, n in TEST_KEYS:
+            case = dict(rows=r, cols=c, count=n, order_scheme="balanced-cycle-v1")
+            orders = [p.order(case, b+3) for b in range(9)]
+            for route in range(4):
+                for position in range(4):
+                    self.assertIn(sum(o[position] == route for o in orders), (2, 3))
+        groups = [[fixture(f) for _ in range(3)] for f in ("native", "browser", "torch")]
+        groups[0][0] = fixture("native", "balanced-cycle-v1")
+        with self.assertRaises(ValueError):
+            p.analyze(*groups)
+        balanced = p.analyze(*[[fixture(f, "balanced-cycle-v1") for _ in range(3)] for f in ("native", "browser", "torch")])
+        p.validate_summary(balanced)
+        self.assertTrue(all(c["order_scheme"] == "balanced-cycle-v1" for c in balanced["cases"]))
 
 
 if __name__ == "__main__":

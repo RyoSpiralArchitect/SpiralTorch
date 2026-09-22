@@ -91,7 +91,11 @@ def order(case, block, torch=False):
         return [0, 1] if (block + r + c + n) % 2 == 0 else [1, 0]
     start = (block + r + c + n) % 4
     result = list(range(4))[start:] + list(range(4))[:start]
-    return result[::-1] if block % 2 else result
+    scheme = case.get("order_scheme", "legacy-alternating")
+    if scheme not in ("legacy-alternating", "balanced-cycle-v1"):
+        raise ValueError("unknown route ordering")
+    reverse = block % 2 if scheme == "legacy-alternating" else (block // 4) % 2
+    return result[::-1] if reverse else result
 
 
 def intervals(case, routes, rounds=False):
@@ -214,6 +218,11 @@ def analyze(native, browser, torch):
     if any(len(group) != 3 for group in reports):
         raise ValueError("exactly three complete rounds required")
     admitted = [[admit(r, f) for r in group] for f, group in zip(("native", "browser", "torch"), reports)]
+    schemes = {case.get("order_scheme", "legacy-alternating")
+               for rounds in admitted for cases in rounds for case in cases.values()}
+    if len(schemes) != 1:
+        raise ValueError("mixed route ordering protocols")
+    scheme = schemes.pop()
     records = []
     for ident in sorted(KEYS):
         r, c, n = ident
@@ -222,6 +231,8 @@ def analyze(native, browser, torch):
                       input_sha256=hashlib.sha256(f32(inputs(r, c))).hexdigest(),
                       oracle_sha256=hashlib.sha256(f32(reference)).hexdigest(),
                       max_abs_errors={}, max_scaled_errors={})
+        if scheme != "legacy-alternating":
+            record["order_scheme"] = scheme
         for family, rounds in zip(("native", "browser", "torch"), admitted):
             routes = ("cpu", "mps") if family == "torch" else tuple(family + "_" + v for v in VARIANTS)
             for repeat, cases in enumerate(rounds):

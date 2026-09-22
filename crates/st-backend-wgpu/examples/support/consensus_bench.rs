@@ -412,7 +412,7 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
                 for block in 0..12 {
                     let mut order = [0, 1, 2, 3];
                     order.rotate_left((block + rows + cols + count) % 4);
-                    if block % 2 == 1 {
+                    if (block / 4) % 2 == 1 {
                         order.reverse();
                     }
                     for route in order {
@@ -434,7 +434,7 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64) -> Result<Value> {
                     }
                 }
             }
-            let case = json!({"rows":rows,"cols":cols,"count":count,"input":data,"reference":reference,
+            let case = json!({"rows":rows,"cols":cols,"count":count,"order_scheme":"balanced-cycle-v1","input":data,"reference":reference,
                              "last_outputs":outputs,"intervals":intervals});
             #[cfg(not(target_arch = "wasm32"))]
             cases.push(case);
