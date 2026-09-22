@@ -25,6 +25,7 @@ class ArchiveProtocol:
     validate_summary: Callable
     stages: list[str]
     decision: str
+    screening_prefix: str = "screen"
 
 
 DEFAULT = ArchiveProtocol(
@@ -59,7 +60,7 @@ def safe_path(root, name):
 
 def summary(root, exploratory=False, *, protocol=DEFAULT):
     def path(family, repeat):
-        stem = f"screen-{family}-{repeat + 1}" if exploratory else f"round-{repeat}-{family}"
+        stem = f"{protocol.screening_prefix}-{family}-{repeat + 1}" if exploratory else f"round-{repeat}-{family}"
         return root / (stem + ".json" if family == "browser" else stem + "/stdout.log")
     return protocol.analyze(*[[read(path(family, repeat)) for repeat in range(3)]
                               for family in ("native", "browser", "torch")])

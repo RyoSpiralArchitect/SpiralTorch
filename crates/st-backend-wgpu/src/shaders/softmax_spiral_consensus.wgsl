@@ -53,7 +53,7 @@ fn layout_offset(base: u32, idx: u32, use_chimera: bool, tile: u32, stripes: u32
     return base + idx;
 }
 
-fn reduce_sum_entropy(local_id: u32) {
+fn reduce_sum_statistics(local_id: u32) {
     var stride = WORKGROUP_SIZE / 2u;
     loop {
         if (stride == 0u) {
@@ -63,20 +63,6 @@ fn reduce_sum_entropy(local_id: u32) {
         if (local_id < stride) {
             shared_entropy[local_id] =
                 shared_entropy[local_id] + shared_entropy[local_id + stride];
-        }
-        stride = stride / 2u;
-    }
-    workgroupBarrier();
-}
-
-fn reduce_sum_hardmass(local_id: u32) {
-    var stride = WORKGROUP_SIZE / 2u;
-    loop {
-        if (stride == 0u) {
-            break;
-        }
-        workgroupBarrier();
-        if (local_id < stride) {
             shared_hardmass[local_id] =
                 shared_hardmass[local_id] + shared_hardmass[local_id + stride];
         }
@@ -124,10 +110,8 @@ fn main(@builtin(workgroup_id) workgroup_id: vec3<u32>,
 
     shared_entropy[tid] = entropy;
     shared_hardmass[tid] = hardmass;
-    workgroupBarrier();
-
-    reduce_sum_entropy(tid);
-    reduce_sum_hardmass(tid);
+    // Both statistics retain their addition tree and share each required barrier.
+    reduce_sum_statistics(tid);
 
     let row_entropy = shared_entropy[0];
     let row_hardmass = shared_hardmass[0];
