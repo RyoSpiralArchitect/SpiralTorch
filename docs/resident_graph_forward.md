@@ -166,11 +166,18 @@ Neither path substitutes host Tensor operations when WebGPU is unavailable.
   optional offset. Row broadcasts are allowed; singleton strides do not matter.
   Rust's shared `NdLayout::row_major_rows()` / `RowMajorRows` contract checks
   addressing without granting mutable/nonoverlapping access. Irregular leading
-  axes, strided columns and pointwise-first graphs still pack on-device.
+  axes and strided columns still pack on-device for a first Linear.
   Contiguous offset-zero inputs retain the ordinary dense shader. The private
   row-input shader preserves the existing host/training uniform ABI and guards.
   Rust's `forward_tensor_packed` forces the packing reference path within the
   same submission; it is not a new Python/JavaScript control option.
+- A first pointwise stage reads any admitted N-D view directly, including
+  offsets, permutations, strided columns and broadcasts. It reuses the original
+  shader pipeline with immutable layout metadata, cached by exact layout.
+  Bindings retain their own metadata plan: warming another layout during an
+  aborted composition cannot change an earlier binding. Parameter broadcasts,
+  residual input slots, stage indices and inherited error guards are preserved.
+  This changes inference addressing, not the training/autograd or host Tensor path.
 - Parameters, bindings and activation buffers are prepared once. `dispatch`
   uses one command submission, with no steady-state buffer/binding allocation
   or host readback. The first `dispatch` after a direct forward bridges its

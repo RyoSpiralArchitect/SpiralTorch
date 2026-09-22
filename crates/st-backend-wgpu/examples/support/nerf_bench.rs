@@ -19,6 +19,9 @@ const WARMUP: usize = 3;
 const BLOCKS: usize = 9;
 const SEED: u32 = 17;
 
+#[path = "pointwise_view_cases.rs"]
+mod pointwise_view_cases;
+
 async fn read(tensor: &ResidentTensor) -> Result<Vec<f32>> {
     let snapshot = tensor.snapshot()?;
     #[cfg(not(target_arch = "wasm32"))]
@@ -31,7 +34,12 @@ async fn read(tensor: &ResidentTensor) -> Result<Vec<f32>> {
     }
 }
 
-fn graph(rows: usize, count: usize, hidden: usize) -> Result<GraphDefinition> {
+fn graph(
+    rows: usize,
+    count: usize,
+    hidden: usize,
+    pointwise_input: bool,
+) -> Result<GraphDefinition> {
     let dims = if hidden == 0 {
         vec![3, 4]
     } else {
@@ -39,6 +47,12 @@ fn graph(rows: usize, count: usize, hidden: usize) -> Result<GraphDefinition> {
     };
     let mut parameters = Vec::new();
     let mut stages = Vec::new();
+    if pointwise_input {
+        stages.push(GraphStage::Pointwise {
+            chain: PointwiseChain::new(1, vec![PointwiseStep::named("relu", None)?])?,
+            parameters: vec![],
+        });
+    }
     for (layer, pair) in dims.windows(2).enumerate() {
         let [input, output] = [pair[0], pair[1]];
         let weight = parameters.len();
@@ -83,7 +97,7 @@ enum Connection {
     Separate,
     Single,
     Packed,
-    Rows,
+    DirectLayout,
 }
 
 #[derive(Clone, Copy)]
@@ -91,6 +105,7 @@ pub enum Comparison {
     StagedDirect,
     Submissions,
     InputRows,
+    PointwiseInput,
 }
 
 fn render(
@@ -102,7 +117,7 @@ fn render(
 ) -> Result<ResidentTensor> {
     let mode = RaySampling::Stratified { seed: SEED };
     match connection {
-        Connection::Packed | Connection::Rows => {
+        Connection::Packed | Connection::DirectLayout => {
             let samples = nerf.sample(rays, count, mode)?;
             let input = samples.positions()?;
             let field = if matches!(connection, Connection::Packed) {
@@ -151,10 +166,16 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64, comparison: Comparison)
             "separate_direct_vs_single_submission",
         ),
         Comparison::InputRows => (
-            [Connection::Packed, Connection::Rows],
+            [Connection::Packed, Connection::DirectLayout],
             ["packed", "rows"],
             "spiraltorch.nerf_row_input_bench.v1",
             "packed_input_vs_row_addressing",
+        ),
+        Comparison::PointwiseInput => (
+            [Connection::Packed, Connection::DirectLayout],
+            ["packed", "views"],
+            "spiraltorch.nerf_pointwise_input_bench.v1",
+            "packed_input_vs_pointwise_view",
         ),
         Comparison::StagedDirect => (
             [Connection::Staged, Connection::Separate],
@@ -168,11 +189,17 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64, comparison: Comparison)
     } else {
         ResidentNerf::render_graph
     };
+    let pointwise_input = matches!(comparison, Comparison::PointwiseInput);
+    let view_cases = if pointwise_input {
+        pointwise_view_cases::run(runtime.clone()).await?
+    } else {
+        0
+    };
     let mut cases = Vec::new();
     let mut guard_checks = 0;
     for (rows, count) in [(1, 1), (1, 64), (65, 64), (256, 64), (1024, 64), (256, 256)] {
         for hidden in [0, 32] {
-            let definition = graph(rows, count, hidden)?;
+            let definition = graph(rows, count, hidden, pointwise_input)?;
             let parameter_data: Vec<_> = definition
                 .parameters()
                 .iter()
@@ -292,16 +319,25 @@ pub async fn run(runtime: WgpuRuntime, now: fn() -> f64, comparison: Comparison)
                     }
                 }
             }
-            cases.push(json!({"rays":rows,"samples":count,"hidden":hidden,"seed":SEED,
+            let mut case = json!({"rays":rows,"samples":count,"hidden":hidden,"seed":SEED,
                 "ray_inputs":rays.iter().map(|r| [r.origin[0],r.origin[1],r.origin[2],
                     r.direction[0],r.direction[1],r.direction[2],r.near,r.far]).collect::<Vec<_>>(),
-                "parameters":parameter_data,"reference":reference,"last_outputs":last,"intervals":intervals}));
+                "parameters":parameter_data,"reference":reference,"last_outputs":last,"intervals":intervals});
+            if pointwise_input {
+                case["input_prelude"] = json!("relu");
+            }
+            cases.push(case);
         }
     }
-    Ok(json!({"schema":schema,"status":"passed",
+    let mut report = json!({"schema":schema,"status":"passed",
         "comparison":comparison_name,
         "guard_cases":guard_checks,
         "adapter":adapter,"warmup":WARMUP,"blocks":BLOCKS,"bursts":[1,4],"cases":cases,
         "kernel":"register_2x2","accumulation":"sequential",
-        "boundary":"Prepared identical rays/parameters; every iteration samples rays, evaluates the NN and composites. One owning RGBA/guard snapshot read at the end of each 1/4-render interval; queue completion and map included. Setup/compilation/uploads and numerical comparisons/serialization excluded. Paired correctness only until independent control is run; no isolated GPU timing or training claim."}))
+        "boundary":"Prepared identical rays/parameters; every iteration samples rays, evaluates the NN and composites. One owning RGBA/guard snapshot read at the end of each 1/4-render interval; queue completion and map included. Setup/compilation/uploads and numerical comparisons/serialization excluded. Paired correctness only until independent control is run; no isolated GPU timing or training claim."});
+    if pointwise_input {
+        report["input_prelude"] = json!("relu");
+        report["view_cases"] = json!(view_cases);
+    }
+    Ok(report)
 }

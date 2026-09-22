@@ -9,9 +9,10 @@ fn main() -> fixture::Result<()> {
         (None, None) => fixture::Comparison::StagedDirect,
         (Some("--compare-submissions"), None) => fixture::Comparison::Submissions,
         (Some("--compare-input-layouts"), None) => fixture::Comparison::InputRows,
+        (Some("--compare-pointwise-inputs"), None) => fixture::Comparison::PointwiseInput,
         _ => {
             return Err(
-                "usage: resident_nerf_bench [--compare-submissions|--compare-input-layouts]".into(),
+                "usage: resident_nerf_bench [--compare-submissions|--compare-input-layouts|--compare-pointwise-inputs]".into(),
             )
         }
     };
