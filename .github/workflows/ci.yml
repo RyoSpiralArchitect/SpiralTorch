@@ -39,6 +39,9 @@ jobs:
           python3 -I -B benchmarks/nerf-pointwise-input/test_evidence_pointwise.py
           python3 -I -B benchmarks/softmax-portable/test_softmax_protocol.py
           python3 -I -B benchmarks/softmax-portable/test_softmax_evidence.py
+          python3 -I -B benchmarks/consensus-readback/test_consensus_protocol.py
+          python3 -I -B benchmarks/consensus-readback/test_evidence.py
+          python3 -I -B benchmarks/consensus-readback/evidence.py verify benchmarks/results/2026-09-22-consensus-readback
           python3 -I -B benchmarks/softmax-portable/softmax_evidence.py verify benchmarks/results/2026-09-22-softmax-portable
           python3 -I -B benchmarks/nerf-pointwise-input/evidence_pointwise.py verify benchmarks/results/2026-09-22-nerf-pointwise-input
           python3 -I -B benchmarks/nerf-row-input/evidence.py verify benchmarks/results/2026-09-22-nerf-row-input
@@ -231,6 +234,7 @@ jobs:
           SPIRALTORCH_STRICT_GPU: "1"
         run: |
           cargo test --locked --release -p st-backend-wgpu softmax -- --test-threads=1
+          cargo test --locked --release -p st-backend-wgpu --lib --test readback_batch --example consensus_readback_bench -- --test-threads=1
           cargo test --locked --release -p st-tensor --features wgpu --test wgpu_softmax_extremes
       - name: Portable GPU compaction across tile and row-prefix blocks
         env:

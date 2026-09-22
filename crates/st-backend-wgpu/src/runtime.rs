@@ -18,7 +18,9 @@ use bytemuck::Pod;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
+mod readback_batch;
 pub mod timestamps;
+pub use readback_batch::{read_buffers, ReadbackBatch};
 
 #[cfg(not(target_arch = "wasm32"))]
 const READBACK_TIMEOUT: Duration = Duration::from_secs(30);

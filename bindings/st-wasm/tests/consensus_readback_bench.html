@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Consensus reduction and ordered readback</title>
+<pre id="result" data-status="running">Checking ordered GPU snapshots and consensus</pre>
+<script type="module">
+import init, {run_consensus_readback_bench} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference:"high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback adapter not confirmed");
+  await init();
+  const report = JSON.parse(await run_consensus_readback_bench());
+  report.browser_adapter_probe = {
+    vendor:adapter.info?.vendor ?? null, architecture:adapter.info?.architecture ?? null,
+    is_fallback_adapter:fallback,
+    boundary:"Separate probe, not attestation of the Rust runtime device"
+  };
+  if (report.schema !== "spiraltorch.consensus_readback_bench.v1" || report.status !== "passed" ||
+      report.domain_cases !== 12 || report.domain_bitwise_equal !== true ||
+      report.ownership?.pending_map_cancellation !== true ||
+      report.cases?.length !== 12 || !report.cases.every(c => c.streamed === true && c.interval_count === 72))
+    throw Error("Incomplete consensus comparison");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error",error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

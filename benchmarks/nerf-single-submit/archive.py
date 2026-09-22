@@ -25,6 +25,8 @@ class ArchiveProtocol:
     validate_summary: Callable
     stages: list[str]
     decision: str
+    screening_prefix: str = "screen"
+    accepted_directory: str = "accepted"
 
 
 DEFAULT = ArchiveProtocol(
@@ -59,7 +61,7 @@ def safe_path(root, name):
 
 def summary(root, exploratory=False, *, protocol=DEFAULT):
     def path(family, repeat):
-        stem = f"screen-{family}-{repeat + 1}" if exploratory else f"round-{repeat}-{family}"
+        stem = f"{protocol.screening_prefix}-{family}-{repeat + 1}" if exploratory else f"round-{repeat}-{family}"
         return root / (stem + ".json" if family == "browser" else stem + "/stdout.log")
     return protocol.analyze(*[[read(path(family, repeat)) for repeat in range(3)]
                               for family in ("native", "browser", "torch")])
@@ -84,7 +86,7 @@ def exploration(raw, *, protocol=DEFAULT):
 
 
 def publish(raw, output, *, protocol=DEFAULT):
-    accepted = raw / "accepted"
+    accepted = raw / protocol.accepted_directory
     source = read(accepted / "round-0-native/receipt.json")["source"]
     if source["status"]:
         raise ValueError("accepted source must be committed and clean")
@@ -136,7 +138,7 @@ def verify(root, raw=None, source=None, *, protocol=DEFAULT):
             path = safe_path(raw, name)
             if path.stat().st_size != record["bytes"] or sha(path) != record["sha256"]:
                 raise ValueError(f"raw bytes differ: {name}")
-        if (result != summary(raw / "accepted", protocol=protocol)
+        if (result != summary(raw / protocol.accepted_directory, protocol=protocol)
                 or earlier != exploration(raw, protocol=protocol)):
             raise ValueError("raw summaries differ")
     if source is not None:

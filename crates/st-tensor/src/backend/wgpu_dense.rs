@@ -11,6 +11,7 @@ use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use st_backend_wgpu::runtime::{Shared as Arc, WeakShared as Weak};
+use st_backend_wgpu::softmax::consensus::{self, Params as SpiralConsensusParams};
 use st_kdsl::autotune_store::{load_best_typed, lookup_similar, record_best};
 use st_kdsl::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetrySample, TelemetrySummary,
@@ -997,62 +998,7 @@ impl GpuContext {
             softmax_zspace_pipeline_layout,
         );
 
-        let softmax_spiral_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("st.tensor.wgpu_dense.softmax_spiral.layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+        let softmax_spiral_layout = consensus::bind_layout(&device);
 
         let softmax_spiral_pipeline_layout = Arc::new(device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
@@ -2269,34 +2215,15 @@ impl GpuContext {
         metrics: &Buffer,
         params: &Buffer,
     ) -> Option<BindGroup> {
-        let layout = &self.softmax_spiral_layout;
-        let descriptor = wgpu::BindGroupDescriptor {
-            label: Some("st.tensor.wgpu_dense.softmax_spiral.bind_group"),
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: softmax.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: mask.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: spiral.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: metrics.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: params.as_entire_binding(),
-                },
-            ],
-        };
-        Some(self.device().create_bind_group(&descriptor))
+        Some(consensus::bind(
+            self.device(),
+            &self.softmax_spiral_layout,
+            softmax,
+            mask,
+            spiral,
+            metrics,
+            params,
+        ))
     }
 
     fn project_softmax_zspace(
@@ -4016,27 +3943,6 @@ struct SoftmaxZSpaceParams {
     golden_angle: f32,
     min_energy: f32,
     _pad1: f32,
-}
-
-#[repr(C, align(16))]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct SpiralConsensusParams {
-    rows: u32,
-    cols: u32,
-    soft_stride: u32,
-    mask_stride: u32,
-    spiral_stride: u32,
-    chimera_tile: u32,
-    chimera_stripes: u32,
-    flags: u32,
-    phi: f32,
-    phi_conjugate: f32,
-    phi_bias: f32,
-    leech_scale: f32,
-    ramanujan_ratio: f32,
-    inv_cols: f32,
-    entropy_epsilon: f32,
-    _pad: f32,
 }
 
 const LAYOUT_FLAG_CHIMERA: u32 = 1 << 0;
@@ -9176,8 +9082,15 @@ pub fn row_softmax_hardmax(
     }
     queue.submit(Some(encoder.finish()));
 
-    let softmax = readback_f32(device, queue, &softmax_buf, rows * cols)?;
-    let mask = readback_f32(device, queue, &mask_buf, rows * cols)?;
+    let mut outputs = st_backend_wgpu::runtime::read_buffers::<f32>(
+        &ctx.context,
+        &[(&softmax_buf, rows * cols), (&mask_buf, rows * cols)],
+        "st.tensor.softmax_hardmax.readback",
+    )
+    .map_err(|error| error.to_string())?
+    .into_iter();
+    let softmax = outputs.next().expect("softmax prefix");
+    let mask = outputs.next().expect("mask prefix");
     Ok((softmax, mask))
 }
 
@@ -9289,12 +9202,24 @@ pub fn row_softmax_hardmax_spiral(
 
     queue.submit(Some(encoder.finish()));
 
-    let softmax = readback_f32(device, queue, &softmax_buf, rows * cols)?;
-    let hardmax = readback_f32(device, queue, &mask_buf, rows * cols)?;
+    let mut sources = vec![(&softmax_buf, rows * cols), (&mask_buf, rows * cols)];
+    if let Some(resources) = &consensus_resources {
+        sources.push((&resources.spiral_buffer, rows * cols));
+        sources.push((&resources.metrics_buffer, rows * 4));
+    }
+    let mut outputs = st_backend_wgpu::runtime::read_buffers::<f32>(
+        &ctx.context,
+        &sources,
+        "st.tensor.softmax_spiral.readback",
+    )
+    .map_err(|error| error.to_string())?
+    .into_iter();
+    let softmax = outputs.next().expect("softmax prefix");
+    let hardmax = outputs.next().expect("mask prefix");
 
     if let Some(resources) = consensus_resources {
-        let spiral = readback_f32(device, queue, &resources.spiral_buffer, rows * cols)?;
-        let metrics = readback_f32(device, queue, &resources.metrics_buffer, rows * 4)?;
+        let spiral = outputs.next().expect("spiral prefix");
+        let metrics = outputs.next().expect("metrics prefix");
         let mut total_entropy = 0.0_f64;
         let mut total_hardmass = 0.0_f64;
         let mut total_enrichment = 0.0_f64;

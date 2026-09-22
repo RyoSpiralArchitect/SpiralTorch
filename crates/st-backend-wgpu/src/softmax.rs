@@ -5,6 +5,8 @@
 
 //! WGPU softmax kernels with optional subgroup acceleration.
 
+pub mod consensus;
+
 use std::path::{Path, PathBuf};
 
 use bytemuck::{Pod, Zeroable};
