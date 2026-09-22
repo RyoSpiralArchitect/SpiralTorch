@@ -71,7 +71,7 @@ fn main_cs(
     let chimera_tile = select(1u, max(params.chimera_tile, 1u), use_chimera);
     let chimera_stripes = select(1u, max(params.chimera_stripes, 1u), use_chimera);
     let row_in_base = row * in_stride;
-    var local_max = -1e30;
+    var local_max = bitcast<f32>(0xff7fffffu);
     var idx = tid;
     if (use_chimera) {
         loop {
@@ -102,7 +102,7 @@ fn main_cs(
 
     let subgroup_count = (WORKGROUP_SIZE + subgroup_size - 1u) / subgroup_size;
     if (tid == 0u) {
-        var global_max = -1e30;
+        var global_max = bitcast<f32>(0xff7fffffu);
         for (var i = 0u; i < subgroup_count; i = i + 1u) {
             global_max = max(global_max, shared_max[i]);
         }

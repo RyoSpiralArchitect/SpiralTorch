@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Portable softmax finite domain and barriers</title>
+<pre id="result" data-status="running">Checking and measuring portable softmax</pre>
+<script type="module">
+import init, {run_softmax_portable_bench} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference:"high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback browser adapter not confirmed");
+  await init();
+  const report = JSON.parse(await run_softmax_portable_bench());
+  report.browser_adapter_probe = {
+    vendor:adapter.info?.vendor ?? null, architecture:adapter.info?.architecture ?? null,
+    is_fallback_adapter:fallback,
+    boundary:"Separate probe, not attestation of the Rust runtime device"
+  };
+  if (report.schema !== "spiraltorch.softmax_portable_bench.v1" || report.status !== "passed" ||
+      report.domain_cases !== 48 || report.finite_domain_fix_in_both !== true ||
+      report.cases?.length !== 12 || !report.cases.every(c => c.intervals?.length === 36))
+    throw Error("Incomplete softmax comparison");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error",error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

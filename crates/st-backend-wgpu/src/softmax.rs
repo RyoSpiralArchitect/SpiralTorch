@@ -44,10 +44,78 @@ pub struct Pipelines {
 }
 
 impl Pipelines {
+    /// Compile canonical bundled WGSL without filesystem access, including WASM.
+    /// The existing 32-byte uniform and dispatch ABI are unchanged. The caller
+    /// owns buffer sizing, finite-input validation and explicit observation.
+    pub fn from_embedded(device: &Device, supports_subgroup: bool) -> Self {
+        let (bind_layout, pipeline_layout) = layouts(device);
+        let compile = |source: &'static str, label| {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            });
+            Shared::new(
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&pipeline_layout),
+                    module: &module,
+                    entry_point: "main_cs",
+                    compilation_options: Default::default(),
+                }),
+            )
+        };
+        let workgroup = compile(
+            crate::shader_sources::SOFTMAX_WORKGROUP_WGSL,
+            "st.softmax.workgroup",
+        );
+        let subgroup = (supports_subgroup && device_supports_subgroup(device)).then(|| {
+            compile(
+                crate::shader_sources::SOFTMAX_SUBGROUP_WGSL,
+                "st.softmax.subgroup",
+            )
+        });
+        Self {
+            bind_layout,
+            workgroup,
+            subgroup,
+        }
+    }
+
     /// Pick the best available pipeline depending on subgroup support.
     pub fn best(&self) -> &ComputePipeline {
         self.subgroup.as_deref().unwrap_or(self.workgroup.as_ref())
     }
+}
+
+fn layouts(device: &Device) -> (BindGroupLayout, wgpu::PipelineLayout) {
+    let entries: Vec<_> = (0..4)
+        .map(|binding| BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::COMPUTE,
+            ty: BindingType::Buffer {
+                ty: if binding == 2 {
+                    wgpu::BufferBindingType::Uniform
+                } else {
+                    wgpu::BufferBindingType::Storage {
+                        read_only: binding == 0,
+                    }
+                },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        })
+        .collect();
+    let binding = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: Some("st.backend.softmax.bind_layout"),
+        entries: &entries,
+    });
+    let pipeline = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("st.backend.softmax.pipeline_layout"),
+        bind_group_layouts: &[&binding],
+        push_constant_ranges: &[],
+    });
+    (binding, pipeline)
 }
 
 pub struct Builder<'a> {
@@ -84,62 +152,7 @@ impl<'a> Builder<'a> {
 
     pub fn build(self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
         let supports_subgroup = self.supports_subgroup && device_supports_subgroup(self.device);
-        let bind_layout = self
-            .device
-            .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("st.backend.softmax.bind_layout"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("st.backend.softmax.pipeline_layout"),
-                bind_group_layouts: &[&bind_layout],
-                push_constant_ranges: &[],
-            });
-
+        let (bind_layout, pipeline_layout) = layouts(self.device);
         self.cache
             .prefetch(["softmax_workgroup.wgsl", "softmax_subgroup.wgsl"])?;
 
@@ -373,3 +386,6 @@ mod tests {
         assert_eq!(dispatch.workgroups(), (42, 1, 1));
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod gpu_tests;

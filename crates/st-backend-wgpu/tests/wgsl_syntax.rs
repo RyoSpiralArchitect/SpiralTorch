@@ -90,7 +90,6 @@ const SKIP: &[&str] = &[
     "topk_keepk_subgroup",
     "topk_keepk_subgroup_1ce",
     "topk_keepk_subgroup_1ce_large",
-    "softmax_workgroup",
     "softmax_subgroup",
     "row_softmax_subgroup",
     "fused_attention",

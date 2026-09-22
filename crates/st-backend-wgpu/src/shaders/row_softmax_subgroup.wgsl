@@ -28,22 +28,25 @@ fn row_offset(row: u32, stride: u32, index: u32) -> u32 {
 fn main_cs(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
-    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(global_invocation_id) _global_id: vec3<u32>,
     @builtin(num_workgroups) _num_workgroups: vec3<u32>,
     @builtin(subgroup_size) subgroup_size: u32,
     @builtin(subgroup_invocation_id) subgroup_lane: u32,
 ) {
-    let row = global_id.x;
+    let row = workgroup_id.x;
     if (row >= params.rows) {
         return;
     }
 
     let tid = local_id.x;
     let cols = params.cols;
+    if (cols == 0u) {
+        return;
+    }
     let in_stride = params.in_stride;
     let out_stride = params.out_stride;
 
-    var local_max = -1e30;
+    var local_max = bitcast<f32>(0xff7fffffu);
     var idx = tid;
     loop {
         if (idx >= cols) {
@@ -63,8 +66,8 @@ fn main_cs(
     workgroupBarrier();
 
     if (tid == 0u) {
-        let subgroup_count = WORKGROUP_SIZE / subgroup_size;
-        var global_max = -1e30;
+        let subgroup_count = (WORKGROUP_SIZE + subgroup_size - 1u) / subgroup_size;
+        var global_max = bitcast<f32>(0xff7fffffu);
         for (var i = 0u; i < subgroup_count; i = i + 1u) {
             global_max = max(global_max, shared_max[i]);
         }
@@ -94,7 +97,7 @@ fn main_cs(
     workgroupBarrier();
 
     if (tid == 0u) {
-        let subgroup_count = WORKGROUP_SIZE / subgroup_size;
+        let subgroup_count = (WORKGROUP_SIZE + subgroup_size - 1u) / subgroup_size;
         var global_sum = 0.0;
         for (var i = 0u; i < subgroup_count; i = i + 1u) {
             global_sum = global_sum + shared_sum[i];
