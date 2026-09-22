@@ -20,6 +20,7 @@ mod direct;
 use direct::OutputSlot;
 mod row_input;
 use row_input::RowInputCache;
+mod pointwise_input;
 
 #[derive(Debug, Error)]
 pub enum GraphInferenceError {
@@ -59,6 +60,10 @@ enum BoundaryBinding {
     Linear(DenseDispatch),
     RowLinear(DenseDispatch),
     Pointwise(wgpu::BindGroup),
+    ViewPointwise {
+        plan: runtime::Shared<PointwisePlan>,
+        binding: wgpu::BindGroup,
+    },
 }
 
 /// An inference workspace, not a training workspace with zero learning rate.
@@ -72,6 +77,7 @@ pub struct ResidentGraph {
     nodes: Vec<Node>,
     kernel: Option<DenseKernel>,
     row_input: RowInputCache,
+    pointwise_input: Option<runtime::Shared<PointwisePlan>>,
     validation: wgpu::Buffer,
     readbacks: runtime::ReadbackPool,
     generation: u64,
@@ -234,6 +240,7 @@ impl ResidentGraph {
             nodes,
             kernel,
             row_input,
+            pointwise_input: None,
             validation,
             readbacks,
             generation: 0,
@@ -461,6 +468,10 @@ impl ResidentGraph {
                     (Node::Pointwise { plan, .. }, Some(BoundaryBinding::Pointwise(binding))) => {
                         plan.encode_in_pass(&mut pass, binding)
                     }
+                    (
+                        Node::Pointwise { .. },
+                        Some(BoundaryBinding::ViewPointwise { plan, binding }),
+                    ) => plan.encode_in_pass(&mut pass, binding),
                     (Node::Linear(binding), None) => self
                         .kernel
                         .as_ref()

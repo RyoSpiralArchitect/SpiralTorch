@@ -33,4 +33,11 @@ mod browser {
             .await
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
+
+    #[wasm_bindgen]
+    pub async fn run_resident_nerf_pointwise_input_bench() -> Result<String, JsValue> {
+        run(fixture::Comparison::PointwiseInput)
+            .await
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
 }

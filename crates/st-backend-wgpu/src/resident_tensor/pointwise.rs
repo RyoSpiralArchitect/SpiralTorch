@@ -14,11 +14,47 @@ pub struct PointwisePlan {
     chain: PointwiseChain,
     layouts: Vec<NdLayout>,
     device: TensorDevice,
-    binding_layout: wgpu::BindGroupLayout,
-    pipeline: wgpu::ComputePipeline,
+    binding_layout: Shared<wgpu::BindGroupLayout>,
+    pipeline: Shared<wgpu::ComputePipeline>,
     metadata: wgpu::Buffer,
     grid: [u32; 3],
     flag_slot: u32,
+}
+
+fn layout_metadata(
+    gpu: &wgpu::Device,
+    layouts: &[NdLayout],
+    flag_slot: u32,
+) -> Result<(wgpu::Buffer, [u32; 3]), TensorError> {
+    let limits = gpu.limits();
+    storage_limit(
+        (flag_slot as usize)
+            .checked_add(1)
+            .ok_or(TensorError::Limit("pointwise guard slot"))?,
+        &limits,
+    )?;
+    let output = NdLayout::contiguous(layouts[0].shape())?;
+    validate_view(&output, output.len(), &limits)?;
+    let grid = grid(output.len(), &limits)?;
+    let mut metadata = vec![output.len() as u32, output.rank() as u32, grid[0], grid[2]];
+    metadata.extend(output.shape().iter().map(|&n| n as u32));
+    for layout in layouts {
+        validate_view(layout, layout.required_storage_len()?, &limits)?;
+        let layout = layout.broadcast_to(output.shape())?;
+        metadata.push(layout.offset() as u32);
+        metadata.extend(layout.strides().iter().map(|&n| n as u32));
+    }
+    metadata.push(flag_slot);
+    storage_limit(metadata.len(), &limits)?;
+    Ok((
+        runtime::upload_slice(
+            gpu,
+            "pointwise.metadata",
+            &metadata,
+            wgpu::BufferUsages::STORAGE,
+        )?,
+        grid,
+    ))
 }
 
 fn fused_source(chain: &PointwiseChain) -> String {
@@ -185,37 +221,13 @@ impl PointwisePlan {
         chain.validate_layouts(&layouts)?;
         let gpu = device.runtime().context().device();
         let limits = gpu.limits();
-        storage_limit(
-            (flag_slot as usize)
-                .checked_add(1)
-                .ok_or(TensorError::Limit("pointwise guard slot"))?,
-            &limits,
-        )?;
         let bindings = chain.input_count() as u32 + 4;
         if bindings > limits.max_storage_buffers_per_shader_stage
             || bindings > limits.max_bindings_per_bind_group
         {
             return Err(TensorError::Limit("pointwise input bindings"));
         }
-        let output = NdLayout::contiguous(layouts[0].shape())?;
-        validate_view(&output, output.len(), &limits)?;
-        let grid = grid(output.len(), &limits)?;
-        let mut metadata = vec![output.len() as u32, output.rank() as u32, grid[0], grid[2]];
-        metadata.extend(output.shape().iter().map(|&n| n as u32));
-        for layout in &layouts {
-            validate_view(layout, layout.required_storage_len()?, &limits)?;
-            let layout = layout.broadcast_to(output.shape())?;
-            metadata.push(layout.offset() as u32);
-            metadata.extend(layout.strides().iter().map(|&n| n as u32));
-        }
-        metadata.push(flag_slot);
-        storage_limit(metadata.len(), &limits)?;
-        let metadata = runtime::upload_slice(
-            gpu,
-            "pointwise.metadata",
-            &metadata,
-            wgpu::BufferUsages::STORAGE,
-        )?;
+        let (metadata, grid) = layout_metadata(gpu, &layouts, flag_slot)?;
         let entries: Vec<_> = (0..bindings)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
@@ -254,12 +266,49 @@ impl PointwisePlan {
             chain,
             layouts,
             device,
-            binding_layout,
-            pipeline,
+            binding_layout: Shared::new(binding_layout),
+            pipeline: Shared::new(pipeline),
             metadata,
             grid,
             flag_slot,
         })
+    }
+
+    /// Graph-private input view: preserve the logical domain, parameter layouts,
+    /// program and guard word. Only immutable addressing metadata is replaced;
+    /// old plans/bindings remain valid and the GPU pipeline is shared, not rebuilt.
+    pub(crate) fn with_input_layout(&self, input: &NdLayout) -> Result<Self, TensorError> {
+        if input.shape() != self.layouts[0].shape() {
+            return Err(PointwiseError::LayoutMismatch.into());
+        }
+        let mut layouts = self.layouts.clone();
+        layouts[0] = input.clone();
+        self.chain.validate_layouts(&layouts)?;
+        let (metadata, grid) = layout_metadata(
+            self.device.runtime().context().device(),
+            &layouts,
+            self.flag_slot,
+        )?;
+        Ok(Self {
+            chain: self.chain.clone(),
+            layouts,
+            device: self.device.clone(),
+            binding_layout: self.binding_layout.clone(),
+            pipeline: self.pipeline.clone(),
+            metadata,
+            grid,
+            flag_slot: self.flag_slot,
+        })
+    }
+
+    pub(crate) fn input_layout(&self) -> &NdLayout {
+        &self.layouts[0]
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn shares_pipeline_with(&self, other: &Self) -> bool {
+        Shared::ptr_eq(&self.pipeline, &other.pipeline)
+            && Shared::ptr_eq(&self.binding_layout, &other.binding_layout)
     }
 
     pub fn run(

@@ -5,8 +5,10 @@
 logical last-axis rows; leading axes must flatten affinely and columns must
 have unit stride (singleton strides are unobservable). Row broadcasts are
 read-only and valid. This is not arbitrary strided matmul or mutable aliasing.
-Irregular prefixes, strided columns and pointwise-first graphs still pack on
-the GPU. No host readback or CPU fallback is introduced.
+Irregular prefixes and strided columns still pack for a first Linear.
+Pointwise-first inputs now use a separate
+[direct-view path and comparison](../nerf-pointwise-input/README.md).
+No host readback or CPU fallback is introduced.
 
 NeRF positions are a `[R,N,3]` view of `[R,N,4]` xyz/t storage. The first Linear
 stage can now read its xyz rows without a temporary packed-value allocation

@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident NeRF pointwise-view input comparison</title>
+<pre id="result" data-status="running">Measuring packed versus direct pointwise-view input</pre>
+<script type="module">
+import init, {run_resident_nerf_pointwise_input_bench} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference:"high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback browser adapter not confirmed");
+  await init();
+  const report = JSON.parse(await run_resident_nerf_pointwise_input_bench());
+  report.browser_adapter_probe = {
+    vendor:adapter.info?.vendor ?? null, architecture:adapter.info?.architecture ?? null,
+    is_fallback_adapter:fallback,
+    boundary:"Separate probe, not attestation of the Rust runtime device"
+  };
+  if (report.schema !== "spiraltorch.nerf_pointwise_input_bench.v1" || report.status !== "passed" ||
+      report.comparison !== "packed_input_vs_pointwise_view" || report.guard_cases !== 12 ||
+      report.input_prelude !== "relu" || report.view_cases !== 8 || report.cases?.length !== 12 ||
+      !report.cases.every(c => c.input_prelude === "relu" && c.intervals?.length === 36 &&
+        c.intervals.every(i => ["packed","views"].includes(i.route))))
+    throw Error("Incomplete pointwise-view input comparison");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error",error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

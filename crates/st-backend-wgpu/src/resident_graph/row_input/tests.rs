@@ -140,7 +140,7 @@ mod gpu {
                                 .as_ref()
                                 .unwrap()
                                 .shares_storage_with(view),
-                            *regular && stages.starts_with('l')
+                            *regular || stages.starts_with('p')
                         );
                         for _ in 0..2 {
                             graph.dispatch().unwrap();

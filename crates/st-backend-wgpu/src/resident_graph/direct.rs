@@ -5,6 +5,13 @@ use crate::resident_tensor::TensorReadback;
 const MAX_OUTPUT_SLOTS: usize = 4;
 const MAX_OUTPUT_BYTES: u64 = 32 * 1024 * 1024;
 
+#[derive(Clone, Copy)]
+enum InputAddressing {
+    Contiguous,
+    Rows,
+    PointwiseView,
+}
+
 /// Bindings retain buffers, not tensor ownership. Only this private slot may
 /// recycle them, and only when no tensor/view can still observe that version.
 pub(super) struct OutputSlot {
@@ -31,6 +38,62 @@ fn retention_limit(elements: usize) -> usize {
 }
 
 impl ResidentGraph {
+    fn prepare_direct_input(
+        &mut self,
+        input: &ResidentTensor,
+        encoder: &mut wgpu::CommandEncoder,
+        allow_direct: bool,
+    ) -> Result<(ResidentTensor, InputAddressing), GraphInferenceError> {
+        let layout = input.layout();
+        if allow_direct && (!layout.is_contiguous() || layout.offset() != 0) {
+            if matches!(self.nodes[0], Node::Pointwise { .. }) {
+                self.prepare_pointwise_input(layout)?;
+                return Ok((input.clone(), InputAddressing::PointwiseView));
+            }
+            let device = self.device.runtime().context().device();
+            if device.limits().max_uniform_buffer_binding_size
+                >= crate::resident_dense::ROW_INPUT_UNIFORM_BYTES
+            {
+                if let (Node::Linear(template), Some(rows)) =
+                    (&self.nodes[0], layout.row_major_rows())
+                {
+                    self.row_input.prepare(device, template, rows)?;
+                    return Ok((input.clone(), InputAddressing::Rows));
+                }
+            }
+        }
+        Ok((input.contiguous_into(encoder)?, InputAddressing::Contiguous))
+    }
+
+    fn bind_direct_input(
+        &self,
+        input: &ResidentTensor,
+        output: &wgpu::Buffer,
+        addressing: InputAddressing,
+    ) -> BoundaryBinding {
+        match addressing {
+            InputAddressing::Contiguous => self.bind_boundary(0, input.values(), output),
+            InputAddressing::PointwiseView => self.bind_pointwise_input(input, output),
+            InputAddressing::Rows => {
+                let (Node::Linear(template), GraphStage::Linear { weight, bias, .. }) =
+                    (&self.nodes[0], &self.definition.stages()[0])
+                else {
+                    unreachable!("row input requires a first linear stage");
+                };
+                BoundaryBinding::RowLinear(self.row_input.bind(
+                    self.device.runtime().context().device(),
+                    template,
+                    input.values(),
+                    output,
+                    &self.parameters[*weight],
+                    &self.parameters[*bias],
+                    &self.unused,
+                    &self.validation,
+                ))
+            }
+        }
+    }
+
     fn retain_output(&mut self, slot: OutputSlot) {
         if self.output_slots.len() < retention_limit(self.output_layout().len()) {
             self.output_slots.push(slot);
@@ -84,7 +147,9 @@ impl ResidentGraph {
     /// within a four-slot / 32 MiB per-graph output-data budget. Busy/oversized
     /// slots never cause aliasing, waiting or CPU fallback: allocate separately.
     /// A first linear stage can directly address regular rows, including offsets
-    /// and row broadcasts. Other views are packed on GPU. Any packing, the graph
+    /// and row broadcasts. A first pointwise stage directly reads any admitted
+    /// view using the existing program with cached immutable metadata. Other
+    /// views are packed on GPU. Any packing, the graph
     /// and the output guard share one queue submission.
     /// The graph and its final guard capture also share one compute pass.
     pub fn forward_tensor(
@@ -132,7 +197,7 @@ impl ResidentGraph {
         &mut self,
         produce: impl FnOnce(&mut wgpu::CommandEncoder) -> Result<(ResidentTensor, S), E>,
         consume: impl FnOnce(&mut wgpu::CommandEncoder, &ResidentTensor, S) -> Result<O, E>,
-        allow_rows: bool,
+        allow_direct: bool,
     ) -> Result<O, E>
     where
         E: From<GraphInferenceError>,
@@ -154,14 +219,14 @@ impl ResidentGraph {
             .submitted_dispatches
             .checked_add(1)
             .ok_or(GraphInferenceError::CounterOverflow)?;
-        let (input, rows) = self.prepare_direct_input(&input, &mut encoder, allow_rows)?;
+        let (input, addressing) = self.prepare_direct_input(&input, &mut encoder, allow_direct)?;
         let slot = self.checkout_output()?;
         let singleton = self.nodes.len() == 1;
         // Keep replacement bindings local until the consumer has also encoded
         // successfully. An aborted composition must not cache a new binding
         // under the previous input_source key.
         let new_binding = if singleton {
-            Some(self.bind_direct_input(&input, slot.tensor.values(), rows))
+            Some(self.bind_direct_input(&input, slot.tensor.values(), addressing))
         } else if self.input_binding.is_none()
             || !self.input_source.as_ref().is_some_and(|source| {
                 source.shares_storage_with(&input) && source.layout() == input.layout()
@@ -171,7 +236,7 @@ impl ResidentGraph {
             {
                 self.direct_stats.input_bindings += 1;
             }
-            Some(self.bind_direct_input(&input, &self.activations[1], rows))
+            Some(self.bind_direct_input(&input, &self.activations[1], addressing))
         } else {
             None
         };

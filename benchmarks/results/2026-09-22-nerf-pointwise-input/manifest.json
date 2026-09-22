@@ -1,0 +1,12 @@
+{
+  ".gitattributes": "e94abf1bfff535dbc270fb5c1be766d00810066e523c9924ec8ab259176a0b26",
+  "README.md": "70edef21341aa33419f08110518c3de60a9bbe2f4ca6c13906c7257fd48ddbab",
+  "admission.log": "1c2691125b0ce4034d9c26772fa5e9daf0b279ba5cdbce715ad232a9ebd11b7c",
+  "archive-tests.log": "0ee26aa5837ef2b023b89d146fdbef44e1e8769be57442d29ace6f3e932082f7",
+  "backend-tests.log": "3264a96ca0e1952361b52246a53e22519f4128a7a9806434efebad2747751935",
+  "exploration.json": "53e74b1453500503be0e40ab8c3b0c66c718751c622350430620b265517e0df1",
+  "local-raw-manifest.json": "8f9bfff1f42afcf5c3e9ccef5d18da879d14cab736754b41aedca7cf353b98be",
+  "results.json": "7908cd3d2300f5566b10c4fbfd36126313fae4cc290a86a5f2058febc588b6aa",
+  "source.json": "b34f9ab538fe6569c0473ccb1b3f3eeb790c03eae9ac50e04a7ea2a95e75da70",
+  "validation.json": "ae2c99fd3056153ebc6821974cad9e33a9ae346b1106a7da09a3cd19e6c03b1e"
+}
