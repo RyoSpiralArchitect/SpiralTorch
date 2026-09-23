@@ -142,6 +142,48 @@ mod browser {
             }
             cases += 1;
         }
+        let mut adaptive_workgroup_cases = 0;
+        for rows in [64usize, 128] {
+            let x = [0., 1.].repeat(rows);
+            let seed: Vec<f32> = (0..rows)
+                .flat_map(|row| {
+                    if row % 2 == 0 {
+                        [1., 0.25]
+                    } else {
+                        [-0.5, 0.75]
+                    }
+                })
+                .collect();
+            let input = device.upload(&[rows, 2], &x)?;
+            let gamma = device.upload(&[2], &[1., 1.])?;
+            let beta = device.upload(&[2], &[0., 0.])?;
+            let upstream = device.upload(&[rows, 2], &seed)?;
+            let tape = input.layer_norm_affine(&gamma, &beta, 0.)?;
+            close(&read(tape.value()).await?, &[-1., 1.].repeat(rows))?;
+            let expected = [
+                [-(rows as f32) / 4., rows as f32 / 2.],
+                [rows as f32 / 4., rows as f32 / 2.],
+            ];
+            for requested in [
+                [false, true, true],
+                [false, true, false],
+                [false, false, true],
+            ] {
+                let gradients = tape.backward(&upstream, 1., requested)?;
+                if gradients[0].is_some()
+                    || gradients[1].is_some() != requested[1]
+                    || gradients[2].is_some() != requested[2]
+                {
+                    return Err("Adaptive affine VJP presence differs".into());
+                }
+                for i in 1..3 {
+                    if let Some(value) = &gradients[i] {
+                        close(&read(value).await?, &expected[i - 1])?;
+                    }
+                }
+            }
+            adaptive_workgroup_cases += 1;
+        }
         let mut scale_nullspace_cases = 0;
         for scale in [1., 1e-10, 1e-20, 1e-30, tiny] {
             let input = device.upload(&[1, 3], &[-scale, 0., scale])?;
@@ -310,8 +352,9 @@ mod browser {
             return Err("Statistics-only VJP lost inherited gamma guard".into());
         }
         Ok(serde_json::to_string(&serde_json::json!({
-            "schema": "spiraltorch.resident_layer_norm.browser.v4", "status": "passed",
+            "schema": "spiraltorch.resident_layer_norm.browser.v5", "status": "passed",
             "adapter": format!("{:?}", runtime.adapter_info()), "cases": cases, "masks_per_case": 8,
+            "adaptive_workgroup_cases": adaptive_workgroup_cases, "adaptive_workgroup_masks": 3,
             "scale_nullspace_cases": scale_nullspace_cases,
             "epsilon_cancellation_cases": epsilon_cancellation_cases,
             "dynamic_range_variants": dynamic_range_variants,

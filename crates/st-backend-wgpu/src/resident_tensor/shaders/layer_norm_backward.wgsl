@@ -41,6 +41,17 @@ fn reduce(lane: u32) {
     }
 }
 
+fn reduce_small(lane: u32, first_stride: u32) {
+    workgroupBarrier();
+    for (var stride = first_stride; stride > 0u; stride >>= 1u) {
+        if (lane < stride) {
+            sums[lane] = wide_add(sums[lane], sums[lane + stride]);
+            projections[lane] = wide_add(projections[lane], projections[lane + stride]);
+        }
+        workgroupBarrier();
+    }
+}
+
 fn weighted(index: u32, col: u32) -> Wide {
     return wide_mul(parts(upstream[index]), parts(gamma[col]));
 }
@@ -82,6 +93,41 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
         let numerator = wide_add(variance_residual, wide_mul(centered_g, epsilon_sum));
         dx[base + col] = checked(wide_mul(numerator, input_scale));
     }
+}
+
+// Keep the 256-lane entry point below unchanged as the broad-shape reference.
+fn compute_affine_small(group: vec3<u32>, lane: u32, lanes: u32) {
+    let col = group.y * params.groups_x + group.x;
+    if (col >= params.cols) { return; }
+    var dg = parts(0.0);
+    var db = parts(0.0);
+    for (var row = lane; row < params.rows; row += lanes) {
+        let index = row * params.cols + col;
+        let seed = parts(upstream[index]);
+        if ((params.requested & 2u) != 0u) {
+            let normalized = wide_mul(centered_values[index], row_stats[row].inverse_std);
+            dg = wide_add(dg, wide_mul(seed, normalized));
+        }
+        if ((params.requested & 4u) != 0u) { db = wide_add(db, seed); }
+    }
+    sums[lane] = dg;
+    projections[lane] = db;
+    reduce_small(lane, lanes / 2u);
+    if (lane == 0u) {
+        let scale = parts(params.scale);
+        if ((params.requested & 2u) != 0u) { affine[col] = checked(wide_mul(sums[0], scale)); }
+        if ((params.requested & 4u) != 0u) { affine[params.beta_offset + col] = checked(wide_mul(projections[0], scale)); }
+    }
+}
+
+@compute @workgroup_size(64)
+fn backward_affine_64(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    compute_affine_small(group, lane, 64u);
+}
+
+@compute @workgroup_size(128)
+fn backward_affine_128(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    compute_affine_small(group, lane, 128u);
 }
 
 @compute @workgroup_size(256)

@@ -58,3 +58,6 @@ condition's median and validation record, not the larger raw JSON reports.
 Separate Rust and PyTorch host stacks and different GPU implementations make
 these measurements unsuitable for a universal speed claim. No browser WebGPU
 performance result is implied by the native Metal run.
+
+The subsequent medium-row affine workgroup optimization and its native/browser
+validation are in `benchmarks/results/2026-09-24-layernorm-affine-workgroups/`.
