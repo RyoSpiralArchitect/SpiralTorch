@@ -44,5 +44,9 @@ crate-type = ["cdylib"]
 name = "gelu_backward_bench_browser"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "layer_norm_resident_browser"
+crate-type = ["cdylib"]
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
