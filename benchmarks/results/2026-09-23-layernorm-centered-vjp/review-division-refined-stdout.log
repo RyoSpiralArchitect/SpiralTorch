@@ -1,0 +1,19 @@
+
+running 9 tests
+test resident_tensor::normalization::tests::layer_norm_resident_extreme_finite_cases ... ok
+test resident_tensor::normalization::tests::layer_norm_resident_rejections_empty_batches_and_guards ... ok
+test resident_tensor::normalization::tests::layer_norm_resident_requested_vjps_and_nd_views ... ok
+test resident_tensor::normalization::tests::layer_norm_resident_training_matches_cpu_including_slow_convergence ... ok
+test resident_tensor::normalization::tests::layer_norm_resident_widths_and_offsets ... ok
+test resident_tensor::normalization::tests::layer_norm_retains_small_epsilon_after_scale_direction_cancellation ... ok
+test resident_tensor::normalization::tests::layer_norm_review_large_dynamic_range_vjp_matches_f64 ... FAILED
+test resident_tensor::normalization::tests::layer_norm_shaders_validate_without_adapter ... ok
+test resident_tensor::normalization::tests::layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance ... ok
+
+failures:
+
+failures:
+    resident_tensor::normalization::tests::layer_norm_review_large_dynamic_range_vjp_matches_f64
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 192 filtered out; finished in 2.31s
+

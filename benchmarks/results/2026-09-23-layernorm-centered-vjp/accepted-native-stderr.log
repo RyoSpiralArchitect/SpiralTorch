@@ -1,0 +1,30 @@
+snapshot stages anchored=true us allocate=3.250 encoder=0.250 values_copy=3.709 indices_copy=0.416 finish=0.084 submit=4.625 map=143.291
+snapshot stages anchored=true us allocate=2.834 encoder=0.250 values_copy=3.583 indices_copy=0.292 finish=0.166 submit=4.625 map=149.125
+snapshot stages anchored=true us allocate=2.750 encoder=0.250 values_copy=3.542 indices_copy=0.333 finish=0.209 submit=4.791 map=244.875
+snapshot stages anchored=true us allocate=5.250 encoder=0.292 values_copy=3.583 indices_copy=0.333 finish=0.167 submit=4.458 map=137.875
+snapshot stages anchored=true us allocate=2.625 encoder=0.334 values_copy=3.541 indices_copy=0.334 finish=0.166 submit=4.250 map=133.792
+snapshot stages anchored=true us allocate=4.958 encoder=0.250 values_copy=3.667 indices_copy=0.291 finish=0.250 submit=4.292 map=137.208
+snapshot stages anchored=true us allocate=3.375 encoder=0.250 values_copy=3.625 indices_copy=0.334 finish=0.166 submit=4.750 map=134.334
+snapshot stages anchored=true us allocate=4.167 encoder=0.333 values_copy=4.250 indices_copy=0.417 finish=0.292 submit=5.000 map=135.500
+snapshot stages anchored=true us allocate=4.041 encoder=0.292 values_copy=3.792 indices_copy=0.375 finish=0.208 submit=4.583 map=135.334
+snapshot stages anchored=true us allocate=2.625 encoder=0.250 values_copy=2.542 indices_copy=0.250 finish=0.125 submit=3.333 map=135.375
+snapshot stages anchored=true us allocate=3.500 encoder=0.292 values_copy=3.541 indices_copy=0.375 finish=0.167 submit=4.500 map=136.208
+LayerNorm 400-step training: lr=0.05, first=1.5588048, last=0.0007589892, cpu_last=0.00075898913, meets_1e_4=false
+LayerNorm 400-step training: lr=0.1, first=1.9879963, last=0.00000000078171347, cpu_last=0.0000000007817134, meets_1e_4=true
+epsilon scale-direction: scale=0.0000000001, seed=340282350000000000000000000000000000000, dx=[-8.760057e23, 0.0, 8.760057e23], expected=876005700000000000000000
+epsilon scale-direction: scale=0.00000000000000000001, seed=1, dx=[-2574268600000000.0, 0.0, 2574268600000000.0], expected=2574268600000000
+review dynamic-range: dx=[-917.6736, 0.0002187904, 1835.3469, -917.6736], reference=[-917.6736, 0.00022702335, 1835.3469, -917.6736]
+scale-direction nullspace: scale=1, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.0000000001, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.00000000000000000001, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.000000000000000000000000000001, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.000000000000000000000000000000000000000000001, dx=[0.0, 0.0, 0.0]
+softmax adapter=AdapterInfo { name: "Apple M4", vendor: 0, device: 0, device_type: IntegratedGpu, driver: "", driver_info: "", backend: Metal }, variants=[Workgroup, Subgroup]
+softmax adapter=AdapterInfo { name: "Apple M4", vendor: 0, device: 0, device_type: IntegratedGpu, driver: "", driver_info: "", backend: Metal }, variants=[Workgroup, Subgroup]
+
+thread 'util::tests::source_cache_recovers_after_poison' (4903270) panicked at crates/st-backend-wgpu/src/util.rs:534:13:
+poison shader source cache
+
+thread 'util::tests::source_loader_panic_does_not_poison_cache' (4903272) panicked at crates/st-backend-wgpu/src/util.rs:573:25:
+source loader failed
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/deps/st_kernel_contracts-82120561376f48c5)

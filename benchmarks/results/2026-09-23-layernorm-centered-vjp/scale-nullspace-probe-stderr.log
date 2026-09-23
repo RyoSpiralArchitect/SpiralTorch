@@ -1,0 +1,30 @@
+1770 |     fn render_bundle_encoder_multi_draw_indexed_indirect_count(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `0` is never read
+  --> vendor/wgpu-0.20.1/src/util/mod.rs:86:5
+   |
+85 | pub struct DownloadBuffer(
+   |            -------------- field in this struct
+86 |     Arc<super::Buffer>,
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+86 -     Arc<super::Buffer>,
+86 +     (),
+   |
+
+warning: `wgpu` (lib) generated 161 warnings
+   Compiling st-backend-wgpu v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-backend-wgpu)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.25s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_backend_wgpu-e17fb8d3b750ce54)
+scale-direction nullspace: scale=1, dx=[-8.702336e-15, 0.0, 8.702336e-15]
+scale-direction nullspace: scale=0.0000000001, dx=[8.7023356e-5, 0.0, -8.7023356e-5]
+
+thread 'resident_tensor::normalization::tests::layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance' (4866215) panicked at crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs:19:9:
+index 0: 0.000087023356 != 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p st-backend-wgpu --lib`

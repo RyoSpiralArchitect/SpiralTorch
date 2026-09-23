@@ -1,0 +1,30 @@
+86 |     Arc<super::Buffer>,
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+86 -     Arc<super::Buffer>,
+86 +     (),
+   |
+
+warning: `wgpu` (lib) generated 161 warnings
+   Compiling st-backend-wgpu v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-backend-wgpu)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.78s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/lib.rs (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/debug/deps/st_backend_wgpu-e17fb8d3b750ce54)
+LayerNorm 400-step training: lr=0.05, first=1.5588048, last=0.0007589892, cpu_last=0.00075898913, meets_1e_4=false
+LayerNorm 400-step training: lr=0.1, first=1.9879963, last=0.00000000078171347, cpu_last=0.0000000007817134, meets_1e_4=true
+epsilon scale-direction: scale=0.0000000001, seed=340282350000000000000000000000000000000, dx=[-8.760057e23, 0.0, 8.760057e23], expected=876005700000000000000000
+epsilon scale-direction: scale=0.00000000000000000001, seed=1, dx=[-2574268600000000.0, 0.0, 2574268600000000.0], expected=2574268600000000
+review dynamic-range: dx=[-917.6736, 0.00030637204, 1835.3469, -917.6736], reference=[-917.6736, 0.00022702335, 1835.3469, -917.6736]
+
+thread 'resident_tensor::normalization::tests::layer_norm_review_large_dynamic_range_vjp_matches_f64' (4884845) panicked at crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs:19:9:
+index 1: 0.00030637204 != 0.00022702335
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+scale-direction nullspace: scale=1, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.0000000001, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.00000000000000000001, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.000000000000000000000000000001, dx=[0.0, 0.0, 0.0]
+scale-direction nullspace: scale=0.000000000000000000000000000000000000000000001, dx=[0.0, 0.0, 0.0]
+error: test failed, to rerun pass `-p st-backend-wgpu --lib`
