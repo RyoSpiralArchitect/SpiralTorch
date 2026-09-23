@@ -56,3 +56,6 @@ The complete second failed job log remains local as
 The stable-tail revision is remeasured separately in
 [the stable-tail archive](../2026-09-23-gelu-stable-tail/README.md); the first
 study is preserved rather than relabeled as a measurement of the correction.
+
+This file records the investigation, not live CI status. Final CI and review
+completion are recorded on [PR #2118](https://github.com/RyoSpiralArchitect/SpiralTorch/pull/2118).
