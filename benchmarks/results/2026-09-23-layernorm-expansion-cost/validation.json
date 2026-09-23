@@ -1,0 +1,784 @@
+{
+  "schema": "spiraltorch.resident_layer_norm.evidence.v3",
+  "measured_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+  "scope": "Exploratory host-to-host primitive comparison, not performance admission; ordinary Tensor route unchanged",
+  "accepted_stages": [
+    "accepted-bindgen",
+    "accepted-browser",
+    "accepted-decimal",
+    "accepted-fmt",
+    "accepted-native",
+    "accepted-native-bench",
+    "accepted-native-clippy",
+    "accepted-tensor-clippy",
+    "accepted-tensor-tests",
+    "accepted-tensor-wasm-clippy",
+    "accepted-torch",
+    "accepted-wasm-build",
+    "accepted-wasm-clippy"
+  ],
+  "rust_tests": 249,
+  "measured_intervals": 540,
+  "stages": {
+    "zero-residuals-native": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T08:56:36.399981+00:00",
+      "finished_at": "2026-09-23T08:56:46.421301+00:00",
+      "seconds": 10.021198292030022,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "accepted-decimal": {
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-B",
+        "benchmarks/layer-norm-resident/decimal_probe.py"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:06:06.344485+00:00",
+      "finished_at": "2026-09-23T09:06:06.454855+00:00",
+      "seconds": 0.11041775002377108,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "ordered-sum-bits-native": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 101,
+      "started_at": "2026-09-23T09:03:04.060601+00:00",
+      "finished_at": "2026-09-23T09:03:05.211038+00:00",
+      "seconds": 1.1504747080034576,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "epsilon-cancellation-probe": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm_retains_small_epsilon_after_scale_direction_cancellation",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 101,
+      "started_at": "2026-09-23T08:23:43.818818+00:00",
+      "finished_at": "2026-09-23T08:23:47.043527+00:00",
+      "seconds": 3.2247192920185626,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "c51c283011ad07bee7002e8b6a90a77af13cd5e7",
+      "source_dirty": true
+    },
+    "row-factor-native": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T08:58:10.683109+00:00",
+      "finished_at": "2026-09-23T08:58:19.398306+00:00",
+      "seconds": 8.71509941702243,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "zero-components-native": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T08:55:17.549635+00:00",
+      "finished_at": "2026-09-23T08:55:27.048593+00:00",
+      "seconds": 9.498850459000096,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "accepted-fmt": {
+      "command": [
+        "cargo",
+        "+nightly-2026-04-15",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:06:03.801963+00:00",
+      "finished_at": "2026-09-23T09:06:05.961187+00:00",
+      "seconds": 2.1592380839865655,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "scale-nullspace-probe": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 101,
+      "started_at": "2026-09-23T08:17:02.238868+00:00",
+      "finished_at": "2026-09-23T08:17:05.687023+00:00",
+      "seconds": 3.448153208999429,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "4855ee7c2e2a64d6eb72d174045a999f717ffc42",
+      "source_dirty": true
+    },
+    "zero-residuals-bench": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "run",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--example",
+        "layer_norm_resident_bench",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T08:57:05.109965+00:00",
+      "finished_at": "2026-09-23T08:57:19.320262+00:00",
+      "seconds": 14.210113750013988,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "ordered-sum-native": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:00:18.341676+00:00",
+      "finished_at": "2026-09-23T09:00:27.319125+00:00",
+      "seconds": 8.977344124985393,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "accepted-tensor-clippy": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:38.116806+00:00",
+      "finished_at": "2026-09-23T09:05:39.928508+00:00",
+      "seconds": 1.8117179579567164,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-tensor-wasm-clippy": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:40.321033+00:00",
+      "finished_at": "2026-09-23T09:05:41.972891+00:00",
+      "seconds": 1.6518808749970049,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-browser": {
+      "command": [
+        "env",
+        "NODE_PATH=/Users/ryospiralarchitect/Library/Logs/SpiralTorch/midk-seek-20260906/browser-deps/node_modules",
+        "node",
+        "tools/test_resident_browser.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/layernorm-expansion-cost-20260923/accepted-wasm",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/layernorm-expansion-cost-20260923/accepted-browser.json",
+        "",
+        "",
+        "",
+        "",
+        "layer-norm-resident"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:56.851025+00:00",
+      "finished_at": "2026-09-23T09:05:58.854919+00:00",
+      "seconds": 2.0039177919970825,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-tensor-tests": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "SPIRALTORCH_STRICT_GPU=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense",
+        "--test",
+        "layer_norm_numerics",
+        "--test",
+        "layer_norm_autograd",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:42.369731+00:00",
+      "finished_at": "2026-09-23T09:05:52.907222+00:00",
+      "seconds": 10.537368750025053,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-wasm-build": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--example",
+        "layer_norm_resident_browser"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:53.306621+00:00",
+      "finished_at": "2026-09-23T09:05:56.054765+00:00",
+      "seconds": 2.748140042007435,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-bindgen": {
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "--target",
+        "web",
+        "--out-name",
+        "spiraltorch_wasm",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/layernorm-expansion-cost-20260923/accepted-wasm",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/layer_norm_resident_browser.wasm"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:56.448642+00:00",
+      "finished_at": "2026-09-23T09:05:56.470121+00:00",
+      "seconds": 0.021521084010601044,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "ordered-sum-bits-native-fixed": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:03:19.877524+00:00",
+      "finished_at": "2026-09-23T09:03:27.521675+00:00",
+      "seconds": 7.644074665964581,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "review-division-refined": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "resident_tensor::normalization::tests",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 101,
+      "started_at": "2026-09-23T08:31:30.499427+00:00",
+      "finished_at": "2026-09-23T08:31:34.316279+00:00",
+      "seconds": 3.816867249959614,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "c51c283011ad07bee7002e8b6a90a77af13cd5e7",
+      "source_dirty": true
+    },
+    "accepted-native": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-backend-wgpu",
+        "-p",
+        "st-kernel-contracts",
+        "--lib",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:29.574917+00:00",
+      "finished_at": "2026-09-23T09:05:34.764405+00:00",
+      "seconds": 5.189451708982233,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "review-dynamic-range": {
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "-p",
+        "st-backend-wgpu",
+        "--lib",
+        "layer_norm_review_large_dynamic_range_vjp_matches_f64",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 101,
+      "started_at": "2026-09-23T08:30:05.825623+00:00",
+      "finished_at": "2026-09-23T08:30:08.064045+00:00",
+      "seconds": 2.2384555840399116,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "c51c283011ad07bee7002e8b6a90a77af13cd5e7",
+      "source_dirty": true
+    },
+    "zero-components-bench": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "run",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--example",
+        "layer_norm_resident_bench",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T08:55:51.718991+00:00",
+      "finished_at": "2026-09-23T08:56:04.992721+00:00",
+      "seconds": 13.27356120798504,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "accepted-wasm-clippy": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "-p",
+        "st-kernel-contracts",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:35.162362+00:00",
+      "finished_at": "2026-09-23T09:05:36.384197+00:00",
+      "seconds": 1.2218678329954855,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-torch": {
+      "command": [
+        "env",
+        "PYTORCH_ENABLE_MPS_FALLBACK=0",
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-B",
+        "benchmarks/layer-norm-resident/torch_bench.py"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:06:02.089315+00:00",
+      "finished_at": "2026-09-23T09:06:03.393568+00:00",
+      "seconds": 1.3042703329701908,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-native-bench": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "run",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--example",
+        "layer_norm_resident_bench",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:59.249085+00:00",
+      "finished_at": "2026-09-23T09:06:01.701045+00:00",
+      "seconds": 2.451965917018242,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "accepted-native-clippy": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "clippy",
+        "--locked",
+        "-p",
+        "st-backend-wgpu",
+        "-p",
+        "st-kernel-contracts",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:05:36.777309+00:00",
+      "finished_at": "2026-09-23T09:05:37.697175+00:00",
+      "seconds": 0.91988887503976,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "6dcf2885682b63463fc4f30dec0b17ce8a3afdb0",
+      "source_dirty": false
+    },
+    "row-factor-bench": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "run",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--example",
+        "layer_norm_resident_bench",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T08:58:32.416448+00:00",
+      "finished_at": "2026-09-23T08:58:45.473216+00:00",
+      "seconds": 13.056606457976159,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    },
+    "ordered-sum-bench": {
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "run",
+        "--locked",
+        "--release",
+        "-p",
+        "st-tensor",
+        "--example",
+        "layer_norm_resident_bench",
+        "--no-default-features",
+        "--features",
+        "cpu,wgpu_dense"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T09:01:16.898009+00:00",
+      "finished_at": "2026-09-23T09:01:29.212822+00:00",
+      "seconds": 12.314677625021432,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "source_commit": "8218209ad450457c46c86ebb5459898b7d5eb3a4",
+      "source_dirty": true
+    }
+  }
+}

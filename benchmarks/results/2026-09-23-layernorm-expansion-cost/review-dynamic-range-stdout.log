@@ -1,0 +1,11 @@
+
+running 1 test
+test resident_tensor::normalization::tests::layer_norm_review_large_dynamic_range_vjp_matches_f64 ... FAILED
+
+failures:
+
+failures:
+    resident_tensor::normalization::tests::layer_norm_review_large_dynamic_range_vjp_matches_f64
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 200 filtered out; finished in 0.32s
+

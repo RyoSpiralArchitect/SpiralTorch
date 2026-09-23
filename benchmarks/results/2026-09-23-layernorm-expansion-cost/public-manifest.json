@@ -1,0 +1,97 @@
+[
+  {
+    "path": "accepted-native-stderr.log",
+    "bytes": 3412,
+    "sha256": "6770911172d940170564bcada4b32ef32b81fd650153988e075e913fb0dee45f"
+  },
+  {
+    "path": "accepted-native-stdout.log",
+    "bytes": 2300,
+    "sha256": "707500f36dbb9f952473585889706a67944b3e0671664960c63a5071ebb6706a"
+  },
+  {
+    "path": "browser.json",
+    "bytes": 1481,
+    "sha256": "51d3f50cfa98a16c6066e9f63de56928fbd2d9011ce43d15a7a9b4c0d84aed7b"
+  },
+  {
+    "path": "decimal-oracle.json",
+    "bytes": 945,
+    "sha256": "7bfeebfb165f9ff3ea68b0576e31ffdc2995a777b9358a78906bf90ef9a548fd"
+  },
+  {
+    "path": "epsilon-cancellation-probe-stderr.log",
+    "bytes": 1851,
+    "sha256": "15a23a8a9709926b40d343c436aafbd16fb73fe99da9944aa1a88094e8148321"
+  },
+  {
+    "path": "epsilon-cancellation-probe-stdout.log",
+    "bytes": 374,
+    "sha256": "22f5a3ff0a6bcea1843116bb63e84c27ca557839fca420f60fb1068881c4bbbd"
+  },
+  {
+    "path": "exploratory-variants.json",
+    "bytes": 164893,
+    "sha256": "09856740290146154d06357539340db1e109999a93f418f685bb82a2aead07d5"
+  },
+  {
+    "path": "measured-source.json",
+    "bytes": 53497,
+    "sha256": "098dc653fdf84ec10fdbcbfee1db2ca5931bc4b27dd009db09eca03a48decbd0"
+  },
+  {
+    "path": "medians.json",
+    "bytes": 1779,
+    "sha256": "b5e694ad2584c426cec5e651c4ca2a0a60739dd373a4ab04091668cff17c4850"
+  },
+  {
+    "path": "native.json",
+    "bytes": 32952,
+    "sha256": "430577ffbbc94e33592b463f42e890c131444d0bf9bb636f9fb8c8f63a8d1e18"
+  },
+  {
+    "path": "pytorch.json",
+    "bytes": 22769,
+    "sha256": "09461d47b7daa7eed4c02458a95210660e058b992d8455de0d6dcf650ffdeb22"
+  },
+  {
+    "path": "raw-manifest.json",
+    "bytes": 21916,
+    "sha256": "0c8e838974d957d8a1e6745c40a369d9b04a7e1cb716c2ca2f50e4fee70927fc"
+  },
+  {
+    "path": "review-division-refined-stderr.log",
+    "bytes": 2386,
+    "sha256": "31cf5c99f45e663eab43b799a91cb7a362c83ef0ab35b97a1844d9bba8bff61b"
+  },
+  {
+    "path": "review-division-refined-stdout.log",
+    "bytes": 1184,
+    "sha256": "aec3d925f7943576055f5dbdd7fb0de4f99d530fa5a38cf42ad040735bba4664"
+  },
+  {
+    "path": "review-dynamic-range-stderr.log",
+    "bytes": 1774,
+    "sha256": "b2460cde3f2c45f4f89176dcafa3cb11bdf2d1c242be67c4234f74db4d3af01a"
+  },
+  {
+    "path": "review-dynamic-range-stdout.log",
+    "bytes": 346,
+    "sha256": "1f548834c13ad87d082aecfd861679030f4053163b1f2b7db1248522bad7046e"
+  },
+  {
+    "path": "scale-nullspace-probe-stderr.log",
+    "bytes": 1795,
+    "sha256": "6f0392658d37a0c01411935e731c9111471bdad5e4232e9d99a638792e78320e"
+  },
+  {
+    "path": "scale-nullspace-probe-stdout.log",
+    "bytes": 368,
+    "sha256": "2545b06245dcc93dac432aab272b4a1c1343bb5071a51ab54cb67c7c2d1b1550"
+  },
+  {
+    "path": "validation.json",
+    "bytes": 25373,
+    "sha256": "47e9b5099b995fed22092ab9a644c675a9ff0bccee92aef670def2cacd415832"
+  }
+]

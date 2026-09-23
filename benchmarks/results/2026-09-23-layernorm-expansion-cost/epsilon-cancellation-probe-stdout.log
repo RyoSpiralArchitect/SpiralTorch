@@ -1,0 +1,11 @@
+
+running 1 test
+test resident_tensor::normalization::tests::layer_norm_retains_small_epsilon_after_scale_direction_cancellation ... FAILED
+
+failures:
+
+failures:
+    resident_tensor::normalization::tests::layer_norm_retains_small_epsilon_after_scale_direction_cancellation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 199 filtered out; finished in 0.35s
+
