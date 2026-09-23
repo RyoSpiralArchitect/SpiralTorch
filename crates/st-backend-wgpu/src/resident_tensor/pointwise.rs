@@ -95,7 +95,7 @@ fn generated_source(chain: &PointwiseChain, vjp: bool) -> String {
             count + 4
         )
         .unwrap();
-        code.push_str(include_str!("../shaders/gelu_derivative.wgsl"));
+        code.push_str(crate::shader_sources::GELU_DERIVATIVE_WGSL);
     }
     // params: length, rank, grid-x, group-count, shape,
     // (offset, strides)*inputs, output flag slot.

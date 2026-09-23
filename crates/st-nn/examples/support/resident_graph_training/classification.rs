@@ -267,7 +267,9 @@ pub(super) async fn run(runtime: WgpuRuntime) -> Result<Value> {
                     .collect();
                 close(&[value], &[expected.loss])?;
                 close(&prediction, &expected.prediction)?;
-                close(&dx, &expected.dx)?;
+                close(&dx, &expected.dx).map_err(|error| {
+                    format!("classification seed={seed} smoothing={smoothing} policy={policy:?} step={i} input_gradient: {error}")
+                })?;
                 for (a, b) in raw.iter().zip(&expected.raw) {
                     close(a, b)?;
                 }

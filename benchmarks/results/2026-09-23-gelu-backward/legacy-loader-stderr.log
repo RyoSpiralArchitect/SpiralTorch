@@ -1,0 +1,28 @@
+     Locking 131 packages to latest compatible versions
+   Compiling wgpu v0.20.1
+   Compiling st-kernel-contracts v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-kernel-contracts)
+   Compiling st-backend-wgpu v0.1.0 (/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-backend-wgpu)
+   Compiling gelu-legacy-probe v0.0.0 (/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-backward-liveness-20260923/baseline-probe)
+    Finished `release` profile [optimized] target(s) in 9.38s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running `/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/release/gelu-legacy-probe '/Users/ryospiralarchitect/🌀SpiralReality🌀/_wt/spiraltorch-resident-graph-forward-v1/crates/st-backend-wgpu/src/shaders'`
+
+thread 'main' (4592815) panicked at /Users/ryospiralarchitect/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-0.20.1/src/backend/wgpu_core.rs:2996:5:
+wgpu error: Validation Error
+
+Caused by:
+    In Device::create_shader_module
+      note: label = `st.backend.gelu_back.fused.rows16_cols16`
+    
+Shader 'st.backend.gelu_back.fused.rows16_cols16' parsing error: Unexpected override-expression
+   ┌─ wgsl:28:36
+   │
+28 │ var<workgroup> tile_gz: array<f32, WG_TILE>;
+   │                                    ^^^^^^^ see msg
+
+
+    Unexpected override-expression
+
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

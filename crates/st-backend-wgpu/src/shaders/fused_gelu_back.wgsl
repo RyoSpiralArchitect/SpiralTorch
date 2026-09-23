@@ -27,14 +27,7 @@ struct Uniforms {
 
 var<workgroup> tile_gz: array<f32, WG_TILE>;
 
-fn gelu_prime(z: f32) -> f32 {
-  let k0: f32 = 0.7978845608028654;
-  let k1: f32 = 0.044715;
-  let z2 = z * z;
-  let u = k0 * (z + k1 * z * z2);
-  let t = tanh(u);
-  return 0.5 * (1.0 + t) + 0.5 * z * (1.0 - t * t) * k0 * (1.0 + 3.0 * k1 * z2);
-}
+// GELU_DERIVATIVE
 
 @compute @workgroup_size(WG_COLS, WG_ROWS, 1)
 fn main(

@@ -11,7 +11,7 @@ async function main() {
   if (!moduleDir || !executablePath || !outputPath) {
     throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-pair-lanes-matched|rank-prefix-matched|rank-count-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean|nn|nn-training|nd-tensor|nn-clients|nn-clients-cpu|nn-training-clients|nn-training-clients-cpu] [BASELINE_MODULE_DIR]");
   }
-if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu", "nn-fusion-clients", "nn-autograd-clients", "nn-learner-clients", "pointwise-clients", "nn-module-handoff", "nn-module-forward", "nn-module-matched", "nn-module-intervals", "nn-module-terminal-intervals", "nn-module-terminal-matched-intervals", "nn-loss-clients", "nn-classification-clients", "nn-microbatch-clients", "nerf", "nerf-bench", "nerf-submit-bench", "nerf-row-input-bench", "nerf-pointwise-input-bench", "softmax-portable-bench", "consensus-readback-bench"].includes(fixture)) throw Error("unknown fixture");
+if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu", "nn-fusion-clients", "nn-autograd-clients", "nn-learner-clients", "pointwise-clients", "nn-module-handoff", "nn-module-forward", "nn-module-matched", "nn-module-intervals", "nn-module-terminal-intervals", "nn-module-terminal-matched-intervals", "nn-loss-clients", "nn-classification-clients", "nn-microbatch-clients", "nerf", "nerf-bench", "nerf-submit-bench", "nerf-row-input-bench", "nerf-pointwise-input-bench", "softmax-portable-bench", "consensus-readback-bench", "gelu-backward-bench"].includes(fixture)) throw Error("unknown fixture");
   const nnClientFixture = fixture === "nn-clients" || fixture === "nn-clients-cpu";
   const trainingClientFixture = fixture === "nn-training-clients" || fixture === "nn-training-clients-cpu";
   const graphClientFixture = fixture === "nn-graph-clients" || fixture === "nn-graph-clients-cpu";
@@ -61,6 +61,7 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
     if(fixture === "nerf-row-input-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_nerf_row_input_bench.html"), "text/html"]);
     if(fixture === "nerf-pointwise-input-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_nerf_pointwise_input_bench.html"), "text/html"]);
     if(fixture === "softmax-portable-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/softmax_portable_bench.html"), "text/html"]);
+    if(fixture === "gelu-backward-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/gelu_backward_bench.html"), "text/html"]);
     if(fixture === "consensus-readback-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/consensus_readback_bench.html"), "text/html"]);
     if(fixture === "nn-forward-clients") {
       files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_forward_clients.html"), "text/html"]);
@@ -129,9 +130,9 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
         metadata.consensus_progress.push({stage, host_time_ms:Date.now()});
       });
     }
-    if(fixture === "nn-graph-training-profile" || moduleIntervals || fixture === "consensus-readback-bench") {
+    if(fixture === "nn-graph-training-profile" || moduleIntervals || fixture === "consensus-readback-bench" || fixture === "gelu-backward-bench") {
       profileFd=fs.openSync(outputPath+".cases.jsonl","wx");
-      await page.exposeFunction(fixture === "consensus-readback-bench" ? "publishConsensusCase" : moduleIntervals ? "publishModuleInterval" : "publishResidentProfile",raw=>{
+      await page.exposeFunction(fixture === "gelu-backward-bench" ? "publishGeluCase" : fixture === "consensus-readback-bench" ? "publishConsensusCase" : moduleIntervals ? "publishModuleInterval" : "publishResidentProfile",raw=>{
         if(typeof raw !== "string" || Buffer.byteLength(raw)>64*1024*1024)
           throw Error("profile state capture exceeds its per-case budget");
         const data=Buffer.from(raw+"\n");
@@ -176,7 +177,7 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
       throw Error("incomplete streamed profiling matrix");
     if(moduleIntervals && (!report || report.cases?.length !== profileRows || profileRows !== 36))
       throw Error("incomplete streamed completed-read matrix");
-    if(fixture === "consensus-readback-bench" && report?.status === "passed") {
+    if(["consensus-readback-bench", "gelu-backward-bench"].includes(fixture) && report?.status === "passed") {
       if(report.cases?.length !== profileRows || profileRows !== 12)
         throw Error("incomplete streamed consensus matrix");
       report.cases = fs.readFileSync(outputPath+".cases.jsonl", "utf8").trimEnd().split("\n").map(JSON.parse);
@@ -194,7 +195,7 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
     if(server) await new Promise(resolve=>server.close(resolve));
     if(profileFd !== undefined) {
       fs.closeSync(profileFd);
-      metadata[fixture === "consensus-readback-bench" ? "consensus_state_artifacts" : moduleIntervals ? "interval_state_artifacts" : "profile_state_artifacts"]={path:path.basename(outputPath)+".cases.jsonl",
+      metadata[fixture === "gelu-backward-bench" ? "gelu_state_artifacts" : fixture === "consensus-readback-bench" ? "consensus_state_artifacts" : moduleIntervals ? "interval_state_artifacts" : "profile_state_artifacts"]={path:path.basename(outputPath)+".cases.jsonl",
         rows:profileRows,bytes:profileBytes,sha256:profileHash.digest("hex")};
     }
     Object.assign(report,metadata,{page_errors:pageErrors,console_messages:consoleMessages});

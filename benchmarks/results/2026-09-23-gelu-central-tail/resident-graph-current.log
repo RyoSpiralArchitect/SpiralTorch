@@ -1,0 +1,18 @@
+
+running 1 test
+test owned_gain_graph_training_matches_modules_and_rejects_partial_commits ... FAILED
+
+failures:
+
+---- owned_gain_graph_training_matches_modules_and_rejects_partial_commits stdout ----
+
+thread 'owned_gain_graph_training_matches_modules_and_rejects_partial_commits' (4729549) panicked at crates/st-nn/tests/resident_graph_training.rs:11:56:
+called `Result::unwrap()` on an `Err` value: "element 0: resident -0.020603502 != reference -0.016700737"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    owned_gain_graph_training_matches_modules_and_rejects_partial_commits
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.84s
+

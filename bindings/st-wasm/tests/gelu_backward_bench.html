@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>GELU backward liveness</title>
+<pre id="result" data-status="running">Checking shared GELU and selected outputs</pre>
+<script type="module">
+import init, {run_gelu_backward_bench} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference:"high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback adapter not confirmed");
+  await init();
+  const report = JSON.parse(await run_gelu_backward_bench());
+  report.browser_adapter_probe = {
+    vendor:adapter.info?.vendor ?? null, architecture:adapter.info?.architecture ?? null,
+    is_fallback_adapter:fallback, boundary:"Separate probe, not attestation of the Rust runtime device"
+  };
+  if (report.schema !== "spiraltorch.gelu_liveness_bench.v1" || report.status !== "passed" ||
+      report.domains?.cases?.length !== 24 || report.cases?.length !== 12 ||
+      !report.cases.every(c => c.streamed === true && c.interval_count === 54))
+    throw Error("Incomplete GELU comparison");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status:"error",error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

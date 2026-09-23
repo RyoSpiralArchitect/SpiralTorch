@@ -52,6 +52,8 @@ pub(crate) fn device_supports_subgroup(device: &Device) -> bool {
 /// Errors that may occur when loading WGSL shaders into a WGPU pipeline.
 #[derive(Debug, Error)]
 pub enum ShaderLoadError {
+    #[error("invalid shader specialization: {0}")]
+    InvalidSpecialization(&'static str),
     /// The WGSL source file could not be read from disk.
     #[error("failed to read WGSL shader '{path}'")]
     Io {
@@ -390,7 +392,7 @@ pub fn load_compute_pipeline_with_layout(
     }))
 }
 
-fn apply_overrides(
+pub(crate) fn apply_overrides(
     source: &Arc<str>,
     file: &str,
     overrides: &[(&str, u32)],
@@ -433,6 +435,31 @@ fn apply_overrides(
     }
 
     Ok(Arc::from(output))
+}
+
+pub(crate) fn create_inline_pipeline(
+    device: &Device,
+    label: &str,
+    source: String,
+    entry_point: &str,
+    layout: &wgpu::PipelineLayout,
+) -> Result<Shared<ComputePipeline>, ShaderLoadError> {
+    let module = create_inline_module(device, label, source)?;
+    let pipeline = catch_unwind(AssertUnwindSafe(|| {
+        device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some(label),
+            layout: Some(layout),
+            module: &module,
+            entry_point,
+            compilation_options: Default::default(),
+        })
+    }))
+    .map_err(|payload| ShaderLoadError::Pipeline {
+        label: label.into(),
+        context: "inline".into(),
+        source: Box::new(PipelineCreateError(panic_payload_to_string(payload))),
+    })?;
+    Ok(Shared::new(pipeline))
 }
 
 #[cfg(test)]

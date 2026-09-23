@@ -9,13 +9,20 @@
 //! generates `gZ`, updates the residual gradient, and accumulates bias partials
 //! per workgroup tile, followed by a column-wise reduction that finalises `db`.
 
+pub mod plain;
+mod portable;
+pub use portable::{
+    fused_bind, fused_bind_layout, fused_source, reduce_bind, reduce_bind_layout, reduce_source,
+    Plan, PlanError,
+};
+
 use std::cmp;
 use std::path::{Path, PathBuf};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
-    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer,
-    BufferUsages, ComputePipeline, Device, PipelineLayoutDescriptor, Queue, ShaderStages,
+    BindGroupLayout, Buffer, BufferUsages, ComputePipeline, Device, PipelineLayoutDescriptor,
+    Queue, ShaderStages,
 };
 
 use crate::{runtime::Shared, ShaderCache, ShaderLoadError};
@@ -270,175 +277,10 @@ impl<'a> Builder<'a> {
         self,
         geometry: Geometry,
     ) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
-        let fused_bind_layout = self
-            .device
-            .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("st.backend.gelu_back.fused.bind_layout"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let reduce_bind_layout = self
-            .device
-            .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("st.backend.gelu_back.reduce.bind_layout"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let fused_layout = self
-            .device
-            .create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("st.backend.gelu_back.fused.pipeline_layout"),
-                bind_group_layouts: &[&fused_bind_layout],
-                push_constant_ranges: &[],
-            });
-
-        let reduce_layout = self
-            .device
-            .create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("st.backend.gelu_back.reduce.pipeline_layout"),
-                bind_group_layouts: &[&reduce_bind_layout],
-                push_constant_ranges: &[],
-            });
-
-        self.cache
-            .prefetch(["fused_gelu_back.wgsl", "reduce_db.wgsl"])?;
-
-        let fused_label = format!(
-            "st.backend.gelu_back.fused.rows{}_cols{}",
-            geometry.wg_rows, geometry.wg_cols
-        );
-        let reduce_label = format!(
-            "st.backend.gelu_back.reduce.cols{}_wg{}",
-            geometry.wg_cols, geometry.reduce_wg
-        );
-
-        let fused = self.cache.load_compute_pipeline_with_layout_and_overrides(
-            self.device,
-            "fused_gelu_back.wgsl",
-            &fused_label,
-            "main",
-            Some(&fused_layout),
-            &[
-                ("WG_ROWS", geometry.wg_rows),
-                ("WG_COLS", geometry.wg_cols),
-                ("WG_TILE", geometry.wg_rows.saturating_mul(geometry.wg_cols)),
-            ],
-        )?;
-
-        let reduce = self.cache.load_compute_pipeline_with_layout_and_overrides(
-            self.device,
-            "reduce_db.wgsl",
-            &reduce_label,
-            "reduce",
-            Some(&reduce_layout),
-            &[
-                ("WG_COLS", geometry.wg_cols),
-                ("REDUCE_WG", geometry.reduce_wg),
-            ],
-        )?;
-
-        Ok((
-            Pipelines {
-                fused_bind_layout,
-                reduce_bind_layout,
-                fused,
-                reduce,
-                geometry,
-            },
-            self.cache,
-        ))
+        let fused = self.cache.source("fused_gelu_back.wgsl")?;
+        let reduce = self.cache.source("reduce_db.wgsl")?;
+        let pipelines = portable::build(self.device, geometry, &fused, &reduce)?;
+        Ok((pipelines, self.cache))
     }
 }
 
@@ -495,6 +337,20 @@ mod tests {
     #[test]
     fn reduce_uniform_size() {
         assert_eq!(std::mem::size_of::<ReduceUniforms>(), 16);
+    }
+
+    #[test]
+    fn uniform_words_and_padding_preserve_tensor_abi() {
+        let fused = FusedUniforms::new(33, 65, 72, 5, 3, true);
+        assert_eq!(
+            bytemuck::cast_slice::<u8, u32>(fused.as_bytes()),
+            &[33, 65, 72, 5, 3, 1, 0, 0]
+        );
+        let reduce = ReduceUniforms::new(65, 5, 3);
+        assert_eq!(
+            bytemuck::cast_slice::<u8, u32>(reduce.as_bytes()),
+            &[65, 5, 3, 0]
+        );
     }
 
     #[test]

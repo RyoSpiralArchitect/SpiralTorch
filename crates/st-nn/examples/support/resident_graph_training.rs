@@ -52,6 +52,7 @@ readback!(parameters, GraphParameterReadback, GraphDefinition);
 readback!(loss, StepReadback, f32);
 readback!(tensor, TensorReadback, Vec<f32>);
 
+#[track_caller]
 fn close(a: &[f32], b: &[f32]) -> Result<f32> {
     if a.len() != b.len() {
         return Err("length mismatch".into());
@@ -59,7 +60,11 @@ fn close(a: &[f32], b: &[f32]) -> Result<f32> {
     let mut error = 0f32;
     for (i, (&a, &b)) in a.iter().zip(b).enumerate() {
         if !a.is_finite() || !b.is_finite() || (a - b).abs() > 2e-5 + 2e-4 * b.abs() {
-            return Err(format!("element {i}: resident {a} != reference {b}").into());
+            return Err(format!(
+                "{} element {i}: resident {a} != reference {b}",
+                std::panic::Location::caller()
+            )
+            .into());
         }
         error = error.max((a - b).abs());
     }
@@ -191,14 +196,35 @@ fn cpu_step_with_loss(
     })
 }
 fn compare(actual: &GraphState, expected: &Reference) -> Result<f32> {
-    let mut error = close(&[actual.loss], &[expected.loss])?
-        .max(close(&actual.prediction, &expected.prediction)?)
-        .max(close(&actual.input_gradient, &expected.dx)?);
+    let field = |name: &str, a: &[f32], b: &[f32]| -> Result<f32> {
+        close(a, b)
+            .map_err(|error| format!("step {} {name}: {error}", actual.submitted_step).into())
+    };
+    let mut error = field("loss", &[actual.loss], &[expected.loss])?
+        .max(field(
+            "prediction",
+            &actual.prediction,
+            &expected.prediction,
+        )?)
+        .max(field(
+            "input_gradient",
+            &actual.input_gradient,
+            &expected.dx,
+        )?);
     for (i, p) in actual.graph.parameters().iter().enumerate() {
         error = error
-            .max(close(&p.values, &expected.parameters[i])?)
-            .max(close(&actual.raw_gradients[i], &expected.raw[i])?)
-            .max(close(
+            .max(field(
+                &format!("parameter {i} {:?}", p.role),
+                &p.values,
+                &expected.parameters[i],
+            )?)
+            .max(field(
+                &format!("raw_gradient {i} {:?}", p.role),
+                &actual.raw_gradients[i],
+                &expected.raw[i],
+            )?)
+            .max(field(
+                &format!("effective_gradient {i} {:?}", p.role),
                 &actual.effective_gradients[i],
                 &expected.effective[i],
             )?);
@@ -271,7 +297,9 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
                 if actual.gradient_policy != policy || actual.batch_generation != 1 {
                     return Err("snapshot metadata drift".into());
                 }
-                error = error.max(compare(&actual, reference)?);
+                error = error.max(compare(&actual, reference).map_err(|error| {
+                    format!("trajectory seed={seed} shape={shape:?} policy={policy:?}: {error}")
+                })?);
                 steps.push(state_json(&actual));
             }
             close(

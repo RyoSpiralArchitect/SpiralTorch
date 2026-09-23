@@ -1,0 +1,2194 @@
+{
+  "accepted/admission/receipt.json": {
+    "sha256": "6333ffa1a7576c5f89d599ffc4ac328b5c68befd5ba545e40ea82ae220203d7f",
+    "bytes": 49300
+  },
+  "accepted/admission/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/admission/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/admission/stderr.log": {
+    "sha256": "9d654695c0a90577e252109954dd749137ace81d33f39cf1a31990e7f48cf31d",
+    "bytes": 102
+  },
+  "accepted/admission/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/archive-tests/receipt.json": {
+    "sha256": "22e52f587ee554f454e31179fa14048aa6edf5f810f715e8e5c33cb88f60cff4",
+    "bytes": 49296
+  },
+  "accepted/archive-tests/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/archive-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/archive-tests/stderr.log": {
+    "sha256": "313333b9e524dda030e2cf2e16bc87424c3d6607678722fb01f27b2e6cba405a",
+    "bytes": 100
+  },
+  "accepted/archive-tests/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/backend-tests/receipt.json": {
+    "sha256": "34d28cdb64048f5036492ad5e95c0ab50c1bab7846dff1e7b8c1f72c00431547",
+    "bytes": 49438
+  },
+  "accepted/backend-tests/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/backend-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/backend-tests/stderr.log": {
+    "sha256": "bf0a4c16b0e0262501fb168161e4e85dff3d3169fb733dbf2e8eb840e6757511",
+    "bytes": 114743
+  },
+  "accepted/backend-tests/stdout.log": {
+    "sha256": "4bf76e0c432592580c84e10d550a4ed049202c7b4050946830cbcfd9606b5287",
+    "bytes": 19211
+  },
+  "accepted/bindgen/receipt.json": {
+    "sha256": "ac8bc40cc38f4df991e32f8167f5dfb9d3be658076b51962451cb35798abdb4b",
+    "bytes": 49655
+  },
+  "accepted/bindgen/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/bindgen/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/bindgen/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/bindgen/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/core-tests/receipt.json": {
+    "sha256": "7ee30a3cc03bb49cee01eeab17d7dcedbd9a6ac0932522a153227cf672cb5f44",
+    "bytes": 49297
+  },
+  "accepted/core-tests/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/core-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/core-tests/stderr.log": {
+    "sha256": "306206d7aaa62e452e5c8ebaae9e0a74b726b15e507824ba08d7c93fd519ba03",
+    "bytes": 519
+  },
+  "accepted/core-tests/stdout.log": {
+    "sha256": "b49f21d16c95a1c2ff63e18de6d8875a3a8c58c628b1de20fe3bf8bb14155b58",
+    "bytes": 91380
+  },
+  "accepted/format/receipt.json": {
+    "sha256": "2a4406ea9da6a652240703a74db6b4cfc300d1ed7724e766520021f24b46f55c",
+    "bytes": 49242
+  },
+  "accepted/format/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/format/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/format/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/format/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/freeze-native/receipt.json": {
+    "sha256": "1f61ab636b3c64e0130c571f2437efc38b9cddb3c557d0d4830cbdca547e09ee",
+    "bytes": 49444
+  },
+  "accepted/freeze-native/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/freeze-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/freeze-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/freeze-native/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/native-bench": {
+    "sha256": "505e0000f48b21a6e1893a752709eb33d8f5860fc1bf2b1414ee818884be01ed",
+    "bytes": 5356512
+  },
+  "accepted/native-build/receipt.json": {
+    "sha256": "a16eeebb3f7c15119320ab77735023d01eb9a2f47aa0c5e893a5c6804f71209a",
+    "bytes": 49304
+  },
+  "accepted/native-build/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/native-build/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/native-build/stderr.log": {
+    "sha256": "68bf443a88804580891f601b281d47b08588f49b1b23ce3eaf8dfd76f7d02336",
+    "bytes": 114151
+  },
+  "accepted/native-build/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/native-clippy/receipt.json": {
+    "sha256": "f65b03f8a6e3a16b457f0f1b6e76262750ab90c9f5f63bf4fe7dc152e61fd318",
+    "bytes": 49367
+  },
+  "accepted/native-clippy/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/native-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/native-clippy/stderr.log": {
+    "sha256": "f7a12cc5b0b5ba44da67ba71a76cc72b05f777f039623644a1e89a87450c3147",
+    "bytes": 114300
+  },
+  "accepted/native-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/nn-tests/receipt.json": {
+    "sha256": "484b477c235162334436c49a02e9134798600dfd5483395cf958d4e77c3fb172",
+    "bytes": 49441
+  },
+  "accepted/nn-tests/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/nn-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/nn-tests/stderr.log": {
+    "sha256": "670c6a507c50dc63ba1638b77500012788524f86d0e371a90e67a268249c7aa4",
+    "bytes": 115168
+  },
+  "accepted/nn-tests/stdout.log": {
+    "sha256": "15d56d755ad27df9fdccbcc20b79921aa93bdd9c5f19ed239d52632e188fde83",
+    "bytes": 961
+  },
+  "accepted/round-0-browser/receipt.json": {
+    "sha256": "5c76e4efa1e559380d7ecbbe9619b5dabc0d77a28fd66962da1cb205698dfe94",
+    "bytes": 49679
+  },
+  "accepted/round-0-browser/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-0-browser/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-0-browser/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-0-browser/stdout.log": {
+    "sha256": "6f1ba7be51135eca921758939f1c9d421668b46ba268727a1a736d762d609a23",
+    "bytes": 155
+  },
+  "accepted/round-0-browser.json": {
+    "sha256": "32b22c8bd69f46602b785c0c28d3b6a6a9a35db531257d76f514f106e2fe1628",
+    "bytes": 129908786
+  },
+  "accepted/round-0-browser.json.cases.jsonl": {
+    "sha256": "2c687aa491f0dc3a452c43c2864299f22ac5d552c668f0c00dd17fdd2cdf392b",
+    "bytes": 80659809
+  },
+  "accepted/round-0-native/receipt.json": {
+    "sha256": "469848795683a822db642c5f9b4bcdf4992d3e9e30aeb11116270b263019d9f3",
+    "bytes": 49265
+  },
+  "accepted/round-0-native/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-0-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-0-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-0-native/stdout.log": {
+    "sha256": "2a07ff0988ef64bc8e7e1ba1a80ac60cd85927b3d77a0eb77075edf29a48a680",
+    "bytes": 80670455
+  },
+  "accepted/round-0-torch/receipt.json": {
+    "sha256": "f0fb522bd6e5ed4b18f501f72f8dd0876ad5f6bd2218c5552bb2063fcbd99fb8",
+    "bytes": 49292
+  },
+  "accepted/round-0-torch/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-0-torch/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-0-torch/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-0-torch/stdout.log": {
+    "sha256": "562ee5e998a114d56908d2829ea0e8cd8faeb057521652a8bef3475c532338fe",
+    "bytes": 68033064
+  },
+  "accepted/round-1-browser/receipt.json": {
+    "sha256": "8aa868fd82cfa5b48b1c1b1b0d828c9ee45de2ac3664a57c20fd077d8ac1c6ab",
+    "bytes": 49679
+  },
+  "accepted/round-1-browser/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-1-browser/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-1-browser/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-1-browser/stdout.log": {
+    "sha256": "fc746870f81a84f1a8252e8760163be8fa7c3cc59bd105f585c29804793eefc3",
+    "bytes": 155
+  },
+  "accepted/round-1-browser.json": {
+    "sha256": "cd6e24dad8b0a9c24382285a28429fb9e0cc6a3cbf8a744e1608f39b221e092d",
+    "bytes": 129908666
+  },
+  "accepted/round-1-browser.json.cases.jsonl": {
+    "sha256": "bf66c754f8e68e671638a1a355c45cfb84459c2d0454acda51defb140143239a",
+    "bytes": 80659705
+  },
+  "accepted/round-1-native/receipt.json": {
+    "sha256": "c756b1c3e90e94057096808d18954573237d3d248fc9edd68404e5437bf869ab",
+    "bytes": 49265
+  },
+  "accepted/round-1-native/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-1-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-1-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-1-native/stdout.log": {
+    "sha256": "c09c839bfbdf4a0164c0912219a2c3ee4ae2d2d59d6329c73d1f70d6d839e059",
+    "bytes": 80670491
+  },
+  "accepted/round-1-torch/receipt.json": {
+    "sha256": "a4c7f82ae48dfe274b907352331087e0e0a6af297e7ed4feb489a871937af969",
+    "bytes": 49293
+  },
+  "accepted/round-1-torch/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-1-torch/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-1-torch/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-1-torch/stdout.log": {
+    "sha256": "db7b9b7ec7c031ffca47f2c2ce40ec37ba8eef2a32c115f407b3001d12971560",
+    "bytes": 68033076
+  },
+  "accepted/round-2-browser/receipt.json": {
+    "sha256": "c048b476895bb89f9f411b000a9862835364a2a4ae4de8dc1874ece7f127d785",
+    "bytes": 49679
+  },
+  "accepted/round-2-browser/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-2-browser/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-2-browser/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-2-browser/stdout.log": {
+    "sha256": "c131658d71f25fdd72483d341764645fa7010f328fea80761c93fa48811fc081",
+    "bytes": 155
+  },
+  "accepted/round-2-browser.json": {
+    "sha256": "f09a9f4980c1b735054b28c0f1e5510b6639d1186dee62f4ef2a66fd0e06420b",
+    "bytes": 129908626
+  },
+  "accepted/round-2-browser.json.cases.jsonl": {
+    "sha256": "dedb1cd39e9516860994e7301db184acf4c0eaf6c32ba23d8964a477e239bc2f",
+    "bytes": 80659649
+  },
+  "accepted/round-2-native/receipt.json": {
+    "sha256": "3a136c0c5e8a43ddfda7898a45c2340feeb5908b1f1678fd96791066b979075e",
+    "bytes": 49264
+  },
+  "accepted/round-2-native/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-2-native/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-2-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-2-native/stdout.log": {
+    "sha256": "4ec1d363950352b66488951b18900209a08ce55d598f9e9e5664a2607652b8b8",
+    "bytes": 80670456
+  },
+  "accepted/round-2-torch/receipt.json": {
+    "sha256": "0ad182525c983639472308c289a33459cbcba026c1594046175c1db767950e63",
+    "bytes": 49293
+  },
+  "accepted/round-2-torch/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/round-2-torch/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-2-torch/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/round-2-torch/stdout.log": {
+    "sha256": "7587813941537f004ea1bab5c61591418274e9f83c8520ad52424a3c5b4fa196",
+    "bytes": 68033050
+  },
+  "accepted/tensor-tests/receipt.json": {
+    "sha256": "fefd33b0bd98759d6653613c97134547ee95fb2851254eff09121718854b8c9d",
+    "bytes": 49484
+  },
+  "accepted/tensor-tests/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/tensor-tests/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/tensor-tests/stderr.log": {
+    "sha256": "5f4f964c168c0f55d8e6b78e9a6c1c7f36d8597424e31eaf272ac6db0d2213f7",
+    "bytes": 114689
+  },
+  "accepted/tensor-tests/stdout.log": {
+    "sha256": "47fd34b7fa72e6c1e9ea9571f135828422ab3265adcac875af0e19dd9a639acf",
+    "bytes": 1541
+  },
+  "accepted/tensor-wasm-clippy/receipt.json": {
+    "sha256": "7b33efebf875552e27ac9d4b09aaacf493ddf2ea9e906940a438f623d0db8868",
+    "bytes": 49404
+  },
+  "accepted/tensor-wasm-clippy/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/tensor-wasm-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/tensor-wasm-clippy/stderr.log": {
+    "sha256": "ca12ac5fcdf08acd30eeaefcc12a9580ce0dc64d7e7a9e4450f392f5557208b8",
+    "bytes": 111114
+  },
+  "accepted/tensor-wasm-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/wasm/snippets/st-backend-wgpu-0123d82c7e1c6a0b/inline0.js": {
+    "sha256": "4f13e4ea6ab769cb7a46b92dd3e90360d556d3a39c2af09b621eed92ae80f448",
+    "bytes": 55
+  },
+  "accepted/wasm/snippets/st-backend-wgpu-0123d82c7e1c6a0b/inline1.js": {
+    "sha256": "338fab7c8b009357acff4756c1ce3ca2f6d95919153520ae01f06f14708b6c8d",
+    "bytes": 85
+  },
+  "accepted/wasm/spiraltorch_wasm.d.ts": {
+    "sha256": "a5161813250857e046eb36e79870ad9ba337b6906bdb6fb8bb469bebcdb6547a",
+    "bytes": 1869
+  },
+  "accepted/wasm/spiraltorch_wasm.js": {
+    "sha256": "7b6c6e68d1b815c0cee1952ac4d0a62af5a5af1197a2dd4691411c2164c9cbad",
+    "bytes": 44897
+  },
+  "accepted/wasm/spiraltorch_wasm_bg.wasm": {
+    "sha256": "1160866382867192e2ffe871d2a7180e5bfcb8777708b713df03d6b2ad0c8406",
+    "bytes": 513734
+  },
+  "accepted/wasm/spiraltorch_wasm_bg.wasm.d.ts": {
+    "sha256": "c7c37125434fb8750c7201640f1a56ad308b1f7ceba6d5d76a32505a7baeec1f",
+    "bytes": 865
+  },
+  "accepted/wasm-build/receipt.json": {
+    "sha256": "b5582f36630b6283c82ce30b44f822215caafa45a86ae83aef9567efa079cac7",
+    "bytes": 49358
+  },
+  "accepted/wasm-build/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/wasm-build/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/wasm-build/stderr.log": {
+    "sha256": "db5849eea91e4f9d5ed7ef0ac6cf3b3931c2b979d90ba7dc141f1569fea48b77",
+    "bytes": 110965
+  },
+  "accepted/wasm-build/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/wasm-clippy/receipt.json": {
+    "sha256": "a63ae218d79d749c98e79e96cae4069f3ac6dfd3a948d980a131b08216bb58f1",
+    "bytes": 49347
+  },
+  "accepted/wasm-clippy/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted/wasm-clippy/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted/wasm-clippy/stderr.log": {
+    "sha256": "a92ad0837e97059f4c18ce30d08850c9b9ab86e7c03b13f9c76d9b6890a59f1a",
+    "bytes": 110975
+  },
+  "accepted/wasm-clippy/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted-analysis/receipt.json": {
+    "sha256": "e3463abde6a61c677b1171a96f995602a7853ecc006faf162354febcb64acee7",
+    "bytes": 50125
+  },
+  "accepted-analysis/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "accepted-analysis/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted-analysis/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "accepted-analysis/stdout.log": {
+    "sha256": "7731e1088eed25f439ce49655efa25240c371d15d1a7f05fbdf6324fbba65e95",
+    "bytes": 1802
+  },
+  "backend-unit/receipt.json": {
+    "sha256": "6c28bb08441c302320c1a686ab463f824f7a16d8e342aa90d2aee56835eff593",
+    "bytes": 48957
+  },
+  "backend-unit/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "backend-unit/source.patch": {
+    "sha256": "7f0b66f52bd1aa732fd962f506f1a750148d43abb7d428a5b4da075dac5763a5",
+    "bytes": 32638
+  },
+  "backend-unit/stderr.log": {
+    "sha256": "e7684c70dbafb8fff7f46ea09e65ceb418fb70e4ea5fbc9ee6e4f212adc93277",
+    "bytes": 114717
+  },
+  "backend-unit/stdout.log": {
+    "sha256": "300a825ac0d7867bd0d438c74ad0ac9c9b33d3545783a143fbba60bff39082c0",
+    "bytes": 897
+  },
+  "backend-unit/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "backend-unit/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "backend-unit/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "backend-unit/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "backend-unit/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "backend-unit/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "baseline-probe/Cargo.lock": {
+    "sha256": "94d4a929fdf66bdcf28800dfcd210ba4687ab31c1ba4d48372383e9b422f128b",
+    "bytes": 31215
+  },
+  "baseline-probe/Cargo.toml": {
+    "sha256": "4cead9341cc8dc1cbb5c6bc2abe37b4e76adaca03eac244a7f5adc9fbf28957d",
+    "bytes": 308
+  },
+  "baseline-probe/src/main.rs": {
+    "sha256": "f9021e737d058ec34a80b4918fb38f25fa331fd1715d46546edd1abe35d1265d",
+    "bytes": 2676
+  },
+  "baseline-probe-run/receipt.json": {
+    "sha256": "48203f34ba78ee486cc121a39423949eba7f85fa97ca0539dee7b5db0677518a",
+    "bytes": 47881
+  },
+  "baseline-probe-run/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "baseline-probe-run/source.patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "baseline-probe-run/stderr.log": {
+    "sha256": "98a1e6f4a80d75675d6eb6968f8fe032cd36c3d4c5afdee102f022d6844a23a3",
+    "bytes": 1767
+  },
+  "baseline-probe-run/stdout.log": {
+    "sha256": "7b10518858dad786dc3e9f51ffb4ff95cf6052ba7d130bb5e3290791f9adce6e",
+    "bytes": 896
+  },
+  "implementation-check/receipt.json": {
+    "sha256": "cbd4b154a9dba1d4775862150880f045a8fa5518c19626a4cf9fc6e374cfbf23",
+    "bytes": 48806
+  },
+  "implementation-check/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "implementation-check/source.patch": {
+    "sha256": "b1b9dbd2249afafb64b61be624185a3c83ab36108935812f712d0564a3c610d3",
+    "bytes": 32347
+  },
+  "implementation-check/stderr.log": {
+    "sha256": "c911ee15f167321da5e7eb3a495e2ea6f8a29d00fd31ed8460bf2123f330f54d",
+    "bytes": 114876
+  },
+  "implementation-check/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "implementation-check/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "implementation-check/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "implementation-check/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "087b14e843caf320efb14a38a2b661e8eb681a4a4be2a2ba4f65b2ac53330a3a",
+    "bytes": 3841
+  },
+  "implementation-check/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "57fc2161c766b3d26489ff7ad70ee0f40f1ce8fe8853ea18aa49cd6cd71c0f22",
+    "bytes": 10073
+  },
+  "implementation-check/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "loader-fixed/receipt.json": {
+    "sha256": "8acf1d7cb711462bb118bb134ce994108be3eed005b63e7e34c7152b9d7b704c",
+    "bytes": 49168
+  },
+  "loader-fixed/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "loader-fixed/source.patch": {
+    "sha256": "7f0b66f52bd1aa732fd962f506f1a750148d43abb7d428a5b4da075dac5763a5",
+    "bytes": 32638
+  },
+  "loader-fixed/stderr.log": {
+    "sha256": "580fa3a93a2eec77a2eba7afcd5b337799c61ce9bd5c45870cb61b08000a443e",
+    "bytes": 869
+  },
+  "loader-fixed/stdout.log": {
+    "sha256": "e2f8805d0470eee64c912e45a034f90e7586e621314f316e897887f43795db07",
+    "bytes": 482
+  },
+  "loader-fixed/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "loader-fixed/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "loader-fixed/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "loader-fixed/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "loader-fixed/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "loader-fixed/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "native-build/receipt.json": {
+    "sha256": "2ddfedfe16426b20328f06f90b7cab9c405d939273cad1015580b1096b6c88fe",
+    "bytes": 49754
+  },
+  "native-build/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "native-build/source.patch": {
+    "sha256": "000821e86194b8c5ddafae76311dec6ee2be45b03947be5ea17df04b28e231f0",
+    "bytes": 44098
+  },
+  "native-build/stderr.log": {
+    "sha256": "98485f16ede229baa572461ec8d76c0beee7743489b536cf070ce230a79aedb8",
+    "bytes": 114151
+  },
+  "native-build/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "native-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "native-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "native-build/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "684ca43ea4b3eb11fd15153c1a4cdc3f8bb6d8d78de86ea30c4ac2e0a9ef559e",
+    "bytes": 19202
+  },
+  "native-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "native-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "native-build/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "native-build/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "native-build/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "native-build/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "native-gpu-domains/receipt.json": {
+    "sha256": "7366c5865450286fa726f80de2cfc0967c22eeed3ffc7a15918ea390dc941fd7",
+    "bytes": 49888
+  },
+  "native-gpu-domains/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "native-gpu-domains/source.patch": {
+    "sha256": "000821e86194b8c5ddafae76311dec6ee2be45b03947be5ea17df04b28e231f0",
+    "bytes": 44098
+  },
+  "native-gpu-domains/stderr.log": {
+    "sha256": "96186f95be43645ffccddfc9c5dcedafe9e88cfa6c158f2714f6e197882a2f1a",
+    "bytes": 114743
+  },
+  "native-gpu-domains/stdout.log": {
+    "sha256": "c89a0cb9a7cfd0d0db9947bdcd9ff78027eafcfcd554597de455cd18620e6f69",
+    "bytes": 19135
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "684ca43ea4b3eb11fd15153c1a4cdc3f8bb6d8d78de86ea30c4ac2e0a9ef559e",
+    "bytes": 19202
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "native-gpu-domains/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "native-gpu-domains/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "native-lint/receipt.json": {
+    "sha256": "16f6514d3b799fd3bce3bf0fbfdd90d21774fba3415f68ab4465cd466998efb0",
+    "bytes": 49817
+  },
+  "native-lint/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "native-lint/source.patch": {
+    "sha256": "000821e86194b8c5ddafae76311dec6ee2be45b03947be5ea17df04b28e231f0",
+    "bytes": 44098
+  },
+  "native-lint/stderr.log": {
+    "sha256": "e4aa54a0d8de7faec443f23b769e41f3a7b379f444303e45c2207c88667d1693",
+    "bytes": 114300
+  },
+  "native-lint/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "684ca43ea4b3eb11fd15153c1a4cdc3f8bb6d8d78de86ea30c4ac2e0a9ef559e",
+    "bytes": 19202
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "native-lint/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "native-lint/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "run.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-analysis/receipt.json": {
+    "sha256": "460196645a267e557f176ebae13cf026b94f1dc7bd37c4d7935d758e9468491d",
+    "bytes": 51330
+  },
+  "screen-analysis/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-analysis/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-analysis/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-analysis/stdout.log": {
+    "sha256": "67a108c503926635403367ed2b53c6360647ec5265019297347128e00e96329e",
+    "bytes": 1810
+  },
+  "screen-analysis/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-analysis/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-analysis/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-analysis/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-analysis/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-analysis/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-analysis/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-analysis/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-bindgen/receipt.json": {
+    "sha256": "db21bc379085453495a884d175bbd0a0caafe401399128942e66215af252366b",
+    "bytes": 50866
+  },
+  "screen-bindgen/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-bindgen/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-bindgen/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-bindgen/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-bindgen/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-bindgen/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-bindgen/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-bindgen/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-bindgen/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-bindgen/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-bindgen/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-bindgen/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-browser-1/receipt.json": {
+    "sha256": "37619b7c178fc1abe0796ce2e67d5368d18e7dcf5f68032a28bb8d68001a493b",
+    "bytes": 50881
+  },
+  "screen-browser-1/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-browser-1/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-browser-1/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-browser-1/stdout.log": {
+    "sha256": "fa68dd9b0a9ead87e669b39a07ac51a04bc82dc8c0fcbe33644dd05bc4a9e114",
+    "bytes": 147
+  },
+  "screen-browser-1/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-browser-1/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-browser-1/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-browser-1/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-browser-1/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-browser-1/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-browser-1/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-browser-1/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-browser-1.json": {
+    "sha256": "eaf4cd68289a77dfd3e0c79161fb268abf450d28a15c1cfaccba9bc8e817dd37",
+    "bytes": 129908998
+  },
+  "screen-browser-1.json.cases.jsonl": {
+    "sha256": "d4e4c09b9f1273e227193e0aaaaf5f149d2145c76785320f9a58a3a641a41b57",
+    "bytes": 80660020
+  },
+  "screen-browser-2/receipt.json": {
+    "sha256": "f0f13f46e99bce931ea2bbe552e5fe066a102d299de9afa6d22ecfa58bde02ad",
+    "bytes": 50882
+  },
+  "screen-browser-2/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-browser-2/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-browser-2/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-browser-2/stdout.log": {
+    "sha256": "6bc2809117b2c482863b5aaabe21902b2fc2ca67a2a655ec42dc174e05b0dadf",
+    "bytes": 147
+  },
+  "screen-browser-2/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-browser-2/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-browser-2/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-browser-2/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-browser-2/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-browser-2/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-browser-2/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-browser-2/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-browser-2.json": {
+    "sha256": "5ae6f2b4f89dbdac3e92f1436042c9094d8b7942f33b30591194c3224ebd1f2d",
+    "bytes": 129908746
+  },
+  "screen-browser-2.json.cases.jsonl": {
+    "sha256": "ed0f3baceddd5d6048913c896284fd9b2b1199dc4c0fa2e21f7528ee11a2d567",
+    "bytes": 80659774
+  },
+  "screen-browser-3/receipt.json": {
+    "sha256": "f5f34823ccdd9d3f9e46726c154528784811947338f677c2db51e46ae84bdf9b",
+    "bytes": 50883
+  },
+  "screen-browser-3/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-browser-3/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-browser-3/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-browser-3/stdout.log": {
+    "sha256": "812087cfc504469ee40db53f21c11dbb0353b52604edaacf19241597db44649f",
+    "bytes": 147
+  },
+  "screen-browser-3/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-browser-3/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-browser-3/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-browser-3/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-browser-3/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-browser-3/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-browser-3/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-browser-3/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-browser-3.json": {
+    "sha256": "74d6dbc0ec6fb0e5b6cdee034070d3b50867cb7941890ab42f461ec9891a747b",
+    "bytes": 129908767
+  },
+  "screen-browser-3.json.cases.jsonl": {
+    "sha256": "088ccee8de985851d53e5a4ea0328cb29715c9aa4b48ac78b5cd96a9b9cffefc",
+    "bytes": 80659819
+  },
+  "screen-freeze-native/receipt.json": {
+    "sha256": "e1588196a6d8cc9bd2edd52dcbcf3a253984255279d0c94a3776a4d0c3c6da56",
+    "bytes": 50656
+  },
+  "screen-freeze-native/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-freeze-native/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-freeze-native/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-freeze-native/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-freeze-native/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-freeze-native/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-freeze-native/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-freeze-native/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-freeze-native/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-freeze-native/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-freeze-native/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-freeze-native/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-native-1/receipt.json": {
+    "sha256": "bd1c4c65b23351e0a03fdb6222921c7dae0151547c9ece6ee98c935c2ae9e322",
+    "bytes": 50477
+  },
+  "screen-native-1/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-native-1/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-native-1/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-native-1/stdout.log": {
+    "sha256": "c56d29f553982ace21ba513f0fc3a507649ca1d0a5430dd522f6aef0ddef7ae9",
+    "bytes": 80670477
+  },
+  "screen-native-1/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-native-1/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-native-1/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-native-1/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-native-1/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-native-1/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-native-1/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-native-1/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-native-2/receipt.json": {
+    "sha256": "9dd71ef264f2695630918d1d6b0a29009fda02fc0634922b0388714281301028",
+    "bytes": 50477
+  },
+  "screen-native-2/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-native-2/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-native-2/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-native-2/stdout.log": {
+    "sha256": "8fbeda57b5828ab20bec6d3e7ed64892e2da6f1a0078daf0ea707e43034092c0",
+    "bytes": 80670471
+  },
+  "screen-native-2/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-native-2/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-native-2/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-native-2/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-native-2/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-native-2/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-native-2/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-native-2/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-native-3/receipt.json": {
+    "sha256": "94ca87ffc774f287c5f61539d20c61ea10ab5aa85ac717d9fae58ff78483354c",
+    "bytes": 50477
+  },
+  "screen-native-3/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-native-3/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-native-3/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-native-3/stdout.log": {
+    "sha256": "b49e4d10800f73298e0d72eb12a55ca06ecacba3b90f72f59e6caeb78dd69c64",
+    "bytes": 80670494
+  },
+  "screen-native-3/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-native-3/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-native-3/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-native-3/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-native-3/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-native-3/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-native-3/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-native-3/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-native-bench": {
+    "sha256": "505e0000f48b21a6e1893a752709eb33d8f5860fc1bf2b1414ee818884be01ed",
+    "bytes": 5356512
+  },
+  "screen-native-build/receipt.json": {
+    "sha256": "c0f7510862eb0f8e3d9d96178ffc68af425325bc7f5fdb9c73eb59db0204d729",
+    "bytes": 50518
+  },
+  "screen-native-build/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-native-build/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-native-build/stderr.log": {
+    "sha256": "cb18d2a328a7a16bd7ecdfe1ef396d2d70d9b7e7c8057e9b799c04c38e555f81",
+    "bytes": 114151
+  },
+  "screen-native-build/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-native-build/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-native-build/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-native-build/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-native-build/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-native-build/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-native-build/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-native-build/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-native-build/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-torch-1/receipt.json": {
+    "sha256": "a0256a2369c51adab90eb6208bf8a500c633ba1650fd9651fba2138be6aa2395",
+    "bytes": 50507
+  },
+  "screen-torch-1/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-torch-1/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-torch-1/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-torch-1/stdout.log": {
+    "sha256": "c817ffb365eb3757b940206d39a9a5948bc658ccfae6c27bd2df44d73868bb27",
+    "bytes": 68033052
+  },
+  "screen-torch-1/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-torch-1/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-torch-1/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-torch-1/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-torch-1/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-torch-1/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-torch-1/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-torch-1/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-torch-2/receipt.json": {
+    "sha256": "740c1e0a70f71e4168c72ba47085e9600c13bde0fe878dc89cac927bfe3aeb1e",
+    "bytes": 50506
+  },
+  "screen-torch-2/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-torch-2/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-torch-2/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-torch-2/stdout.log": {
+    "sha256": "0a0f227dd6170de66b48c5293ebd4ffb3557b4e3d2de23cd8e4ce5e0656795d6",
+    "bytes": 68033051
+  },
+  "screen-torch-2/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-torch-2/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-torch-2/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-torch-2/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-torch-2/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-torch-2/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-torch-2/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-torch-2/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-torch-3/receipt.json": {
+    "sha256": "e17b70f5f9df27c51caaa4f68730a9da43d6c925e1251e9f050a37d6831986e2",
+    "bytes": 50507
+  },
+  "screen-torch-3/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-torch-3/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-torch-3/stderr.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-torch-3/stdout.log": {
+    "sha256": "5d0a7d303b3358f70360c6deff57150da56095f51afa75b0a02eb07bb7e89ea5",
+    "bytes": 68033022
+  },
+  "screen-torch-3/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-torch-3/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-torch-3/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-torch-3/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-torch-3/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-torch-3/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-torch-3/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-torch-3/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "screen-wasm/snippets/st-backend-wgpu-0123d82c7e1c6a0b/inline0.js": {
+    "sha256": "4f13e4ea6ab769cb7a46b92dd3e90360d556d3a39c2af09b621eed92ae80f448",
+    "bytes": 55
+  },
+  "screen-wasm/snippets/st-backend-wgpu-0123d82c7e1c6a0b/inline1.js": {
+    "sha256": "338fab7c8b009357acff4756c1ce3ca2f6d95919153520ae01f06f14708b6c8d",
+    "bytes": 85
+  },
+  "screen-wasm/spiraltorch_wasm.d.ts": {
+    "sha256": "796bf67bbb744ae5b6da1f164f6b01b919a0f28e23b420f37b4ed3e80cfa2978",
+    "bytes": 1869
+  },
+  "screen-wasm/spiraltorch_wasm.js": {
+    "sha256": "e13093882bbd9b2d301efc248cf2b614e5c51cf28be9b998437de1a3be0cc2f1",
+    "bytes": 44897
+  },
+  "screen-wasm/spiraltorch_wasm_bg.wasm": {
+    "sha256": "3ac8e7dd621fa7854d6ff6394421149ae2c836532e97f0f942cf22af0602a456",
+    "bytes": 513734
+  },
+  "screen-wasm/spiraltorch_wasm_bg.wasm.d.ts": {
+    "sha256": "cd8035a94027593a46430292557c5edf5041b19be4ff82727940478aab8be9d4",
+    "bytes": 865
+  },
+  "screen-wasm-build/receipt.json": {
+    "sha256": "bebcb3baa35ac740c4fe84a57cfde9052f3c230992440bcad1015f8344a6e14d",
+    "bytes": 50572
+  },
+  "screen-wasm-build/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "screen-wasm-build/source.patch": {
+    "sha256": "d623b0b7b6ae525351d23c79b20d354478c24c29e77ee5f28be6758f7dc66ea2",
+    "bytes": 45975
+  },
+  "screen-wasm-build/stderr.log": {
+    "sha256": "225e96f38b394306b144ac0cbc6cac679689afbfcc6720354be4c0cd357bc137",
+    "bytes": 110965
+  },
+  "screen-wasm-build/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "screen-wasm-build/untracked/benchmarks/gelu-backward/README.md": {
+    "sha256": "b498f815a5e3f6cb91f591173a6b28acdc3f4afcd5df5879ed4937fc58a09be5",
+    "bytes": 5746
+  },
+  "screen-wasm-build/untracked/benchmarks/gelu-backward/evidence.py": {
+    "sha256": "d497fe2deb7a00cf36476683e23b7deabbb654161cecf914e89b03fa5cb25134",
+    "bytes": 1774
+  },
+  "screen-wasm-build/untracked/benchmarks/gelu-backward/protocol_gelu.py": {
+    "sha256": "e2e018e6bfe5243e78737c9789f0716c6cec450ccd140a99841dbc1192220274",
+    "bytes": 12685
+  },
+  "screen-wasm-build/untracked/benchmarks/gelu-backward/test_evidence.py": {
+    "sha256": "67840165586b010f7406cf2a2ef729690f95db2ddb028baf53300d5391553d1a",
+    "bytes": 3200
+  },
+  "screen-wasm-build/untracked/benchmarks/gelu-backward/test_protocol_gelu.py": {
+    "sha256": "5b889f0bc4b394744ade18f1772bed76cc14086c4f6542b287d55442809755f8",
+    "bytes": 5223
+  },
+  "screen-wasm-build/untracked/benchmarks/gelu-backward/torch_bench.py": {
+    "sha256": "9013e56d9a94ce9c61945cc7fe49e076d8835f64e92a23579e848f5ee32ae10d",
+    "bytes": 3500
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "07fd864a9c389c6770ee5d62581866d1cb399115518cf7a66a9fcd623c1c9054",
+    "bytes": 19383
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "screen-wasm-build/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "screen-wasm-build/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "tensor-gpu/receipt.json": {
+    "sha256": "f50a6103241ebbfec2fa6b087868a51a975a610007f1d45ba4509d748dcf4040",
+    "bytes": 49091
+  },
+  "tensor-gpu/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "tensor-gpu/source.patch": {
+    "sha256": "7f0b66f52bd1aa732fd962f506f1a750148d43abb7d428a5b4da075dac5763a5",
+    "bytes": 32638
+  },
+  "tensor-gpu/stderr.log": {
+    "sha256": "83e61844559c8818cd6d03a1728045d99a79475cca490170dd79a739cf066f71",
+    "bytes": 114490
+  },
+  "tensor-gpu/stdout.log": {
+    "sha256": "e3af40f5eb64677520b3b24c1ad4d49344abc7e92b4a0505e02fb704b37bfd34",
+    "bytes": 323
+  },
+  "tensor-gpu/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "tensor-gpu/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "tensor-gpu/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "tensor-gpu/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "tensor-gpu/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "tensor-gpu/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "wasm-build/receipt.json": {
+    "sha256": "f646aeb080a5922f41b4084844d8992ce98cd7461ca3c50eb020a8b80efc42d4",
+    "bytes": 49808
+  },
+  "wasm-build/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "wasm-build/source.patch": {
+    "sha256": "000821e86194b8c5ddafae76311dec6ee2be45b03947be5ea17df04b28e231f0",
+    "bytes": 44098
+  },
+  "wasm-build/stderr.log": {
+    "sha256": "692137c627b0b06969bc33c0d44467a0b424d9309a27ea7eeefc2f263f2c3401",
+    "bytes": 110965
+  },
+  "wasm-build/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "684ca43ea4b3eb11fd15153c1a4cdc3f8bb6d8d78de86ea30c4ac2e0a9ef559e",
+    "bytes": 19202
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "wasm-build/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "wasm-build/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  },
+  "wasm-lint/receipt.json": {
+    "sha256": "728bf23fdd67c8d33a3cc43ef9708f0884863142e5a670470422471c2cb9b834",
+    "bytes": 49797
+  },
+  "wasm-lint/runner.py": {
+    "sha256": "e078111d0bfe111eb840819a787897f294ed423998407463048ec407b2d09fbe",
+    "bytes": 2807
+  },
+  "wasm-lint/source.patch": {
+    "sha256": "000821e86194b8c5ddafae76311dec6ee2be45b03947be5ea17df04b28e231f0",
+    "bytes": 44098
+  },
+  "wasm-lint/stderr.log": {
+    "sha256": "9fae718400d5b8285ce63a935524546f6d6e68749d397805bde19b81df482cb4",
+    "bytes": 110975
+  },
+  "wasm-lint/stdout.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench.rs": {
+    "sha256": "e8de53b9fe9e0283fb97ff91e48afba2e1814b8edef1340e14bb6f7f9135da3f",
+    "bytes": 455
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/examples/gelu_backward_bench_browser.rs": {
+    "sha256": "e2e6991d6d16d46e58665cf68d5f60118dcd12bf5ca7cd58704ee8df7de0b017",
+    "bytes": 547
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/examples/support/gelu_bench.rs": {
+    "sha256": "684ca43ea4b3eb11fd15153c1a4cdc3f8bb6d8d78de86ea30c4ac2e0a9ef559e",
+    "bytes": 19202
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_backend.wgsl": {
+    "sha256": "1cabbf183cd1ebbb76ed838283126797fcd7e3e3c295d3572393e71485a1efbd",
+    "bytes": 2437
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/examples/support/gelu_legacy_tensor.wgsl": {
+    "sha256": "c87fa86bad37c3a8d3bbd6ce9f8fc20a9e2c631aa8bef5081e3a59bafb26e8d1",
+    "bytes": 2288
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/src/gelu_back/plain.rs": {
+    "sha256": "6d3045a5a2d8574c1d0d27f20106a72b9a1f29089b3d9c390a209a806b570d95",
+    "bytes": 4201
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/src/gelu_back/portable.rs": {
+    "sha256": "238a307535a50c56da70527a7896a5f975af44dae9f64b0a753635dfd75647ff",
+    "bytes": 11647
+  },
+  "wasm-lint/untracked/crates/st-backend-wgpu/src/shaders/gelu_backward_plain.wgsl": {
+    "sha256": "446965c7c6163c066d00225bc7f5a72e974c6bfcac37d5c8530d9aae8935cd3b",
+    "bytes": 675
+  },
+  "wasm-lint/untracked/crates/st-tensor/tests/wgpu_gelu_liveness.rs": {
+    "sha256": "3495371f958cfe64ca5880622626ad5916e31137d45e995888212904c34755b0",
+    "bytes": 5134
+  }
+}

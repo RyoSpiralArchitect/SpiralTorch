@@ -1,0 +1,1155 @@
+{
+  "role": "Additional clean-source native/browser regression gates, separate from timing intervals",
+  "source_commit": "4c872c2c6ddace6a38ad39d1cdda247e9ac25289",
+  "source_json_sha256": "5019076e11edc1d9eeb6951331d2030e9bdc29348e3f97dbe26174c854f2f8f7",
+  "validation": [
+    {
+      "stage": "resident-native-tests",
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--test",
+        "resident_training",
+        "--test",
+        "resident_nd_tensor",
+        "--test",
+        "resident_graph_training",
+        "--test",
+        "resident_graph_forward",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T06:41:28.753918+00:00",
+      "finished_at": "2026-09-23T06:42:35.306540+00:00",
+      "seconds": 66.5008491249755,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "test_totals": [
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        }
+      ]
+    },
+    {
+      "stage": "nn-full-tests",
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "st-nn",
+        "--features",
+        "wgpu",
+        "--release",
+        "--lib",
+        "--test",
+        "gelu_layout_contract",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T06:42:35.725393+00:00",
+      "finished_at": "2026-09-23T06:43:11.923142+00:00",
+      "seconds": 36.19781008298742,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "test_totals": [
+        {
+          "passed": 772,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        }
+      ]
+    },
+    {
+      "stage": "selfsup-tests",
+      "command": [
+        "env",
+        "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+        "cargo",
+        "+1.98.0",
+        "test",
+        "--locked",
+        "-p",
+        "spiral-selfsup",
+        "--features",
+        "wgpu",
+        "--release",
+        "--test",
+        "info_nce_tensor",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T06:43:12.391994+00:00",
+      "finished_at": "2026-09-23T06:44:05.437730+00:00",
+      "seconds": 53.045725249976385,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "test_totals": [
+        {
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        }
+      ]
+    },
+    {
+      "stage": "resident-browser-build",
+      "command": [
+        "cargo",
+        "+1.98.0",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "st-nn",
+        "--no-default-features",
+        "--features",
+        "wgpu",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--example",
+        "resident_graph_training_browser"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T06:44:05.862203+00:00",
+      "finished_at": "2026-09-23T06:44:52.130050+00:00",
+      "seconds": 46.26783974998398,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "test_totals": []
+    },
+    {
+      "stage": "resident-browser-bindgen",
+      "command": [
+        "/Users/ryospiralarchitect/Library/Caches/.wasm-pack/wasm-bindgen-cargo-install-0.2.104/wasm-bindgen",
+        "--target",
+        "web",
+        "--out-name",
+        "spiraltorch_wasm",
+        "--out-dir",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-central-tail-20260923/accepted/resident-wasm",
+        "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target/wasm32-unknown-unknown/release/examples/resident_graph_training_browser.wasm"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T06:44:52.557312+00:00",
+      "finished_at": "2026-09-23T06:44:52.672506+00:00",
+      "seconds": 0.11524533299962059,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "test_totals": []
+    },
+    {
+      "stage": "resident-browser-training",
+      "command": [
+        "env",
+        "NODE_PATH=/Users/ryospiralarchitect/Library/Logs/SpiralTorch/midk-seek-20260906/browser-deps/node_modules",
+        "node",
+        "tools/test_resident_browser.cjs",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-central-tail-20260923/accepted/resident-wasm",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Users/ryospiralarchitect/Library/Logs/SpiralTorch/gelu-central-tail-20260923/accepted/resident-browser.json",
+        "",
+        "",
+        "",
+        "",
+        "nn-graph-training"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-09-23T06:44:52.997213+00:00",
+      "finished_at": "2026-09-23T06:45:10.360286+00:00",
+      "seconds": 17.36309583298862,
+      "source_unchanged": true,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/ryospiralarchitect/\ud83c\udf00SpiralReality\ud83c\udf00/_wt/spiraltorch-spiralk-golden-blackcat-contract-v1/target",
+        "CARGO_BUILD_JOBS": "4",
+        "RAYON_NUM_THREADS": "4"
+      },
+      "test_totals": []
+    }
+  ],
+  "browser": {
+    "raw_path": "accepted/resident-browser.json",
+    "raw_sha256": "9cb15ce68520cd1853e97fa469f53adf21794b75f3567df88b268b355262b35c",
+    "status": "passed",
+    "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+    "browser_version": "153.0.8010.53",
+    "asset_sha256": {
+      "/": "1a8b056bfdf2192397d02412bd2d28572993b91ac84da952a3da95519c6321c5",
+      "/module/spiraltorch_wasm.js": "07a52714ee3644369dc7bbe2ab02180fc621a19989c90b0dc9fffe83bd335363",
+      "/module/spiraltorch_wasm_bg.wasm": "5f1c014a2059bfa2f2d959e3f6bb84ea94c85e221891ce769f0c8b6768412e8f"
+    },
+    "page_errors": [],
+    "base_cases": 6,
+    "base_guards": 36,
+    "primitive_checks": 3,
+    "sections": {
+      "pointwise_fusion": {
+        "cases": [
+          {
+            "seed": 17,
+            "input_shape": [
+              4
+            ],
+            "policy": "Exact",
+            "max_abs_error": 1.4901161193847656e-08,
+            "resume": "passed",
+            "steps_count": 9
+          },
+          {
+            "seed": 17,
+            "input_shape": [
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "max_abs_error": 1.4901161193847656e-08,
+            "resume": "passed",
+            "steps_count": 9
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "max_abs_error": 1.4901161193847656e-08,
+            "resume": "passed",
+            "steps_count": 9
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "max_abs_error": 1.4901161193847656e-08,
+            "resume": "passed",
+            "steps_count": 9
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              129,
+              4
+            ],
+            "policy": "Exact",
+            "max_abs_error": 4.470348358154297e-08,
+            "resume": "passed",
+            "steps_count": 9
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              129,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "max_abs_error": 3.725290298461914e-08,
+            "resume": "passed",
+            "steps_count": 9
+          }
+        ],
+        "guards": 16,
+        "probes": 0
+      },
+      "autograd": {
+        "cases": [
+          {
+            "seed": 17,
+            "input_shape": [
+              4
+            ],
+            "fused": false,
+            "replays_count": 4
+          },
+          {
+            "seed": 17,
+            "input_shape": [
+              4
+            ],
+            "fused": true,
+            "replays_count": 4
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              3,
+              4
+            ],
+            "fused": false,
+            "replays_count": 4
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              3,
+              4
+            ],
+            "fused": true,
+            "replays_count": 4
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              129,
+              4
+            ],
+            "fused": false,
+            "replays_count": 4
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              129,
+              4
+            ],
+            "fused": true,
+            "replays_count": 4
+          }
+        ],
+        "guards": 13,
+        "probes": 0
+      },
+      "learning": {
+        "cases": [
+          {
+            "seed": 17,
+            "shape": [
+              4
+            ],
+            "policy": "exact",
+            "fused": false,
+            "max_abs_error": 5.960464477539063e-08,
+            "initial_loss": 0.04439958930015564,
+            "final_loss": 0.00013335191761143506,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 17,
+            "shape": [
+              4
+            ],
+            "policy": "exact",
+            "fused": true,
+            "max_abs_error": 5.960464477539063e-08,
+            "initial_loss": 0.04439958930015564,
+            "final_loss": 0.00013335191761143506,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 17,
+            "shape": [
+              4
+            ],
+            "policy": "module_compatible",
+            "fused": false,
+            "max_abs_error": 5.960464477539063e-08,
+            "initial_loss": 0.04439958930015564,
+            "final_loss": 0.00013335191761143506,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 17,
+            "shape": [
+              4
+            ],
+            "policy": "module_compatible",
+            "fused": true,
+            "max_abs_error": 5.960464477539063e-08,
+            "initial_loss": 0.04439958930015564,
+            "final_loss": 0.00013335191761143506,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 29,
+            "shape": [
+              3,
+              4
+            ],
+            "policy": "exact",
+            "fused": false,
+            "max_abs_error": 1.4901161193847656e-08,
+            "initial_loss": 0.0487646758556366,
+            "final_loss": 0.014504955150187016,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 29,
+            "shape": [
+              3,
+              4
+            ],
+            "policy": "exact",
+            "fused": true,
+            "max_abs_error": 1.4901161193847656e-08,
+            "initial_loss": 0.0487646758556366,
+            "final_loss": 0.014504955150187016,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 29,
+            "shape": [
+              3,
+              4
+            ],
+            "policy": "module_compatible",
+            "fused": false,
+            "max_abs_error": 2.9802322387695312e-08,
+            "initial_loss": 0.0487646758556366,
+            "final_loss": 0.014217403717339039,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 29,
+            "shape": [
+              3,
+              4
+            ],
+            "policy": "module_compatible",
+            "fused": true,
+            "max_abs_error": 2.9802322387695312e-08,
+            "initial_loss": 0.0487646758556366,
+            "final_loss": 0.014217403717339039,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 43,
+            "shape": [
+              2,
+              129,
+              4
+            ],
+            "policy": "exact",
+            "fused": false,
+            "max_abs_error": 5.960464477539063e-08,
+            "initial_loss": 0.038602620363235474,
+            "final_loss": 0.021049344912171364,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 43,
+            "shape": [
+              2,
+              129,
+              4
+            ],
+            "policy": "exact",
+            "fused": true,
+            "max_abs_error": 5.960464477539063e-08,
+            "initial_loss": 0.038602620363235474,
+            "final_loss": 0.021049344912171364,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 43,
+            "shape": [
+              2,
+              129,
+              4
+            ],
+            "policy": "module_compatible",
+            "fused": false,
+            "max_abs_error": 2.9802322387695312e-08,
+            "initial_loss": 0.038602620363235474,
+            "final_loss": 0.02098679542541504,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          },
+          {
+            "seed": 43,
+            "shape": [
+              2,
+              129,
+              4
+            ],
+            "policy": "module_compatible",
+            "fused": true,
+            "max_abs_error": 2.9802322387695312e-08,
+            "initial_loss": 0.038602620363235474,
+            "final_loss": 0.02098679542541504,
+            "accepted_updates": 64,
+            "resume": "bit_identical",
+            "steps_count": 64,
+            "captures_count": 5
+          }
+        ],
+        "guards": 8,
+        "probes": 0
+      },
+      "resident_loss": {
+        "cases": [
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.04017513990402222,
+            "steps_count": 64
+          },
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.040119316428899765,
+            "steps_count": 64
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.04194250330328941,
+            "steps_count": 64
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.04216456413269043,
+            "steps_count": 64
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.0423760861158371,
+            "steps_count": 64
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.042229995131492615,
+            "steps_count": 64
+          }
+        ],
+        "guards": 0,
+        "probes": 7
+      },
+      "classification": {
+        "cases": [
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.48732200264930725,
+            "steps_count": 64
+          },
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 0.6703365445137024,
+            "steps_count": 64
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.2,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 1.016823172569275,
+            "steps_count": 64
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.2,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 1.028573751449585,
+            "steps_count": 64
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.5,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 1.0709919929504395,
+            "steps_count": 64
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.5,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 64,
+            "module_parameters_applied": 7,
+            "final_loss": 1.0722330808639526,
+            "steps_count": 64
+          }
+        ],
+        "guards": 0,
+        "probes": 43
+      },
+      "microbatch": {
+        "cases": [
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1071768999099731,
+            "final_loss": 0.6934325098991394,
+            "gradient_clip": false,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1071768999099731,
+            "final_loss": 0.7789208889007568,
+            "gradient_clip": false,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "sum",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.12106454372406,
+            "final_loss": 1.0420304536819458,
+            "gradient_clip": false,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "sum",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.12106454372406,
+            "final_loss": 1.044956088066101,
+            "gradient_clip": false,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1325043439865112,
+            "final_loss": 1.0447320938110352,
+            "gradient_clip": false,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1325043439865112,
+            "final_loss": 1.045428991317749,
+            "gradient_clip": false,
+            "topos_momentum": false,
+            "windows_count": 32
+          }
+        ],
+        "guards": 0,
+        "probes": 0
+      },
+      "gradient_clip": {
+        "cases": [
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1071768999099731,
+            "final_loss": 0.9298034906387329,
+            "gradient_clip": true,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1071768999099731,
+            "final_loss": 0.9408352971076965,
+            "gradient_clip": true,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "sum",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.12106454372406,
+            "final_loss": 1.0723962783813477,
+            "gradient_clip": true,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "sum",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.12106454372406,
+            "final_loss": 1.0725442171096802,
+            "gradient_clip": true,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1325043439865112,
+            "final_loss": 1.077451467514038,
+            "gradient_clip": true,
+            "topos_momentum": false,
+            "windows_count": 32
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1325043439865112,
+            "final_loss": 1.0771808624267578,
+            "gradient_clip": true,
+            "topos_momentum": false,
+            "windows_count": 32
+          }
+        ],
+        "guards": 0,
+        "probes": 0
+      },
+      "momentum": {
+        "cases": [
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1071768999099731,
+            "final_loss": 0.9971793293952942,
+            "gradient_clip": true,
+            "topos_momentum": true,
+            "windows_count": 32
+          },
+          {
+            "seed": 17,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1071768999099731,
+            "final_loss": 1.000532627105713,
+            "gradient_clip": true,
+            "topos_momentum": true,
+            "windows_count": 32
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "sum",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.12106454372406,
+            "final_loss": 1.0885257720947266,
+            "gradient_clip": true,
+            "topos_momentum": true,
+            "windows_count": 32
+          },
+          {
+            "seed": 29,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "sum",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.12106454372406,
+            "final_loss": 1.0887718200683594,
+            "gradient_clip": true,
+            "topos_momentum": true,
+            "windows_count": 32
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "Exact",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1325043439865112,
+            "final_loss": 1.0968208312988281,
+            "gradient_clip": true,
+            "topos_momentum": true,
+            "windows_count": 32
+          },
+          {
+            "seed": 43,
+            "input_shape": [
+              2,
+              3,
+              4
+            ],
+            "policy": "ModuleCompatible",
+            "label_smoothing": 0.1,
+            "ignore_index": -100,
+            "reduction": "mean",
+            "observations_after_updates": 32,
+            "microbatches": 95,
+            "module_parameters_applied": 7,
+            "initial_loss": 1.1325043439865112,
+            "final_loss": 1.0969494581222534,
+            "gradient_clip": true,
+            "topos_momentum": true,
+            "windows_count": 32
+          }
+        ],
+        "guards": 0,
+        "probes": 0
+      }
+    }
+  },
+  "numerical_reexecution": false
+}
