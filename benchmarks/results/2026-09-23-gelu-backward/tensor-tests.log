@@ -1,0 +1,29 @@
+
+running 16 tests
+test column_major_seeds_have_the_same_logical_vjp_as_row_major ... ok
+test constant_row_bias_does_not_reduce_an_unused_gradient ... ok
+test gelu_backward_rejects_non_finite_inputs_seeds_and_results ... ok
+test gelu_saturated_derivatives_remain_finite ... ok
+test gradient_seeds_and_exposed_gradients_cannot_change_committed_state ... ok
+test leaf_layout_is_normalized_before_nonlinear_kernels ... ok
+test nonlinear_backward_failure_preserves_existing_gradients ... ok
+test nonlinear_empty_tensors_keep_shapes_and_zero_bias_gradients ... ok
+test nonlinear_vjps_match_finite_differences_and_do_not_commit ... ok
+test relu_zero_convention_and_bias_reduction_are_explicit ... ok
+test row_bias_gradient_cancels_large_finite_seeds_before_narrowing ... ok
+test row_bias_gradient_rejects_final_overflow_without_partial_commit ... ok
+test snapshot_exports_obey_read_only_and_copy_negotiation ... ok
+test snapshots_isolate_existing_native_and_exported_aliases ... ok
+test softmax_vjp_couples_classes_and_handles_saturated_logits ... ok
+test unique_native_leaf_reuses_storage_and_detach_shares_its_snapshot ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 3 tests
+test gelu_shape_overflow_rejects_before_requesting_a_device ... ok
+test plain_and_fused_gelu_preserve_tails_saturation_and_residual_contract ... ok
+test plain_gelu_keeps_logical_layout_and_finite_policy ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
