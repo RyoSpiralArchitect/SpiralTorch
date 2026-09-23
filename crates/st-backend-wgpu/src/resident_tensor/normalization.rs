@@ -63,7 +63,7 @@ pub(super) struct LayerNormKernels {
     forward: wgpu::ComputePipeline,
     statistics: wgpu::ComputePipeline,
     input: wgpu::ComputePipeline,
-    affine: wgpu::ComputePipeline,
+    affine: [wgpu::ComputePipeline; 3],
     guard: guard_capture::GuardCapture,
 }
 
@@ -94,45 +94,52 @@ impl LayerNormKernels {
         };
         let forward_layout = layout(3);
         let backward_layout = layout(4);
-        let pipeline = |layout, template, entry_point| {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = |bind_layout| {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("layer_norm.layout"),
-                bind_group_layouts: &[layout],
+                bind_group_layouts: &[bind_layout],
                 push_constant_ranges: &[],
-            });
-            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(entry_point),
+            })
+        };
+        let forward_pipeline_layout = pipeline_layout(&forward_layout);
+        let backward_pipeline_layout = pipeline_layout(&backward_layout);
+        let module = |label, template| {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
                 source: wgpu::ShaderSource::Wgsl(source(template).into()),
-            });
+            })
+        };
+        let forward_module = module(
+            "layer_norm.forward",
+            include_str!("shaders/layer_norm.wgsl"),
+        );
+        let backward_module = module(
+            "layer_norm.backward",
+            include_str!("shaders/layer_norm_backward.wgsl"),
+        );
+        let pipeline = |layout, module, entry_point| {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(entry_point),
-                layout: Some(&layout),
-                module: &module,
+                layout: Some(layout),
+                module,
                 entry_point,
                 compilation_options: Default::default(),
             })
         };
         Self {
-            forward: pipeline(
-                &forward_layout,
-                include_str!("shaders/layer_norm.wgsl"),
-                "forward",
-            ),
-            statistics: pipeline(
-                &forward_layout,
-                include_str!("shaders/layer_norm.wgsl"),
-                "statistics",
-            ),
+            forward: pipeline(&forward_pipeline_layout, &forward_module, "forward"),
+            statistics: pipeline(&forward_pipeline_layout, &forward_module, "statistics"),
             input: pipeline(
-                &backward_layout,
-                include_str!("shaders/layer_norm_backward.wgsl"),
+                &backward_pipeline_layout,
+                &backward_module,
                 "backward_input",
             ),
-            affine: pipeline(
-                &backward_layout,
-                include_str!("shaders/layer_norm_backward.wgsl"),
+            affine: [
+                "backward_affine_64",
+                "backward_affine_128",
                 "backward_affine",
-            ),
+            ]
+            .map(|entry_point| pipeline(&backward_pipeline_layout, &backward_module, entry_point)),
             forward_layout,
             backward_layout,
             guard: guard_capture::GuardCapture::new(device),
@@ -183,6 +190,14 @@ fn groups(count: usize, limits: &wgpu::Limits) -> Result<[u32; 2], TensorError> 
         return Err(TensorError::Limit("LayerNorm grid"));
     }
     Ok([x, count.div_ceil(x)])
+}
+
+fn affine_pipeline_index(rows: usize) -> usize {
+    match rows {
+        33..=64 => 0,
+        65..=128 => 1,
+        _ => 2,
+    }
 }
 
 fn bind(
@@ -551,7 +566,7 @@ impl LayerNormBackwardTape {
             (
                 requested[1] || requested[2],
                 self.shape.cols,
-                &kernels.affine,
+                &kernels.affine[affine_pipeline_index(self.shape.rows)],
             ),
         ] {
             if !enabled {
