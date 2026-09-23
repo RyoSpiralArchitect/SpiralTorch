@@ -1,5 +1,11 @@
 # Resident LayerNorm foundation, 2026-09-23
 
+**Historical candidate, not the accepted implementation.** Subsequent review
+found a cancellation-sensitive input-VJP failure, and a separate scale-nullspace
+probe failed. These measurements and their source remain intact. They do not
+describe the revised centered three-component shader; see the current
+[protocol](../../layer-norm-resident/README.md) for the additional gates.
+
 Measured implementation: `a37acdcfaf5aa54a89695723288e9730b295ec68`.
 The new explicit backend keeps statistics, normalized tape, VJPs and updates on
 GPU. Ordinary Tensor routing is unchanged. See the [protocol and replay guide](../../layer-norm-resident/README.md).

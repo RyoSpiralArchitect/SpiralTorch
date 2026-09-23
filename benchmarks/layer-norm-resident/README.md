@@ -2,7 +2,7 @@
 
 The explicit Rust backend `ResidentTensor::layer_norm_affine` returns an owning
 forward value and reusable `ResidentLayerNorm` tape. `backward(seed, scale,
-requested)` returns selected input/gamma/beta cotangents. Statistics, normalized
+requested)` returns selected input/gamma/beta cotangents. Statistics, centered
 values, cotangents and parameter updates can remain on the same GPU queue.
 Native WGPU and browser WebGPU compile the same embedded WGSL.
 
@@ -22,10 +22,15 @@ JavaScript reimplementation.
   Unrequested gradients are not evaluated; their overflow cannot reject dx.
 - Fresh output/tape storage survives repeated calls and dropped parents. All
   requested gradients share one guard, including inherited input failures.
-- Private two-component significands and extended binary exponents preserve
+- Private three-component significands and extended binary exponents preserve
   cancellation and intermediate range. This is **not IEEE f64 emulation** or
-  an all-input equivalence proof. The normalized tape uses 16 bytes per element,
+  an all-input equivalence proof. The centered tape uses 16 bytes per element,
   a deliberate initial correctness cost rather than a claimed optimal layout.
+- Input VJP cancels centered variance/covariance products before dividing by
+  variance. Epsilon is added after that cancellation so a small positive value
+  is not lost. Each row retains inverse standard deviation and raw squared sum
+  in 32 bytes. Zero-epsilon scale directions, tiny positive epsilon, and signed
+  seed-scale/permutation variants are regression-tested without relaxed bounds.
 - Forward retains the CPU's rounded-f32 normalized value and affine operation
   boundaries. The affine product decodes subnormal bits before multiplication:
   otherwise `(tiny normalized value) * large gamma` can incorrectly become zero.
@@ -90,3 +95,11 @@ The performance harness already requests all gradients, and checks their
 values. `torch_mask_probe.py` exits normally after gathering diagnostics;
 `all_masks_valid=false` must never be interpreted as numerical acceptance.
 No installed PyTorch code or default route was modified.
+
+The initial two-component normalized-tape candidate also failed a zero-epsilon
+scale-nullspace probe and an independent review's large-dynamic-range input
+VJP. Adding division refinements alone did not fix the latter. Historical
+timings do not describe the revised centered three-component implementation;
+re-measure it separately. `decimal_probe.py` reproduces a 100-digit independent
+oracle used alongside the existing centered-f64 reference, not in place of its
+original review-case check.

@@ -421,7 +421,9 @@ fn layer_norm_retains_small_epsilon_after_scale_direction_cancellation() {
         let input = device.upload(&[1, 3], &[-scale, 0., scale]).unwrap();
         let gamma = device.upload(&[3], &[1.; 3]).unwrap();
         let beta = device.upload(&[3], &[0.; 3]).unwrap();
-        let seed = device.upload(&[1, 3], &[-cotangent, 0., cotangent]).unwrap();
+        let seed = device
+            .upload(&[1, 3], &[-cotangent, 0., cotangent])
+            .unwrap();
         let tape = input.layer_norm_affine(&gamma, &beta, epsilon).unwrap();
         let [dx, _, _] = tape.backward(&seed, 1., [true, false, false]).unwrap();
         // Closed-form derivative for this symmetric scale direction. Form the
@@ -449,6 +451,44 @@ fn layer_norm_review_large_dynamic_range_vjp_matches_f64() {
     let tape = input.layer_norm_affine(&gamma, &beta, 1e-5).unwrap();
     close(&read(tape.value()), &expected[0]);
     let grads = tape.backward(&seed, 1., [true; 3]).unwrap();
-    eprintln!("review dynamic-range: dx={:?}, reference={:?}", read(grads[0].as_ref().unwrap()), expected[1]);
-    for i in 0..3 { close(&read(grads[i].as_ref().unwrap()), &expected[i + 1]); }
+    eprintln!(
+        "review dynamic-range: dx={:?}, reference={:?}",
+        read(grads[0].as_ref().unwrap()),
+        expected[1]
+    );
+    for i in 0..3 {
+        close(&read(grads[i].as_ref().unwrap()), &expected[i + 1]);
+    }
+}
+
+#[test]
+fn layer_norm_dynamic_range_vjp_is_permutation_and_seed_scale_equivariant() {
+    let Some(device) = device() else { return };
+    // 100-digit Decimal oracle on exact f32 inputs, reproduced by
+    // benchmarks/layer-norm-resident/decimal_probe.py. The ordinary f64
+    // projection itself loses enough bits to be unsuitable for scaled variants.
+    let expected = [
+        -917.6735572182624,
+        0.00021879039951844405,
+        1835.3468956461253,
+        -917.6735572182624,
+    ];
+    for shift in 0..4 {
+        let mut x = [0., -1e10, 1192.0929, 0.];
+        let mut g = [1., 1e20, 1., 1.];
+        x.rotate_left(shift);
+        g.rotate_left(shift);
+        let input = device.upload(&[1, 4], &x).unwrap();
+        let gamma = device.upload(&[4], &g).unwrap();
+        let beta = device.upload(&[4], &[0.; 4]).unwrap();
+        let tape = input.layer_norm_affine(&gamma, &beta, 1e-5).unwrap();
+        for scale in [1. / 1024., -0.125, 1., 16., 1024.] {
+            let seed = device.upload(&[1, 4], &[scale; 4]).unwrap();
+            let grads = tape.backward(&seed, 1., [true, false, false]).unwrap();
+            assert!(grads[1].is_none() && grads[2].is_none());
+            let mut expected = expected.map(|v| (v * f64::from(scale)) as f32);
+            expected.rotate_left(shift);
+            close(&read(grads[0].as_ref().unwrap()), &expected);
+        }
+    }
 }

@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use st_backend_wgpu::{
-        resident_tensor::{ResidentTensor, TensorDevice},
+        resident_tensor::{normalization::ResidentLayerNorm, ResidentTensor, TensorDevice},
         runtime::WgpuRuntime,
     };
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -22,6 +22,18 @@ mod browser {
             }
         }
         Ok(())
+    }
+
+    async fn input_gradient(
+        tape: &ResidentLayerNorm,
+        seed: &ResidentTensor,
+        expected: &[f32],
+    ) -> Result<()> {
+        let grads = tape.backward(seed, 1., [true, false, false])?;
+        if grads[0].is_none() || grads[1].is_some() || grads[2].is_some() {
+            return Err("VJP presence differs from input-only mask".into());
+        }
+        close(&read(grads[0].as_ref().unwrap()).await?, expected)
     }
 
     pub async fn run() -> Result<String> {
@@ -116,7 +128,7 @@ mod browser {
             let tape = input.layer_norm_affine(&gamma, &beta, epsilon)?;
             close(&read(tape.value()).await?, &y)?;
             let expected = [dx, dg, db];
-            for mask in 1..8 {
+            for mask in 0..8 {
                 let requested = [mask & 1 != 0, mask & 2 != 0, mask & 4 != 0];
                 let grads = tape.backward(&seed, 1., requested)?;
                 for i in 0..3 {
@@ -125,12 +137,66 @@ mod browser {
                     }
                     if let Some(value) = &grads[i] {
                         close(&read(value).await?, &expected[i])?;
-                    } else if requested[i] {
-                        return Err("Missing requested VJP".into());
                     }
                 }
             }
             cases += 1;
+        }
+        let mut scale_nullspace_cases = 0;
+        for scale in [1., 1e-10, 1e-20, 1e-30, tiny] {
+            let input = device.upload(&[1, 3], &[-scale, 0., scale])?;
+            let tape = input.layer_norm_affine(
+                &device.upload(&[3], &[1.; 3])?,
+                &device.upload(&[3], &[0.; 3])?,
+                0.,
+            )?;
+            input_gradient(&tape, &device.upload(&[1, 3], &[-1., 0., 1.])?, &[0.; 3]).await?;
+            scale_nullspace_cases += 1;
+        }
+        let mut epsilon_cancellation_cases = 0;
+        for (scale, cotangent) in [(1e-10f32, f32::MAX), (1e-20, 1.)] {
+            let input = device.upload(&[1, 3], &[-scale, 0., scale])?;
+            let tape = input.layer_norm_affine(
+                &device.upload(&[3], &[1.; 3])?,
+                &device.upload(&[3], &[0.; 3])?,
+                tiny,
+            )?;
+            let variance = 2. * f64::from(scale).powi(2) / 3.;
+            let magnitude = (f64::from(cotangent) * f64::from(tiny)
+                / (variance + f64::from(tiny)).powf(1.5)) as f32;
+            input_gradient(
+                &tape,
+                &device.upload(&[1, 3], &[-cotangent, 0., cotangent])?,
+                &[-magnitude, 0., magnitude],
+            )
+            .await?;
+            epsilon_cancellation_cases += 1;
+        }
+        // Independently reproduced by decimal_probe.py on exact f32 inputs.
+        let oracle = [
+            -917.6735572182624,
+            0.00021879039951844405,
+            1835.3468956461253,
+            -917.6735572182624,
+        ];
+        let mut dynamic_range_variants = 0;
+        for shift in 0..4 {
+            let mut x = [0., -1e10, 1192.0929, 0.];
+            let mut g = [1., 1e20, 1., 1.];
+            x.rotate_left(shift);
+            g.rotate_left(shift);
+            let input = device.upload(&[1, 4], &x)?;
+            let tape = input.layer_norm_affine(
+                &device.upload(&[4], &g)?,
+                &device.upload(&[4], &[0.; 4])?,
+                1e-5,
+            )?;
+            for scale in [1. / 1024., -0.125, 1., 16., 1024.] {
+                let mut expected = oracle.map(|v| (v * f64::from(scale)) as f32);
+                expected.rotate_left(shift);
+                input_gradient(&tape, &device.upload(&[1, 4], &[scale; 4])?, &expected).await?;
+                dynamic_range_variants += 1;
+            }
         }
         let input = device.upload(&[3, 3], &[0.4, -0.8, 1.2, -0.3, 0.9, -1.1, 0.7, 0.1, -0.2])?;
         let target = input.layer_norm_affine(
@@ -186,8 +252,11 @@ mod browser {
             return Err("Inherited failure escaped guard".into());
         }
         Ok(serde_json::to_string(&serde_json::json!({
-            "schema": "spiraltorch.resident_layer_norm.browser.v1", "status": "passed",
-            "adapter": format!("{:?}", runtime.adapter_info()), "cases": cases, "masks_per_case": 7,
+            "schema": "spiraltorch.resident_layer_norm.browser.v2", "status": "passed",
+            "adapter": format!("{:?}", runtime.adapter_info()), "cases": cases, "masks_per_case": 8,
+            "scale_nullspace_cases": scale_nullspace_cases,
+            "epsilon_cancellation_cases": epsilon_cancellation_cases,
+            "dynamic_range_variants": dynamic_range_variants,
             "training_steps": 400, "first_loss": first, "last_loss": last,
             "intermediate_readbacks": 0, "guard_checks": 4,
         }))?)
