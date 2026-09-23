@@ -1,0 +1,43 @@
+{
+  "accumulations_request": "",
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "adaptive_workgroup_cases": 2,
+  "adaptive_workgroup_masks": 3,
+  "asset_sha256": {
+    "/": "ffea3de70939e851e54d0e7e181cf2a85263ac778a44844230c04a5a709430a1",
+    "/module/spiraltorch_wasm.js": "e2e72d86148a1afe4200e7dc0e2817c0da0eecc9a1f49b44f57c7bbb6fa09005",
+    "/module/spiraltorch_wasm_bg.wasm": "b5d9f33dc7ade43ebd56c2130322cb4bbd23e1d1d2f0ff9788cb3d2ad303645e"
+  },
+  "batched_snapshot_checks": 4,
+  "browser_adapter_probe": {
+    "architecture": "metal-3",
+    "boundary": "Separate probe, not attestation of the Rust runtime device",
+    "is_fallback_adapter": false,
+    "vendor": "apple"
+  },
+  "browser_version": "153.0.8010.53",
+  "cases": 7,
+  "console_messages": [],
+  "dynamic_range_variants": 20,
+  "epsilon_cancellation_cases": 2,
+  "first_loss": 1.9879963397979736,
+  "fixture_request": "layer-norm-resident",
+  "guard_checks": 4,
+  "intermediate_readbacks": 0,
+  "kernels_request": "",
+  "last_loss": 7.817134717313934E-10,
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "masks_per_case": 8,
+  "page_errors": [],
+  "page_sha256": "ffea3de70939e851e54d0e7e181cf2a85263ac778a44844230c04a5a709430a1",
+  "scale_nullspace_cases": 5,
+  "schema": "spiraltorch.resident_layer_norm.browser.v5",
+  "shapes_request": "",
+  "statistics_only_vjp_checks": 6,
+  "status": "passed",
+  "tiles_mnk_request": "",
+  "training_steps": 400,
+  "wasm_sha256": "b5d9f33dc7ade43ebd56c2130322cb4bbd23e1d1d2f0ff9788cb3d2ad303645e"
+}
