@@ -12,7 +12,7 @@ warmups and 18 timed intervals, and alternates route order. The first scope
 reads already computed resident tensors; the second includes uploads, forward,
 all VJPs, and readback. Both routes are checked against the CPU-centered
 reference with the unchanged scaled `2e-5 * (1 + abs(reference))` tolerance.
-All 12 shape/scope/route comparisons passed; the maximum scaled error was
+All 12 shape/scope pairs passed on both routes (24 results); the maximum scaled error was
 `0.001133` (128x1025). Times below are medians in milliseconds from the
 source-pinned run on a shared machine, not speed guarantees.
 
