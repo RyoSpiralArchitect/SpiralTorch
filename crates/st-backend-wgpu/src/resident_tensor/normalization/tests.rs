@@ -522,6 +522,64 @@ fn layer_norm_resident_rejections_empty_batches_and_guards() {
 }
 
 #[test]
+fn layer_norm_statistics_tape_does_not_inherit_unused_forward_overflow() {
+    let Some(device) = device() else { return };
+    let input = device.upload(&[1, 2], &[-1., 1.]).unwrap();
+    let gamma = device.upload(&[2], &[f32::MAX; 2]).unwrap();
+    let beta = device.upload(&[2], &[f32::MAX; 2]).unwrap();
+    let seed = device.upload(&[1, 2], &[1., 1.]).unwrap();
+    let forward = input.layer_norm_affine(&gamma, &beta, 0.).unwrap();
+    assert!(matches!(
+        forward.value().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    assert!(matches!(
+        forward.backward(&seed, 1., [true; 3]).unwrap()[0]
+            .as_ref()
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read(),
+        Err(TensorError::NonFinite)
+    ));
+
+    let tape = input.layer_norm_vjp_tape(&gamma, 0.).unwrap();
+    let gradients = tape.backward(&seed, 1., [true; 3]).unwrap();
+    let pending = device
+        .snapshot_many(&gradients.iter().flatten().collect::<Vec<_>>())
+        .unwrap();
+    assert_eq!(pending.staging_buffer_count(), 1);
+    let values = pending.read().unwrap();
+    close(&values[0], &[0., 0.]);
+    close(&values[1], &[-1., 1.]);
+    close(&values[2], &[1., 1.]);
+
+    let huge_seed = device.upload(&[1, 2], &[f32::MAX; 2]).unwrap();
+    let bad_seed = huge_seed.add(&huge_seed).unwrap();
+    let poisoned = tape.backward(&bad_seed, 1., [true, false, false]).unwrap();
+    assert!(matches!(
+        poisoned[0].as_ref().unwrap().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    let constant = device.upload(&[1, 2], &[1., 1.]).unwrap();
+    let degenerate = constant.layer_norm_vjp_tape(&gamma, 0.).unwrap();
+    let gradients = degenerate
+        .backward(&seed, 1., [true, false, false])
+        .unwrap();
+    assert!(matches!(
+        gradients[0].as_ref().unwrap().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+
+    let empty = device.upload(&[0, 2], &[]).unwrap();
+    let empty_tape = empty.layer_norm_vjp_tape(&gamma, 0.).unwrap();
+    let gradients = empty_tape.backward(&empty, 1., [true; 3]).unwrap();
+    assert_eq!(read(gradients[0].as_ref().unwrap()), Vec::<f32>::new());
+    close(&read(gradients[1].as_ref().unwrap()), &[0., 0.]);
+    close(&read(gradients[2].as_ref().unwrap()), &[0., 0.]);
+}
+
+#[test]
 fn layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance() {
     let Some(device) = device() else { return };
     for scale in [1., 1e-10, 1e-20, 1e-30, f32::from_bits(1)] {

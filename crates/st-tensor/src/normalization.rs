@@ -118,15 +118,91 @@ impl Tensor {
         Ok((input.unwrap(), gamma.unwrap(), beta.unwrap()))
     }
 
-    pub(crate) fn layer_norm_vjp(
+    /// Explicit native WGPU VJP with a statistics-only GPU tape. Only the
+    /// requested final gradients are read back, as one bounded batch. This
+    /// does not change the `Auto` or existing hybrid WGPU training routes.
+    #[cfg(all(feature = "wgpu_dense", not(target_arch = "wasm32")))]
+    pub fn layer_norm_affine_backward_resident(
         &self,
         gamma: &Tensor,
         upstream: &Tensor,
         epsilon: f32,
         parameter_gradient_scale: f32,
-        backend: TensorUtilBackend,
         requested: [bool; 3],
     ) -> PureResult<[Option<Tensor>; 3]> {
+        let (input, gamma, upstream) = self.validated_layer_norm_vjp_operands(
+            gamma,
+            upstream,
+            epsilon,
+            parameter_gradient_scale,
+        )?;
+        let (rows, cols) = input.shape();
+        let device = default_layer_norm_resident_device()?;
+        let input = device
+            .upload(&[rows, cols], input.data())
+            .map_err(resident_layer_norm_error)?;
+        let gamma = device
+            .upload(&[cols], gamma.data())
+            .map_err(resident_layer_norm_error)?;
+        let upstream = device
+            .upload(&[rows, cols], upstream.data())
+            .map_err(resident_layer_norm_error)?;
+        let tape = input
+            .layer_norm_vjp_tape(&gamma, epsilon)
+            .map_err(resident_layer_norm_error)?;
+        let gradients = tape
+            .backward(&upstream, parameter_gradient_scale, requested)
+            .map_err(resident_layer_norm_error)?;
+        if gradients
+            .iter()
+            .zip(requested)
+            .any(|(gradient, enabled)| gradient.is_some() != enabled)
+        {
+            return Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "LayerNorm VJP returned the wrong gradient mask".into(),
+            });
+        }
+        let sources: Vec<_> = gradients.iter().flatten().collect();
+        let pending = device
+            .snapshot_many(&sources)
+            .map_err(resident_layer_norm_error)?;
+        let terminal_maps = pending.staging_buffer_count();
+        let mut values = pending
+            .read()
+            .map_err(resident_layer_norm_error)?
+            .into_iter();
+        let mut output = [None, None, None];
+        for (index, enabled) in requested.into_iter().enumerate() {
+            if enabled {
+                let data = values.next().ok_or_else(|| TensorError::BackendFailure {
+                    backend: "wgpu",
+                    message: "LayerNorm VJP readback omitted a requested gradient".into(),
+                })?;
+                let (result_rows, result_cols) = if index == 0 { (rows, cols) } else { (1, cols) };
+                output[index] = Some(Tensor::from_vec(result_rows, result_cols, data)?);
+            }
+        }
+        crate::emit_tensor_op("layer_norm_affine_backward", &[rows, cols], &[rows, cols]);
+        crate::emit_tensor_op_meta("layer_norm_affine_backward", || {
+            serde_json::json!({
+                "semantic_owner": "st-tensor", "rows": rows, "cols": cols,
+                "backend": "resident_wgpu", "normalization_backend": "wgpu",
+                "parameter_gradient_scale": parameter_gradient_scale,
+                "input_gradient_scale": 1.0, "requested_gradients": requested,
+                "intermediate_readbacks": 0, "terminal_maps": terminal_maps,
+            })
+        });
+        Ok(output)
+    }
+
+    fn validated_layer_norm_vjp_operands(
+        &self,
+        gamma: &Tensor,
+        upstream: &Tensor,
+        epsilon: f32,
+        parameter_gradient_scale: f32,
+    ) -> PureResult<(Tensor, Tensor, Tensor)> {
         let (rows, cols) = self.shape();
         if cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
@@ -162,6 +238,25 @@ impl Tensor {
         for &value in gamma.data().iter().chain(upstream.data()) {
             finite("layernorm_backward_operand", value)?;
         }
+        Ok((input, gamma, upstream))
+    }
+
+    pub(crate) fn layer_norm_vjp(
+        &self,
+        gamma: &Tensor,
+        upstream: &Tensor,
+        epsilon: f32,
+        parameter_gradient_scale: f32,
+        backend: TensorUtilBackend,
+        requested: [bool; 3],
+    ) -> PureResult<[Option<Tensor>; 3]> {
+        let (input, gamma, upstream) = self.validated_layer_norm_vjp_operands(
+            gamma,
+            upstream,
+            epsilon,
+            parameter_gradient_scale,
+        )?;
+        let (rows, cols) = input.shape();
         let output = if rows == 0 || !matches!(backend, TensorUtilBackend::GpuWgpu) {
             layer_norm_vjp_cpu(
                 &input,
@@ -251,6 +346,40 @@ fn finite(label: &'static str, value: f32) -> PureResult<f32> {
     } else {
         Err(TensorError::NonFiniteValue { label, value })
     }
+}
+
+#[cfg(all(feature = "wgpu_dense", not(target_arch = "wasm32")))]
+fn resident_layer_norm_error(error: impl std::fmt::Display) -> TensorError {
+    TensorError::BackendFailure {
+        backend: "wgpu",
+        message: error.to_string(),
+    }
+}
+
+#[cfg(all(feature = "wgpu_dense", not(target_arch = "wasm32")))]
+fn default_layer_norm_resident_device() -> PureResult<st_backend_wgpu::resident_tensor::TensorDevice>
+{
+    use st_backend_wgpu::{resident_tensor::TensorDevice, runtime};
+    static DEVICE: std::sync::OnceLock<TensorDevice> = std::sync::OnceLock::new();
+
+    let (runtime, _) = runtime::ensure_default_runtime_blocking("tensor.layer_norm_vjp")
+        .map_err(resident_layer_norm_error)?;
+    if let Some(cached) = DEVICE.get() {
+        if !cached
+            .runtime()
+            .context()
+            .shares_handles_with(runtime.context())
+        {
+            return Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "cached LayerNorm device differs from the default runtime".into(),
+            });
+        }
+        return Ok(cached.clone());
+    }
+    let created = TensorDevice::new(runtime).map_err(resident_layer_norm_error)?;
+    let _ = DEVICE.set(created.clone());
+    Ok(DEVICE.get().unwrap_or(&created).clone())
 }
 
 fn layer_norm_vjp_cpu(

@@ -12,9 +12,24 @@ use st_kernel_contracts::normalization::{
 #[derive(Clone)]
 pub struct ResidentLayerNorm {
     value: ResidentTensor,
+    tape: LayerNormBackwardTape,
+}
+
+/// Statistics-only backward tape. Affine forward overflow cannot invalidate
+/// finite requested VJPs because no forward affine output is computed.
+#[derive(Clone)]
+pub struct ResidentLayerNormVjp {
+    tape: LayerNormBackwardTape,
+}
+
+#[derive(Clone)]
+struct LayerNormBackwardTape {
     centered: Shared<wgpu::Buffer>,
     row_stats: Shared<wgpu::Buffer>,
     gamma: ResidentTensor,
+    layout: NdLayout,
+    flags: Shared<wgpu::Buffer>,
+    device: TensorDevice,
     shape: LayerNormShape,
     epsilon: f32,
 }
@@ -46,6 +61,7 @@ pub(super) struct LayerNormKernels {
     forward_layout: wgpu::BindGroupLayout,
     backward_layout: wgpu::BindGroupLayout,
     forward: wgpu::ComputePipeline,
+    statistics: wgpu::ComputePipeline,
     input: wgpu::ComputePipeline,
     affine: wgpu::ComputePipeline,
     guard: guard_capture::GuardCapture,
@@ -101,6 +117,11 @@ impl LayerNormKernels {
                 &forward_layout,
                 include_str!("shaders/layer_norm.wgsl"),
                 "forward",
+            ),
+            statistics: pipeline(
+                &forward_layout,
+                include_str!("shaders/layer_norm.wgsl"),
+                "statistics",
             ),
             input: pipeline(
                 &backward_layout,
@@ -207,7 +228,7 @@ fn validation(
         device,
         "layer_norm.validation",
         inputs.len() + 1,
-        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
     )?;
     encoder.clear_buffer(&flags, 0, None);
     for (i, input) in inputs.iter().enumerate() {
@@ -315,12 +336,110 @@ impl ResidentTensor {
         capture(kernels, gpu, &mut encoder, &flags, value.flags());
         context.queue().submit(Some(encoder.finish()));
         Ok(ResidentLayerNorm {
+            tape: LayerNormBackwardTape {
+                centered,
+                row_stats,
+                gamma,
+                layout: value.layout.clone(),
+                flags: value.storage.flags.clone(),
+                device: self.device.clone(),
+                shape,
+                epsilon,
+            },
             value,
-            centered,
-            row_stats,
-            gamma,
-            shape,
-            epsilon,
+        })
+    }
+
+    /// Prepare only the centered row statistics required by the VJP. No
+    /// affine output is evaluated or read, and there is no CPU fallback.
+    pub fn layer_norm_vjp_tape(
+        &self,
+        gamma: &Self,
+        epsilon: f32,
+    ) -> Result<ResidentLayerNormVjp, TensorError> {
+        validate_epsilon(epsilon)?;
+        let shape = LayerNormShape::new(self.layout.shape(), gamma.layout.shape())?;
+        let context = self.device.runtime().context();
+        gamma.require_context(context)?;
+        let gpu = context.device();
+        preflight(shape, &gpu.limits())?;
+        let grid = groups(shape.rows, &gpu.limits())?;
+        let layout = NdLayout::contiguous(self.layout.shape())?;
+        let kernels = self
+            .device
+            .0
+            .normalization
+            .get_or_init(|| LayerNormKernels::new(gpu));
+        let mut encoder = gpu.create_command_encoder(&Default::default());
+        let input = self.contiguous_into(&mut encoder)?;
+        let gamma = gamma.contiguous_into(&mut encoder)?;
+        let centered = Shared::new(runtime::empty_buffer::<[u32; 4]>(
+            gpu,
+            "layer_norm.vjp.centered",
+            self.layout.len().max(1),
+            wgpu::BufferUsages::STORAGE,
+        )?);
+        let row_stats = Shared::new(runtime::empty_buffer::<[u32; 8]>(
+            gpu,
+            "layer_norm.vjp.row_stats",
+            shape.rows.max(1),
+            wgpu::BufferUsages::STORAGE,
+        )?);
+        let flags = Shared::new(validation(
+            gpu,
+            &mut encoder,
+            &[input.flags(), gamma.flags()],
+        )?);
+        let unused_output = runtime::empty_buffer::<f32>(
+            gpu,
+            "layer_norm.vjp.unused_output",
+            1,
+            wgpu::BufferUsages::STORAGE,
+        )?;
+        let params = runtime::upload_slice(
+            gpu,
+            "layer_norm.vjp.params",
+            &[Params {
+                rows: shape.rows as u32,
+                cols: shape.cols as u32,
+                groups_x: grid[0],
+                requested: 0,
+                epsilon,
+                scale: 1.0,
+                beta_offset: 0,
+                _pad: 0,
+            }],
+            wgpu::BufferUsages::UNIFORM,
+        )?;
+        let binding = bind(
+            gpu,
+            &kernels.forward_layout,
+            [
+                input.values(),
+                gamma.values(),
+                gamma.values(),
+                &centered,
+                &row_stats,
+                &unused_output,
+                &flags,
+                &params,
+            ],
+        );
+        if shape.rows != 0 {
+            dispatch(&mut encoder, &kernels.statistics, &binding, grid);
+        }
+        context.queue().submit(Some(encoder.finish()));
+        Ok(ResidentLayerNormVjp {
+            tape: LayerNormBackwardTape {
+                centered,
+                row_stats,
+                gamma,
+                layout,
+                flags,
+                device: self.device.clone(),
+                shape,
+                epsilon,
+            },
         })
     }
 }
@@ -340,11 +459,37 @@ impl ResidentLayerNorm {
         parameter_gradient_scale: f32,
         requested: [bool; 3],
     ) -> Result<[Option<ResidentTensor>; 3], TensorError> {
+        self.tape
+            .backward(upstream, parameter_gradient_scale, requested)
+    }
+}
+
+impl ResidentLayerNormVjp {
+    /// Return only requested `(input, gamma, beta)` VJPs. The tape has no
+    /// forward affine value or beta dependency to poison valid gradients.
+    pub fn backward(
+        &self,
+        upstream: &ResidentTensor,
+        parameter_gradient_scale: f32,
+        requested: [bool; 3],
+    ) -> Result<[Option<ResidentTensor>; 3], TensorError> {
+        self.tape
+            .backward(upstream, parameter_gradient_scale, requested)
+    }
+}
+
+impl LayerNormBackwardTape {
+    fn backward(
+        &self,
+        upstream: &ResidentTensor,
+        parameter_gradient_scale: f32,
+        requested: [bool; 3],
+    ) -> Result<[Option<ResidentTensor>; 3], TensorError> {
         validate_gradient_scale(parameter_gradient_scale)?;
-        if upstream.layout.shape() != self.value.layout.shape() {
+        if upstream.layout.shape() != self.layout.shape() {
             return Err(LayerNormError::CotangentShape.into());
         }
-        let device = &self.value.device;
+        let device = &self.device;
         let context = device.runtime().context();
         upstream.require_context(context)?;
         if !requested.iter().any(|&v| v) {
@@ -355,16 +500,12 @@ impl ResidentLayerNorm {
             .0
             .normalization
             .get()
-            .expect("forward created LayerNorm kernels");
+            .expect("tape created LayerNorm kernels");
         let mut encoder = gpu.create_command_encoder(&Default::default());
         let upstream = upstream.contiguous_into(&mut encoder)?;
-        let flags = validation(gpu, &mut encoder, &[self.value.flags(), upstream.flags()])?;
+        let flags = validation(gpu, &mut encoder, &[&self.flags, upstream.flags()])?;
         let empty = NdLayout::contiguous(&[0])?;
-        let mut dx = device.allocate_output(if requested[0] {
-            &self.value.layout
-        } else {
-            &empty
-        })?;
+        let mut dx = device.allocate_output(if requested[0] { &self.layout } else { &empty })?;
         let affine_len = self.shape.cols * (usize::from(requested[1]) + usize::from(requested[2]));
         let affine = device.allocate_output(&NdLayout::contiguous(&[affine_len])?)?;
         // Fresh private buffers are not exposed until both kernels and their

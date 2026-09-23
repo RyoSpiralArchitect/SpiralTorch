@@ -278,14 +278,33 @@ mod browser {
         {
             return Err("Batched readback lost upstream guard".into());
         }
+        let wide_input = device.upload(&[1, 2], &[-1., 1.])?;
+        let wide_gamma = device.upload(&[2], &[f32::MAX; 2])?;
+        let wide_beta = device.upload(&[2], &[f32::MAX; 2])?;
+        let unit_seed = device.upload(&[1, 2], &[1., 1.])?;
+        let overflow_forward = wide_input.layer_norm_affine(&wide_gamma, &wide_beta, 0.)?;
+        if read(overflow_forward.value()).await.is_ok() {
+            return Err("Overflowing forward was accepted".into());
+        }
+        let tape = wide_input.layer_norm_vjp_tape(&wide_gamma, 0.)?;
+        let gradients = tape.backward(&unit_seed, 1., [true; 3])?;
+        let pending = device.snapshot_many(&gradients.iter().flatten().collect::<Vec<_>>())?;
+        if pending.staging_buffer_count() != 1 {
+            return Err("Statistics-only VJP did not share one map".into());
+        }
+        let values = pending.read_async().await?;
+        close(&values[0], &[0., 0.])?;
+        close(&values[1], &[-1., 1.])?;
+        close(&values[2], &[1., 1.])?;
         Ok(serde_json::to_string(&serde_json::json!({
-            "schema": "spiraltorch.resident_layer_norm.browser.v3", "status": "passed",
+            "schema": "spiraltorch.resident_layer_norm.browser.v4", "status": "passed",
             "adapter": format!("{:?}", runtime.adapter_info()), "cases": cases, "masks_per_case": 8,
             "scale_nullspace_cases": scale_nullspace_cases,
             "epsilon_cancellation_cases": epsilon_cancellation_cases,
             "dynamic_range_variants": dynamic_range_variants,
             "training_steps": 400, "first_loss": first, "last_loss": last,
             "intermediate_readbacks": 0, "guard_checks": 4, "batched_snapshot_checks": 4,
+            "statistics_only_vjp_checks": 4,
         }))?)
     }
 }
