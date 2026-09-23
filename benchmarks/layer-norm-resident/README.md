@@ -78,3 +78,15 @@ criterion unchanged, on both native and browser resident paths.
 A subsequent subnormal-affine probe reproduced a real error: expected
 `-0.09223365`, observed `0`. It is now a native/browser regression case. Neither
 its input nor the 2e-5 scaled comparison tolerance was relaxed.
+
+The installed PyTorch 2.12.1 MPS training control also failed when the input did
+not require a gradient. A separate direct `aten.native_layer_norm_backward`
+probe on the fixed 3x3 fixture found incorrect affine gradients for masks
+`[false,true,false]`, `[false,false,true]` and `[false,true,true]`; CPU passed all
+seven masks, and MPS passed the masks requesting dx. Requesting an unused dx
+restored the two 400-step MPS controls. This is a **local, mask-specific negative
+result**, not a general PyTorch finding or an accepted same-work workaround.
+The performance harness already requests all gradients, and checks their
+values. `torch_mask_probe.py` exits normally after gathering diagnostics;
+`all_masks_valid=false` must never be interpreted as numerical acceptance.
+No installed PyTorch code or default route was modified.

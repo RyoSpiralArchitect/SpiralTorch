@@ -1,0 +1,15 @@
+
+running 5 tests
+test resident_tensor::normalization::tests::layer_norm_resident_extreme_finite_cases ... ok
+test resident_tensor::normalization::tests::layer_norm_resident_rejections_empty_batches_and_guards ... ok
+test resident_tensor::normalization::tests::layer_norm_resident_requested_vjps_and_nd_views ... ok
+test resident_tensor::normalization::tests::layer_norm_resident_widths_offsets_and_training ... FAILED
+test resident_tensor::normalization::tests::layer_norm_shaders_validate_without_adapter ... ok
+
+failures:
+
+failures:
+    resident_tensor::normalization::tests::layer_norm_resident_widths_offsets_and_training
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 192 filtered out; finished in 1.41s
+

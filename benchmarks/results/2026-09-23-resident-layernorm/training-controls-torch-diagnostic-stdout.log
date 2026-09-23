@@ -1,0 +1,4 @@
+{"device": "cpu", "learning_rate": 0.05, "first": 1.5588045120239258, "last": 0.0007589891902171075, "expected": false, "observed": false}
+{"device": "cpu", "learning_rate": 0.1, "first": 1.987995982170105, "last": 7.817145264432668e-10, "expected": true, "observed": true}
+{"device": "mps", "learning_rate": 0.05, "first": 1.558804988861084, "last": 2.1711352426250895e+20, "expected": false, "observed": false}
+{"device": "mps", "learning_rate": 0.1, "first": 1.987996220588684, "last": Infinity, "expected": true, "observed": false}
