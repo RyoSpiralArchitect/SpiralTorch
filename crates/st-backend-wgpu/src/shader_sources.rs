@@ -13,6 +13,7 @@ pub const FUSED_ATTENTION_ONLINE_WGSL: &str = include_str!("shaders/fused_attent
 
 pub const DENSE_MATMUL_WGSL: &str = include_str!("shaders/dense_matmul.wgsl");
 pub const ROUNDED_ADD_WGSL: &str = include_str!("shaders/rounded_add.wgsl");
+pub const GELU_DERIVATIVE_WGSL: &str = include_str!("shaders/gelu_derivative.wgsl");
 
 pub const NERF_VOLUME_UTILS_WGSL: &str = include_str!("shaders/nerf_volume_utils.wgsl");
 

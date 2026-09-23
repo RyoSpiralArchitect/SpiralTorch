@@ -93,8 +93,6 @@ const SKIP: &[&str] = &[
     "softmax_subgroup",
     "row_softmax_subgroup",
     "fused_attention",
-    "reduce_db",
-    "fused_gelu_back",
     "nd_indexer",
 ];
 
@@ -107,6 +105,12 @@ fn all_backend_shaders_parse() {
         let expanded;
         let source = if *name == "nerf_raymarch" {
             expanded = st_backend_wgpu::shader_sources::nerf_raymarch_source();
+            expanded.as_str()
+        } else if *name == "fused_gelu_back" {
+            expanded = st_backend_wgpu::gelu_back::fused_source(Default::default()).unwrap();
+            expanded.as_str()
+        } else if *name == "reduce_db" {
+            expanded = st_backend_wgpu::gelu_back::reduce_source(Default::default()).unwrap();
             expanded.as_str()
         } else {
             source

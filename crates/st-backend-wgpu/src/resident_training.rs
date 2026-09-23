@@ -255,7 +255,7 @@ pub struct ResidentDenseTraining {
 
 pub(crate) fn training_scalar_source() -> String {
     [
-        include_str!("shaders/gelu_derivative.wgsl"),
+        crate::shader_sources::GELU_DERIVATIVE_WGSL,
         include_str!("shaders/dense_training.wgsl"),
     ]
     .concat()
