@@ -251,14 +251,41 @@ mod browser {
         if read(&inherited).await.is_ok() {
             return Err("Inherited failure escaped guard".into());
         }
+        let offset = input.narrow(0, 1, 1)?;
+        let transposed = input.permute(&[1, 0])?;
+        let empty = input.narrow(0, 3, 0)?;
+        let pending = device.snapshot_many(&[&offset, &transposed, &empty])?;
+        if pending.staging_buffer_count() != 1 {
+            return Err("Batch did not share one map".into());
+        }
+        drop(offset);
+        drop(transposed);
+        drop(empty);
+        let values = pending.read_async().await?;
+        close(&values[0], &[-0.3, 0.9, -1.1])?;
+        close(
+            &values[1],
+            &[0.4, -0.3, 0.7, -0.8, 0.9, 0.1, 1.2, -1.1, -0.2],
+        )?;
+        if !values[2].is_empty() {
+            return Err("Empty view readback is not empty".into());
+        }
+        if device
+            .snapshot_many(&[&bad_seed])?
+            .read_async()
+            .await
+            .is_ok()
+        {
+            return Err("Batched readback lost upstream guard".into());
+        }
         Ok(serde_json::to_string(&serde_json::json!({
-            "schema": "spiraltorch.resident_layer_norm.browser.v2", "status": "passed",
+            "schema": "spiraltorch.resident_layer_norm.browser.v3", "status": "passed",
             "adapter": format!("{:?}", runtime.adapter_info()), "cases": cases, "masks_per_case": 8,
             "scale_nullspace_cases": scale_nullspace_cases,
             "epsilon_cancellation_cases": epsilon_cancellation_cases,
             "dynamic_range_variants": dynamic_range_variants,
             "training_steps": 400, "first_loss": first, "last_loss": last,
-            "intermediate_readbacks": 0, "guard_checks": 4,
+            "intermediate_readbacks": 0, "guard_checks": 4, "batched_snapshot_checks": 4,
         }))?)
     }
 }

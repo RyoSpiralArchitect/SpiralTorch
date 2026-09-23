@@ -93,11 +93,53 @@ impl<T: Pod> ReadbackBatch<T> {
         label: &str,
         staging_limit: u64,
     ) -> Result<Self, WgpuRuntimeError> {
+        let spans: Vec<_> = sources
+            .iter()
+            .map(|&(source, elements)| (source, 0, elements))
+            .collect();
+        let mut encoder =
+            context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("st.backend.wgpu.readback_batch.encoder"),
+                });
+        let batch =
+            Self::encode_spans_with_limit(context, &spans, label, staging_limit, &mut encoder)?;
+        if !batch.chunks.is_empty() {
+            context.queue().submit(Some(encoder.finish()));
+        }
+        Ok(batch)
+    }
+
+    /// Encode element-aligned source spans after the caller's GPU work. The
+    /// caller submits the encoder once, before mapping this owning snapshot.
+    pub(crate) fn encode_spans(
+        context: &WgpuContext,
+        spans: &[(&wgpu::Buffer, usize, usize)],
+        label: &str,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Self, WgpuRuntimeError> {
+        Self::encode_spans_with_limit(
+            context,
+            spans,
+            label,
+            context.device().limits().max_buffer_size,
+            encoder,
+        )
+    }
+
+    fn encode_spans_with_limit(
+        context: &WgpuContext,
+        spans: &[(&wgpu::Buffer, usize, usize)],
+        label: &str,
+        staging_limit: u64,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Self, WgpuRuntimeError> {
         let device = context.device();
-        let sizes = sources
+        let sizes = spans
             .iter()
             .enumerate()
-            .map(|(index, &(source, elements))| {
+            .map(|(index, &(source, offset, elements))| {
                 if elements == 0 {
                     return Ok(0);
                 }
@@ -114,10 +156,25 @@ impl<T: Pod> ReadbackBatch<T> {
                         required: "COPY_SRC",
                     });
                 }
-                if size > source.size() {
+                let start = checked_byte_len::<T>(&resource, offset)?;
+                if !start.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) {
+                    return Err(WgpuRuntimeError::UnalignedReadback {
+                        resource,
+                        bytes: start,
+                    });
+                }
+                let end =
+                    start
+                        .checked_add(size)
+                        .ok_or_else(|| WgpuRuntimeError::ByteCountOverflow {
+                            resource: resource.clone(),
+                            elements,
+                            element_size: size_of::<T>(),
+                        })?;
+                if end > source.size() {
                     return Err(WgpuRuntimeError::ReadbackRange {
                         resource,
-                        required: size,
+                        required: end,
                         available: source.size(),
                     });
                 }
@@ -142,22 +199,16 @@ impl<T: Pod> ReadbackBatch<T> {
                 }))
             })
             .collect();
-        if !chunks.is_empty() {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("st.backend.wgpu.readback_batch.encoder"),
-            });
-            for ((source, _), segment) in sources.iter().zip(&packed.segments) {
-                if let Some(segment) = segment {
-                    encoder.copy_buffer_to_buffer(
-                        source,
-                        0,
-                        chunks[segment.chunk].buffer(),
-                        segment.bytes.start as u64,
-                        segment.bytes.len() as u64,
-                    );
-                }
+        for ((source, offset, _), segment) in spans.iter().zip(&packed.segments) {
+            if let Some(segment) = segment {
+                encoder.copy_buffer_to_buffer(
+                    source,
+                    checked_byte_len::<T>(label, *offset)?,
+                    chunks[segment.chunk].buffer(),
+                    segment.bytes.start as u64,
+                    segment.bytes.len() as u64,
+                );
             }
-            context.queue().submit(Some(encoder.finish()));
         }
         Ok(Self {
             chunks,
@@ -279,6 +330,62 @@ mod tests {
             batch.read().unwrap(),
             [vec![1, 2], vec![1], vec![1], vec![]]
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn encoded_spans_read_offsets_and_validate_ranges_when_enabled() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let runtime = pollster::block_on(WgpuRuntime::request_headless("batch.spans")).unwrap();
+        let context = runtime.context();
+        let source = upload_slice(
+            context.device(),
+            "batch.spans",
+            &[10u32, 20, 30, 40],
+            wgpu::BufferUsages::COPY_SRC,
+        )
+        .unwrap();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let batch = ReadbackBatch::<u32>::encode_spans_with_limit(
+            context,
+            &[(&source, 1, 2), (&source, 3, 1), (&source, 4, 0)],
+            "batch.spans",
+            8,
+            &mut encoder,
+        )
+        .unwrap();
+        assert_eq!(batch.staging_buffer_count(), 2);
+        context.queue().submit(Some(encoder.finish()));
+        assert_eq!(batch.read().unwrap(), [vec![20, 30], vec![40], vec![]]);
+
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        assert!(matches!(
+            ReadbackBatch::<u32>::encode_spans(
+                context,
+                &[(&source, 3, 2)],
+                "batch.spans.invalid",
+                &mut encoder,
+            ),
+            Err(WgpuRuntimeError::ReadbackRange { .. })
+        ));
+        let halfwords = upload_slice(
+            context.device(),
+            "batch.spans.halfwords",
+            &[1u16, 2, 3, 4],
+            wgpu::BufferUsages::COPY_SRC,
+        )
+        .unwrap();
+        assert!(matches!(
+            ReadbackBatch::<u16>::encode_spans(
+                context,
+                &[(&halfwords, 1, 2)],
+                "batch.spans.unaligned",
+                &mut encoder,
+            ),
+            Err(WgpuRuntimeError::UnalignedReadback { .. })
+        ));
     }
 
     #[test]
