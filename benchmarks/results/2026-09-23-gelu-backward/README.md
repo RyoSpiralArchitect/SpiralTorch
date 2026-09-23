@@ -118,3 +118,6 @@ Add --raw-root and --source-root to rehash local raw evidence, recompute all
 summaries and compare the measured source. Verification is not GPU reexecution.
 No CUDA/Furnace run, model-quality gain, whole-model multiplier or universal
 device/geometry guarantee is included in this milestone.
+
+Post-publication CI outcomes and their resolution are tracked separately in
+[CI-FOLLOWUP.md](CI-FOLLOWUP.md); the original local measurements remain intact.

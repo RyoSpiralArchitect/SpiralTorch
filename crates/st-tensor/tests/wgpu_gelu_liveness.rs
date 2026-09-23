@@ -57,16 +57,20 @@ fn plain_and_fused_gelu_preserve_tails_saturation_and_residual_contract() {
             let (gz, dr, db) =
                 wgpu_dense::fused_gelu_backward(&z, &seed, residual, rows, cols).unwrap();
             for (i, &want) in reference.iter().enumerate() {
-                for actual in [gz[i], plain.data()[i]] {
+                for (route, actual) in [("fused", gz[i]), ("plain", plain.data()[i])] {
                     assert!(
                         actual.is_finite()
-                            && (f64::from(actual) - want).abs() <= 2e-6 + 1e-5 * want.abs()
+                            && (f64::from(actual) - want).abs() <= 2e-6 + 1e-5 * want.abs(),
+                        "{route} {rows}x{cols} index={i} residual={} z={} seed={} actual={actual} expected={want}",
+                        residual.is_some(), z[i], seed[i]
                     );
                 }
                 let want = want + f64::from(residual.map_or(0., |r| r[i]));
                 assert!(
                     dr[i].is_finite()
-                        && (f64::from(dr[i]) - want).abs() <= 2e-6 + 1e-5 * want.abs()
+                        && (f64::from(dr[i]) - want).abs() <= 2e-6 + 1e-5 * want.abs(),
+                    "residual {rows}x{cols} index={i} accumulated={} z={} seed={} base={} gz={} actual={} expected={want}",
+                    residual.is_some(), z[i], seed[i], residual.map_or(0., |r| r[i]), gz[i], dr[i]
                 );
             }
             for c in 0..cols {
@@ -74,7 +78,10 @@ fn plain_and_fused_gelu_preserve_tails_saturation_and_residual_contract() {
                 assert!(
                     db[c].is_finite()
                         && (f64::from(db[c]) - want).abs()
-                            <= 2e-6 * rows as f64 + 1e-5 * want.abs()
+                            <= 2e-6 * rows as f64 + 1e-5 * want.abs(),
+                    "bias {rows}x{cols} col={c} residual={} actual={} expected={want}",
+                    residual.is_some(),
+                    db[c]
                 );
             }
         }
