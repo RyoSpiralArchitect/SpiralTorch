@@ -14,6 +14,10 @@ The backend owns the canonical saturated tanh-GELU derivative, embedded
 plain/fused shaders, 32/16-byte fused uniforms, bindings and validated geometry.
 Tensor pipelines still compile lazily. Resident VJP/training use the same WGSL
 derivative source without changing their deferred guard machinery.
+The shared derivative uses an exp-based tanh identity for the CDF and sech-squared
+terms, avoiding cancellation in `1 - tanh(inner)^2` near saturated tails.
+This preserves the tanh-GELU derivative and the exact abs(x)>=10 saturation
+policy; it does not relax the frozen accuracy gate.
 
 The old filesystem loader failed to compile its override-sized workgroup array
 on WGPU 0.20. Specializations now become host-selected constants, on both the

@@ -25,3 +25,34 @@ The published timings, raw snapshot and measured source hashes are unchanged.
 Test-diagnostic revisions are not remeasured kernel revisions: a source-root
 verification must use the recorded measured commit, not assume every later test
 file has the same bytes. Merge remains gated on resolving the failed CI.
+
+## Diagnostic Reproduction And Stable Tail
+
+The diagnostic-only commit `353c42ddefe132270e6f2d067812cf8f48721995`
+[reproduced the failure](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/35823105752/job/107058992898):
+
+```text
+residual 17x31 index=101 accumulated=true z=9.999 seed=-0.5 base=0.375 gz=-0.5000034 actual=-0.1250034 expected=-0.125
+```
+
+The observed residual is consistent with adding the seed to the already shifted
+gradient, not with a mismatched readback segment. The approximately 3.4e-6
+gradient error passes its relative tolerance but exceeds the residual's tighter
+absolute-plus-relative allowance after cancellation. The old `1-tanh(inner)^2`
+form amplifies a tiny tail error near tanh=1 by the large cubic slope.
+The internal tanh value was not captured; this interpretation is an inference
+from the observed outputs and formula, not a measured driver implementation.
+
+The shared WGSL derivative now uses q=exp(-2*abs(inner)), inverse=1/(1+q),
+the corresponding signed CDF, and sech-squared=4*q*inverse^2. This is the same
+tanh-GELU derivative without subtracting nearly equal tail values. It retains
+the exact abs(x)>=10 limiting branch. No input, tolerance, finite guard, CPU
+routing or test enablement was changed. Resident VJP/training, plain backward
+and fused backward all receive the shared numerical correction.
+
+The complete second failed job log remains local as
+`post-publication/ci-diagnostic-wgpu.log`, SHA-256
+`71562d5399006ae6310978e5c3fc92091a168674552c888abc8dd4af7bf2a91a`.
+The stable-tail revision is remeasured separately in
+[the stable-tail archive](../2026-09-23-gelu-stable-tail/README.md); the first
+study is preserved rather than relabeled as a measurement of the correction.
