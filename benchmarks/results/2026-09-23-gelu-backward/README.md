@@ -1,5 +1,9 @@
 # GELU Backward Liveness, 2026-09-23
 
+Historical candidate: CI exposed a tail-accuracy failure after these local
+measurements. See [the failure record](CI-FOLLOWUP.md) and the separately
+[remeasured final correction](../2026-09-23-gelu-central-tail/README.md).
+
 Measured implementation: `0f7a03f49f3808344a1b1a1c15776be83b4fe3fb`.
 Base: `62dced674158234726cfb2521c09d378e8ec3b6f`.
 

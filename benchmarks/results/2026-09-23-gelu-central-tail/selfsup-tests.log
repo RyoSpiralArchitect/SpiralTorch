@@ -1,0 +1,12 @@
+
+running 7 tests
+test entry_points_reject_invalid_temperatures_and_shapes ... ok
+test explicit_runtime_opt_in_requires_real_dense_gpu ... ok
+test shared_backend_matches_independent_float64_objective ... ok
+test tensor_layouts_preserve_logical_rows ... ok
+test tensor_wrapper_matches_vector_api ... ok
+test vector_result_rejects_empty_tensor_without_panicking ... ok
+test wgpu_feature_path_matches_reference ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+

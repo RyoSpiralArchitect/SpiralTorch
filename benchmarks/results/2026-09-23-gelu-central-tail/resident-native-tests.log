@@ -1,0 +1,26 @@
+
+running 2 tests
+test forward_graph_owns_nd_io_and_preserves_deferred_guards ... ok
+test single_pass_retains_each_logical_stage_guard_after_reuse ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+
+running 1 test
+test owned_gain_graph_training_matches_modules_and_rejects_partial_commits ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.06s
+
+
+running 1 test
+test nd_tensors_feed_existing_nn_and_preserve_training_guards_on_gpu ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+
+running 2 tests
+test resident_vjp_learning_and_transactional_sgd_on_real_gpu ... ok
+test zero_rate_probe_preserves_signed_zero_parameters ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+

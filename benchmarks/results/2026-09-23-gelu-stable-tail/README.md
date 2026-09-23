@@ -1,5 +1,9 @@
 # Stable GELU Derivative Tails, 2026-09-23
 
+Historical candidate: its single-operation checks passed, but full classification
+training regressed. See [the failure record](CI-FOLLOWUP.md) and the separately
+[remeasured central/tail correction](../2026-09-23-gelu-central-tail/README.md).
+
 Measured implementation: `e97bba6454d374e7165632bbe906c9730edeaffc`.
 Original optimization base: `62dced674158234726cfb2521c09d378e8ec3b6f`.
 This is a new complete measurement, not a relabeling of the earlier result.
