@@ -296,6 +296,19 @@ mod browser {
         close(&values[0], &[0., 0.])?;
         close(&values[1], &[-1., 1.])?;
         close(&values[2], &[1., 1.])?;
+        let huge_input = device.upload(&[1, 2], &[f32::MAX; 2])?;
+        let bad_input = huge_input.add(&huge_input)?;
+        let bad_input_tape = bad_input.layer_norm_vjp_tape(&wide_gamma, 1e-5)?;
+        let bad_input_grad = bad_input_tape.backward(&unit_seed, 1., [true, false, false])?;
+        if read(bad_input_grad[0].as_ref().unwrap()).await.is_ok() {
+            return Err("Statistics-only VJP lost inherited input guard".into());
+        }
+        let bad_gamma = wide_gamma.add(&wide_gamma)?;
+        let bad_gamma_tape = wide_input.layer_norm_vjp_tape(&bad_gamma, 0.)?;
+        let bad_gamma_grad = bad_gamma_tape.backward(&unit_seed, 1., [false, true, false])?;
+        if read(bad_gamma_grad[1].as_ref().unwrap()).await.is_ok() {
+            return Err("Statistics-only VJP lost inherited gamma guard".into());
+        }
         Ok(serde_json::to_string(&serde_json::json!({
             "schema": "spiraltorch.resident_layer_norm.browser.v4", "status": "passed",
             "adapter": format!("{:?}", runtime.adapter_info()), "cases": cases, "masks_per_case": 8,
@@ -304,7 +317,7 @@ mod browser {
             "dynamic_range_variants": dynamic_range_variants,
             "training_steps": 400, "first_loss": first, "last_loss": last,
             "intermediate_readbacks": 0, "guard_checks": 4, "batched_snapshot_checks": 4,
-            "statistics_only_vjp_checks": 4,
+            "statistics_only_vjp_checks": 6,
         }))?)
     }
 }

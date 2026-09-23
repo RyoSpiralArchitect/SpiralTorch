@@ -224,15 +224,28 @@ fn validation(
     encoder: &mut wgpu::CommandEncoder,
     inputs: &[&wgpu::Buffer],
 ) -> Result<wgpu::Buffer, TensorError> {
+    let bytes = inputs.iter().try_fold(4u64, |total, input| {
+        if input.size() % 4 != 0 {
+            return Err(TensorError::Limit("LayerNorm validation alignment"));
+        }
+        total
+            .checked_add(input.size())
+            .ok_or(TensorError::Limit("LayerNorm validation size"))
+    })?;
+    let words =
+        usize::try_from(bytes / 4).map_err(|_| TensorError::Limit("LayerNorm validation size"))?;
     let flags = runtime::empty_buffer::<u32>(
         device,
         "layer_norm.validation",
-        inputs.len() + 1,
+        words,
         wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
     )?;
     encoder.clear_buffer(&flags, 0, None);
-    for (i, input) in inputs.iter().enumerate() {
-        encoder.copy_buffer_to_buffer(input, 0, &flags, (i as u64 + 1) * 4, 4);
+    let mut offset = 4;
+    for input in inputs {
+        // A previous validation may contain several inherited guard words.
+        encoder.copy_buffer_to_buffer(input, 0, &flags, offset, input.size());
+        offset += input.size();
     }
     Ok(flags)
 }

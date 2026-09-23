@@ -561,6 +561,33 @@ fn layer_norm_statistics_tape_does_not_inherit_unused_forward_overflow() {
         poisoned[0].as_ref().unwrap().snapshot().unwrap().read(),
         Err(TensorError::NonFinite)
     ));
+    let huge_input = device.upload(&[1, 2], &[f32::MAX; 2]).unwrap();
+    let bad_input = huge_input.add(&huge_input).unwrap();
+    assert!(matches!(
+        bad_input.snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    let bad_input_tape = bad_input.layer_norm_vjp_tape(&gamma, 1e-5).unwrap();
+    let poisoned = bad_input_tape
+        .backward(&seed, 1., [true, false, false])
+        .unwrap();
+    assert!(matches!(
+        poisoned[0].as_ref().unwrap().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    let bad_gamma = gamma.add(&gamma).unwrap();
+    assert!(matches!(
+        bad_gamma.snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    let bad_gamma_tape = input.layer_norm_vjp_tape(&bad_gamma, 0.).unwrap();
+    let poisoned = bad_gamma_tape
+        .backward(&seed, 1., [false, true, false])
+        .unwrap();
+    assert!(matches!(
+        poisoned[1].as_ref().unwrap().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
     let constant = device.upload(&[1, 2], &[1., 1.]).unwrap();
     let degenerate = constant.layer_norm_vjp_tape(&gamma, 0.).unwrap();
     let gradients = degenerate
