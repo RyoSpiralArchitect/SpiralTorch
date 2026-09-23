@@ -1,0 +1,1302 @@
+[
+  {
+    "path": "accepted-bindgen/receipt.json",
+    "bytes": 54826,
+    "sha256": "2a5f9678616a3a0f1637e096083ff19fdeeacf4643618bd4bc0af250672d98a8"
+  },
+  {
+    "path": "accepted-bindgen/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-bindgen/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-bindgen/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-bindgen/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-browser/receipt.json",
+    "bytes": 54838,
+    "sha256": "df1930c91df62e8ffd7552d71afb4f05c9cbacdaf77c660bc5a7bc843ddd2979"
+  },
+  {
+    "path": "accepted-browser/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-browser/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-browser/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-browser/stdout.log",
+    "bytes": 132,
+    "sha256": "17a4280a9417568a5eede22d9f49106678628a2e0e79bb8397d9f9c2b3cbcc66"
+  },
+  {
+    "path": "accepted-browser.json",
+    "bytes": 1384,
+    "sha256": "1f43d9c96af27c48795aa084186fc425c697dd385aa61f3acaf5bb3efc58e5d7"
+  },
+  {
+    "path": "accepted-fmt/receipt.json",
+    "bytes": 54407,
+    "sha256": "54293b8eb20e21c0562c6e9be1014f6c12795b9a1ff5dab0cebe7debb54d458f"
+  },
+  {
+    "path": "accepted-fmt/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-fmt/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-fmt/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-fmt/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-native/receipt.json",
+    "bytes": 54592,
+    "sha256": "ccf1a2b8638063c45cfd7a34d2c67b55fac9e883d965cb25d34bd0101eb934b2"
+  },
+  {
+    "path": "accepted-native/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-native/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-native/stderr.log",
+    "bytes": 121621,
+    "sha256": "5a8279125b42cc9d82a6c7a8dadd93d25d107f3d21c1031081a65b03976b957c"
+  },
+  {
+    "path": "accepted-native/stdout.log",
+    "bytes": 22109,
+    "sha256": "618755f38f40a88edfabf6405c4d515dc36438fe081129ea763e967fdcf2dff4"
+  },
+  {
+    "path": "accepted-native-bench/receipt.json",
+    "bytes": 54546,
+    "sha256": "0752ea3065005525fcb25ff4b0954fbe8b869ffb9ec3a5eebb47c8be6d1fc00b"
+  },
+  {
+    "path": "accepted-native-bench/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-native-bench/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-native-bench/stderr.log",
+    "bytes": 114304,
+    "sha256": "ca0ac4c22c89e3b6cf4367201816150d4ceb5494af383dd1ecab8be3324015c8"
+  },
+  {
+    "path": "accepted-native-bench/stdout.log",
+    "bytes": 32977,
+    "sha256": "70c1c8164a90b82a593684e08f086928dd1aef2852396e409f0a34e499d920d9"
+  },
+  {
+    "path": "accepted-native-clippy/receipt.json",
+    "bytes": 54513,
+    "sha256": "598d9c8e20dfa11335e6ba308cd456a34575b9aa05a8a5d8311164d3d2bf8784"
+  },
+  {
+    "path": "accepted-native-clippy/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-native-clippy/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-native-clippy/stderr.log",
+    "bytes": 114010,
+    "sha256": "9365960da645fcf68c108aca379387b8fb1cc209627e3066ec6cefa72213e8df"
+  },
+  {
+    "path": "accepted-native-clippy/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-tensor-clippy/receipt.json",
+    "bytes": 54538,
+    "sha256": "b299ec9fbddc5919f391dad43f7ad10e5028a0682e69a945e8388053c745598f"
+  },
+  {
+    "path": "accepted-tensor-clippy/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-tensor-clippy/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-tensor-clippy/stderr.log",
+    "bytes": 115268,
+    "sha256": "6c377c1ae317dd1482cca8c9802445911de74a6fee75331655e11ca5e7fd5302"
+  },
+  {
+    "path": "accepted-tensor-clippy/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-tensor-tests/receipt.json",
+    "bytes": 54719,
+    "sha256": "d9e869133cb6a3efc78e69a932b8343c53cdc6a37aaf53b4177907db81a43fee"
+  },
+  {
+    "path": "accepted-tensor-tests/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-tensor-tests/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-tensor-tests/stderr.log",
+    "bytes": 114693,
+    "sha256": "5118e1007686fa0dd1afaf3d34b59f307d06aafac5d75ef76a07889c5bdc6b9e"
+  },
+  {
+    "path": "accepted-tensor-tests/stdout.log",
+    "bytes": 1320,
+    "sha256": "fcb6846bc86842fee1796c2b8129ee0408f0238ad7e49a070ae1d963344c3c9d"
+  },
+  {
+    "path": "accepted-tensor-wasm-clippy/receipt.json",
+    "bytes": 54584,
+    "sha256": "02ca3af858fff47b4a4fbd4fa3b3bb510450ff7005eb1d15b4ea7483a4762abc"
+  },
+  {
+    "path": "accepted-tensor-wasm-clippy/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-tensor-wasm-clippy/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-tensor-wasm-clippy/stderr.log",
+    "bytes": 111114,
+    "sha256": "5e89d75977af9cfbdcaea394b0491f679ec4e26f29424bc87b38a0a7befced4f"
+  },
+  {
+    "path": "accepted-tensor-wasm-clippy/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-torch/receipt.json",
+    "bytes": 54522,
+    "sha256": "c4103cf304eb807109146a0441d4ff56defbf68833c8cfa7cca940a206138b65"
+  },
+  {
+    "path": "accepted-torch/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-torch/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-torch/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-torch/stdout.log",
+    "bytes": 11925,
+    "sha256": "32ecdf986be1e0463a2af54388554b715061b26938683c5614766f0400112851"
+  },
+  {
+    "path": "accepted-wasm/spiraltorch_wasm.d.ts",
+    "bytes": 1794,
+    "sha256": "c8134655ec8896cc33ca4cebe2891bdeddfa4a5b038c8f36dea9ffc1ce0ab21f"
+  },
+  {
+    "path": "accepted-wasm/spiraltorch_wasm.js",
+    "bytes": 44199,
+    "sha256": "a3d2065a469bc02bfc935b4f95f95a573743b3e2600753963f65459e0ef6a3e9"
+  },
+  {
+    "path": "accepted-wasm/spiraltorch_wasm_bg.wasm",
+    "bytes": 517674,
+    "sha256": "46c3da0b9e9b1e0a1922e06d5eba03d8cbd5857f3dd7c07e8dc35a59fd1d83ef"
+  },
+  {
+    "path": "accepted-wasm/spiraltorch_wasm_bg.wasm.d.ts",
+    "bytes": 790,
+    "sha256": "ddbf00004903e4aec54075ec6377d592ae0ea234430863f5edc7317aa63bfef6"
+  },
+  {
+    "path": "accepted-wasm-build/receipt.json",
+    "bytes": 54533,
+    "sha256": "af833a35965a8f5bb2621dcdac42aedfaf77c9f95317f86850f9f790ccd2a28c"
+  },
+  {
+    "path": "accepted-wasm-build/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-wasm-build/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-wasm-build/stderr.log",
+    "bytes": 110965,
+    "sha256": "0e9e97f4c76ee7188b7f1f2da97f1ddc75dcffa9f8ff29a42dda0a618511ed49"
+  },
+  {
+    "path": "accepted-wasm-build/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-wasm-clippy/receipt.json",
+    "bytes": 54558,
+    "sha256": "e13f18b09c6aef1e449ecf72f15c790556b6ebb4fa27f590dd806bcc3c651994"
+  },
+  {
+    "path": "accepted-wasm-clippy/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "accepted-wasm-clippy/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "accepted-wasm-clippy/stderr.log",
+    "bytes": 111134,
+    "sha256": "32c11c06f32c00985765e2859c1140c55b91fe6109113c7d5af57abcbbc7bfe1"
+  },
+  {
+    "path": "accepted-wasm-clippy/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-01-native/receipt.json",
+    "bytes": 51132,
+    "sha256": "c174bce1c592bb44bdd0d7e0ebac6b2d4795faeb481020c1a916e986bad6a859"
+  },
+  {
+    "path": "prototype-01-native/runner.py",
+    "bytes": 2890,
+    "sha256": "7f35685b6ce14adb72f44fc54aeb486ba9109231469e2a56a00ddf9e8fe4eec1"
+  },
+  {
+    "path": "prototype-01-native/source.patch",
+    "bytes": 1805,
+    "sha256": "d647fb40ac37779775e2efae753f0417bcf07fab9a50b44638bbd8d30f04b074"
+  },
+  {
+    "path": "prototype-01-native/stderr.log",
+    "bytes": 114555,
+    "sha256": "711a3d246b246e6b9682406cc2e9e56cbc7ecbf01bad2c558a15a09462821021"
+  },
+  {
+    "path": "prototype-01-native/stdout.log",
+    "bytes": 728,
+    "sha256": "28cde13d5344460383b229827166f6cea4c4471aedc83a1aa66050e1fbb5e5eb"
+  },
+  {
+    "path": "prototype-01-native/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 10962,
+    "sha256": "71298a012d4d5d284854cfeccf1433fd1b270905836d0b77e107c536091f7490"
+  },
+  {
+    "path": "prototype-01-native/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 12778,
+    "sha256": "c0ea22838fb31cef5d184ec5399f93b816f8a8055f57978749831ad6e3a649e2"
+  },
+  {
+    "path": "prototype-01-native/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 2995,
+    "sha256": "38324d56206f9d22199f9e92c81531c90f249469dd7be0dc457b01086fb449cf"
+  },
+  {
+    "path": "prototype-01-native/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-01-native/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4717,
+    "sha256": "f41523f6f02aa4c0bda1f20050c75f95d1588bed2fc9d57da311afd74f4f12ff"
+  },
+  {
+    "path": "prototype-01-native/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2797,
+    "sha256": "ce7e2504747f6a01baa860c5161673a183bde27eb73be8d11c098c4f7e8a8a2a"
+  },
+  {
+    "path": "prototype-02-native/receipt.json",
+    "bytes": 51130,
+    "sha256": "dfdb1f5d604c766103b5f1fd6b7ec4bb13e009ddfdd18a303c77116ac2fd020e"
+  },
+  {
+    "path": "prototype-02-native/runner.py",
+    "bytes": 2890,
+    "sha256": "7f35685b6ce14adb72f44fc54aeb486ba9109231469e2a56a00ddf9e8fe4eec1"
+  },
+  {
+    "path": "prototype-02-native/source.patch",
+    "bytes": 1805,
+    "sha256": "d647fb40ac37779775e2efae753f0417bcf07fab9a50b44638bbd8d30f04b074"
+  },
+  {
+    "path": "prototype-02-native/stderr.log",
+    "bytes": 114747,
+    "sha256": "858581e2240895ae05c8ab029116019135a0edba8da04dfbcbe86b3f6ab619fa"
+  },
+  {
+    "path": "prototype-02-native/stdout.log",
+    "bytes": 717,
+    "sha256": "ddc0c85e42252132d6b5fff417e6c381f4148427b87cba9cc47367eff06b374f"
+  },
+  {
+    "path": "prototype-02-native/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14389,
+    "sha256": "fe0460a92b466c7fa0cad329e60be8f69e6fde6fa49a2484f2c58579fb38a351"
+  },
+  {
+    "path": "prototype-02-native/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-02-native/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 2995,
+    "sha256": "38324d56206f9d22199f9e92c81531c90f249469dd7be0dc457b01086fb449cf"
+  },
+  {
+    "path": "prototype-02-native/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-02-native/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4717,
+    "sha256": "f41523f6f02aa4c0bda1f20050c75f95d1588bed2fc9d57da311afd74f4f12ff"
+  },
+  {
+    "path": "prototype-02-native/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-03-benchmark/receipt.json",
+    "bytes": 51285,
+    "sha256": "80983605496bb5a284373c43ce7baefbec219ca43d414818ba998005fd5b236b"
+  },
+  {
+    "path": "prototype-03-benchmark/runner.py",
+    "bytes": 2890,
+    "sha256": "7f35685b6ce14adb72f44fc54aeb486ba9109231469e2a56a00ddf9e8fe4eec1"
+  },
+  {
+    "path": "prototype-03-benchmark/source.patch",
+    "bytes": 1805,
+    "sha256": "d647fb40ac37779775e2efae753f0417bcf07fab9a50b44638bbd8d30f04b074"
+  },
+  {
+    "path": "prototype-03-benchmark/stderr.log",
+    "bytes": 114615,
+    "sha256": "859f4c4e2b2d8f254834a62ad639cbcc8ae6a92125c51f21c127aa7314d1c376"
+  },
+  {
+    "path": "prototype-03-benchmark/stdout.log",
+    "bytes": 33124,
+    "sha256": "e768cf4f0d7b096ce83845010927f841dc025627d5cc3280b972fc5b70859888"
+  },
+  {
+    "path": "prototype-03-benchmark/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14389,
+    "sha256": "fe0460a92b466c7fa0cad329e60be8f69e6fde6fa49a2484f2c58579fb38a351"
+  },
+  {
+    "path": "prototype-03-benchmark/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-03-benchmark/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 2995,
+    "sha256": "38324d56206f9d22199f9e92c81531c90f249469dd7be0dc457b01086fb449cf"
+  },
+  {
+    "path": "prototype-03-benchmark/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-03-benchmark/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4717,
+    "sha256": "f41523f6f02aa4c0bda1f20050c75f95d1588bed2fc9d57da311afd74f4f12ff"
+  },
+  {
+    "path": "prototype-03-benchmark/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-03-benchmark/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-04-torch/receipt.json",
+    "bytes": 55189,
+    "sha256": "95d18caf93aeb9226f9759bd9274d12b1d74dcbc3bbd94687e4ff69f58c25b66"
+  },
+  {
+    "path": "prototype-04-torch/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-04-torch/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-04-torch/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-04-torch/stdout.log",
+    "bytes": 11955,
+    "sha256": "6fb4832c32f3c31048358f55941cd7d39692abccb6b2b9186f32cd4b26ef5b78"
+  },
+  {
+    "path": "prototype-04-torch/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-04-torch/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-04-torch/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "dc8f727ad93bba98d1bc106a145188f9356b0fb3f4f757e2ec89258d83771a57"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 6952,
+    "sha256": "28e9e865f8517c18c0e8d4c3b03b3328481acce2f3d851b9b916c0ab449d9f89"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14389,
+    "sha256": "fe0460a92b466c7fa0cad329e60be8f69e6fde6fa49a2484f2c58579fb38a351"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 2995,
+    "sha256": "38324d56206f9d22199f9e92c81531c90f249469dd7be0dc457b01086fb449cf"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4717,
+    "sha256": "f41523f6f02aa4c0bda1f20050c75f95d1588bed2fc9d57da311afd74f4f12ff"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-04-torch/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-05-wasm-build/receipt.json",
+    "bytes": 55200,
+    "sha256": "6c1e43d516a76fa080fff055f75538cb5b405f0e06197e514758342b2da670b0"
+  },
+  {
+    "path": "prototype-05-wasm-build/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-05-wasm-build/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-05-wasm-build/stderr.log",
+    "bytes": 111124,
+    "sha256": "746d87ef409070df077f4fb0ab73923af404e4833dcd62420cd01056ea3f14e7"
+  },
+  {
+    "path": "prototype-05-wasm-build/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "dc8f727ad93bba98d1bc106a145188f9356b0fb3f4f757e2ec89258d83771a57"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 6952,
+    "sha256": "28e9e865f8517c18c0e8d4c3b03b3328481acce2f3d851b9b916c0ab449d9f89"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14389,
+    "sha256": "fe0460a92b466c7fa0cad329e60be8f69e6fde6fa49a2484f2c58579fb38a351"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 2995,
+    "sha256": "38324d56206f9d22199f9e92c81531c90f249469dd7be0dc457b01086fb449cf"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4717,
+    "sha256": "f41523f6f02aa4c0bda1f20050c75f95d1588bed2fc9d57da311afd74f4f12ff"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-05-wasm-build/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-06-denormal-probe/receipt.json",
+    "bytes": 55239,
+    "sha256": "df4aac918829f306378857b60b3e267e79b8d404266751c48245a81c41171fe2"
+  },
+  {
+    "path": "prototype-06-denormal-probe/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-06-denormal-probe/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-06-denormal-probe/stderr.log",
+    "bytes": 114698,
+    "sha256": "fe6fbcbf78bd941fe56b3facd6b15d3945da624a60df4b97b9a93b0fd7984924"
+  },
+  {
+    "path": "prototype-06-denormal-probe/stdout.log",
+    "bytes": 320,
+    "sha256": "f4c91bf9c48cb8a7fcee9467ea160c80e7146093ba09648957bd295ef58fef20"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "dc8f727ad93bba98d1bc106a145188f9356b0fb3f4f757e2ec89258d83771a57"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 6952,
+    "sha256": "28e9e865f8517c18c0e8d4c3b03b3328481acce2f3d851b9b916c0ab449d9f89"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14557,
+    "sha256": "11c419a62e3a6e97289f91489b1ed4998e8740cc7b5b9e1cc065ed87044abc30"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 2995,
+    "sha256": "38324d56206f9d22199f9e92c81531c90f249469dd7be0dc457b01086fb449cf"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4717,
+    "sha256": "f41523f6f02aa4c0bda1f20050c75f95d1588bed2fc9d57da311afd74f4f12ff"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-06-denormal-probe/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/receipt.json",
+    "bytes": 55234,
+    "sha256": "2bb5d4f54c38e27eb6e68949f1737b5d157f51abe7fb8eee7afcb804a2d00672"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/stderr.log",
+    "bytes": 114589,
+    "sha256": "742e5444518af9f1c383079b86fb3ca20f44810c8afd0d13beceb186a0ad7ab5"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/stdout.log",
+    "bytes": 717,
+    "sha256": "05877ec33033983508b4726c52c96f2f31492c6a614a7d79a2b92ba243c05b59"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "72f4d47f4f9a020261cae9ea391fbbd01a7826d52374caa0dd712983793b98bb"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 7392,
+    "sha256": "b7bb6886c49a36cb6ddeed35bd7ce14c005989c2f6acfb224b7f14e500067ca3"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14747,
+    "sha256": "14f5593c4690f46e47cedc730fa9418307b144d0c8abb4e7a768c20b3fcd3027"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 3312,
+    "sha256": "9d70091d6f2f175ec24e9f797654fc7b206f6fc70e2465944615f0f98c646520"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4717,
+    "sha256": "f41523f6f02aa4c0bda1f20050c75f95d1588bed2fc9d57da311afd74f4f12ff"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-07-denormal-fixed/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/receipt.json",
+    "bytes": 55199,
+    "sha256": "b3e64df440a4647aa292bb0386f9420bbcdc89d3901025cb3ddf11b5cb2e792d"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/stderr.log",
+    "bytes": 110965,
+    "sha256": "92eb13f3a7cdfd58676de0b3cb2d6d13194e9cc53ed40cc97e6bc86907c9c5d7"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "72f4d47f4f9a020261cae9ea391fbbd01a7826d52374caa0dd712983793b98bb"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 7392,
+    "sha256": "b7bb6886c49a36cb6ddeed35bd7ce14c005989c2f6acfb224b7f14e500067ca3"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14747,
+    "sha256": "14f5593c4690f46e47cedc730fa9418307b144d0c8abb4e7a768c20b3fcd3027"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 3312,
+    "sha256": "9d70091d6f2f175ec24e9f797654fc7b206f6fc70e2465944615f0f98c646520"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4837,
+    "sha256": "8ee160280a8f53f5e8bc9b1615d6798ef584ae33f305ea2568fbfe5edca6f42d"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-08-wasm-fixed/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-09-bindgen/receipt.json",
+    "bytes": 55494,
+    "sha256": "5378ff1e99fb8fdbc67179b663e482ceb4da8d66a5b15115e4335902b93b5870"
+  },
+  {
+    "path": "prototype-09-bindgen/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-09-bindgen/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-09-bindgen/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-09-bindgen/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "72f4d47f4f9a020261cae9ea391fbbd01a7826d52374caa0dd712983793b98bb"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 7392,
+    "sha256": "b7bb6886c49a36cb6ddeed35bd7ce14c005989c2f6acfb224b7f14e500067ca3"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14747,
+    "sha256": "14f5593c4690f46e47cedc730fa9418307b144d0c8abb4e7a768c20b3fcd3027"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 3312,
+    "sha256": "9d70091d6f2f175ec24e9f797654fc7b206f6fc70e2465944615f0f98c646520"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4837,
+    "sha256": "8ee160280a8f53f5e8bc9b1615d6798ef584ae33f305ea2568fbfe5edca6f42d"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-09-bindgen/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-10-browser/receipt.json",
+    "bytes": 55506,
+    "sha256": "8da5a6593003d4c2f0906e08ba590ffe63963e9cdf52634220033cafaf8e4297"
+  },
+  {
+    "path": "prototype-10-browser/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-10-browser/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-10-browser/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-10-browser/stdout.log",
+    "bytes": 133,
+    "sha256": "ed6df2e58866a0bf4b9f268a67e9cf08ce166ad4b324226f25b45a8669ab5015"
+  },
+  {
+    "path": "prototype-10-browser/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-10-browser/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-10-browser/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "72f4d47f4f9a020261cae9ea391fbbd01a7826d52374caa0dd712983793b98bb"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 7392,
+    "sha256": "b7bb6886c49a36cb6ddeed35bd7ce14c005989c2f6acfb224b7f14e500067ca3"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14747,
+    "sha256": "14f5593c4690f46e47cedc730fa9418307b144d0c8abb4e7a768c20b3fcd3027"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 3312,
+    "sha256": "9d70091d6f2f175ec24e9f797654fc7b206f6fc70e2465944615f0f98c646520"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4837,
+    "sha256": "8ee160280a8f53f5e8bc9b1615d6798ef584ae33f305ea2568fbfe5edca6f42d"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-10-browser/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4863,
+    "sha256": "26b5cab56a092761a0df39986bdf1c323834f2ca5814db9d71bbec2b1f7c1435"
+  },
+  {
+    "path": "prototype-11-clippy/receipt.json",
+    "bytes": 55298,
+    "sha256": "730395c532e08bab29c95664b7ec9ffbdf034248072097259de73a0eb23b495d"
+  },
+  {
+    "path": "prototype-11-clippy/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-11-clippy/source.patch",
+    "bytes": 6544,
+    "sha256": "5ca2217a896925909d81a46109acedabe5a0aff36a12a9b79dc6ede2b610dba9"
+  },
+  {
+    "path": "prototype-11-clippy/stderr.log",
+    "bytes": 114320,
+    "sha256": "04c0616366cdda077a0b1bb32438e6c253143df4c979ded482ec21fcd038a943"
+  },
+  {
+    "path": "prototype-11-clippy/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/benchmarks/layer-norm-resident/README.md",
+    "bytes": 4696,
+    "sha256": "c0c544df0245cb1d36ec47da34bee3f98bc031caccd43f584e65fe92caf280fc"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/benchmarks/layer-norm-resident/run.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/benchmarks/layer-norm-resident/torch_bench.py",
+    "bytes": 3104,
+    "sha256": "b2ffaf015ddbfe5845036e178cd4504b071b1da8c41312e148a159d344b5e686"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/bindings/st-wasm/tests/resident_layer_norm.html",
+    "bytes": 1448,
+    "sha256": "72f4d47f4f9a020261cae9ea391fbbd01a7826d52374caa0dd712983793b98bb"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-backend-wgpu/examples/layer_norm_resident_browser.rs",
+    "bytes": 7411,
+    "sha256": "5605526cb07cc24221da47ef2e136906e800227235b520990eb00ceeb0df062e"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization/tests.rs",
+    "bytes": 14747,
+    "sha256": "14f5593c4690f46e47cedc730fa9418307b144d0c8abb4e7a768c20b3fcd3027"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-backend-wgpu/src/resident_tensor/normalization.rs",
+    "bytes": 15326,
+    "sha256": "0cd17c27685dec53685df3295896f117f7af7c065d19f9b21d8e3aec74a9e900"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm.wgsl",
+    "bytes": 3312,
+    "sha256": "9d70091d6f2f175ec24e9f797654fc7b206f6fc70e2465944615f0f98c646520"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_backward.wgsl",
+    "bytes": 3569,
+    "sha256": "f790fe1e3bedf65455ef8d9a67a60009cf819542429f6d0589096a7c551b004e"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "bytes": 4837,
+    "sha256": "8ee160280a8f53f5e8bc9b1615d6798ef584ae33f305ea2568fbfe5edca6f42d"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-kernel-contracts/src/normalization.rs",
+    "bytes": 2882,
+    "sha256": "c005f6b5f46f50f278ee88c3d3127adb7ea2be88ce4610d2f2fabb92663f04dc"
+  },
+  {
+    "path": "prototype-11-clippy/untracked/crates/st-tensor/examples/layer_norm_resident_bench.rs",
+    "bytes": 4926,
+    "sha256": "4da7b7a56efd12cab5c18e2fa3d4fe26c59b1301388af57bb57a4d9f70bcb5a1"
+  },
+  {
+    "path": "prototype-browser.json",
+    "bytes": 1384,
+    "sha256": "e13b15ea85a1f3945114208d6da3636403ccb3e5d34dfcf1fab91d6630245eaf"
+  },
+  {
+    "path": "prototype-wasm/spiraltorch_wasm.d.ts",
+    "bytes": 1794,
+    "sha256": "c8134655ec8896cc33ca4cebe2891bdeddfa4a5b038c8f36dea9ffc1ce0ab21f"
+  },
+  {
+    "path": "prototype-wasm/spiraltorch_wasm.js",
+    "bytes": 44197,
+    "sha256": "7773cb67d4fd4216db2be5d0f3ed73077622e9c77e53b543de44ba1c632cc195"
+  },
+  {
+    "path": "prototype-wasm/spiraltorch_wasm_bg.wasm",
+    "bytes": 517651,
+    "sha256": "d990fb336ae7b6e77c29bcf4fc22b504aed7c633fe69696909a1fb80496afbfc"
+  },
+  {
+    "path": "prototype-wasm/spiraltorch_wasm_bg.wasm.d.ts",
+    "bytes": 790,
+    "sha256": "ddbf00004903e4aec54075ec6377d592ae0ea234430863f5edc7317aa63bfef6"
+  },
+  {
+    "path": "torch-mask-probe/receipt.json",
+    "bytes": 54710,
+    "sha256": "91413eefb277199598b0b63619d96a2b94f55341ba15bbf071feb1afb4f54216"
+  },
+  {
+    "path": "torch-mask-probe/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "torch-mask-probe/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "torch-mask-probe/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "torch-mask-probe/stdout.log",
+    "bytes": 9760,
+    "sha256": "f2ec9831afee8927fb1096e96e7bed6ce142ae03e622bb1a96a8509884dc9ca0"
+  },
+  {
+    "path": "torch-mask-probe/untracked/benchmarks/layer-norm-resident/torch_mask_probe.py",
+    "bytes": 2861,
+    "sha256": "6b50fe423bbd6ea2a1663fccf69d93ef44ad593fb9d8d2d5c2be870e27d56ed2"
+  },
+  {
+    "path": "training-controls-torch/receipt.json",
+    "bytes": 55803,
+    "sha256": "48af69bdcdea201669b234c661e9ee8e6431595df711e6d3f1fcb58f524660af"
+  },
+  {
+    "path": "training-controls-torch/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "training-controls-torch/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "training-controls-torch/stderr.log",
+    "bytes": 90,
+    "sha256": "65886d5269c550103dce8489f2b2e7fde718b11a8746ecbe1537be58b2adcd9a"
+  },
+  {
+    "path": "training-controls-torch/stdout.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "training-controls-torch-diagnostic/receipt.json",
+    "bytes": 55942,
+    "sha256": "cb8bbd303df1608910c73ee765732aa952b035323724300847f7e4f92034334f"
+  },
+  {
+    "path": "training-controls-torch-diagnostic/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "training-controls-torch-diagnostic/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "training-controls-torch-diagnostic/stderr.log",
+    "bytes": 90,
+    "sha256": "725ca54c5d9a389551d01acd8293c7e6bc278ad88d375d510bd30befeb4eead2"
+  },
+  {
+    "path": "training-controls-torch-diagnostic/stdout.log",
+    "bytes": 536,
+    "sha256": "50eb5ef5797d20b9dd65545a75a8aadb0ba12831acf188ca6d39d8ee872120d1"
+  },
+  {
+    "path": "training-controls-torch-forced-input-vjp/receipt.json",
+    "bytes": 56058,
+    "sha256": "a497dccf5d2ce94dac8ad56209f5e899d1c8bf87a3046a9abbd2626108b883e5"
+  },
+  {
+    "path": "training-controls-torch-forced-input-vjp/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "training-controls-torch-forced-input-vjp/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "training-controls-torch-forced-input-vjp/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "training-controls-torch-forced-input-vjp/stdout.log",
+    "bytes": 1352,
+    "sha256": "a07140399d4376c027e83bb0ad45a8cf319f14d88e61261c2953276f137fd323"
+  },
+  {
+    "path": "training-controls-torch-forced-input-vjp/untracked/benchmarks/layer-norm-resident/torch_mask_probe.py",
+    "bytes": 2861,
+    "sha256": "6b50fe423bbd6ea2a1663fccf69d93ef44ad593fb9d8d2d5c2be870e27d56ed2"
+  },
+  {
+    "path": "training-mps-isolate/receipt.json",
+    "bytes": 55683,
+    "sha256": "55a66b4fca6708b29e750ed9d7db4dd10b381dbe7b9fe0cbe759ecfe03ccbc19"
+  },
+  {
+    "path": "training-mps-isolate/runner.py",
+    "bytes": 2694,
+    "sha256": "3a4c143faba682ac4a67f52faacf24624d1bbac4e9209374beb7bebb6e373f7d"
+  },
+  {
+    "path": "training-mps-isolate/source.patch",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "training-mps-isolate/stderr.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "training-mps-isolate/stdout.log",
+    "bytes": 4387,
+    "sha256": "87e051fb8b5e49467a0ef913246f6616ddb31d0a6a9899296e319cbdf1b92966"
+  }
+]

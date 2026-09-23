@@ -1,0 +1,11 @@
+
+running 1 test
+test resident_tensor::normalization::tests::layer_norm_resident_extreme_finite_cases ... FAILED
+
+failures:
+
+failures:
+    resident_tensor::normalization::tests::layer_norm_resident_extreme_finite_cases
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.34s
+

@@ -1,0 +1,1702 @@
+{
+  "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "cases": [
+    {
+      "cols": 3,
+      "intervals": [
+        {
+          "iteration": 0,
+          "ms": 0.0012079999999999999,
+          "route": 0
+        },
+        {
+          "iteration": 0,
+          "ms": 4.011291999999999,
+          "route": 1
+        },
+        {
+          "iteration": 0,
+          "ms": 1.911042,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 3.8375000000000004,
+          "route": 1
+        },
+        {
+          "iteration": 1,
+          "ms": 2.019584,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 0.001667,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 2.0117920000000002,
+          "route": 2
+        },
+        {
+          "iteration": 2,
+          "ms": 0.001375,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 3.740709,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 0.000958,
+          "route": 0
+        },
+        {
+          "iteration": 3,
+          "ms": 3.8964580000000004,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 2.014416,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 3.846917,
+          "route": 1
+        },
+        {
+          "iteration": 4,
+          "ms": 2.0586670000000002,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 0.001291,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 2.04575,
+          "route": 2
+        },
+        {
+          "iteration": 5,
+          "ms": 0.00125,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 3.7855,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 0.0012920000000000002,
+          "route": 0
+        },
+        {
+          "iteration": 6,
+          "ms": 3.871625,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 2.034542,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 3.9245,
+          "route": 1
+        },
+        {
+          "iteration": 7,
+          "ms": 2.061041,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 0.0011250000000000001,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 2.00475,
+          "route": 2
+        },
+        {
+          "iteration": 8,
+          "ms": 0.001625,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 3.9626669999999997,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 0.0012079999999999999,
+          "route": 0
+        },
+        {
+          "iteration": 9,
+          "ms": 3.559542,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 1.9777079999999998,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 3.682375,
+          "route": 1
+        },
+        {
+          "iteration": 10,
+          "ms": 2.194833,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 0.001333,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 1.9641250000000001,
+          "route": 2
+        },
+        {
+          "iteration": 11,
+          "ms": 0.001083,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 3.639458,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 0.001042,
+          "route": 0
+        },
+        {
+          "iteration": 12,
+          "ms": 3.50225,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 2.027,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 3.6658329999999997,
+          "route": 1
+        },
+        {
+          "iteration": 13,
+          "ms": 2.439375,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 0.001375,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 2.051916,
+          "route": 2
+        },
+        {
+          "iteration": 14,
+          "ms": 0.001042,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 3.692042,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 0.000833,
+          "route": 0
+        },
+        {
+          "iteration": 15,
+          "ms": 3.5236669999999997,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 2.36525,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 3.7192499999999997,
+          "route": 1
+        },
+        {
+          "iteration": 16,
+          "ms": 2.447416,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 0.0015,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 2.447584,
+          "route": 2
+        },
+        {
+          "iteration": 17,
+          "ms": 0.0012079999999999999,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 4.368333000000001,
+          "route": 1
+        }
+      ],
+      "max_scaled_error": [
+        0.0,
+        0.0007112618556326775,
+        0.0
+      ],
+      "rows": 2
+    },
+    {
+      "cols": 257,
+      "intervals": [
+        {
+          "iteration": 0,
+          "ms": 0.018542,
+          "route": 0
+        },
+        {
+          "iteration": 0,
+          "ms": 3.68775,
+          "route": 1
+        },
+        {
+          "iteration": 0,
+          "ms": 3.011709,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 3.602084,
+          "route": 1
+        },
+        {
+          "iteration": 1,
+          "ms": 2.78975,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 0.018834,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 2.4086250000000002,
+          "route": 2
+        },
+        {
+          "iteration": 2,
+          "ms": 0.019417,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 3.7348749999999997,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 0.018417,
+          "route": 0
+        },
+        {
+          "iteration": 3,
+          "ms": 3.7381670000000002,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 2.4177920000000004,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 3.659084,
+          "route": 1
+        },
+        {
+          "iteration": 4,
+          "ms": 3.89675,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 0.01875,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 4.410709,
+          "route": 2
+        },
+        {
+          "iteration": 5,
+          "ms": 0.018666000000000002,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 4.025125,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 0.018625,
+          "route": 0
+        },
+        {
+          "iteration": 6,
+          "ms": 3.872333,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 2.725083,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 3.6305,
+          "route": 1
+        },
+        {
+          "iteration": 7,
+          "ms": 2.2385,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 0.018834,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 2.147542,
+          "route": 2
+        },
+        {
+          "iteration": 8,
+          "ms": 0.018958,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 3.66825,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 0.021667000000000002,
+          "route": 0
+        },
+        {
+          "iteration": 9,
+          "ms": 3.520875,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 2.208083,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 3.669375,
+          "route": 1
+        },
+        {
+          "iteration": 10,
+          "ms": 1.9872090000000002,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 0.018916,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 1.9400000000000002,
+          "route": 2
+        },
+        {
+          "iteration": 11,
+          "ms": 0.018792,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 3.796042,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 0.018834,
+          "route": 0
+        },
+        {
+          "iteration": 12,
+          "ms": 3.591084,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 2.280167,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 3.919833,
+          "route": 1
+        },
+        {
+          "iteration": 13,
+          "ms": 5.07725,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 0.023042,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 1.9939580000000001,
+          "route": 2
+        },
+        {
+          "iteration": 14,
+          "ms": 0.017042,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 3.524792,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 0.020667,
+          "route": 0
+        },
+        {
+          "iteration": 15,
+          "ms": 3.625833,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 1.8042500000000001,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 3.515875,
+          "route": 1
+        },
+        {
+          "iteration": 16,
+          "ms": 1.79325,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 0.018542,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 3.979042,
+          "route": 2
+        },
+        {
+          "iteration": 17,
+          "ms": 0.018709,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 3.873917,
+          "route": 1
+        }
+      ],
+      "max_scaled_error": [
+        0.0,
+        0.003719838710769372,
+        0.0
+      ],
+      "rows": 8
+    },
+    {
+      "cols": 256,
+      "intervals": [
+        {
+          "iteration": 0,
+          "ms": 0.066541,
+          "route": 0
+        },
+        {
+          "iteration": 0,
+          "ms": 4.140833,
+          "route": 1
+        },
+        {
+          "iteration": 0,
+          "ms": 1.9889999999999999,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 3.671042,
+          "route": 1
+        },
+        {
+          "iteration": 1,
+          "ms": 1.9789999999999999,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 0.067208,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 2.226708,
+          "route": 2
+        },
+        {
+          "iteration": 2,
+          "ms": 0.078959,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 3.715125,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 0.06625,
+          "route": 0
+        },
+        {
+          "iteration": 3,
+          "ms": 4.2975,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 6.590375,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 4.165292,
+          "route": 1
+        },
+        {
+          "iteration": 4,
+          "ms": 5.6878329999999995,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 0.06679199999999999,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 1.9871659999999998,
+          "route": 2
+        },
+        {
+          "iteration": 5,
+          "ms": 0.07054200000000001,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 3.674625,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 0.065917,
+          "route": 0
+        },
+        {
+          "iteration": 6,
+          "ms": 4.060041,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 1.977875,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 3.8305000000000002,
+          "route": 1
+        },
+        {
+          "iteration": 7,
+          "ms": 1.9995,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 0.066167,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 1.989375,
+          "route": 2
+        },
+        {
+          "iteration": 8,
+          "ms": 0.066834,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 3.8382910000000003,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 0.066541,
+          "route": 0
+        },
+        {
+          "iteration": 9,
+          "ms": 3.6763339999999998,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 1.9887080000000001,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 4.144,
+          "route": 1
+        },
+        {
+          "iteration": 10,
+          "ms": 6.556042,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 0.066042,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 6.51425,
+          "route": 2
+        },
+        {
+          "iteration": 11,
+          "ms": 0.15687500000000001,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 4.441375,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 0.067,
+          "route": 0
+        },
+        {
+          "iteration": 12,
+          "ms": 3.664166,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 2.2142500000000003,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 3.671125,
+          "route": 1
+        },
+        {
+          "iteration": 13,
+          "ms": 2.003209,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 0.06679199999999999,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 2.176625,
+          "route": 2
+        },
+        {
+          "iteration": 14,
+          "ms": 0.06658299999999999,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 4.539833,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 0.06849999999999999,
+          "route": 0
+        },
+        {
+          "iteration": 15,
+          "ms": 4.152165999999999,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 6.300708,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 4.216708,
+          "route": 1
+        },
+        {
+          "iteration": 16,
+          "ms": 5.5977500000000004,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 0.07225,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 1.9963749999999998,
+          "route": 2
+        },
+        {
+          "iteration": 17,
+          "ms": 0.066,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 3.7138750000000003,
+          "route": 1
+        }
+      ],
+      "max_scaled_error": [
+        0.0,
+        0.011607846997433039,
+        0.0
+      ],
+      "rows": 32
+    },
+    {
+      "cols": 768,
+      "intervals": [
+        {
+          "iteration": 0,
+          "ms": 0.38699999999999996,
+          "route": 0
+        },
+        {
+          "iteration": 0,
+          "ms": 4.778625,
+          "route": 1
+        },
+        {
+          "iteration": 0,
+          "ms": 7.36775,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 4.957166,
+          "route": 1
+        },
+        {
+          "iteration": 1,
+          "ms": 6.481,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 0.39275,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 7.3775,
+          "route": 2
+        },
+        {
+          "iteration": 2,
+          "ms": 0.379417,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 4.893666,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 0.382458,
+          "route": 0
+        },
+        {
+          "iteration": 3,
+          "ms": 5.0425,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 6.627625,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 5.5694170000000005,
+          "route": 1
+        },
+        {
+          "iteration": 4,
+          "ms": 6.5360000000000005,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 0.38725,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 6.487667,
+          "route": 2
+        },
+        {
+          "iteration": 5,
+          "ms": 0.379125,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 5.42625,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 0.38579199999999997,
+          "route": 0
+        },
+        {
+          "iteration": 6,
+          "ms": 4.87425,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 7.404708,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 5.447457999999999,
+          "route": 1
+        },
+        {
+          "iteration": 7,
+          "ms": 7.381791000000001,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 0.38041699999999995,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 7.320458,
+          "route": 2
+        },
+        {
+          "iteration": 8,
+          "ms": 0.378708,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 5.6,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 0.380959,
+          "route": 0
+        },
+        {
+          "iteration": 9,
+          "ms": 5.430167,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 7.494458,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 5.4745,
+          "route": 1
+        },
+        {
+          "iteration": 10,
+          "ms": 7.415,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 0.37720899999999996,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 7.402708,
+          "route": 2
+        },
+        {
+          "iteration": 11,
+          "ms": 0.39337500000000003,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 5.639875,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 0.384375,
+          "route": 0
+        },
+        {
+          "iteration": 12,
+          "ms": 5.783375,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 7.400625,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 5.61225,
+          "route": 1
+        },
+        {
+          "iteration": 13,
+          "ms": 7.356625,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 0.399833,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 7.388209,
+          "route": 2
+        },
+        {
+          "iteration": 14,
+          "ms": 0.381834,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 5.678125,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 0.38275,
+          "route": 0
+        },
+        {
+          "iteration": 15,
+          "ms": 5.686167,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 7.313083,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 5.638375,
+          "route": 1
+        },
+        {
+          "iteration": 16,
+          "ms": 7.583417,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 0.385125,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 7.421708,
+          "route": 2
+        },
+        {
+          "iteration": 17,
+          "ms": 0.392083,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 5.811333,
+          "route": 1
+        }
+      ],
+      "max_scaled_error": [
+        0.0,
+        0.016771331197287978,
+        0.0
+      ],
+      "rows": 64
+    },
+    {
+      "cols": 1025,
+      "intervals": [
+        {
+          "iteration": 0,
+          "ms": 1.026,
+          "route": 0
+        },
+        {
+          "iteration": 0,
+          "ms": 8.476125,
+          "route": 1
+        },
+        {
+          "iteration": 0,
+          "ms": 16.340417,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 8.119291,
+          "route": 1
+        },
+        {
+          "iteration": 1,
+          "ms": 16.164375000000003,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 1.014458,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 16.1135,
+          "route": 2
+        },
+        {
+          "iteration": 2,
+          "ms": 1.012625,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 8.39775,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 1.035333,
+          "route": 0
+        },
+        {
+          "iteration": 3,
+          "ms": 8.307375,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 16.56775,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 8.316333,
+          "route": 1
+        },
+        {
+          "iteration": 4,
+          "ms": 16.299292,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 1.0299580000000002,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 15.967292,
+          "route": 2
+        },
+        {
+          "iteration": 5,
+          "ms": 1.0304579999999999,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 8.456208,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 1.026084,
+          "route": 0
+        },
+        {
+          "iteration": 6,
+          "ms": 8.372375,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 16.229,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 8.337917000000001,
+          "route": 1
+        },
+        {
+          "iteration": 7,
+          "ms": 16.179291,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 1.0181660000000001,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 16.039624999999997,
+          "route": 2
+        },
+        {
+          "iteration": 8,
+          "ms": 1.015292,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 8.463999999999999,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 1.0417079999999999,
+          "route": 0
+        },
+        {
+          "iteration": 9,
+          "ms": 8.531042000000001,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 15.92725,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 8.259041999999999,
+          "route": 1
+        },
+        {
+          "iteration": 10,
+          "ms": 16.287917,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 1.0165,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 15.899,
+          "route": 2
+        },
+        {
+          "iteration": 11,
+          "ms": 1.012125,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 8.308584000000002,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 1.0325829999999998,
+          "route": 0
+        },
+        {
+          "iteration": 12,
+          "ms": 8.406,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 16.380333,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 8.224,
+          "route": 1
+        },
+        {
+          "iteration": 13,
+          "ms": 16.131041,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 1.034292,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 16.130708000000002,
+          "route": 2
+        },
+        {
+          "iteration": 14,
+          "ms": 1.012542,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 8.331959,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 1.022375,
+          "route": 0
+        },
+        {
+          "iteration": 15,
+          "ms": 8.384,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 16.244708,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 8.2605,
+          "route": 1
+        },
+        {
+          "iteration": 16,
+          "ms": 16.348958,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 1.024667,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 16.261541,
+          "route": 2
+        },
+        {
+          "iteration": 17,
+          "ms": 1.024625,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 8.481459000000001,
+          "route": 1
+        }
+      ],
+      "max_scaled_error": [
+        0.0,
+        0.01829962919827348,
+        0.0011325779687626387
+      ],
+      "rows": 128
+    },
+    {
+      "cols": 256,
+      "intervals": [
+        {
+          "iteration": 0,
+          "ms": 0.507875,
+          "route": 0
+        },
+        {
+          "iteration": 0,
+          "ms": 6.216208,
+          "route": 1
+        },
+        {
+          "iteration": 0,
+          "ms": 7.556125000000001,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 6.241917,
+          "route": 1
+        },
+        {
+          "iteration": 1,
+          "ms": 7.533375,
+          "route": 2
+        },
+        {
+          "iteration": 1,
+          "ms": 0.505292,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 7.506417,
+          "route": 2
+        },
+        {
+          "iteration": 2,
+          "ms": 0.502625,
+          "route": 0
+        },
+        {
+          "iteration": 2,
+          "ms": 6.1687080000000005,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 0.5174580000000001,
+          "route": 0
+        },
+        {
+          "iteration": 3,
+          "ms": 6.140083,
+          "route": 1
+        },
+        {
+          "iteration": 3,
+          "ms": 7.569667000000001,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 6.152125,
+          "route": 1
+        },
+        {
+          "iteration": 4,
+          "ms": 7.464292,
+          "route": 2
+        },
+        {
+          "iteration": 4,
+          "ms": 0.5043340000000001,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 7.432333,
+          "route": 2
+        },
+        {
+          "iteration": 5,
+          "ms": 0.5025000000000001,
+          "route": 0
+        },
+        {
+          "iteration": 5,
+          "ms": 6.375958,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 0.513875,
+          "route": 0
+        },
+        {
+          "iteration": 6,
+          "ms": 6.3660000000000005,
+          "route": 1
+        },
+        {
+          "iteration": 6,
+          "ms": 7.517125,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 6.043042,
+          "route": 1
+        },
+        {
+          "iteration": 7,
+          "ms": 7.4524170000000005,
+          "route": 2
+        },
+        {
+          "iteration": 7,
+          "ms": 0.51925,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 7.571792,
+          "route": 2
+        },
+        {
+          "iteration": 8,
+          "ms": 0.5135839999999999,
+          "route": 0
+        },
+        {
+          "iteration": 8,
+          "ms": 6.20775,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 0.5077499999999999,
+          "route": 0
+        },
+        {
+          "iteration": 9,
+          "ms": 6.2753749999999995,
+          "route": 1
+        },
+        {
+          "iteration": 9,
+          "ms": 7.4336660000000006,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 6.238167,
+          "route": 1
+        },
+        {
+          "iteration": 10,
+          "ms": 7.574584,
+          "route": 2
+        },
+        {
+          "iteration": 10,
+          "ms": 0.507167,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 7.540417,
+          "route": 2
+        },
+        {
+          "iteration": 11,
+          "ms": 0.506084,
+          "route": 0
+        },
+        {
+          "iteration": 11,
+          "ms": 6.011667,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 0.509709,
+          "route": 0
+        },
+        {
+          "iteration": 12,
+          "ms": 6.189042,
+          "route": 1
+        },
+        {
+          "iteration": 12,
+          "ms": 7.358541,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 6.192833,
+          "route": 1
+        },
+        {
+          "iteration": 13,
+          "ms": 7.499916,
+          "route": 2
+        },
+        {
+          "iteration": 13,
+          "ms": 0.509333,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 7.378125,
+          "route": 2
+        },
+        {
+          "iteration": 14,
+          "ms": 0.503541,
+          "route": 0
+        },
+        {
+          "iteration": 14,
+          "ms": 6.260917,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 0.512375,
+          "route": 0
+        },
+        {
+          "iteration": 15,
+          "ms": 6.227291,
+          "route": 1
+        },
+        {
+          "iteration": 15,
+          "ms": 7.540208,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 6.076708999999999,
+          "route": 1
+        },
+        {
+          "iteration": 16,
+          "ms": 7.483583,
+          "route": 2
+        },
+        {
+          "iteration": 16,
+          "ms": 0.509959,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 7.5345,
+          "route": 2
+        },
+        {
+          "iteration": 17,
+          "ms": 0.501125,
+          "route": 0
+        },
+        {
+          "iteration": 17,
+          "ms": 6.295959,
+          "route": 1
+        }
+      ],
+      "max_scaled_error": [
+        0.0,
+        0.02788899146967024,
+        0.0
+      ],
+      "rows": 256
+    }
+  ],
+  "epsilon": 1e-05,
+  "iterations": 18,
+  "parameter_gradient_scale": 0.5,
+  "routes": [
+    "cpu_centered_f64",
+    "legacy_hybrid_wgpu",
+    "resident_wide_wgpu"
+  ],
+  "schema": "spiraltorch.layer_norm.exploratory.v1",
+  "scope": "host-to-host; input uploads + affine forward + all VJPs + four CPU-owned outputs; exploratory shared-machine timings, not a speed guarantee",
+  "warmup": 3
+}

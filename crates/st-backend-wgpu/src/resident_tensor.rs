@@ -12,6 +12,7 @@ pub(crate) mod capture;
 pub mod classification;
 pub(crate) mod guard_capture;
 pub mod loss;
+pub mod normalization;
 pub mod pointwise;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
@@ -19,6 +20,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    LayerNorm(#[from] st_kernel_contracts::normalization::LayerNormError),
     #[error(transparent)]
     Classification(#[from] st_kernel_contracts::classification::ClassificationError),
     #[error(transparent)]
@@ -52,6 +55,7 @@ struct Kernels {
     runtime: WgpuRuntime,
     mse: std::sync::OnceLock<loss::MseKernels>,
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
+    normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -190,6 +194,7 @@ impl TensorDevice {
             runtime,
             mse: std::sync::OnceLock::new(),
             classification: std::sync::OnceLock::new(),
+            normalization: std::sync::OnceLock::new(),
         })))
     }
 

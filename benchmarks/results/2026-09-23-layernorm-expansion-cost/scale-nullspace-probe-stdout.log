@@ -1,0 +1,11 @@
+
+running 1 test
+test resident_tensor::normalization::tests::layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance ... FAILED
+
+failures:
+
+failures:
+    resident_tensor::normalization::tests::layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 198 filtered out; finished in 0.46s
+

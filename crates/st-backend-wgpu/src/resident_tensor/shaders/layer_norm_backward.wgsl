@@ -1,0 +1,110 @@
+ROUNDED_ADD
+WIDE_ARITHMETIC
+
+struct Params {
+    rows: u32, cols: u32, groups_x: u32, requested: u32,
+    epsilon: f32, scale: f32, beta_offset: u32, _pad: u32,
+};
+@group(0) @binding(0) var<storage, read> centered_values: array<Wide>;
+@group(0) @binding(1) var<storage, read> gamma: array<f32>;
+@group(0) @binding(2) var<storage, read> upstream: array<f32>;
+@group(0) @binding(3) var<storage, read> row_stats: array<LayerNormRow>;
+@group(0) @binding(4) var<storage, read_write> dx: array<f32>;
+@group(0) @binding(5) var<storage, read_write> affine: array<f32>;
+@group(0) @binding(6) var<storage, read_write> flags: array<atomic<u32>>;
+@group(0) @binding(7) var<uniform> params: Params;
+
+var<workgroup> sums: array<Wide, 256>;
+var<workgroup> projections: array<Wide, 256>;
+var<workgroup> mean: Wide;
+var<workgroup> projection: Wide;
+var<workgroup> epsilon_sum: Wide;
+var<workgroup> input_scale: Wide;
+
+fn checked(value: Wide) -> f32 {
+    let result = wide_float(value);
+    if ((bitcast<u32>(result) & 0x7f800000u) == 0x7f800000u) {
+        atomicOr(&flags[0], 1u);
+        return 0.0;
+    }
+    return result;
+}
+
+fn reduce(lane: u32) {
+    workgroupBarrier();
+    for (var stride = 128u; stride > 0u; stride >>= 1u) {
+        if (lane < stride) {
+            sums[lane] = wide_add(sums[lane], sums[lane + stride]);
+            projections[lane] = wide_add(projections[lane], projections[lane + stride]);
+        }
+        workgroupBarrier();
+    }
+}
+
+fn weighted(index: u32, col: u32) -> Wide {
+    return wide_mul(parts(upstream[index]), parts(gamma[col]));
+}
+
+@compute @workgroup_size(256)
+fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    let row = group.y * params.groups_x + group.x;
+    if (row >= params.rows) { return; }
+    let base = row * params.cols;
+    let origin = weighted(base, 0u);
+    var sum = parts(0.0);
+    var dot = parts(0.0);
+    for (var col = lane; col < params.cols; col += 256u) {
+        let g = wide_sub(weighted(base + col, col), origin);
+        sum = wide_add(sum, g);
+        dot = wide_add(dot, wide_mul(g, centered_values[base + col]));
+    }
+    sums[lane] = sum;
+    projections[lane] = dot;
+    reduce(lane);
+    if (lane == 0u) {
+        mean = wide_div(sums[0], parts(f32(params.cols)));
+        projection = projections[0];
+        epsilon_sum = wide_mul(parts(params.epsilon), parts(f32(params.cols)));
+        // This divisor is row-constant. Keep its extended-range reciprocal on
+        // GPU instead of repeating compensated division for every input VJP.
+        let stats = row_stats[row];
+        input_scale = wide_div(stats.inverse_std, wide_add(stats.square_sum, epsilon_sum));
+    }
+    workgroupBarrier();
+    for (var col = lane; col < params.cols; col += 256u) {
+        let g = wide_sub(weighted(base + col, col), origin);
+        let stats = row_stats[row];
+        // Cancel before dividing: squaring rounded normalized values introduces
+        // a scale-direction residual that tiny variance can amplify enormously.
+        let centered_g = wide_sub(g, mean);
+        let variance_residual = wide_difference_of_products(centered_g, stats.square_sum,
+                                                            centered_values[base + col], projection);
+        let numerator = wide_add(variance_residual, wide_mul(centered_g, epsilon_sum));
+        dx[base + col] = checked(wide_mul(numerator, input_scale));
+    }
+}
+
+@compute @workgroup_size(256)
+fn backward_affine(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    let col = group.y * params.groups_x + group.x;
+    if (col >= params.cols) { return; }
+    var dg = parts(0.0);
+    var db = parts(0.0);
+    for (var row = lane; row < params.rows; row += 256u) {
+        let index = row * params.cols + col;
+        let seed = parts(upstream[index]);
+        if ((params.requested & 2u) != 0u) {
+            let normalized = wide_mul(centered_values[index], row_stats[row].inverse_std);
+            dg = wide_add(dg, wide_mul(seed, normalized));
+        }
+        if ((params.requested & 4u) != 0u) { db = wide_add(db, seed); }
+    }
+    sums[lane] = dg;
+    projections[lane] = db;
+    reduce(lane);
+    if (lane == 0u) {
+        let scale = parts(params.scale);
+        if ((params.requested & 2u) != 0u) { affine[col] = checked(wide_mul(sums[0], scale)); }
+        if ((params.requested & 4u) != 0u) { affine[params.beta_offset + col] = checked(wide_mul(projections[0], scale)); }
+    }
+}

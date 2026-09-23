@@ -1,0 +1,77 @@
+[
+  {
+    "path": "browser.json",
+    "bytes": 1384,
+    "sha256": "1f43d9c96af27c48795aa084186fc425c697dd385aa61f3acaf5bb3efc58e5d7"
+  },
+  {
+    "path": "measured-source.json",
+    "bytes": 53007,
+    "sha256": "d283fb2e736b19a77ac9af62a409b20b789c59302194b2868a6dd513982c6eae"
+  },
+  {
+    "path": "medians.json",
+    "bytes": 1780,
+    "sha256": "461df465621159d3322924348ace1f25919f5e602d50a11bd29399776ef5d136"
+  },
+  {
+    "path": "native.json",
+    "bytes": 32975,
+    "sha256": "c9a63d30ea34005ba322240f6b87eb3d39bfb7b73b36910c59eb7db5cee04c97"
+  },
+  {
+    "path": "prototype-01-native-stderr.log",
+    "bytes": 1595,
+    "sha256": "9dc4735882c59e79d060fc22bf0e64eec8477b8da1637e11cd0afa5bd241b0b7"
+  },
+  {
+    "path": "prototype-01-native-stdout.log",
+    "bytes": 728,
+    "sha256": "28cde13d5344460383b229827166f6cea4c4471aedc83a1aa66050e1fbb5e5eb"
+  },
+  {
+    "path": "prototype-06-denormal-probe-stderr.log",
+    "bytes": 1675,
+    "sha256": "d301989b8163b57d338c2b6e8cf44c805cfa9dad47905ed2528306b17564140f"
+  },
+  {
+    "path": "prototype-06-denormal-probe-stdout.log",
+    "bytes": 320,
+    "sha256": "f4c91bf9c48cb8a7fcee9467ea160c80e7146093ba09648957bd295ef58fef20"
+  },
+  {
+    "path": "pytorch-forced-input-control.json",
+    "bytes": 1880,
+    "sha256": "27fd36f07a9fa0f22b65844a953d868b83fbc21485c61774c545a41863597643"
+  },
+  {
+    "path": "pytorch-mask-diagnostic.json",
+    "bytes": 17006,
+    "sha256": "e149745ecb3fe129468c0d4d99a866acb96d75197f5cdb00c86e50d6a27adfe5"
+  },
+  {
+    "path": "pytorch.json",
+    "bytes": 22733,
+    "sha256": "32d46e8f6bcac15f181d563f99adb4e9c13c231d3c5f0ce4fd6997e31611b4a3"
+  },
+  {
+    "path": "raw-manifest.json",
+    "bytes": 47391,
+    "sha256": "b522512f2dc96ad33fff8fbf4d76fd6fa14a4e5605dbc233b3d1c1bc56ce2598"
+  },
+  {
+    "path": "training-controls-torch-diagnostic-stderr.log",
+    "bytes": 90,
+    "sha256": "725ca54c5d9a389551d01acd8293c7e6bc278ad88d375d510bd30befeb4eead2"
+  },
+  {
+    "path": "training-controls-torch-diagnostic-stdout.log",
+    "bytes": 536,
+    "sha256": "50eb5ef5797d20b9dd65545a75a8aadb0ba12831acf188ca6d39d8ee872120d1"
+  },
+  {
+    "path": "validation.json",
+    "bytes": 31480,
+    "sha256": "73216f7497f16d31ee1f23130cc5bf6b138f811f39576946074643d3cf1aff54"
+  }
+]
