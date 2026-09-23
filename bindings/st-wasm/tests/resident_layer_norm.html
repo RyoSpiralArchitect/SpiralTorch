@@ -12,12 +12,12 @@ try {
   if (!adapter || fallback !== false) throw Error("Non-fallback adapter not confirmed");
   await init();
   const report = JSON.parse(await run_layer_norm_checks());
-  if (report.schema !== "spiraltorch.resident_layer_norm.browser.v3" || report.status !== "passed" ||
+  if (report.schema !== "spiraltorch.resident_layer_norm.browser.v4" || report.status !== "passed" ||
       report.cases !== 7 || report.masks_per_case !== 8 || report.training_steps !== 400 ||
       report.scale_nullspace_cases !== 5 || report.epsilon_cancellation_cases !== 2 ||
       report.dynamic_range_variants !== 20 ||
       report.guard_checks !== 4 || report.intermediate_readbacks !== 0 ||
-      report.batched_snapshot_checks !== 4) throw Error("Incomplete LayerNorm checks");
+      report.batched_snapshot_checks !== 4 || report.statistics_only_vjp_checks !== 6) throw Error("Incomplete LayerNorm checks");
   report.browser_adapter_probe = {vendor: adapter.info?.vendor, architecture: adapter.info?.architecture,
     is_fallback_adapter: fallback, boundary: "Separate probe, not attestation of the Rust runtime device"};
   result.textContent = JSON.stringify(report);

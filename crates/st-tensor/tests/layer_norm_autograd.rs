@@ -232,6 +232,94 @@ fn centered_gradient_is_translation_invariant_and_supports_logical_layout() {
     close(&b, &e, 0.0);
 }
 
+#[cfg(all(feature = "wgpu_dense", not(target_arch = "wasm32")))]
+#[test]
+fn explicit_resident_vjp_matches_cpu_masks_and_preserves_independent_guards() {
+    use std::sync::{Arc, Mutex};
+
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("tensor.vjp.test").unwrap();
+    assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+    let (x, gamma, _, seed) = fixture();
+    let (dx, dg, db) = x
+        .layer_norm_affine_backward_with_backend(&gamma, &seed, 1e-5, 0.5, TensorUtilBackend::Cpu)
+        .unwrap();
+    let reference = [dx, dg, db];
+    let receipts = Arc::new(Mutex::new(Vec::new()));
+    let captured = receipts.clone();
+    let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(
+        move |event: &st_tensor::TensorOpMetaEvent| {
+            if event.op_name == "layer_norm_affine_backward"
+                && event.data["backend"] == "resident_wgpu"
+            {
+                captured.lock().unwrap().push(event.data.clone());
+            }
+        },
+    )));
+    for mask in 0..8 {
+        let requested = [mask & 1 != 0, mask & 2 != 0, mask & 4 != 0];
+        let actual = x
+            .layer_norm_affine_backward_resident(&gamma, &seed, 1e-5, 0.5, requested)
+            .unwrap();
+        for index in 0..3 {
+            assert_eq!(actual[index].is_some(), requested[index]);
+            if let Some(result) = &actual[index] {
+                close(result, &reference[index], 2e-5);
+            }
+        }
+    }
+    st_tensor::set_thread_meta_observer(previous);
+    let receipts = receipts.lock().unwrap();
+    assert_eq!(receipts.len(), 8);
+    for (mask, receipt) in receipts.iter().enumerate() {
+        assert_eq!(receipt["intermediate_readbacks"], 0);
+        assert_eq!(receipt["terminal_maps"], usize::from(mask != 0));
+        assert_eq!(receipt["normalization_backend"], "wgpu");
+    }
+
+    let column = x.to_layout(st_tensor::Layout::ColMajor).unwrap();
+    let column_seed = seed.to_layout(st_tensor::Layout::ColMajor).unwrap();
+    let column_output = column
+        .layer_norm_affine_backward_resident(&gamma, &column_seed, 1e-5, 0.5, [true; 3])
+        .unwrap();
+    for (result, expected) in column_output.iter().flatten().zip(&reference) {
+        close(result, expected, 2e-5);
+    }
+
+    let large_gamma = tensor(1, 2, &[f32::MAX; 2]);
+    let large_beta = tensor(1, 2, &[f32::MAX; 2]);
+    let overflow_forward_input = tensor(1, 2, &[-1., 1.]);
+    let unit_seed = tensor(1, 2, &[1., 1.]);
+    assert!(overflow_forward_input
+        .layer_norm_affine_with_backend(&large_gamma, &large_beta, 0., LayerNormBackend::Cpu)
+        .is_err());
+    let finite = overflow_forward_input
+        .layer_norm_affine_backward_resident(&large_gamma, &unit_seed, 0., 1., [true; 3])
+        .unwrap();
+    assert_eq!(finite[0].as_ref().unwrap().data(), &[0., 0.]);
+    close(finite[1].as_ref().unwrap(), &tensor(1, 2, &[-1., 1.]), 2e-5);
+    assert_eq!(finite[2].as_ref().unwrap().data(), &[1., 1.]);
+
+    let empty = Tensor::zeros(0, 2).unwrap();
+    let empty_gradients = empty
+        .layer_norm_affine_backward_resident(&large_gamma, &empty, 0., 1., [true; 3])
+        .unwrap();
+    assert_eq!(empty_gradients[0].as_ref().unwrap().shape(), (0, 2));
+    assert_eq!(empty_gradients[1].as_ref().unwrap().data(), &[0., 0.]);
+    assert_eq!(empty_gradients[2].as_ref().unwrap().data(), &[0., 0.]);
+    assert!(tensor(1, 2, &[1., 1.])
+        .layer_norm_affine_backward_resident(&large_gamma, &unit_seed, 0., 1., [true; 3])
+        .is_err());
+
+    let huge = tensor(2, 1, &[f32::MAX; 2]);
+    assert!(tensor(2, 1, &[1., 2.])
+        .layer_norm_affine_backward_resident(&tensor(1, 1, &[1.]), &huge, 1e-5, 1., [true; 3],)
+        .is_err());
+}
+
 #[test]
 fn affine_parameters_learn_through_native_graph_and_sgd() {
     let input = tensor(3, 3, &[0.4, -0.8, 1.2, -0.3, 0.9, -1.1, 0.7, 0.1, -0.2]);

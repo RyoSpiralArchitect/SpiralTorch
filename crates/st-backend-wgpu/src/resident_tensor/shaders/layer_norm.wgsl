@@ -35,8 +35,7 @@ fn reduce(lane: u32) {
     }
 }
 
-@compute @workgroup_size(256)
-fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
     let row = group.y * params.groups_x + group.x;
     if (row >= params.rows) { return; }
     let base = row * params.cols;
@@ -69,14 +68,26 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     workgroupBarrier();
     for (var col = lane; col < params.cols; col += 256u) {
         let centered = wide_sub(wide_sub(parts(input[base + col]), origin), row_mean);
-        let normed = wide_mul(centered, row_inverse);
         centered_values[base + col] = centered;
-        // Forward retains the existing f32 affine contract. Backward consumes
-        // the unrounded, extended-range centered tape instead.
-        // Decode the rounded f32 bits again: a subnormal normalized value can
-        // have a normal affine product, but hardware multiplication may flush
-        // that operand to zero. Preserve the CPU's two f32 rounding boundaries.
-        let product = wide_float(wide_mul(parts(wide_float(normed)), parts(gamma[col])));
-        output[base + col] = checked(rounded_add(product, beta[col]));
+        if (emit_value) {
+            // Forward retains the existing f32 affine contract. Backward
+            // consumes the unrounded, extended-range centered tape instead.
+            // Decode the rounded f32 bits again: a subnormal normalized value
+            // can have a normal affine product, but hardware multiplication
+            // may flush that operand to zero.
+            let normed = wide_mul(centered, row_inverse);
+            let product = wide_float(wide_mul(parts(wide_float(normed)), parts(gamma[col])));
+            output[base + col] = checked(rounded_add(product, beta[col]));
+        }
     }
+}
+
+@compute @workgroup_size(256)
+fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    compute_row(group, lane, true);
+}
+
+@compute @workgroup_size(256)
+fn statistics(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    compute_row(group, lane, false);
 }
