@@ -6,16 +6,17 @@ use st_kernel_contracts::normalization::{
     validate_epsilon, validate_gradient_scale, LayerNormError, LayerNormShape,
 };
 
-/// The forward value plus immutable normalized values, row statistics and gamma.
+/// The forward value plus immutable centered values, row statistics and gamma.
 /// Cloning, dropping other operations, or running backward again cannot recycle
 /// this tape. Reading any result checks its inherited whole-operation guard.
 #[derive(Clone)]
 pub struct ResidentLayerNorm {
     value: ResidentTensor,
-    normalized: Shared<wgpu::Buffer>,
-    inverse_std: Shared<wgpu::Buffer>,
+    centered: Shared<wgpu::Buffer>,
+    row_stats: Shared<wgpu::Buffer>,
     gamma: ResidentTensor,
     shape: LayerNormShape,
+    epsilon: f32,
 }
 
 #[repr(C)]
@@ -131,13 +132,13 @@ fn preflight(shape: LayerNormShape, limits: &wgpu::Limits) -> Result<(), TensorE
             .rows
             .checked_mul(shape.cols)
             .and_then(|n| n.checked_mul(4))
-            .ok_or(TensorError::Limit("LayerNorm normalized tape"))?,
+            .ok_or(TensorError::Limit("LayerNorm centered tape"))?,
         limits,
     )?;
     storage_limit(
         shape
             .rows
-            .checked_mul(4)
+            .checked_mul(8)
             .ok_or(TensorError::Limit("LayerNorm row tape"))?,
         limits,
     )?;
@@ -261,15 +262,15 @@ impl ResidentTensor {
         let gamma = gamma.contiguous_into(&mut encoder)?;
         let beta = beta.contiguous_into(&mut encoder)?;
         let value = self.device.allocate_output(&self.layout)?;
-        let normalized = Shared::new(runtime::empty_buffer::<[u32; 4]>(
+        let centered = Shared::new(runtime::empty_buffer::<[u32; 4]>(
             gpu,
-            "layer_norm.normalized",
+            "layer_norm.centered",
             self.layout.len().max(1),
             wgpu::BufferUsages::STORAGE,
         )?);
-        let inverse_std = Shared::new(runtime::empty_buffer::<[u32; 4]>(
+        let row_stats = Shared::new(runtime::empty_buffer::<[u32; 8]>(
             gpu,
-            "layer_norm.inverse_std",
+            "layer_norm.row_stats",
             shape.rows.max(1),
             wgpu::BufferUsages::STORAGE,
         )?);
@@ -300,8 +301,8 @@ impl ResidentTensor {
                 input.values(),
                 gamma.values(),
                 beta.values(),
-                &normalized,
-                &inverse_std,
+                &centered,
+                &row_stats,
                 value.values(),
                 &flags,
                 &params,
@@ -314,10 +315,11 @@ impl ResidentTensor {
         context.queue().submit(Some(encoder.finish()));
         Ok(ResidentLayerNorm {
             value,
-            normalized,
-            inverse_std,
+            centered,
+            row_stats,
             gamma,
             shape,
+            epsilon,
         })
     }
 }
@@ -376,7 +378,7 @@ impl ResidentLayerNorm {
             requested: u32::from(requested[0])
                 | (u32::from(requested[1]) << 1)
                 | (u32::from(requested[2]) << 2),
-            epsilon: 0.0,
+            epsilon: self.epsilon,
             scale: parameter_gradient_scale,
             beta_offset: if requested[1] {
                 self.shape.cols as u32
@@ -412,10 +414,10 @@ impl ResidentLayerNorm {
                 gpu,
                 &kernels.backward_layout,
                 [
-                    &self.normalized,
+                    &self.centered,
                     self.gamma.values(),
                     upstream.values(),
-                    &self.inverse_std,
+                    &self.row_stats,
                     dx.values(),
                     affine.values(),
                     &flags,

@@ -412,3 +412,43 @@ fn layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance() {
         close(&actual, &[0.; 3]);
     }
 }
+
+#[test]
+fn layer_norm_retains_small_epsilon_after_scale_direction_cancellation() {
+    let Some(device) = device() else { return };
+    let epsilon = f32::from_bits(1);
+    for (scale, cotangent) in [(1e-10f32, f32::MAX), (1e-20, 1.)] {
+        let input = device.upload(&[1, 3], &[-scale, 0., scale]).unwrap();
+        let gamma = device.upload(&[3], &[1.; 3]).unwrap();
+        let beta = device.upload(&[3], &[0.; 3]).unwrap();
+        let seed = device.upload(&[1, 3], &[-cotangent, 0., cotangent]).unwrap();
+        let tape = input.layer_norm_affine(&gamma, &beta, epsilon).unwrap();
+        let [dx, _, _] = tape.backward(&seed, 1., [true, false, false]).unwrap();
+        // Closed-form derivative for this symmetric scale direction. Form the
+        // small epsilon term directly, not by subtracting two rounded projections.
+        let variance = 2. * f64::from(scale).powi(2) / 3.;
+        let magnitude = (f64::from(cotangent) * f64::from(epsilon)
+            / (variance + f64::from(epsilon)).powf(1.5)) as f32;
+        let actual = read(dx.as_ref().unwrap());
+        eprintln!("epsilon scale-direction: scale={scale}, seed={cotangent}, dx={actual:?}, expected={magnitude}");
+        close(&actual, &[-magnitude, 0., magnitude]);
+    }
+}
+
+#[test]
+fn layer_norm_review_large_dynamic_range_vjp_matches_f64() {
+    let Some(device) = device() else { return };
+    let x = [0., -1e10, 1192.0929, 0.];
+    let g = [1., 1e20, 1., 1.];
+    let seed = [1.; 4];
+    let expected = reference(&x, &g, &[0.; 4], &seed, 1e-5, 1.);
+    let input = device.upload(&[1, 4], &x).unwrap();
+    let gamma = device.upload(&[4], &g).unwrap();
+    let beta = device.upload(&[4], &[0.; 4]).unwrap();
+    let seed = device.upload(&[1, 4], &seed).unwrap();
+    let tape = input.layer_norm_affine(&gamma, &beta, 1e-5).unwrap();
+    close(&read(tape.value()), &expected[0]);
+    let grads = tape.backward(&seed, 1., [true; 3]).unwrap();
+    eprintln!("review dynamic-range: dx={:?}, reference={:?}", read(grads[0].as_ref().unwrap()), expected[1]);
+    for i in 0..3 { close(&read(grads[i].as_ref().unwrap()), &expected[i + 1]); }
+}

@@ -5,10 +5,10 @@ struct Params {
     rows: u32, cols: u32, groups_x: u32, requested: u32,
     epsilon: f32, scale: f32, beta_offset: u32, _pad: u32,
 };
-@group(0) @binding(0) var<storage, read> normalized: array<Wide>;
+@group(0) @binding(0) var<storage, read> centered_values: array<Wide>;
 @group(0) @binding(1) var<storage, read> gamma: array<f32>;
 @group(0) @binding(2) var<storage, read> upstream: array<f32>;
-@group(0) @binding(3) var<storage, read> inverse_std: array<Wide>;
+@group(0) @binding(3) var<storage, read> row_stats: array<LayerNormRow>;
 @group(0) @binding(4) var<storage, read_write> dx: array<f32>;
 @group(0) @binding(5) var<storage, read_write> affine: array<f32>;
 @group(0) @binding(6) var<storage, read_write> flags: array<atomic<u32>>;
@@ -54,20 +54,28 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
     for (var col = lane; col < params.cols; col += 256u) {
         let g = wide_sub(weighted(base + col, col), origin);
         sum = wide_add(sum, g);
-        dot = wide_add(dot, wide_mul(g, normalized[base + col]));
+        dot = wide_add(dot, wide_mul(g, centered_values[base + col]));
     }
     sums[lane] = sum;
     projections[lane] = dot;
     reduce(lane);
     if (lane == 0u) {
         mean = wide_div(sums[0], parts(f32(params.cols)));
-        projection = wide_div(projections[0], parts(f32(params.cols)));
+        projection = projections[0];
     }
     workgroupBarrier();
     for (var col = lane; col < params.cols; col += 256u) {
         let g = wide_sub(weighted(base + col, col), origin);
-        let centered = wide_sub(wide_sub(g, mean), wide_mul(normalized[base + col], projection));
-        dx[base + col] = checked(wide_mul(centered, inverse_std[row]));
+        let stats = row_stats[row];
+        // Cancel before dividing: squaring rounded normalized values introduces
+        // a scale-direction residual that tiny variance can amplify enormously.
+        let centered_g = wide_sub(g, mean);
+        let epsilon_sum = wide_mul(parts(params.epsilon), parts(f32(params.cols)));
+        let variance_residual = wide_difference_of_products(centered_g, stats.square_sum,
+                                                            centered_values[base + col], projection);
+        let numerator = wide_add(variance_residual, wide_mul(centered_g, epsilon_sum));
+        let denominator = wide_add(stats.square_sum, epsilon_sum);
+        dx[base + col] = checked(wide_mul(wide_div(numerator, denominator), stats.inverse_std));
     }
 }
 
@@ -80,7 +88,10 @@ fn backward_affine(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoc
     for (var row = lane; row < params.rows; row += 256u) {
         let index = row * params.cols + col;
         let seed = parts(upstream[index]);
-        if ((params.requested & 2u) != 0u) { dg = wide_add(dg, wide_mul(seed, normalized[index])); }
+        if ((params.requested & 2u) != 0u) {
+            let normalized = wide_mul(centered_values[index], row_stats[row].inverse_std);
+            dg = wide_add(dg, wide_mul(seed, normalized));
+        }
         if ((params.requested & 4u) != 0u) { db = wide_add(db, seed); }
     }
     sums[lane] = dg;

@@ -8,6 +8,11 @@ struct Wide {
     _pad: u32,
 };
 
+struct LayerNormRow {
+    inverse_std: Wide,
+    square_sum: Wide,
+};
+
 fn parts(value: f32) -> Wide {
     let bits = bitcast<u32>(value);
     let magnitude = bits & 0x7fffffffu;
@@ -77,10 +82,58 @@ fn wide_div(a: Wide, b: Wide) -> Wide {
     if (a.hi == 0.0 || b.hi == 0.0) { return parts(0.0); }
     var quotient = parts(a.hi / b.hi);
     quotient.exponent += a.exponent - b.exponent;
-    let remainder = wide_sub(a, wide_mul(quotient, b));
-    var correction = parts(remainder.hi / b.hi);
-    correction.exponent += remainder.exponent - b.exponent;
-    return wide_add(quotient, correction);
+    for (var refinement = 0u; refinement < 2u; refinement += 1u) {
+        let remainder = wide_sub(a, wide_mul(quotient, b));
+        var correction = parts(remainder.hi / b.hi);
+        correction.exponent += remainder.exponent - b.exponent;
+        var tail = parts(remainder.lo / b.hi);
+        tail.exponent += remainder.exponent - b.exponent;
+        quotient = wide_add(quotient, wide_add(correction, tail));
+    }
+    return quotient;
+}
+
+fn expansion_add(accumulator: vec4<f32>, value: f32) -> vec4<f32> {
+    let a = two_sum(accumulator.x, value);
+    let b = two_sum(accumulator.y, a.y);
+    let c = two_sum(accumulator.z, b.y);
+    return vec4<f32>(a.x, b.x, c.x, rounded_add(accumulator.w, c.y));
+}
+
+fn product_parts(a: f32, b: f32, exponent: i32, base_exp: i32) -> vec2<f32> {
+    let product = wide_mul(parts(a), parts(b));
+    return vec2<f32>(align(product.hi, product.exponent + exponent - base_exp),
+                     align(product.lo, product.exponent + exponent - base_exp));
+}
+
+fn wide_difference_of_products(a: Wide, b: Wide, c: Wide, d: Wide) -> Wide {
+    let ab = wide_mul(a, b);
+    let cd = wide_mul(c, d);
+    let difference = wide_sub(ab, cd);
+    if (ab.hi == 0.0 || cd.hi == 0.0) { return difference; }
+    let base_exp = max(a.exponent + b.exponent, c.exponent + d.exponent);
+    // Two-component products retain about 48 significand bits. Recompute the
+    // difference before rounding when cancellation would consume >20 bits.
+    if (difference.hi != 0.0 && difference.exponent >= base_exp - 20) { return difference; }
+    var expansion = vec4<f32>(0.0);
+    let av = vec2<f32>(a.hi, a.lo);
+    let bv = vec2<f32>(b.hi, b.lo);
+    let cv = vec2<f32>(c.hi, c.lo);
+    let dv = vec2<f32>(d.hi, d.lo);
+    for (var i = 0u; i < 2u; i += 1u) {
+        for (var j = 0u; j < 2u; j += 1u) {
+            let p = product_parts(av[i], bv[j], a.exponent + b.exponent, base_exp);
+            let q = product_parts(cv[i], dv[j], c.exponent + d.exponent, base_exp);
+            expansion = expansion_add(expansion, p.x);
+            expansion = expansion_add(expansion, -q.x);
+            expansion = expansion_add(expansion, p.y);
+            expansion = expansion_add(expansion, -q.y);
+        }
+    }
+    var result = wide_add(wide_add(parts(expansion.x), parts(expansion.y)),
+                          wide_add(parts(expansion.z), parts(expansion.w)));
+    result.exponent += base_exp;
+    return result;
 }
 
 fn wide_sqrt(a: Wide) -> Wide {

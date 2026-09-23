@@ -120,6 +120,9 @@ mod browser {
                 let requested = [mask & 1 != 0, mask & 2 != 0, mask & 4 != 0];
                 let grads = tape.backward(&seed, 1., requested)?;
                 for i in 0..3 {
+                    if grads[i].is_some() != requested[i] {
+                        return Err("VJP presence differs from requested mask".into());
+                    }
                     if let Some(value) = &grads[i] {
                         close(&read(value).await?, &expected[i])?;
                     } else if requested[i] {
