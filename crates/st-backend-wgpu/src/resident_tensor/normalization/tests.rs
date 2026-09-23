@@ -396,3 +396,19 @@ fn layer_norm_resident_rejections_empty_batches_and_guards() {
     close(&read(grads[1].as_ref().unwrap()), &[0.]);
     close(&read(grads[2].as_ref().unwrap()), &[0.]);
 }
+
+#[test]
+fn layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance() {
+    let Some(device) = device() else { return };
+    for scale in [1., 1e-10, 1e-20, 1e-30, f32::from_bits(1)] {
+        let input = device.upload(&[1, 3], &[-scale, 0., scale]).unwrap();
+        let gamma = device.upload(&[3], &[1.; 3]).unwrap();
+        let beta = device.upload(&[3], &[0.; 3]).unwrap();
+        let seed = device.upload(&[1, 3], &[-1., 0., 1.]).unwrap();
+        let tape = input.layer_norm_affine(&gamma, &beta, 0.).unwrap();
+        let [dx, _, _] = tape.backward(&seed, 1., [true, false, false]).unwrap();
+        let actual = read(dx.as_ref().unwrap());
+        eprintln!("scale-direction nullspace: scale={scale}, dx={actual:?}");
+        close(&actual, &[0.; 3]);
+    }
+}
