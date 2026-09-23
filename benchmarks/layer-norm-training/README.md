@@ -20,6 +20,10 @@ upload and final CPU copies. PyTorch CPU starts with host-owned inputs. All
 numbers include host-side dispatch, allocation, and framework overhead; none
 are device-only kernel timings.
 
+The reported loss and affine gradients are from the 32nd forward/backward,
+just before its SGD update; gamma/beta are from just after that update. This
+is a step-log convention, not a post-update evaluation pass.
+
 The seven separate stage probes each end with one snapshot: readback-only,
 forward, MSE, backward-all, backward-input-only, backward-affine-only, and
 parameter update. They diagnose where time is spent but are not additive

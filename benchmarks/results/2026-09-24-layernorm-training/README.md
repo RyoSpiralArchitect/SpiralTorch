@@ -37,10 +37,11 @@ include a terminal snapshot. They must not be summed into a 32-step estimate.
 
 All 3 comparisons passed: 648 Rust training intervals, 1,134 stage intervals,
 and 324 PyTorch intervals, with no missing shape or route. Initial losses
-were 1.09-1.24 and final losses were 0.068-0.091 on every route. The largest
-scaled numerical error across all native and cross-runtime final values was
-0.000272 of the allowed `5e-4 * (1 + abs(reference))` bound. No GPU fallback
-or CPU adapter was accepted. The raw input/target f32 digests matched exactly.
+were 1.09-1.24 and 32nd-step pre-update losses were 0.068-0.091 on every
+route. The largest scaled numerical error across native and cross-runtime
+final values was 0.000272 of the allowed `5e-4 * (1 + abs(reference))` bound.
+No GPU fallback or CPU adapter was accepted. The raw input/target f32 digests
+matched exactly.
 
 The negative performance result is the point: simply retaining tensors on the
 GPU barely changes the all-gradient time here. On the 128x1025 case, WGPU
