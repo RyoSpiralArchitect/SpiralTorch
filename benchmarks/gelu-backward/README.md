@@ -14,8 +14,12 @@ The backend owns the canonical saturated tanh-GELU derivative, embedded
 plain/fused shaders, 32/16-byte fused uniforms, bindings and validated geometry.
 Tensor pipelines still compile lazily. Resident VJP/training use the same WGSL
 derivative source without changing their deferred guard machinery.
-The shared derivative uses an exp-based tanh identity for the CDF and sech-squared
-terms, avoiding cancellation in `1 - tanh(inner)^2` near saturated tails.
+The shared derivative retains the established tanh evaluation order for
+abs(x)<=3 and uses an exp-based tanh identity for the CDF and sech-squared terms
+outside that central domain, avoiding cancellation in `1 - tanh(inner)^2` near
+saturated tails. Replacing the central evaluation too passed single-operation
+accuracy checks but regressed a 64-step classification trajectory; the existing
+Module comparison and its unchanged tolerance remain a required regression gate.
 This preserves the tanh-GELU derivative and the exact abs(x)>=10 saturation
 policy; it does not relax the frozen accuracy gate.
 
@@ -85,6 +89,7 @@ The original loader failure is preserved separately.
 cargo test --locked --release -p st-backend-wgpu --lib --test wgsl_syntax
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu --example gelu_backward_bench -- --test-threads=1
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 SPIRALTORCH_STRICT_GPU=1 cargo test --locked --release -p st-tensor --features wgpu --test wgpu_gelu_liveness
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_graph_training -- --test-threads=1
 cargo run --locked --release -p st-backend-wgpu --example gelu_backward_bench
 cargo build --locked --release -p st-backend-wgpu --target wasm32-unknown-unknown --example gelu_backward_bench_browser
 wasm-bindgen --target web --out-name spiraltorch_wasm --out-dir NEW_WASM_DIR target/wasm32-unknown-unknown/release/examples/gelu_backward_bench_browser.wasm

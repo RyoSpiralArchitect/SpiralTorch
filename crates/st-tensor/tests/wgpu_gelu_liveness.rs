@@ -89,6 +89,48 @@ fn plain_and_fused_gelu_preserve_tails_saturation_and_residual_contract() {
 }
 
 #[test]
+fn gelu_derivative_transition_keeps_both_adjacent_f32_values_accurate() {
+    if !enabled() {
+        return;
+    }
+    assert_eq!(std::env::var("SPIRALTORCH_STRICT_GPU").as_deref(), Ok("1"));
+    let boundary = 3f32.to_bits();
+    let mut values = Vec::new();
+    for sign in [-1., 1.] {
+        for bits in boundary - 4..=boundary + 4 {
+            values.push(sign * f32::from_bits(bits));
+        }
+    }
+    let len = values.len();
+    let seed = vec![1.; len];
+    let residual = vec![0.375; len];
+    let plain = Tensor::from_vec(1, len, values.clone())
+        .unwrap()
+        .gelu_backward_with_backend(
+            &Tensor::from_vec(1, len, seed.clone()).unwrap(),
+            TensorUtilBackend::GpuWgpu,
+        )
+        .unwrap();
+    let (gz, dr, db) =
+        wgpu_dense::fused_gelu_backward(&values, &seed, Some(&residual), 1, len).unwrap();
+    for (i, &x) in values.iter().enumerate() {
+        let reference = derivative(f64::from(x));
+        for (route, actual, expected) in [
+            ("plain", plain.data()[i], reference),
+            ("fused", gz[i], reference),
+            ("bias", db[i], reference),
+            ("residual", dr[i], reference + 0.375),
+        ] {
+            assert!(
+                actual.is_finite()
+                    && (f64::from(actual) - expected).abs() <= 2e-6 + 1e-5 * expected.abs(),
+                "{route} boundary x={x:?} actual={actual} expected={expected}"
+            );
+        }
+    }
+}
+
+#[test]
 fn plain_gelu_keeps_logical_layout_and_finite_policy() {
     if !enabled() {
         return;
