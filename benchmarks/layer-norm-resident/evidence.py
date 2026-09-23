@@ -98,19 +98,29 @@ def collect(raw, public):
 
 
 def verify(raw, public):
-    for root, manifest in ((raw, "raw-manifest.json"), (public, "public-manifest.json")):
+    manifests = [(public, "public-manifest.json")]
+    if raw is not None:
+        manifests.append((raw, "raw-manifest.json"))
+    for root, manifest in manifests:
         for expected in read(public / manifest):
             path = root / expected["path"]
             require(path.is_relative_to(root) and ".." not in path.relative_to(root).parts, "manifest path")
             require(file_record(path, root) == expected, "hash mismatch: " + expected["path"])
-    print(json.dumps(dict(status="verified", raw_files=len(read(public / "raw-manifest.json")), public=str(public))))
+    medians = dict(native=validate_intervals(read(public / "native.json"), (0, 1, 2)),
+                   pytorch=validate_intervals(read(public / "pytorch.json"), ("cpu", "mps")))
+    require(medians == read(public / "medians.json"), "derived medians differ")
+    print(json.dumps(dict(status="verified", raw_verified=raw is not None,
+                         raw_files=len(read(public / "raw-manifest.json")), public=str(public))))
 
 
 if __name__ == "__main__":
-    mode, raw, public = sys.argv[1:]
-    if mode == "collect":
+    if sys.argv[1] == "verify-public":
+        verify(None, Path(sys.argv[2]))
+    elif sys.argv[1] == "collect":
+        _, raw, public = sys.argv[1:]
         collect(Path(raw), Path(public))
-    elif mode == "verify":
+    elif sys.argv[1] == "verify":
+        _, raw, public = sys.argv[1:]
         verify(Path(raw), Path(public))
     else:
-        raise SystemExit("expected collect|verify RAW PUBLIC")
+        raise SystemExit("expected collect|verify RAW PUBLIC, or verify-public PUBLIC")
