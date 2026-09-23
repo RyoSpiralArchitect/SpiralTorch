@@ -31,6 +31,11 @@ JavaScript reimplementation.
   is not lost. Each row retains inverse standard deviation and raw squared sum
   in 32 bytes. Zero-epsilon scale directions, tiny positive epsilon, and signed
   seed-scale/permutation variants are regression-tested without relaxed bounds.
+- Zero components bypass unnecessary expansion work. Ordered FastTwoSum keeps
+  exact residuals with three integer-rounded additions; a native 16,708-pair
+  GPU test compares both sum and residual bits against unordered CPU TwoSum.
+  Input VJP division is row-constant and computed once per row, not per element.
+  Preflight accounts for both reductions and all four shared row scalars.
 - Forward retains the CPU's rounded-f32 normalized value and affine operation
   boundaries. The affine product decodes subnormal bits before multiplication:
   otherwise `(tiny normalized value) * large gamma` can incorrectly become zero.

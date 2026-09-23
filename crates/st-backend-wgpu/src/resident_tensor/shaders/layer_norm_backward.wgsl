@@ -18,6 +18,8 @@ var<workgroup> sums: array<Wide, 256>;
 var<workgroup> projections: array<Wide, 256>;
 var<workgroup> mean: Wide;
 var<workgroup> projection: Wide;
+var<workgroup> epsilon_sum: Wide;
+var<workgroup> input_scale: Wide;
 
 fn checked(value: Wide) -> f32 {
     let result = wide_float(value);
@@ -62,6 +64,11 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
     if (lane == 0u) {
         mean = wide_div(sums[0], parts(f32(params.cols)));
         projection = projections[0];
+        epsilon_sum = wide_mul(parts(params.epsilon), parts(f32(params.cols)));
+        // This divisor is row-constant. Keep its extended-range reciprocal on
+        // GPU instead of repeating compensated division for every input VJP.
+        let stats = row_stats[row];
+        input_scale = wide_div(stats.inverse_std, wide_add(stats.square_sum, epsilon_sum));
     }
     workgroupBarrier();
     for (var col = lane; col < params.cols; col += 256u) {
@@ -70,12 +77,10 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
         // Cancel before dividing: squaring rounded normalized values introduces
         // a scale-direction residual that tiny variance can amplify enormously.
         let centered_g = wide_sub(g, mean);
-        let epsilon_sum = wide_mul(parts(params.epsilon), parts(f32(params.cols)));
         let variance_residual = wide_difference_of_products(centered_g, stats.square_sum,
                                                             centered_values[base + col], projection);
         let numerator = wide_add(variance_residual, wide_mul(centered_g, epsilon_sum));
-        let denominator = wide_add(stats.square_sum, epsilon_sum);
-        dx[base + col] = checked(wide_mul(wide_div(numerator, denominator), stats.inverse_std));
+        dx[base + col] = checked(wide_mul(numerator, input_scale));
     }
 }
 

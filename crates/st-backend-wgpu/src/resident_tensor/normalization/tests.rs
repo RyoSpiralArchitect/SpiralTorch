@@ -92,6 +92,130 @@ fn layer_norm_shaders_validate_without_adapter() {
         .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&text)));
     }
     assert_eq!(std::mem::size_of::<Params>(), 32);
+    let shape = LayerNormShape::new(&[1, 3], &[3]).unwrap();
+    let mut limits = wgpu::Limits {
+        max_compute_workgroup_storage_size: 8255,
+        ..Default::default()
+    };
+    assert!(matches!(
+        preflight(shape, &limits),
+        Err(TensorError::Limit("LayerNorm pipeline"))
+    ));
+    limits.max_compute_workgroup_storage_size = 8256;
+    assert!(preflight(shape, &limits).is_ok());
+}
+
+#[test]
+fn layer_norm_ordered_sum_preserves_sum_and_residual_bits() {
+    let Some(tensor_device) = device() else {
+        return;
+    };
+    let ctx = tensor_device.0.runtime.context();
+    let device = ctx.device();
+    let mut pairs = Vec::new();
+    let boundary = [
+        0u32, 1, 0x7fffff, 0x800000, 0x33800000, 0x3f000000, 0x3f800000, 0x3f800001, 0x40000000,
+    ];
+    for a in boundary {
+        for b in boundary {
+            for sign_a in [0, 0x80000000] {
+                for sign_b in [0, 0x80000000] {
+                    pairs.push([a | sign_a, b | sign_b]);
+                }
+            }
+        }
+    }
+    let mut state = 17u32;
+    let mut next = || {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        // Finite, non-overflowing significand pairs, including subnormal bits.
+        (state & 0x807fffff) | (((state >> 24) % 140) << 23)
+    };
+    for _ in 0..16384 {
+        pairs.push([next(), next()]);
+    }
+    let input = runtime::upload_slice(
+        device,
+        "layer_norm.sum.inputs",
+        &pairs,
+        wgpu::BufferUsages::STORAGE,
+    )
+    .unwrap();
+    let output = runtime::empty_buffer::<[u32; 2]>(
+        device,
+        "layer_norm.sum.output",
+        pairs.len(),
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    )
+    .unwrap();
+    let shader = source(
+        r#"
+ROUNDED_ADD
+WIDE_ARITHMETIC
+@group(0) @binding(0) var<storage, read> pairs: array<vec2<u32>>;
+@group(0) @binding(1) var<storage, read_write> output: array<vec2<u32>>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x < arrayLength(&pairs)) {
+        output[id.x] = bitcast<vec2<u32>>(two_sum(bitcast<f32>(pairs[id.x].x), bitcast<f32>(pairs[id.x].y)));
+    }
+}
+"#,
+    );
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("layer_norm.sum.shader"),
+        source: wgpu::ShaderSource::Wgsl(shader.into()),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("layer_norm.sum.pipeline"),
+        layout: None,
+        module: &module,
+        entry_point: "main",
+        compilation_options: Default::default(),
+    });
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("layer_norm.sum.group"),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: output.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        pass.dispatch_workgroups((pairs.len() as u32).div_ceil(64), 1, 1);
+    }
+    ctx.queue().submit(Some(encoder.finish()));
+    let actual = runtime::read_buffer::<[u32; 2]>(
+        device,
+        ctx.queue(),
+        &output,
+        pairs.len(),
+        "layer_norm.sum.read",
+    )
+    .unwrap();
+    for ([a, b], actual) in pairs.into_iter().zip(actual) {
+        let (a, b) = (f32::from_bits(a), f32::from_bits(b));
+        // Independent, unordered TwoSum on the CPU. Do not enable fast-math.
+        let sum = a + b;
+        let bv = sum - a;
+        let residual = (a - (sum - bv)) + (b - bv);
+        for (bits, expected) in actual.into_iter().zip([sum, residual]) {
+            if expected == 0. {
+                assert_eq!(bits & 0x7fffffff, 0);
+            } else {
+                assert_eq!(bits, expected.to_bits(), "a={a:e}, b={b:e}");
+            }
+        }
+    }
 }
 
 #[test]

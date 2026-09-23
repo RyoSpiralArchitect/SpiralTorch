@@ -28,13 +28,30 @@ fn parts(value: f32) -> Wide {
 }
 
 fn two_sum(a: f32, b: f32) -> vec2<f32> {
-    let s = rounded_add(a, b);
-    let bv = rounded_add(s, -a);
-    let error = rounded_add(rounded_add(a, -rounded_add(s, -bv)), rounded_add(b, -bv));
-    return vec2<f32>(s, error);
+    let ma = bitcast<u32>(a) & 0x7fffffffu;
+    let mb = bitcast<u32>(b) & 0x7fffffffu;
+    if (ma == 0u) { return vec2<f32>(b, 0.0); }
+    if (mb == 0u) { return vec2<f32>(a, 0.0); }
+    // Ordered FastTwoSum is error-free for our finite significands and uses
+    // three integer-rounded additions instead of six. Sorting is essential.
+    let large = select(b, a, ma >= mb);
+    let small = select(a, b, ma >= mb);
+    let sum = rounded_add(large, small);
+    return vec2<f32>(sum, rounded_add(small, -rounded_add(sum, -large)));
 }
 
 fn wide_normalize(hi: f32, lo: f32, tail: f32, exponent: i32) -> Wide {
+    if (lo == 0.0 && tail == 0.0) {
+        var leading = parts(hi);
+        leading.exponent += exponent;
+        return leading;
+    }
+    if (tail == 0.0) {
+        let pair = two_sum(hi, lo);
+        let leading = parts(pair.x);
+        if (leading.hi == 0.0) { return leading; }
+        return Wide(leading.hi, align(pair.y, -leading.exponent), exponent + leading.exponent, 0.0);
+    }
     let low = two_sum(lo, tail);
     let high = two_sum(hi, low.x);
     let rest = two_sum(high.y, low.y);
@@ -88,7 +105,9 @@ fn wide_mul(a: Wide, b: Wide) -> Wide {
     let av = vec3<f32>(a.hi, a.lo, a.tail);
     let bv = vec3<f32>(b.hi, b.lo, b.tail);
     for (var i = 0u; i < 3u; i += 1u) {
+        if (av[i] == 0.0) { continue; }
         for (var j = 0u; j < 3u; j += 1u) {
+            if (bv[j] == 0.0) { continue; }
             let product = product_parts(av[i], bv[j], 0, 0);
             expansion = expansion_add(expansion, product.x);
             expansion = expansion_add(expansion, product.y);
@@ -115,6 +134,8 @@ fn wide_div(a: Wide, b: Wide) -> Wide {
 }
 
 fn expansion_add(accumulator: vec4<f32>, value: f32) -> vec4<f32> {
+    if (value == 0.0) { return accumulator; }
+    if (all(accumulator == vec4<f32>(0.0))) { return vec4<f32>(value, 0.0, 0.0, 0.0); }
     let a = two_sum(accumulator.x, value);
     let b = two_sum(accumulator.y, a.y);
     let c = two_sum(accumulator.z, b.y);
@@ -122,6 +143,9 @@ fn expansion_add(accumulator: vec4<f32>, value: f32) -> vec4<f32> {
 }
 
 fn wide_from_expansion(value: vec4<f32>, exponent: i32) -> Wide {
+    if (value.z == 0.0 && value.w == 0.0) {
+        return wide_normalize(value.x, value.y, 0.0, exponent);
+    }
     let low = two_sum(value.z, value.w);
     let middle = two_sum(value.y, low.x);
     let high = two_sum(value.x, middle.x);

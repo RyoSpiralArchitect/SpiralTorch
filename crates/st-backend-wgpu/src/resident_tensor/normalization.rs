@@ -123,7 +123,8 @@ fn preflight(shape: LayerNormShape, limits: &wgpu::Limits) -> Result<(), TensorE
     if limits.max_bindings_per_bind_group < 8
         || limits.max_uniform_buffers_per_shader_stage < 1
         || limits.max_uniform_buffer_binding_size < 32
-        || limits.max_compute_workgroup_storage_size < 8224
+        // Two 256-element reductions plus four row-constant Wide values.
+        || limits.max_compute_workgroup_storage_size < 2 * 256 * 16 + 4 * 16
     {
         return Err(TensorError::Limit("LayerNorm pipeline"));
     }

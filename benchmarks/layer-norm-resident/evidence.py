@@ -57,7 +57,7 @@ def validate_centered_browser(browser):
     require(math.isfinite(browser["last_loss"]) and 0 <= browser["last_loss"] < browser["first_loss"] * 1e-4, "browser learning")
 
 
-def collect(raw, public, centered=False):
+def collect(raw, public, centered=False, optimized=False):
     stages = {p.parent.name: read(p) for p in raw.glob("*/receipt.json")}
     accepted = ACCEPTED | {"accepted-decimal"} if centered else ACCEPTED
     require({n for n in stages if n.startswith("accepted-")} == accepted, "accepted stage coverage")
@@ -75,7 +75,7 @@ def collect(raw, public, centered=False):
     if not centered:
         require("0 != -0.09223365" in (raw / "prototype-06-denormal-probe/stderr.log").read_text(), "subnormal regression")
     tests = lambda name: [int(v) for v in re.findall(r"test result: ok\. (\d+) passed; 0 failed", (raw / name / "stdout.log").read_text())]
-    require(tests("accepted-native") == [202 if centered else 198, 31], "native tests")
+    require(tests("accepted-native") == [203 if optimized else 202 if centered else 198, 31], "native tests")
     require(tests("accepted-tensor-tests") == [11, 4], "Tensor tests")
     native = read(raw / "accepted-native-bench/stdout.log")
     torch = read(raw / "accepted-torch/stdout.log")
@@ -89,6 +89,20 @@ def collect(raw, public, centered=False):
         decimal = read(raw / "accepted-decimal/stdout.log")
         require(decimal["precision"] == 100 and len(decimal["dx_f32"]) == 4, "decimal oracle")
         extra.append(("decimal-oracle.json", decimal))
+        if optimized:
+            variants = {}
+            for name, stage in stages.items():
+                if not name.endswith("-bench") or name.startswith("accepted-"):
+                    continue
+                require(stage["exit_code"] == 0 and stage["source_unchanged"], name + " variant failed")
+                report = read(raw / name / "stdout.log")
+                medians_by_shape = validate_intervals(report, (0, 1, 2))
+                variants[name] = dict(source_commit=stage["source"]["commit"],
+                                      source_dirty=bool(stage["source"]["status"]),
+                                      source_patch=file_record(raw / name / "source.patch", raw),
+                                      report=report, medians=medians_by_shape)
+            require(set(variants) == {"zero-components-bench", "zero-residuals-bench", "row-factor-bench", "ordered-sum-bench"}, "exploratory variant coverage")
+            extra.append(("exploratory-variants.json", variants))
     else:
         require(browser["status"] == "passed" and not browser["page_errors"] and not browser["console_messages"], "browser status")
         require((browser["cases"], browser["masks_per_case"], browser["training_steps"], browser["intermediate_readbacks"]) == (7, 7, 400, 0), "browser coverage")
@@ -108,9 +122,10 @@ def collect(raw, public, centered=False):
     for name, record in stage_records.items():
         record["source_commit"] = stages[name]["source"]["commit"]
         record["source_dirty"] = bool(stages[name]["source"]["status"])
-    write("validation.json", dict(schema="spiraltorch.resident_layer_norm.evidence.v2" if centered else "spiraltorch.resident_layer_norm.evidence.v1", measured_commit=source["commit"],
+    version = "v3" if optimized else "v2" if centered else "v1"
+    write("validation.json", dict(schema="spiraltorch.resident_layer_norm.evidence." + version, measured_commit=source["commit"],
           scope="Exploratory host-to-host primitive comparison, not performance admission; ordinary Tensor route unchanged",
-          accepted_stages=sorted(accepted), rust_tests=248 if centered else 244, measured_intervals=540, stages=stage_records))
+          accepted_stages=sorted(accepted), rust_tests=249 if optimized else 248 if centered else 244, measured_intervals=540, stages=stage_records))
     for name in [n for n, _ in negatives] + (["accepted-native"] if centered else []):
         for stream in ("stdout.log", "stderr.log"):
             text = (raw / name / stream).read_text()
@@ -132,8 +147,14 @@ def verify(raw, public):
     medians = dict(native=validate_intervals(read(public / "native.json"), (0, 1, 2)),
                    pytorch=validate_intervals(read(public / "pytorch.json"), ("cpu", "mps")))
     require(medians == read(public / "medians.json"), "derived medians differ")
-    if read(public / "validation.json")["schema"] == "spiraltorch.resident_layer_norm.evidence.v2":
+    version = read(public / "validation.json")["schema"]
+    if version in ("spiraltorch.resident_layer_norm.evidence.v2", "spiraltorch.resident_layer_norm.evidence.v3"):
         validate_centered_browser(read(public / "browser.json"))
+    if version == "spiraltorch.resident_layer_norm.evidence.v3":
+        variants = read(public / "exploratory-variants.json")
+        require(set(variants) == {"zero-components-bench", "zero-residuals-bench", "row-factor-bench", "ordered-sum-bench"}, "exploratory variant coverage")
+        for variant in variants.values():
+            require(validate_intervals(variant["report"], (0, 1, 2)) == variant["medians"], "variant medians")
     print(json.dumps(dict(status="verified", raw_verified=raw is not None,
                          raw_files=len(read(public / "raw-manifest.json")), public=str(public))))
 
@@ -141,11 +162,11 @@ def verify(raw, public):
 if __name__ == "__main__":
     if sys.argv[1] == "verify-public":
         verify(None, Path(sys.argv[2]))
-    elif sys.argv[1] in ("collect", "collect-centered"):
+    elif sys.argv[1] in ("collect", "collect-centered", "collect-optimized"):
         mode, raw, public = sys.argv[1:]
-        collect(Path(raw), Path(public), centered=mode == "collect-centered")
+        collect(Path(raw), Path(public), centered=mode != "collect", optimized=mode == "collect-optimized")
     elif sys.argv[1] == "verify":
         _, raw, public = sys.argv[1:]
         verify(Path(raw), Path(public))
     else:
-        raise SystemExit("expected collect|collect-centered|verify RAW PUBLIC, or verify-public PUBLIC")
+        raise SystemExit("expected collect|collect-centered|collect-optimized|verify RAW PUBLIC, or verify-public PUBLIC")
