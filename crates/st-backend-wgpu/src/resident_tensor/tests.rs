@@ -162,3 +162,91 @@ fn tensor_snapshots_preserve_versions_and_guards_on_real_gpu() {
     drop(bad);
     assert_eq!(old.read().unwrap(), [1., 3., 2., 4.]);
 }
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn tensor_batch_snapshots_preserve_views_order_and_guards_on_real_gpu() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) = runtime::ensure_default_runtime_blocking("tensor.snapshot.batch").unwrap();
+    let device = TensorDevice::new(runtime).unwrap();
+    let root = device.upload(&[3, 2], &[1., 2., 3., 4., 5., 6.]).unwrap();
+    let slice = root.narrow(0, 1, 1).unwrap();
+    assert!(slice.layout.is_contiguous());
+    assert_eq!(slice.layout.offset(), 2);
+    assert_eq!(slice.snapshot().unwrap().read().unwrap(), [3., 4.]);
+    let transposed = root.permute(&[1, 0]).unwrap();
+    let empty = root.narrow(0, 3, 0).unwrap();
+    let scalar = device.upload(&[], &[-0.]).unwrap();
+    let pending = device
+        .snapshot_many(&[&slice, &transposed, &empty, &scalar])
+        .unwrap();
+    assert_eq!(pending.staging_buffer_count(), 1);
+    assert_eq!(
+        pending
+            .layouts()
+            .iter()
+            .map(|layout| layout.shape())
+            .collect::<Vec<_>>(),
+        [&[1, 2][..], &[2, 3][..], &[0, 2][..], &[][..]]
+    );
+    let next = device.snapshot_many(&[&root]).unwrap();
+    drop(root);
+    drop(slice);
+    drop(transposed);
+    drop(empty);
+    drop(scalar);
+    assert_eq!(next.read().unwrap(), [vec![1., 2., 3., 4., 5., 6.]]);
+    let values = pending.read().unwrap();
+    assert_eq!(values[0], [3., 4.]);
+    assert_eq!(values[1], [1., 3., 5., 2., 4., 6.]);
+    assert!(values[2].is_empty());
+    assert_eq!(values[3][0].to_bits(), (-0f32).to_bits());
+    assert_eq!(
+        device.snapshot_many(&[]).unwrap().read().unwrap(),
+        Vec::<Vec<f32>>::new()
+    );
+
+    let bad = device
+        .upload(&[1], &[-f32::MAX])
+        .unwrap()
+        .mul(&device.upload(&[], &[2.]).unwrap())
+        .unwrap();
+    let bad_empty = bad.broadcast_to(&[0]).unwrap();
+    assert!(matches!(
+        device.snapshot_many(&[&bad_empty]).unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    let healthy = device.upload(&[1], &[7.]).unwrap();
+    assert!(matches!(
+        device.snapshot_many(&[&healthy, &bad]).unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    assert_eq!(
+        device.snapshot_many(&[&healthy]).unwrap().read().unwrap(),
+        [vec![7.]]
+    );
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn tensor_batch_rejects_mixed_contexts_before_submission_on_real_gpu() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let first = pollster::block_on(WgpuRuntime::request_headless("tensor.batch.first")).unwrap();
+    let second = pollster::block_on(WgpuRuntime::request_headless("tensor.batch.second")).unwrap();
+    let first = TensorDevice::new(first).unwrap();
+    let second = TensorDevice::new(second).unwrap();
+    let a = first.upload(&[1], &[1.]).unwrap();
+    let b = second.upload(&[1], &[2.]).unwrap();
+    assert!(matches!(
+        first.snapshot_many(&[&a, &b]),
+        Err(TensorError::DeviceMismatch)
+    ));
+    assert_eq!(
+        first.snapshot_many(&[&a]).unwrap().read().unwrap(),
+        [vec![1.]]
+    );
+}

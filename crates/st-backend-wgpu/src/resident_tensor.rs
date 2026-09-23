@@ -398,6 +398,49 @@ impl TensorDevice {
             layout.shape(),
         )
     }
+
+    /// Freeze several logical tensors with one queue submission. Contiguous
+    /// views copy their own span; only strided views need a GPU packing pass.
+    /// Mapping remains explicit and preserves the input order and guard bits.
+    pub fn snapshot_many(
+        &self,
+        tensors: &[&ResidentTensor],
+    ) -> Result<TensorReadbackBatch, TensorError> {
+        let context = self.runtime().context();
+        for tensor in tensors {
+            tensor.require_context(context)?;
+        }
+        let layouts = tensors
+            .iter()
+            .map(|tensor| NdLayout::contiguous(tensor.layout.shape()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let prepared: Vec<_> = tensors
+            .iter()
+            .map(|tensor| {
+                if tensor.layout.is_contiguous() {
+                    Ok((*tensor).clone())
+                } else {
+                    tensor.apply_into(&mut encoder, ElementwiseOp::Identity, None)
+                }
+            })
+            .collect::<Result<_, TensorError>>()?;
+        let mut spans = Vec::with_capacity(prepared.len() * 2);
+        for tensor in &prepared {
+            spans.push((tensor.values(), tensor.layout.offset(), tensor.layout.len()));
+            spans.push((tensor.flags(), 0, 1));
+        }
+        let batch = runtime::ReadbackBatch::<u32>::encode_spans(
+            context,
+            &spans,
+            "tensor.snapshot_many",
+            &mut encoder,
+        )?;
+        if !tensors.is_empty() {
+            context.queue().submit(Some(encoder.finish()));
+        }
+        Ok(TensorReadbackBatch { batch, layouts })
+    }
 }
 
 #[derive(Debug)]
@@ -555,7 +598,11 @@ impl ResidentTensor {
 
     /// Capture logical values and validity now; awaiting does not re-read the source.
     pub fn snapshot(&self) -> Result<TensorReadback, TensorError> {
-        let packed = self.contiguous()?;
+        let packed = if self.layout.is_contiguous() {
+            self.clone()
+        } else {
+            self.contiguous()?
+        };
         let context = self.device.runtime().context();
         let len = self.layout.len();
         let staging = runtime::empty_buffer::<u32>(
@@ -566,7 +613,13 @@ impl ResidentTensor {
         )?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
         if len > 0 {
-            encoder.copy_buffer_to_buffer(packed.values(), 0, &staging, 0, len as u64 * 4);
+            encoder.copy_buffer_to_buffer(
+                packed.values(),
+                packed.layout.offset() as u64 * 4,
+                &staging,
+                0,
+                len as u64 * 4,
+            );
         }
         encoder.copy_buffer_to_buffer(packed.flags(), 0, &staging, len as u64 * 4, 4);
         context.queue().submit(Some(encoder.finish()));
@@ -575,6 +628,60 @@ impl ResidentTensor {
             layout: NdLayout::contiguous(self.layout.shape())?,
             context: context.clone(),
         })
+    }
+}
+
+/// One ordered, all-or-error read of multiple resident tensor snapshots.
+pub struct TensorReadbackBatch {
+    batch: runtime::ReadbackBatch<u32>,
+    layouts: Vec<NdLayout>,
+}
+
+impl TensorReadbackBatch {
+    pub fn layouts(&self) -> &[NdLayout] {
+        &self.layouts
+    }
+
+    pub fn staging_buffer_count(&self) -> usize {
+        self.batch.staging_buffer_count()
+    }
+
+    fn decode(words: Vec<Vec<u32>>, layouts: &[NdLayout]) -> Result<Vec<Vec<f32>>, TensorError> {
+        if !words.len().is_multiple_of(2) || words.len() / 2 != layouts.len() {
+            return Err(TensorError::Readback);
+        }
+        words
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .zip(layouts)
+            .map(|(pair, layout)| {
+                if pair[0].len() != layout.len() || pair[1].len() != 1 {
+                    return Err(TensorError::Readback);
+                }
+                if pair[1][0] != 0 {
+                    return Err(TensorError::NonFinite);
+                }
+                let values: Vec<_> = pair[0]
+                    .iter()
+                    .map(|&bits| f32::from_bits(u32::from_le(bits)))
+                    .collect();
+                if !values.iter().all(|value| value.is_finite()) {
+                    return Err(TensorError::NonFinite);
+                }
+                Ok(values)
+            })
+            .collect()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read(self) -> Result<Vec<Vec<f32>>, TensorError> {
+        Self::decode(self.batch.read()?, &self.layouts)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn read_async(self) -> Result<Vec<Vec<f32>>, TensorError> {
+        Self::decode(self.batch.read_async().await?, &self.layouts)
     }
 }
 
