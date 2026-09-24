@@ -30,6 +30,15 @@ parameter update. They diagnose where time is spent but are not additive
 components of the 32-step run. The affine/update probes also snapshot the
 input to retain a comparable terminal observation.
 
+The native example defaults to the original `sequential` SGD update: gamma
+and beta each execute multiply, then add. Set
+`SPIRALTORCH_LAYER_NORM_UPDATE_EXECUTION=batched` or `fused` to prepare two
+layout-specialized pointwise chains before timing. Each parameter then uses
+one GPU submission instead of two. `batched` keeps two dispatches per
+parameter; `fused` uses one dispatch. All routes retain the same update
+equation and final-output checks. This opt-in benchmark path does not change
+the default `Tensor`, NN trainer, or browser dispatch.
+
 On an Apple Metal host with PyTorch MPS available, replay from the measured
 source commit and keep the full JSON reports outside the repository:
 
@@ -61,3 +70,6 @@ performance result is implied by the native Metal run.
 
 The subsequent medium-row affine workgroup optimization and its native/browser
 validation are in `benchmarks/results/2026-09-24-layernorm-affine-workgroups/`.
+The prepared pointwise update comparison, including the separately rejected
+grouped-submission experiment, is in
+`benchmarks/results/2026-09-24-layernorm-update-dispatch/`.
