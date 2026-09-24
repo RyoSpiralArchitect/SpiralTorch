@@ -9,6 +9,9 @@ gradient kernel, validation flags, and public API are unchanged.
 
 Baseline source: `9e9e10a62dc7a0bd2cb410b4234dad79e8c60cf2`.
 Candidate source: `c988b80db080412b18be3707fde2dd902cb479fa`.
+The follow-up preflight correction in this PR changes only the declared
+minimum workgroup-storage limit from 8288 to 8292 bytes; it does not change
+the measured shader or dispatch schedule.
 Measurements used one Apple M4 / Metal host on macOS 26.4.1, rustc 1.98.0
 for WASM and the numerical control, PyTorch 2.12.1 for numerical validation,
 and Chrome 153.0.8010.53 on a non-fallback Apple WebGPU adapter. All runs

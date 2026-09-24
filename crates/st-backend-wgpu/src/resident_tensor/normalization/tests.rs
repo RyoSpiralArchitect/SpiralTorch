@@ -94,14 +94,14 @@ fn layer_norm_shaders_validate_without_adapter() {
     assert_eq!(std::mem::size_of::<Params>(), 32);
     let shape = LayerNormShape::new(&[1, 3], &[3]).unwrap();
     let mut limits = wgpu::Limits {
-        max_compute_workgroup_storage_size: 8287,
+        max_compute_workgroup_storage_size: 8291,
         ..Default::default()
     };
     assert!(matches!(
         preflight(shape, &limits),
         Err(TensorError::Limit("LayerNorm pipeline"))
     ));
-    limits.max_compute_workgroup_storage_size = 8288;
+    limits.max_compute_workgroup_storage_size = 8292;
     assert!(preflight(shape, &limits).is_ok());
 }
 
