@@ -1,0 +1,4337 @@
+{
+  "schema": "spiraltorch.layer_norm.input_vjp_guard_evidence.v1",
+  "baseline_commit": "ce21cccb7de207234f56c210f17a2a609fa6145b",
+  "candidate_code_commit": "28ddea8d9149049a7f5e05e54b596510d8abc889",
+  "runs": [
+    {
+      "name": "baseline-final-graph-1.json",
+      "raw_sha256": "bf0b102de3737c226125760ca2e205efd58743b7f80696e8eb6206ba5de3dcf6",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            31.657834,
+            29.484792,
+            31.847291,
+            31.997375,
+            28.767375
+          ],
+          "graph_ms": [
+            29.597292,
+            28.973667000000003,
+            27.425042,
+            28.972125000000002,
+            27.013125
+          ],
+          "standalone_median_ms": 31.657834,
+          "graph_median_ms": 28.972125000000002,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            54.905916,
+            54.833209000000004,
+            53.578875,
+            54.147625,
+            56.311583
+          ],
+          "graph_ms": [
+            52.581458,
+            50.18075,
+            52.231041,
+            51.278125,
+            50.327459
+          ],
+          "standalone_median_ms": 54.833209000000004,
+          "graph_median_ms": 51.278125,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            549.468542,
+            532.910459,
+            543.966375,
+            538.941042,
+            538.546292
+          ],
+          "graph_ms": [
+            545.30425,
+            552.0812910000001,
+            545.666667,
+            554.256583,
+            553.808542
+          ],
+          "standalone_median_ms": 538.941042,
+          "graph_median_ms": 552.0812910000001,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-final-graph-2.json",
+      "raw_sha256": "53cb9c490ae56f1403b1237e2790d9e27af50becf333f48b9fb9cdfc685ec40a",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            30.852958,
+            30.473833,
+            29.3405,
+            28.606083,
+            31.159958000000003
+          ],
+          "graph_ms": [
+            27.474041,
+            29.113541,
+            26.873041999999998,
+            28.517500000000002,
+            27.725333000000003
+          ],
+          "standalone_median_ms": 30.473833,
+          "graph_median_ms": 27.725333000000003,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            55.457375000000006,
+            55.474125,
+            53.415375000000004,
+            54.871875,
+            53.70675
+          ],
+          "graph_ms": [
+            51.09325,
+            51.219208,
+            49.797000000000004,
+            50.252458,
+            51.559875
+          ],
+          "standalone_median_ms": 54.871875,
+          "graph_median_ms": 51.09325,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            538.091584,
+            548.18875,
+            539.6959999999999,
+            549.640125,
+            532.33075
+          ],
+          "graph_ms": [
+            543.255583,
+            545.007209,
+            544.6771249999999,
+            554.134125,
+            553.217583
+          ],
+          "standalone_median_ms": 539.6959999999999,
+          "graph_median_ms": 545.007209,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-final-masks-1.json",
+      "raw_sha256": "0ef7a644a1e4f0cb86e542baf5c960ef344bf59121656085d8d93b85248beb0e",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                9.692917000000001,
+                12.160292,
+                8.741375,
+                8.910334,
+                9.323708
+              ],
+              "median_ms": 9.323708,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                4.150292,
+                4.154959,
+                6.818375,
+                6.696042,
+                6.940542
+              ],
+              "median_ms": 6.696042,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                11.937958,
+                13.228167000000001,
+                11.406792000000001,
+                12.983459,
+                10.978791999999999
+              ],
+              "median_ms": 11.937958,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                13.080958,
+                15.025333999999999,
+                13.783334,
+                15.492333,
+                14.766625
+              ],
+              "median_ms": 14.766625,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                9.5055,
+                9.431167,
+                8.914333,
+                9.613083999999999,
+                8.99175
+              ],
+              "median_ms": 9.431167,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                21.169041999999997,
+                22.82825,
+                23.026417000000002,
+                20.964333000000003,
+                22.867542
+              ],
+              "median_ms": 22.82825,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                255.8035,
+                261.67879100000005,
+                259.872708,
+                259.38262499999996,
+                264.576667
+              ],
+              "median_ms": 259.872708,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                75.680791,
+                76.733834,
+                76.071792,
+                75.615125,
+                76.143458
+              ],
+              "median_ms": 76.071792,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                326.872375,
+                330.096333,
+                322.711334,
+                320.7335,
+                332.850666
+              ],
+              "median_ms": 326.872375,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-final-masks-2.json",
+      "raw_sha256": "3d1b2cee4dbcfb16f02cb359ea6d4fae3305e672c8e43232e8c0e73199969355",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                12.148833,
+                9.717125,
+                9.080792,
+                9.578709,
+                8.771083
+              ],
+              "median_ms": 9.578709,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                6.3334589999999995,
+                4.293792,
+                6.767625,
+                6.7765830000000005,
+                7.0246249999999995
+              ],
+              "median_ms": 6.767625,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                11.629541999999999,
+                12.201791,
+                11.257792,
+                12.671916999999999,
+                11.899750000000001
+              ],
+              "median_ms": 11.899750000000001,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                14.352958000000001,
+                13.124375,
+                14.346167,
+                14.120584000000001,
+                14.088875000000002
+              ],
+              "median_ms": 14.120584000000001,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                8.59975,
+                7.155625,
+                8.617167,
+                8.773875,
+                9.280959
+              ],
+              "median_ms": 8.617167,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                20.824291000000002,
+                21.617084000000002,
+                22.900582999999997,
+                20.834791,
+                20.0825
+              ],
+              "median_ms": 20.834791,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                257.824167,
+                255.587584,
+                270.01545799999997,
+                265.20425,
+                271.865417
+              ],
+              "median_ms": 265.20425,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                74.891917,
+                76.11800000000001,
+                78.787292,
+                81.472666,
+                81.834708
+              ],
+              "median_ms": 78.787292,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                331.507667,
+                329.829,
+                318.87,
+                355.593875,
+                346.44962499999997
+              ],
+              "median_ms": 331.507667,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-graph-1.json",
+      "raw_sha256": "dd5a3f6eded56bd19e13b9bd12443db446aa752c3496b7f4712650c53e449147",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            41.38125,
+            43.023459,
+            47.595208,
+            47.933584,
+            47.451417
+          ],
+          "graph_ms": [
+            29.345,
+            29.694166000000003,
+            29.345125,
+            29.074083,
+            32.474500000000006
+          ],
+          "standalone_median_ms": 47.451417,
+          "graph_median_ms": 29.345125,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            67.919208,
+            68.277208,
+            70.505583,
+            63.063042,
+            61.086332999999996
+          ],
+          "graph_ms": [
+            54.077583999999995,
+            51.677583,
+            55.162542,
+            52.507875000000006,
+            50.799542
+          ],
+          "standalone_median_ms": 67.919208,
+          "graph_median_ms": 52.507875000000006,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            537.504833,
+            541.2365,
+            541.099833,
+            545.2235840000001,
+            566.9114579999999
+          ],
+          "graph_ms": [
+            548.164042,
+            565.625709,
+            526.477791,
+            528.214292,
+            560.632833
+          ],
+          "standalone_median_ms": 541.2365,
+          "graph_median_ms": 548.164042,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-graph-2.json",
+      "raw_sha256": "da88fe7dbd0d71230485acebb20e174dfb517beb0b28f97c51b383e95612dccd",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            39.104082999999996,
+            36.051083,
+            38.710333999999996,
+            35.955,
+            40.835541000000006
+          ],
+          "graph_ms": [
+            28.726584,
+            29.04025,
+            28.08225,
+            29.755292,
+            26.985709
+          ],
+          "standalone_median_ms": 38.710333999999996,
+          "graph_median_ms": 28.726584,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            59.194125,
+            57.235625,
+            57.992291,
+            56.985375,
+            59.547584
+          ],
+          "graph_ms": [
+            49.772042,
+            50.061667,
+            49.281,
+            51.565125,
+            49.890499999999996
+          ],
+          "standalone_median_ms": 57.992291,
+          "graph_median_ms": 49.890499999999996,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            542.91075,
+            535.2302500000001,
+            530.829333,
+            554.921375,
+            542.9515
+          ],
+          "graph_ms": [
+            528.70475,
+            527.6685,
+            540.2430830000001,
+            558.9510829999999,
+            536.1297910000001
+          ],
+          "standalone_median_ms": 542.91075,
+          "graph_median_ms": 536.1297910000001,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-graph-3.json",
+      "raw_sha256": "91fcd1b3daded6cf7dd1112e85a1dc60515048494186de8378bd52f6f9d4a0b9",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            49.574,
+            47.354084,
+            42.616625,
+            42.519583,
+            37.371167
+          ],
+          "graph_ms": [
+            30.592875,
+            29.805167,
+            28.8225,
+            27.148084,
+            30.197292
+          ],
+          "standalone_median_ms": 42.616625,
+          "graph_median_ms": 29.805167,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            59.043416,
+            60.565124999999995,
+            61.880708999999996,
+            58.961042,
+            59.781291
+          ],
+          "graph_ms": [
+            49.474,
+            48.873582999999996,
+            49.369167,
+            51.887,
+            49.614959
+          ],
+          "standalone_median_ms": 59.781291,
+          "graph_median_ms": 49.474,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            582.1320420000001,
+            533.6053750000001,
+            542.209417,
+            566.415084,
+            576.7073750000001
+          ],
+          "graph_ms": [
+            537.142,
+            526.8965,
+            527.96175,
+            533.277084,
+            526.445833
+          ],
+          "standalone_median_ms": 566.415084,
+          "graph_median_ms": 527.96175,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-graph-4.json",
+      "raw_sha256": "5277e59c54100ddff8ce7e54c8533147861f6ba59cc99b9cc34fd49bb9259cc6",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            37.680541,
+            36.087708000000006,
+            38.185417,
+            35.361792,
+            39.560583
+          ],
+          "graph_ms": [
+            30.245,
+            27.206667,
+            28.288916,
+            29.111,
+            27.444208
+          ],
+          "standalone_median_ms": 37.680541,
+          "graph_median_ms": 28.288916,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            59.440167,
+            56.154458,
+            57.828209,
+            56.254666,
+            57.359542
+          ],
+          "graph_ms": [
+            50.326042,
+            50.761958,
+            52.854541999999995,
+            49.986916,
+            50.17875
+          ],
+          "standalone_median_ms": 57.359542,
+          "graph_median_ms": 50.326042,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            536.558875,
+            538.507333,
+            530.7122079999999,
+            531.940208,
+            541.173792
+          ],
+          "graph_ms": [
+            527.347583,
+            540.682667,
+            548.7874579999999,
+            554.372625,
+            526.341875
+          ],
+          "standalone_median_ms": 536.558875,
+          "graph_median_ms": 540.682667,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-masks-1.json",
+      "raw_sha256": "29986fd0c2f490214b5713502dee99143d369a0f3d15a667f5d8bf01d48e6cde",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                10.300417,
+                10.2565,
+                11.897042,
+                10.094042,
+                10.21275
+              ],
+              "median_ms": 10.2565,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                7.947042,
+                8.010417,
+                14.448875,
+                7.633832999999999,
+                7.582542
+              ],
+              "median_ms": 7.947042,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                12.861125,
+                15.486416,
+                24.151625,
+                14.453875,
+                15.34025
+              ],
+              "median_ms": 15.34025,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                15.768832999999999,
+                12.609791,
+                14.864165999999999,
+                15.195542,
+                14.717333
+              ],
+              "median_ms": 14.864165999999999,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                10.602667,
+                10.60675,
+                10.318417,
+                10.040166999999999,
+                9.734875
+              ],
+              "median_ms": 10.318417,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                23.352500000000003,
+                21.077125,
+                20.442708,
+                19.749875,
+                22.933042
+              ],
+              "median_ms": 21.077125,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                241.964958,
+                249.108833,
+                239.770542,
+                234.00225,
+                241.53775
+              ],
+              "median_ms": 241.53775,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                74.14241700000001,
+                70.22179200000001,
+                70.721084,
+                71.486084,
+                73.85083300000001
+              ],
+              "median_ms": 71.486084,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                304.39220900000004,
+                306.482292,
+                306.332375,
+                303.929791,
+                324.95016599999997
+              ],
+              "median_ms": 306.332375,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-masks-2.json",
+      "raw_sha256": "f17c63514fd3ccd33bc30a3b1a5a35c66388b41701fb037adb7e49467c37e1fd",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                11.760542000000001,
+                13.205417,
+                10.930250000000001,
+                11.616125,
+                10.478833
+              ],
+              "median_ms": 11.616125,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                4.1425,
+                7.563917,
+                7.503166,
+                6.957083,
+                7.843625
+              ],
+              "median_ms": 7.503166,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                12.032542,
+                11.768542,
+                15.540958,
+                12.925542,
+                14.351833
+              ],
+              "median_ms": 12.925542,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                16.016,
+                13.825083,
+                12.826083,
+                15.751999999999999,
+                15.017000000000001
+              ],
+              "median_ms": 15.017000000000001,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                11.098792,
+                9.377625,
+                10.483333,
+                9.979792,
+                9.569332999999999
+              ],
+              "median_ms": 9.979792,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                19.796958,
+                20.861917000000002,
+                20.969917000000002,
+                23.46825,
+                23.465
+              ],
+              "median_ms": 20.969917000000002,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                255.545542,
+                245.591792,
+                248.748541,
+                252.44725000000003,
+                240.448958
+              ],
+              "median_ms": 248.748541,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                74.893542,
+                72.865,
+                73.017709,
+                72.634625,
+                74.819875
+              ],
+              "median_ms": 73.017709,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                323.464333,
+                300.63241600000003,
+                308.061042,
+                309.857541,
+                309.588792
+              ],
+              "median_ms": 309.588792,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-masks-3.json",
+      "raw_sha256": "39574fa07287bd03279d78c86d29126d5f25b71f0bfd8f9cabf596642de6db8a",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                12.094459,
+                12.994709,
+                9.693334,
+                10.523458,
+                10.535124999999999
+              ],
+              "median_ms": 10.535124999999999,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                4.283417,
+                8.067041,
+                4.195416000000001,
+                7.329458,
+                4.474417
+              ],
+              "median_ms": 4.474417,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                12.335,
+                12.080542,
+                14.885417,
+                14.856207999999999,
+                15.168
+              ],
+              "median_ms": 14.856207999999999,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                12.975791000000001,
+                13.161792,
+                13.288,
+                16.522333,
+                14.621041
+              ],
+              "median_ms": 13.288,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                9.967916,
+                9.849958,
+                9.509083,
+                10.029875,
+                9.932042000000001
+              ],
+              "median_ms": 9.932042000000001,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                22.007542,
+                20.331792,
+                20.985584000000003,
+                20.901417,
+                21.101708
+              ],
+              "median_ms": 20.985584000000003,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                250.40329099999997,
+                259.722833,
+                253.87820900000003,
+                247.071667,
+                232.73975
+              ],
+              "median_ms": 250.40329099999997,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                77.464125,
+                70.835166,
+                69.392917,
+                73.893666,
+                75.64987500000001
+              ],
+              "median_ms": 73.893666,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                339.616333,
+                320.2025,
+                328.843166,
+                316.926333,
+                306.040458
+              ],
+              "median_ms": 320.2025,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "baseline-masks-4.json",
+      "raw_sha256": "7f85f1aa1113c2df023013be0700f3406579401048647095637430ae77af0e4b",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                11.445625,
+                14.195542,
+                9.921249999999999,
+                10.301833,
+                10.210624999999999
+              ],
+              "median_ms": 10.301833,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                7.719625,
+                8.108834,
+                4.394667,
+                8.441084,
+                4.410500000000001
+              ],
+              "median_ms": 7.719625,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                14.622125,
+                13.568999999999999,
+                13.1595,
+                12.809375,
+                16.112000000000002
+              ],
+              "median_ms": 13.568999999999999,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                14.172167,
+                16.772959,
+                18.838959,
+                15.229209,
+                17.83875
+              ],
+              "median_ms": 16.772959,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                11.845292,
+                12.419917000000002,
+                12.071166,
+                11.012833,
+                11.897291000000001
+              ],
+              "median_ms": 11.897291000000001,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                21.238500000000002,
+                24.657709,
+                24.416291,
+                25.460292,
+                25.124958
+              ],
+              "median_ms": 24.657709,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                237.082583,
+                240.233875,
+                241.05591700000002,
+                251.86375,
+                255.57316600000001
+              ],
+              "median_ms": 241.05591700000002,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                70.488667,
+                72.797708,
+                72.199,
+                80.01650000000001,
+                78.15920799999999
+              ],
+              "median_ms": 72.797708,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                307.555291,
+                313.264084,
+                304.070333,
+                320.357166,
+                333.832875
+              ],
+              "median_ms": 313.264084,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "browser-code-correctness.json",
+      "raw_sha256": "112bc569dfec17a8a74ba5eae9f6e142504b3905b34a4af51addf63c7493a392",
+      "schema": "spiraltorch.nn.inference_plan.v3",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "tiled_affine_shape": [
+        32,
+        257
+      ],
+      "guard_rejected": true,
+      "cases": []
+    },
+    {
+      "name": "browser-code-matched-1.json",
+      "raw_sha256": "039688e22918f037f8296883bdb8edf8bcc89bf23664136cecb45876d95e7995",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            39.90000003576279,
+            39.80000001192093,
+            40.39999997615814,
+            39.59999996423721,
+            41.60000002384186
+          ],
+          "candidate_ms": [
+            37.80000001192093,
+            38,
+            37.90000003576279,
+            37.69999998807907,
+            40.80000001192093
+          ],
+          "baseline_median_ms": 39.90000003576279,
+          "candidate_median_ms": 37.90000003576279,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            440.5,
+            452.60000002384186,
+            450.80000001192093,
+            443.39999997615814,
+            439.30000001192093
+          ],
+          "candidate_ms": [
+            407.80000001192093,
+            405.19999998807907,
+            411,
+            410,
+            407.69999998807907
+          ],
+          "baseline_median_ms": 443.39999997615814,
+          "candidate_median_ms": 407.80000001192093,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-code-matched-2.json",
+      "raw_sha256": "ff226da38fdd6941ac195b6823a262afbd3a92111ae88851ed3230efa9d726f7",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            39.69999998807907,
+            39.40000003576279,
+            40,
+            39.80000001192093,
+            41.39999997615814
+          ],
+          "candidate_ms": [
+            40,
+            40.09999996423721,
+            37.89999997615814,
+            37.59999996423721,
+            40.40000003576279
+          ],
+          "baseline_median_ms": 39.80000001192093,
+          "candidate_median_ms": 40,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            463.19999998807907,
+            455,
+            441.30000001192093,
+            449.30000001192093,
+            443.30000001192093
+          ],
+          "candidate_ms": [
+            408.7999999523163,
+            409.39999997615814,
+            413.0999999642372,
+            412.80000001192093,
+            412.4000000357628
+          ],
+          "baseline_median_ms": 449.30000001192093,
+          "candidate_median_ms": 412.4000000357628,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-code-matched-3.json",
+      "raw_sha256": "d506b9104ba35e930b032a533623e3d736e28e8c888e1c1d6b5c787f55b4dcc3",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            40.299999952316284,
+            39.40000003576279,
+            39.30000001192093,
+            39.69999998807907,
+            39.30000001192093
+          ],
+          "candidate_ms": [
+            37.5,
+            37.89999997615814,
+            37.69999998807907,
+            37.69999998807907,
+            41.80000001192093
+          ],
+          "baseline_median_ms": 39.40000003576279,
+          "candidate_median_ms": 37.69999998807907,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            476.89999997615814,
+            443.7000000476837,
+            439,
+            442.10000002384186,
+            440.69999998807907
+          ],
+          "candidate_ms": [
+            427,
+            407.60000002384186,
+            409.0999999642372,
+            406.80000001192093,
+            408.5999999642372
+          ],
+          "baseline_median_ms": 442.10000002384186,
+          "candidate_median_ms": 408.5999999642372,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-code-matched-4.json",
+      "raw_sha256": "5996a45f3b0810871136c37da4fd5eb0834229c3d97aec15d1afa814ed53402e",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            39.90000003576279,
+            39.19999998807907,
+            39.80000001192093,
+            40,
+            41.10000002384186
+          ],
+          "candidate_ms": [
+            38.09999996423721,
+            37.69999998807907,
+            37.90000003576279,
+            37.5,
+            41
+          ],
+          "baseline_median_ms": 39.90000003576279,
+          "candidate_median_ms": 37.90000003576279,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            441.30000001192093,
+            457.2000000476837,
+            442.89999997615814,
+            471.89999997615814,
+            458.89999997615814
+          ],
+          "candidate_ms": [
+            413,
+            413,
+            418.10000002384186,
+            439.5,
+            408.10000002384186
+          ],
+          "baseline_median_ms": 457.2000000476837,
+          "candidate_median_ms": 413,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-final-correctness.json",
+      "raw_sha256": "12ff00fb8b10fd7e5c846b86a9c86264f814516cd364e8b5c64e9b15564e6eaf",
+      "schema": "spiraltorch.nn.inference_plan.v3",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "tiled_affine_shape": [
+        32,
+        257
+      ],
+      "guard_rejected": true,
+      "cases": []
+    },
+    {
+      "name": "browser-final-matched-1.json",
+      "raw_sha256": "542691750735a29ca9bd414be655abe0ebae9721678f076815ffe722e356af93",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            50.200000047683716,
+            49.5,
+            49.19999998807907,
+            51.200000047683716,
+            49
+          ],
+          "candidate_ms": [
+            48.69999998807907,
+            48,
+            47.59999996423721,
+            49.10000002384186,
+            48.299999952316284
+          ],
+          "baseline_median_ms": 49.5,
+          "candidate_median_ms": 48.299999952316284,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            556.8999999761581,
+            608.5999999642372,
+            578.7999999523163,
+            639.5,
+            622
+          ],
+          "candidate_ms": [
+            625.9000000357628,
+            675.3000000119209,
+            627.3000000119209,
+            608.8000000119209,
+            554.0999999642372
+          ],
+          "baseline_median_ms": 608.5999999642372,
+          "candidate_median_ms": 625.9000000357628,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-final-matched-2.json",
+      "raw_sha256": "505ca2e5197cbf4bfac3b133fe796f02c06083625d6b78b94bcb5236293936ca",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            49.09999996423721,
+            49.10000002384186,
+            48.69999998807907,
+            51,
+            51.5
+          ],
+          "candidate_ms": [
+            47.5,
+            47.40000003576279,
+            45.60000002384186,
+            47.30000001192093,
+            54.799999952316284
+          ],
+          "baseline_median_ms": 49.10000002384186,
+          "candidate_median_ms": 47.40000003576279,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            570.8999999761581,
+            604.8000000119209,
+            598,
+            617.3000000119209,
+            646.9000000357628
+          ],
+          "candidate_ms": [
+            534.6000000238419,
+            548.5,
+            542.3999999761581,
+            512,
+            582.5
+          ],
+          "baseline_median_ms": 604.8000000119209,
+          "candidate_median_ms": 542.3999999761581,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-final-matched-3.json",
+      "raw_sha256": "13b6e34c0df293c6cd9d5c5b35ee10cdec07d61776830770a2254360b8202ee6",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            48.80000001192093,
+            47.30000001192093,
+            46.80000001192093,
+            51.60000002384186,
+            47.69999998807907
+          ],
+          "candidate_ms": [
+            46.69999998807907,
+            45.60000002384186,
+            48.30000001192093,
+            48.69999998807907,
+            47
+          ],
+          "baseline_median_ms": 47.69999998807907,
+          "candidate_median_ms": 47,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            551,
+            542.9000000357628,
+            555.5,
+            534.4000000357628,
+            538.6999999880791
+          ],
+          "candidate_ms": [
+            525.6999999880791,
+            510.5,
+            524.5,
+            510.60000002384186,
+            529.8000000119209
+          ],
+          "baseline_median_ms": 542.9000000357628,
+          "candidate_median_ms": 524.5,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-final-matched-4.json",
+      "raw_sha256": "8f559804c64482cc3d57efe40f49c0c66f95075b2aaecacada46c23be09cd2ce",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            50,
+            49.60000002384186,
+            49.39999997615814,
+            50.89999997615814,
+            48.19999998807907
+          ],
+          "candidate_ms": [
+            47.39999997615814,
+            48,
+            47.60000002384186,
+            49.60000002384186,
+            47.5
+          ],
+          "baseline_median_ms": 49.60000002384186,
+          "candidate_median_ms": 47.60000002384186,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            561.9000000357628,
+            544,
+            539,
+            540.7000000476837,
+            537.4000000357628
+          ],
+          "candidate_ms": [
+            527.5,
+            515.9000000357628,
+            511.80000001192093,
+            505,
+            512.5999999642372
+          ],
+          "baseline_median_ms": 540.7000000476837,
+          "candidate_median_ms": 512.5999999642372,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-guarded-1.json",
+      "raw_sha256": "4eb19f7fb085fa4e2101b2b676f946abd3c96aaaa0cf5048ff971adf59256553",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            49.39999997615814,
+            52.39999997615814,
+            48.30000001192093,
+            48.80000001192093,
+            53.90000003576279
+          ],
+          "candidate_ms": [
+            47.10000002384186,
+            49.19999998807907,
+            45.59999996423721,
+            48.30000001192093,
+            49.19999998807907
+          ],
+          "baseline_median_ms": 49.39999997615814,
+          "candidate_median_ms": 48.30000001192093,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            514.3000000119209,
+            532.8000000119209,
+            517.7999999523163,
+            522.6999999880791,
+            515.5999999642372
+          ],
+          "candidate_ms": [
+            490.39999997615814,
+            501.60000002384186,
+            482.89999997615814,
+            476.60000002384186,
+            500.89999997615814
+          ],
+          "baseline_median_ms": 517.7999999523163,
+          "candidate_median_ms": 490.39999997615814,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "browser-guarded-2.json",
+      "raw_sha256": "8b74708da28960e9cf20ad772b3e234ba85cef27b77f76fa7df8ece35458753c",
+      "schema": "spiraltorch.layer_norm.browser_matched.v1",
+      "status": "passed",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "browser_version": "153.0.8010.53",
+      "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_ms": [
+            51.5,
+            49.80000001192093,
+            50.200000047683716,
+            52.40000003576279,
+            50.69999998807907
+          ],
+          "candidate_ms": [
+            47.90000003576279,
+            48.89999997615814,
+            49.89999997615814,
+            49.5,
+            52.19999998807907
+          ],
+          "baseline_median_ms": 50.69999998807907,
+          "candidate_median_ms": 49.5,
+          "max_scaled_error": 0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_ms": [
+            502.5,
+            541.5999999642372,
+            514.5,
+            509.69999998807907,
+            508.80000001192093
+          ],
+          "candidate_ms": [
+            469,
+            484.80000001192093,
+            475.69999998807907,
+            464,
+            474.5
+          ],
+          "baseline_median_ms": 509.69999998807907,
+          "candidate_median_ms": 474.5,
+          "max_scaled_error": 0
+        }
+      ]
+    },
+    {
+      "name": "candidate-final-graph-1.json",
+      "raw_sha256": "009763da4a4e18435bf11a0d1f9fb39fdcd5a626b450f8c59b78957b2082b97c",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            28.676750000000002,
+            29.484375,
+            31.634500000000003,
+            28.468458,
+            31.294750000000004
+          ],
+          "graph_ms": [
+            26.402542,
+            28.386459,
+            26.926375,
+            28.565666,
+            27.630166000000003
+          ],
+          "standalone_median_ms": 29.484375,
+          "graph_median_ms": 27.630166000000003,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            52.073209000000006,
+            51.412417000000005,
+            53.416084000000005,
+            53.955957999999995,
+            53.120042
+          ],
+          "graph_ms": [
+            49.624583,
+            46.939958,
+            48.401334,
+            47.593125,
+            47.620166999999995
+          ],
+          "standalone_median_ms": 53.120042,
+          "graph_median_ms": 47.620166999999995,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            519.6297079999999,
+            515.00925,
+            524.086584,
+            529.812375,
+            533.224792
+          ],
+          "graph_ms": [
+            518.7993749999999,
+            524.51675,
+            533.0195,
+            516.092208,
+            526.39075
+          ],
+          "standalone_median_ms": 524.086584,
+          "graph_median_ms": 524.51675,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "candidate-final-graph-2.json",
+      "raw_sha256": "bfc6ff1d1f07b28265bb4063cdbf8a4cae9094a2b3f4cbaf9feb7e2954a858a0",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            31.462708999999997,
+            28.808291999999998,
+            31.324875000000002,
+            30.198666999999997,
+            29.370832999999998
+          ],
+          "graph_ms": [
+            28.261458,
+            28.562208,
+            27.408292,
+            29.427416,
+            26.29225
+          ],
+          "standalone_median_ms": 30.198666999999997,
+          "graph_median_ms": 28.261458,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            53.477458,
+            51.448625,
+            54.094,
+            51.671834,
+            51.304750000000006
+          ],
+          "graph_ms": [
+            49.679958000000006,
+            47.080083,
+            48.379583,
+            50.07,
+            47.330833000000005
+          ],
+          "standalone_median_ms": 51.671834,
+          "graph_median_ms": 48.379583,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            523.5492499999999,
+            528.775042,
+            517.456,
+            524.087583,
+            513.527334
+          ],
+          "graph_ms": [
+            513.419958,
+            519.871625,
+            521.4890829999999,
+            513.341916,
+            518.245042
+          ],
+          "standalone_median_ms": 523.5492499999999,
+          "graph_median_ms": 518.245042,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "candidate-final-masks-1.json",
+      "raw_sha256": "0beb5b964ad359aa1c784f3b42a3039b454efece4607468d93a92f81a4fbcfd6",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                9.338625,
+                8.490792,
+                9.0055,
+                9.157791999999999,
+                8.597417
+              ],
+              "median_ms": 9.0055,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                6.855583,
+                6.934,
+                6.5217920000000005,
+                6.837459,
+                6.771458999999999
+              ],
+              "median_ms": 6.837459,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                12.879208,
+                11.089958000000001,
+                10.4765,
+                13.476333,
+                10.087957999999999
+              ],
+              "median_ms": 11.089958000000001,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                14.808667,
+                14.813958,
+                13.370375000000001,
+                13.084208,
+                13.041291
+              ],
+              "median_ms": 13.370375000000001,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                8.646125,
+                9.176542,
+                8.608167,
+                7.954709000000001,
+                9.029
+              ],
+              "median_ms": 8.646125,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                20.9225,
+                22.564334,
+                21.500625,
+                22.413,
+                23.289208
+              ],
+              "median_ms": 22.413,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                223.85829199999998,
+                215.057041,
+                214.95320800000002,
+                210.074875,
+                213.792292
+              ],
+              "median_ms": 214.95320800000002,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                77.476334,
+                77.919,
+                77.056625,
+                75.98816699999999,
+                76.491625
+              ],
+              "median_ms": 77.056625,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                269.736292,
+                267.922666,
+                272.080333,
+                269.00316699999996,
+                269.269083
+              ],
+              "median_ms": 269.269083,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "candidate-final-masks-2.json",
+      "raw_sha256": "f090d390d5d77c064f30de92f85fb01d866113fa39452cfe40b426adf908525e",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                8.692042,
+                8.604584000000001,
+                7.202083,
+                8.501,
+                8.322916
+              ],
+              "median_ms": 8.501,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                6.842625,
+                6.508792000000001,
+                7.1884999999999994,
+                6.7527919999999995,
+                4.237458
+              ],
+              "median_ms": 6.7527919999999995,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                11.365584,
+                10.286375,
+                11.422666999999999,
+                11.4395,
+                11.788542000000001
+              ],
+              "median_ms": 11.422666999999999,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                14.600959,
+                13.250416,
+                15.220374999999999,
+                13.503958,
+                15.199458
+              ],
+              "median_ms": 14.600959,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                8.624,
+                7.813374999999999,
+                9.394667,
+                9.04025,
+                8.74975
+              ],
+              "median_ms": 8.74975,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                20.643749999999997,
+                21.639042,
+                23.2565,
+                20.170042,
+                23.576916999999998
+              ],
+              "median_ms": 21.639042,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                213.986208,
+                213.441375,
+                218.597083,
+                228.498791,
+                211.661292
+              ],
+              "median_ms": 213.986208,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                75.84725,
+                74.731959,
+                77.839208,
+                74.833708,
+                79.912542
+              ],
+              "median_ms": 75.84725,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                272.553291,
+                267.935833,
+                272.163875,
+                273.912125,
+                275.636833
+              ],
+              "median_ms": 272.553291,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "candidate-graph-1.json",
+      "raw_sha256": "046a878167cfbac83d6e8153c5be08811c680df37caad585597ccf3fa150687b",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            35.629458,
+            35.656542,
+            39.685708,
+            35.557792,
+            38.553583
+          ],
+          "graph_ms": [
+            27.591667,
+            27.230332999999998,
+            27.686458000000002,
+            28.449667,
+            27.991459
+          ],
+          "standalone_median_ms": 35.656542,
+          "graph_median_ms": 27.686458000000002,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            66.66808300000001,
+            65.371792,
+            67.189667,
+            65.65625,
+            66.013292
+          ],
+          "graph_ms": [
+            57.84575,
+            57.384417,
+            55.839583,
+            57.630874999999996,
+            56.68975
+          ],
+          "standalone_median_ms": 66.013292,
+          "graph_median_ms": 57.384417,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            530.399875,
+            538.65175,
+            548.393875,
+            528.2302920000001,
+            528.824583
+          ],
+          "graph_ms": [
+            518.208917,
+            517.362834,
+            544.250583,
+            523.120208,
+            519.943167
+          ],
+          "standalone_median_ms": 530.399875,
+          "graph_median_ms": 519.943167,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "candidate-graph-2.json",
+      "raw_sha256": "a3cc46e700308c79fcc66fe8d0653d87c6a5ec2a34a5084f1e86d5e2866be969",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            36.341208,
+            41.591459,
+            36.850833,
+            39.279624999999996,
+            36.296083
+          ],
+          "graph_ms": [
+            28.535332999999998,
+            27.747,
+            27.990875,
+            27.768041,
+            28.984625
+          ],
+          "standalone_median_ms": 36.850833,
+          "graph_median_ms": 27.990875,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            67.64862500000001,
+            67.657333,
+            68.12775,
+            70.082459,
+            68.323042
+          ],
+          "graph_ms": [
+            57.1425,
+            56.005417,
+            56.454291,
+            57.288790999999996,
+            57.408666999999994
+          ],
+          "standalone_median_ms": 68.12775,
+          "graph_median_ms": 57.1425,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            528.157833,
+            546.266708,
+            573.8896249999999,
+            532.119542,
+            533.134583
+          ],
+          "graph_ms": [
+            515.2860420000001,
+            515.245,
+            531.571458,
+            520.245209,
+            519.156125
+          ],
+          "standalone_median_ms": 533.134583,
+          "graph_median_ms": 519.156125,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "candidate-masks-1.json",
+      "raw_sha256": "305d281b6705cd9f5bdd2fd6bfaa5476d600dafadc01fe8efb6dba784193b3a4",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                12.206542,
+                10.660916,
+                11.485917,
+                13.417250000000001,
+                11.069458000000001
+              ],
+              "median_ms": 11.485917,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                7.372333,
+                9.063833,
+                4.721541,
+                6.108083000000001,
+                8.613582999999998
+              ],
+              "median_ms": 7.372333,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                16.717041,
+                16.926541999999998,
+                14.216125,
+                16.64775,
+                16.314
+              ],
+              "median_ms": 16.64775,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                17.403,
+                19.697125,
+                16.63075,
+                18.132125,
+                17.871083
+              ],
+              "median_ms": 17.871083,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                11.54975,
+                10.422666000000001,
+                13.389166,
+                12.133708,
+                10.614500000000001
+              ],
+              "median_ms": 11.54975,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                25.853375,
+                25.440541,
+                25.211707999999998,
+                24.419208,
+                23.89525
+              ],
+              "median_ms": 25.211707999999998,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                238.268375,
+                245.96912500000002,
+                240.678167,
+                250.41858299999998,
+                250.007916
+              ],
+              "median_ms": 245.96912500000002,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                72.1155,
+                73.925625,
+                71.191708,
+                80.939458,
+                74.834541
+              ],
+              "median_ms": 73.925625,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                309.542667,
+                311.226209,
+                307.803834,
+                318.85308299999997,
+                310.355917
+              ],
+              "median_ms": 310.355917,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "candidate-masks-2.json",
+      "raw_sha256": "ec0ff9bad5976631899175ec5d2ddf577b695844869310d5977dc24e5bbe9904",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                12.912333,
+                14.403667,
+                11.978834,
+                11.690083,
+                14.950041
+              ],
+              "median_ms": 12.912333,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                4.214041,
+                8.304542,
+                9.602666,
+                9.120208,
+                8.233458
+              ],
+              "median_ms": 8.304542,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                16.18825,
+                15.746708000000002,
+                16.753500000000003,
+                17.119249999999997,
+                15.995875
+              ],
+              "median_ms": 16.18825,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                16.414458,
+                16.473834,
+                16.961208,
+                15.679875,
+                15.893250000000002
+              ],
+              "median_ms": 16.414458,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                10.566707999999998,
+                9.834208,
+                10.400540999999999,
+                10.069167,
+                10.464166
+              ],
+              "median_ms": 10.400540999999999,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                21.867042,
+                24.6495,
+                23.083959,
+                22.974916,
+                24.534625000000002
+              ],
+              "median_ms": 23.083959,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                237.19975,
+                250.63216599999998,
+                261.09025,
+                250.841333,
+                239.082916
+              ],
+              "median_ms": 250.63216599999998,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                73.95916600000001,
+                72.290791,
+                71.345833,
+                74.744459,
+                73.66499999999999
+              ],
+              "median_ms": 73.66499999999999,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                305.213166,
+                305.7185,
+                315.596333,
+                332.83075,
+                313.936583
+              ],
+              "median_ms": 313.936583,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-baseline-graph-1.json",
+      "raw_sha256": "b52d107e347c5fd9f1119e20536f073e86e60356f1e36e9cd9a3552b6b366f21",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            31.143957999999998,
+            29.584042,
+            28.423834,
+            25.373,
+            25.427667
+          ],
+          "graph_ms": [
+            22.659791,
+            23.088541,
+            23.179209,
+            23.395125,
+            23.634124999999997
+          ],
+          "standalone_median_ms": 28.423834,
+          "graph_median_ms": 23.179209,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            46.426625,
+            47.847874999999995,
+            48.852083,
+            50.391083,
+            47.191167
+          ],
+          "graph_ms": [
+            43.575834,
+            44.024667,
+            43.467208,
+            42.425916,
+            44.61
+          ],
+          "standalone_median_ms": 47.847874999999995,
+          "graph_median_ms": 43.575834,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            512.092333,
+            495.310917,
+            483.09954100000004,
+            493.23699999999997,
+            483.418709
+          ],
+          "graph_ms": [
+            489.491042,
+            478.233,
+            487.971333,
+            477.526709,
+            490.610584
+          ],
+          "standalone_median_ms": 493.23699999999997,
+          "graph_median_ms": 487.971333,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-baseline-graph-2.json",
+      "raw_sha256": "e73c3a38b61f5c830aec0636182a0acb6a6cdaec42f1867122dca35525f0dde5",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            42.599375,
+            58.750083000000004,
+            43.340083,
+            45.255958,
+            41.701916
+          ],
+          "graph_ms": [
+            33.999209,
+            33.327834,
+            29.262832999999997,
+            31.367082999999997,
+            23.095042
+          ],
+          "standalone_median_ms": 43.340083,
+          "graph_median_ms": 31.367082999999997,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            55.799583,
+            53.051125,
+            51.197125,
+            51.898792,
+            52.032624999999996
+          ],
+          "graph_ms": [
+            43.713667,
+            44.577125,
+            46.018084,
+            44.909125,
+            43.917084
+          ],
+          "standalone_median_ms": 52.032624999999996,
+          "graph_median_ms": 44.577125,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            488.61025,
+            512.958542,
+            498.84241699999995,
+            550.5308749999999,
+            522.154667
+          ],
+          "graph_ms": [
+            498.316333,
+            482.830042,
+            531.18325,
+            522.228416,
+            495.606625
+          ],
+          "standalone_median_ms": 512.958542,
+          "graph_median_ms": 498.316333,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-baseline-masks-1.json",
+      "raw_sha256": "13c3cb1b4ef136d834b790c092a51b5af8f1abccf8776fa8cc3ec32537a3feaa",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                7.456042,
+                7.435708,
+                9.390458,
+                8.505375,
+                8.806415999999999
+              ],
+              "median_ms": 8.505375,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                4.098209000000001,
+                5.257542,
+                6.685416,
+                6.915542,
+                6.752709
+              ],
+              "median_ms": 6.685416,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                11.870875,
+                10.771708,
+                11.362708,
+                12.1975,
+                11.003625
+              ],
+              "median_ms": 11.362708,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                10.636708,
+                12.095209,
+                11.304708,
+                10.920166,
+                11.808584
+              ],
+              "median_ms": 11.304708,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                8.891083,
+                8.549792,
+                8.573083,
+                8.477583000000001,
+                8.830208
+              ],
+              "median_ms": 8.573083,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                17.368334,
+                17.713167,
+                17.63875,
+                17.086625,
+                17.072625000000002
+              ],
+              "median_ms": 17.368334,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                229.475084,
+                218.24450000000002,
+                224.461209,
+                222.2565,
+                216.76624999999999
+              ],
+              "median_ms": 222.2565,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                68.518084,
+                64.86500000000001,
+                66.6495,
+                65.638,
+                64.615542
+              ],
+              "median_ms": 65.638,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                292.315208,
+                296.64991699999996,
+                277.720959,
+                283.91308300000003,
+                285.369417
+              ],
+              "median_ms": 285.369417,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-baseline-masks-2.json",
+      "raw_sha256": "c3f66f7024803a1bc06a1b77704b2c595e7e73ee0d743fee65fb0234bbd20e2e",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                7.962584,
+                7.3786249999999995,
+                8.94575,
+                7.790458999999999,
+                7.6302080000000005
+              ],
+              "median_ms": 7.790458999999999,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                4.148459,
+                5.391584,
+                5.404708,
+                4.558375,
+                5.820292
+              ],
+              "median_ms": 5.391584,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                9.441333,
+                9.642875,
+                10.295959,
+                11.577834000000001,
+                10.353625
+              ],
+              "median_ms": 10.295959,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                10.715125,
+                11.459541999999999,
+                12.163874999999999,
+                10.814625,
+                11.091208
+              ],
+              "median_ms": 11.091208,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                9.056709,
+                9.018292,
+                8.519541,
+                8.720584,
+                8.416708
+              ],
+              "median_ms": 8.720584,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                18.01875,
+                17.798833,
+                17.78925,
+                17.147417,
+                17.617417
+              ],
+              "median_ms": 17.78925,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                219.586417,
+                219.136542,
+                221.990292,
+                223.001541,
+                221.88412499999998
+              ],
+              "median_ms": 221.88412499999998,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                62.611374999999995,
+                64.964167,
+                64.004375,
+                65.943084,
+                62.385709
+              ],
+              "median_ms": 64.004375,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                281.742708,
+                279.37066599999997,
+                288.074208,
+                282.33383299999997,
+                282.487959
+              ],
+              "median_ms": 282.33383299999997,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-candidate-graph-1.json",
+      "raw_sha256": "3b55aa24e88a381b90c8812fad161b4dca961c6bb294ae41ccf14ab400249f1c",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            26.47375,
+            34.728584,
+            32.387541999999996,
+            31.171083,
+            31.654707999999996
+          ],
+          "graph_ms": [
+            24.37775,
+            24.896,
+            24.91525,
+            24.457208,
+            25.510208
+          ],
+          "standalone_median_ms": 31.654707999999996,
+          "graph_median_ms": 24.896,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            50.647458,
+            49.911125,
+            49.583833,
+            47.928709,
+            43.784709
+          ],
+          "graph_ms": [
+            42.624791,
+            41.187709000000005,
+            40.781125,
+            42.131375,
+            40.88675
+          ],
+          "standalone_median_ms": 49.583833,
+          "graph_median_ms": 41.187709000000005,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            449.592041,
+            461.96166700000003,
+            450.982666,
+            464.007417,
+            450.376042
+          ],
+          "graph_ms": [
+            472.663792,
+            451.990666,
+            456.130666,
+            446.56458399999997,
+            457.497792
+          ],
+          "standalone_median_ms": 450.982666,
+          "graph_median_ms": 456.130666,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-candidate-graph-2.json",
+      "raw_sha256": "c528bad5675912c8548b1b4f1f7ecac718d2075434f2672937dc9ae0950cbf66",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            26.330708,
+            36.726292,
+            31.615875000000003,
+            32.686709,
+            32.040583
+          ],
+          "graph_ms": [
+            26.596458,
+            25.903375,
+            24.203625,
+            24.723,
+            23.466375000000003
+          ],
+          "standalone_median_ms": 32.040583,
+          "graph_median_ms": 24.723,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            50.638374999999996,
+            50.315209,
+            49.169540999999995,
+            49.375834,
+            44.046834
+          ],
+          "graph_ms": [
+            40.810375,
+            41.758541,
+            41.276292,
+            41.572166,
+            39.939541000000006
+          ],
+          "standalone_median_ms": 49.375834,
+          "graph_median_ms": 41.276292,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            473.744667,
+            469.064875,
+            456.907542,
+            478.703125,
+            462.192458
+          ],
+          "graph_ms": [
+            458.70325,
+            455.26375,
+            470.148959,
+            488.462042,
+            487.680167
+          ],
+          "standalone_median_ms": 469.064875,
+          "graph_median_ms": 470.148959,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-candidate-masks-1.json",
+      "raw_sha256": "55d545d1091afe94dc2e70f94a7f691bbfffeebe200156b0c0573ec27e99d42b",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                7.519125,
+                7.229792,
+                7.690791,
+                7.380375,
+                7.071041999999999
+              ],
+              "median_ms": 7.380375,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                3.9544999999999995,
+                4.241542,
+                5.51975,
+                4.102209,
+                4.248082999999999
+              ],
+              "median_ms": 4.241542,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                9.930542,
+                9.482249999999999,
+                8.822541999999999,
+                8.803708,
+                8.93675
+              ],
+              "median_ms": 8.93675,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                12.982000000000001,
+                11.971292,
+                12.018083,
+                11.946541999999999,
+                12.0905
+              ],
+              "median_ms": 12.018083,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                9.1775,
+                8.163209,
+                7.618209,
+                7.867582999999999,
+                8.321916
+              ],
+              "median_ms": 8.163209,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                17.696125,
+                18.461624999999998,
+                17.211125,
+                18.835791,
+                17.322457999999997
+              ],
+              "median_ms": 17.696125,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                195.90058399999998,
+                179.043417,
+                191.615167,
+                183.251959,
+                190.206
+              ],
+              "median_ms": 190.206,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                65.29870799999999,
+                62.49375,
+                64.234042,
+                63.498082999999994,
+                66.084167
+              ],
+              "median_ms": 64.234042,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                256.840125,
+                244.44475,
+                251.383459,
+                241.260709,
+                258.327375
+              ],
+              "median_ms": 251.383459,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "code-candidate-masks-2.json",
+      "raw_sha256": "56e2e4d613294894f3be8511690703f6a807db39324554d46127c1521bd852ce",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                8.573374999999999,
+                8.714833,
+                8.237542000000001,
+                8.393584,
+                8.629416
+              ],
+              "median_ms": 8.573374999999999,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                5.503083,
+                6.5645,
+                6.623666999999999,
+                6.9495,
+                6.993208
+              ],
+              "median_ms": 6.623666999999999,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                9.665875000000002,
+                10.261625,
+                10.618792000000001,
+                12.083083,
+                10.123541999999999
+              ],
+              "median_ms": 10.261625,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                11.585833000000001,
+                11.69825,
+                13.994459,
+                14.231584,
+                13.53875
+              ],
+              "median_ms": 13.53875,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                8.695958000000001,
+                8.565542,
+                8.552791000000001,
+                10.120125,
+                9.133834
+              ],
+              "median_ms": 8.695958000000001,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                17.029042,
+                16.589958,
+                17.614459,
+                19.41675,
+                20.416415999999998
+              ],
+              "median_ms": 17.614459,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                174.83475,
+                179.856459,
+                183.63579199999998,
+                182.775125,
+                183.48879200000002
+              ],
+              "median_ms": 182.775125,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                65.83033300000001,
+                63.680917,
+                65.73608300000001,
+                64.57175,
+                66.021
+              ],
+              "median_ms": 65.73608300000001,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                246.75633299999998,
+                249.612583,
+                242.177375,
+                247.201875,
+                246.26779200000001
+              ],
+              "median_ms": 246.75633299999998,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "combined-denominator-graph-1.json",
+      "raw_sha256": "2be5bc26229d258a6195c0e50881c138735e612a2bb391267d34b220d148db52",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            35.233291,
+            35.136250000000004,
+            34.604707999999995,
+            35.753708,
+            35.4765
+          ],
+          "graph_ms": [
+            30.394709,
+            29.628875,
+            27.88625,
+            27.030790999999997,
+            26.813584000000002
+          ],
+          "standalone_median_ms": 35.233291,
+          "graph_median_ms": 27.88625,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            57.299875,
+            56.022000000000006,
+            57.684666,
+            57.006125,
+            57.071625
+          ],
+          "graph_ms": [
+            46.507,
+            47.228958,
+            48.202541000000004,
+            48.545667,
+            48.739333
+          ],
+          "standalone_median_ms": 57.071625,
+          "graph_median_ms": 48.202541000000004,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            507.742166,
+            497.460083,
+            505.806541,
+            525.516792,
+            508.24941599999994
+          ],
+          "graph_ms": [
+            490.679708,
+            487.309417,
+            493.42325,
+            520.513334,
+            484.694916
+          ],
+          "standalone_median_ms": 507.742166,
+          "graph_median_ms": 490.679708,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "combined-denominator-masks-1.json",
+      "raw_sha256": "8f89c9a66182ef8a6a6ee258fc841f8ab3f516868df531f446f63a0f206b6263",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                11.402458000000001,
+                11.855666000000001,
+                11.837792,
+                14.022834,
+                10.942708000000001
+              ],
+              "median_ms": 11.837792,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                9.83325,
+                9.419667,
+                4.368291,
+                8.6085,
+                4.223542
+              ],
+              "median_ms": 8.6085,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                12.995792000000002,
+                12.953707999999999,
+                16.958916000000002,
+                17.04475,
+                16.698500000000003
+              ],
+              "median_ms": 16.698500000000003,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                16.649167,
+                17.316417,
+                17.441917,
+                17.640249999999998,
+                17.131042
+              ],
+              "median_ms": 17.316417,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                13.956916999999999,
+                10.413333,
+                15.217334000000001,
+                12.110917,
+                14.5635
+              ],
+              "median_ms": 13.956916999999999,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                24.697917,
+                24.530292,
+                24.037959,
+                24.279709,
+                24.872166
+              ],
+              "median_ms": 24.530292,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                199.59625,
+                200.939333,
+                199.28258300000002,
+                201.349583,
+                211.60279100000002
+              ],
+              "median_ms": 200.939333,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                72.765625,
+                73.272875,
+                75.077791,
+                76.448375,
+                76.880833
+              ],
+              "median_ms": 75.077791,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                273.275875,
+                270.240625,
+                267.53425,
+                272.163875,
+                284.20716600000003
+              ],
+              "median_ms": 272.163875,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "guarded-graph-1.json",
+      "raw_sha256": "cf0b2e0970538f3e1991119eca6def065cbc59661c5812c11164ed208d806ab2",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            34.693957999999995,
+            42.83475,
+            42.5265,
+            42.236792,
+            43.059
+          ],
+          "graph_ms": [
+            26.959291999999998,
+            29.514292,
+            28.8905,
+            29.334125,
+            31.468791000000003
+          ],
+          "standalone_median_ms": 42.5265,
+          "graph_median_ms": 29.334125,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            66.09474999999999,
+            62.988417000000005,
+            65.258959,
+            59.549583000000005,
+            57.254583
+          ],
+          "graph_ms": [
+            51.651625,
+            51.233417,
+            53.358958,
+            48.489540999999996,
+            49.170333
+          ],
+          "standalone_median_ms": 62.988417000000005,
+          "graph_median_ms": 51.233417,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            517.4761249999999,
+            525.939208,
+            502.57154199999997,
+            509.99016600000004,
+            504.212833
+          ],
+          "graph_ms": [
+            499.97724999999997,
+            516.9783329999999,
+            485.93275,
+            495.453292,
+            504.03429200000005
+          ],
+          "standalone_median_ms": 509.99016600000004,
+          "graph_median_ms": 499.97724999999997,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "guarded-graph-2.json",
+      "raw_sha256": "1f2a6bb2b6226d5fd66567e6e923bb171d10ed69ce960f33a647db51f057b822",
+      "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "standalone_ms": [
+            35.40775,
+            35.365667,
+            37.757209,
+            35.681999999999995,
+            35.787333
+          ],
+          "graph_ms": [
+            26.615875,
+            26.909875,
+            29.939833,
+            29.832625,
+            27.640958
+          ],
+          "standalone_median_ms": 35.681999999999995,
+          "graph_median_ms": 27.640958,
+          "terminal_loss": [
+            0.48289936780929565,
+            0.48289936780929565
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "standalone_ms": [
+            56.21975,
+            62.657042,
+            66.747292,
+            62.50837500000001,
+            65.30862499999999
+          ],
+          "graph_ms": [
+            52.306375,
+            54.167375,
+            51.771291,
+            51.1365,
+            51.596250000000005
+          ],
+          "standalone_median_ms": 62.657042,
+          "graph_median_ms": 51.771291,
+          "terminal_loss": [
+            1.0864962339401245,
+            1.0864962339401245
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "standalone_ms": [
+            510.698833,
+            539.060333,
+            525.802167,
+            504.473125,
+            513.706667
+          ],
+          "graph_ms": [
+            489.85704200000004,
+            496.47929200000004,
+            493.488,
+            486.93208300000003,
+            486.678167
+          ],
+          "standalone_median_ms": 513.706667,
+          "graph_median_ms": 489.85704200000004,
+          "terminal_loss": [
+            1.0901281833648682,
+            1.0901281833648682
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "guarded-masks-1.json",
+      "raw_sha256": "7ef761c7850266a90811f44ce457bcd9103bdf2d879e2d059652e05214350973",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                11.835583,
+                10.601750000000001,
+                9.498332999999999,
+                10.211959,
+                9.11575
+              ],
+              "median_ms": 10.211959,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                4.298917,
+                4.483334,
+                8.0145,
+                8.323291,
+                8.006583
+              ],
+              "median_ms": 8.006583,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                11.555792,
+                14.499542,
+                12.24825,
+                11.469875,
+                14.408334
+              ],
+              "median_ms": 12.24825,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                15.563,
+                13.25425,
+                14.545792,
+                15.726042,
+                13.825083
+              ],
+              "median_ms": 14.545792,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                10.593625000000001,
+                10.100833,
+                9.546041,
+                10.102459,
+                10.255208999999999
+              ],
+              "median_ms": 10.102459,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                20.363459,
+                22.002959,
+                21.386291,
+                20.748666,
+                22.287875
+              ],
+              "median_ms": 21.386291,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                199.782459,
+                202.02925,
+                202.5645,
+                197.84520799999999,
+                199.857375
+              ],
+              "median_ms": 199.857375,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                70.555,
+                71.365333,
+                69.996708,
+                74.445542,
+                72.09895800000001
+              ],
+              "median_ms": 71.365333,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                285.361334,
+                265.90775,
+                273.036208,
+                263.138875,
+                268.005834
+              ],
+              "median_ms": 268.005834,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    },
+    {
+      "name": "guarded-masks-2.json",
+      "raw_sha256": "5fd4d473711a95874eba0a23734cba4459c2d136c88a183ed4a1dbff33750adc",
+      "schema": "spiraltorch.layer_norm.backward_masks.v1",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "boundary": "32 repeated backward calls on one prepared tape; forward/upload excluded, identical terminal readback included; host wall time, not GPU-only",
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "routes": [
+            {
+              "intervals_ms": [
+                9.924875,
+                9.555042,
+                9.90075,
+                9.772833,
+                10.138541
+              ],
+              "median_ms": 9.90075,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                7.808041,
+                4.509291,
+                7.877999999999999,
+                7.697875,
+                7.892125
+              ],
+              "median_ms": 7.808041,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                14.696917000000001,
+                14.7445,
+                13.219542,
+                12.108584,
+                13.486917
+              ],
+              "median_ms": 13.486917,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "routes": [
+            {
+              "intervals_ms": [
+                12.880958,
+                13.502666999999999,
+                13.802791,
+                16.185708,
+                12.982624999999999
+              ],
+              "median_ms": 13.502666999999999,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                12.768833,
+                10.090041,
+                10.339457999999999,
+                10.101042,
+                11.865834000000001
+              ],
+              "median_ms": 10.339457999999999,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                21.1785,
+                20.334125,
+                21.255833,
+                20.805166,
+                20.08925
+              ],
+              "median_ms": 20.805166,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "routes": [
+            {
+              "intervals_ms": [
+                213.932792,
+                215.716292,
+                197.42954200000003,
+                207.860583,
+                207.052791
+              ],
+              "median_ms": 207.860583,
+              "name": "input"
+            },
+            {
+              "intervals_ms": [
+                81.183,
+                75.946042,
+                73.923709,
+                71.789625,
+                70.511083
+              ],
+              "median_ms": 73.923709,
+              "name": "affine"
+            },
+            {
+              "intervals_ms": [
+                284.378875,
+                278.8415,
+                265.525666,
+                268.149417,
+                268.053417
+              ],
+              "median_ms": 268.149417,
+              "name": "both"
+            }
+          ],
+          "max_scaled_error": 0.0
+        }
+      ]
+    }
+  ]
+}

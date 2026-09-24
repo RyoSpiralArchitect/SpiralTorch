@@ -94,14 +94,14 @@ fn layer_norm_shaders_validate_without_adapter() {
     assert_eq!(std::mem::size_of::<Params>(), 32);
     let shape = LayerNormShape::new(&[1, 3], &[3]).unwrap();
     let mut limits = wgpu::Limits {
-        max_compute_workgroup_storage_size: 8255,
+        max_compute_workgroup_storage_size: 8287,
         ..Default::default()
     };
     assert!(matches!(
         preflight(shape, &limits),
         Err(TensorError::Limit("LayerNorm pipeline"))
     ));
-    limits.max_compute_workgroup_storage_size = 8256;
+    limits.max_compute_workgroup_storage_size = 8288;
     assert!(preflight(shape, &limits).is_ok());
 }
 
@@ -821,6 +821,46 @@ fn layer_norm_retains_small_epsilon_after_scale_direction_cancellation() {
         let actual = read(dx.as_ref().unwrap());
         eprintln!("epsilon scale-direction: scale={scale}, seed={cotangent}, dx={actual:?}, expected={magnitude}");
         close(&actual, &[-magnitude, 0., magnitude]);
+    }
+}
+
+#[test]
+fn layer_norm_preserves_subnormal_epsilon_relative_to_large_variance() {
+    let Some(device) = device() else { return };
+    let epsilon = f32::from_bits(1);
+    for scale in [0.1f32, 1., 2., 10.] {
+        assert_scale_direction_epsilon(&device, scale, epsilon);
+    }
+}
+
+#[test]
+fn layer_norm_scale_direction_keeps_epsilon_across_combined_boundary() {
+    let Some(device) = device() else { return };
+    for exponent in -30..=0 {
+        let epsilon = 2f32.powi(exponent);
+        for scale in [1f32, 10.] {
+            assert_scale_direction_epsilon(&device, scale, epsilon);
+        }
+    }
+}
+
+fn assert_scale_direction_epsilon(device: &TensorDevice, scale: f32, epsilon: f32) {
+    let input = device.upload(&[1, 3], &[-scale, 0., scale]).unwrap();
+    let gamma = device.upload(&[3], &[1.; 3]).unwrap();
+    let beta = device.upload(&[3], &[0.; 3]).unwrap();
+    let seed = device.upload(&[1, 3], &[-f32::MAX, 0., f32::MAX]).unwrap();
+    let tape = input.layer_norm_affine(&gamma, &beta, epsilon).unwrap();
+    let [dx, _, _] = tape.backward(&seed, 1., [true, false, false]).unwrap();
+    let actual = read(dx.as_ref().unwrap());
+    let variance = 2. * f64::from(scale).powi(2) / 3.;
+    let expected = (f64::from(f32::MAX) * f64::from(epsilon)
+        / (variance + f64::from(epsilon)).powf(1.5)) as f32;
+    assert!(expected.is_finite() && expected > 0.);
+    for (got, want) in actual.into_iter().zip([-expected, 0., expected]) {
+        assert!(
+            (got - want).abs() <= expected.abs() * 0.002,
+            "scale={scale}, epsilon={epsilon}: {got} != {want}"
+        );
     }
 }
 
