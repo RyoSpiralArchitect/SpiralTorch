@@ -3577,7 +3577,9 @@ impl TransformPipeline {
                     op.apply(image)?;
                     idx += 1;
                 }
-                TransformOperation::Resize(_) | TransformOperation::CenterCrop(_) => {
+                TransformOperation::Resize(_)
+                | TransformOperation::CenterCrop(_)
+                | TransformOperation::RandomHorizontalFlip(_) => {
                     #[cfg(feature = "wgpu")]
                     {
                         if let Some(dispatcher) = self.dispatcher.clone() {
@@ -3596,12 +3598,11 @@ impl TransformPipeline {
                         TransformOperation::CenterCrop(op) => {
                             self.apply_center_crop(&op, image)?;
                         }
+                        TransformOperation::RandomHorizontalFlip(op) => {
+                            self.apply_horizontal_flip(&op, image)?;
+                        }
                         _ => {}
                     }
-                    idx += 1;
-                }
-                TransformOperation::RandomHorizontalFlip(op) => {
-                    self.apply_horizontal_flip(&op, image)?;
                     idx += 1;
                 }
                 TransformOperation::ColorJitter(op) => {
@@ -3759,6 +3760,7 @@ impl TransformPipeline {
     ) -> PureResult<usize> {
         let mut commands = Vec::new();
         let mut index = start_idx;
+        let mut sampled_rng = self.rng.clone();
         let mut geometry = ImageGeometry {
             channels: image.channels(),
             height: image.height(),
@@ -3793,12 +3795,24 @@ impl TransformPipeline {
                     geometry.width = op.width;
                     index += 1;
                 }
+                TransformOperation::RandomHorizontalFlip(op) => {
+                    if op.should_apply(&mut sampled_rng) {
+                        commands.push(GeometryCommand::HorizontalFlip(HorizontalFlipConfig {
+                            channels: geometry.channels,
+                            height: geometry.height,
+                            width: geometry.width,
+                            apply: true,
+                        }));
+                    }
+                    index += 1;
+                }
                 _ => break,
             }
         }
 
         if commands.is_empty() {
-            return Ok(start_idx);
+            self.rng = sampled_rng;
+            return Ok(index);
         }
 
         let (output, final_geometry) = dispatcher
@@ -3819,6 +3833,7 @@ impl TransformPipeline {
             final_geometry.width,
             output,
         )?;
+        self.rng = sampled_rng;
 
         Ok(index)
     }
@@ -5544,6 +5559,77 @@ mod tests {
         assert_eq!(image.shape(), expected.shape());
         for (lhs, rhs) in image.as_slice().iter().zip(expected.as_slice()) {
             assert!((lhs - rhs).abs() < 1e-5);
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn geometry_sequence_preserves_seeded_flip_decisions() {
+        let mut direct = TransformPipeline::with_seed(17);
+        direct
+            .add(TransformOperation::Resize(Resize::new(8, 10).unwrap()))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(0.5).unwrap(),
+            ))
+            .add(TransformOperation::CenterCrop(
+                CenterCrop::new(6, 6).unwrap(),
+            ))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(0.0).unwrap(),
+            ))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(1.0).unwrap(),
+            ));
+        let mut sequenced = direct
+            .clone()
+            .with_gpu_dispatcher(TransformDispatcher::cpu());
+        for frame in 0..12 {
+            let pixels: Vec<_> = (0..3 * 12 * 14)
+                .map(|i| ((i * 37 + frame * 13) % 257) as f32 / 256.)
+                .collect();
+            let mut expected = ImageTensor::new(3, 12, 14, pixels.clone()).unwrap();
+            let mut actual = ImageTensor::new(3, 12, 14, pixels).unwrap();
+            direct.apply(&mut expected).unwrap();
+            sequenced.apply(&mut actual).unwrap();
+            assert_eq!(actual.shape(), expected.shape());
+            for (&lhs, &rhs) in actual.as_slice().iter().zip(expected.as_slice()) {
+                assert!((lhs - rhs).abs() < 1e-6, "frame={frame}: {lhs} != {rhs}");
+            }
+        }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn geometry_sequence_runs_seeded_flips_on_wgpu() {
+        let Ok(dispatcher) = TransformDispatcher::new_default_gpu() else {
+            eprintln!("Skipping vision WGPU sequence: no adapter available");
+            return;
+        };
+        let mut direct = TransformPipeline::with_seed(17);
+        direct
+            .add(TransformOperation::Resize(Resize::new(80, 96).unwrap()))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(0.5).unwrap(),
+            ))
+            .add(TransformOperation::CenterCrop(
+                CenterCrop::new(64, 64).unwrap(),
+            ))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(1.0).unwrap(),
+            ));
+        let mut sequenced = direct.clone().with_gpu_dispatcher(dispatcher);
+        for frame in 0..3 {
+            let pixels: Vec<_> = (0..3 * 128 * 128)
+                .map(|i| ((i * 37 + frame * 13) % 257) as f32 / 256.)
+                .collect();
+            let mut expected = ImageTensor::new(3, 128, 128, pixels.clone()).unwrap();
+            let mut actual = ImageTensor::new(3, 128, 128, pixels).unwrap();
+            direct.apply(&mut expected).unwrap();
+            sequenced.apply(&mut actual).unwrap();
+            assert_eq!(actual.shape(), expected.shape());
+            for (&lhs, &rhs) in actual.as_slice().iter().zip(expected.as_slice()) {
+                assert!((lhs - rhs).abs() < 1e-5, "frame={frame}: {lhs} != {rhs}");
+            }
         }
     }
 

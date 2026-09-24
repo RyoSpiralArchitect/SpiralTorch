@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyDict};
 use pyo3::IntoPyObjectExt;
@@ -10,6 +10,8 @@ use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 use crate::telemetry::PyAtlasFrame;
 use crate::tensor::{tensor_err_to_py, PyTensor};
 use crate::theory::PyZRelativityModel;
+#[cfg(feature = "wgpu")]
+use st_backend_wgpu::transform::TransformDispatcher;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_tensor::wasm_canvas::{
     CanvasPalette, FractalCanvas as PureFractalCanvas,
@@ -546,6 +548,28 @@ impl PyTransformPipeline {
 
     fn has_gpu_dispatcher(&self) -> bool {
         self.inner.has_gpu_dispatcher()
+    }
+
+    /// Opt into WGPU-backed image geometry and flip transforms.
+    fn enable_wgpu(&mut self) -> PyResult<()> {
+        #[cfg(feature = "wgpu")]
+        {
+            let dispatcher = TransformDispatcher::new_default_gpu()
+                .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+            self.inner.set_gpu_dispatcher(dispatcher);
+            Ok(())
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            Err(PyRuntimeError::new_err(
+                "WGPU is not available in this SpiralTorch build",
+            ))
+        }
+    }
+
+    fn disable_wgpu(&mut self) {
+        #[cfg(feature = "wgpu")]
+        self.inner.clear_gpu_dispatcher();
     }
 
     fn apply(&mut self, image: &PyImageTensor) -> PyResult<PyImageTensor> {

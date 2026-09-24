@@ -671,7 +671,10 @@ value:
 - Vision preprocessing via `vision.ImageTensor` and
   `vision.TransformPipeline`: resize, center-crop, deterministic horizontal
   flip, normalize, audit GPU transform coverage, and inspect canonical
-  dataset/model catalogs from Python.
+  dataset/model catalogs from Python. On WGPU-enabled native builds,
+  `pipeline.enable_wgpu()` explicitly selects the resident resize/crop/flip
+  sequence; `pipeline.disable_wgpu()` restores CPU preprocessing. No GPU
+  dispatcher is attached by default.
 - Vision mini-pipelines via `vision.TensorVisionDataset`,
   `vision.VisionDataLoader`, and `vision.VisionModel`: build small in-memory
   batches, apply Rust transforms during loading, stack image batches, and run

@@ -2,6 +2,23 @@
 
 SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape for the Python bindings, and a TypeScript-powered collaboration canvas. This document captures the near-term ecosystem priorities so contributors can converge on the same themes while the core crates continue to evolve.
 
+## Restarted execution slice: vision across Rust, Python, and browser
+
+The first concrete cross-surface milestone is the image-transform path in
+`st-vision`, not a general claim that every backend is interchangeable.
+Contiguous resize, crop, and sampled horizontal-flip stages now use one WGPU
+geometry sequence with one upload and terminal readback on native platforms.
+The seeded CPU route remains the behavioral reference; Python exposes an
+explicit `TransformPipeline.enable_wgpu()` opt-in and `disable_wgpu()` fallback.
+
+The browser is **not yet equivalent**: the current transform dispatcher uses
+synchronous host-visible readback, which is unavailable for WebGPU in WASM.
+The next milestone is an async resident transform interface and a real-browser
+fixture for the same seeded image sequence. Admission requires matching Rust
+CPU, native WGPU, Python, and browser outputs and random decisions, plus a
+paired benchmark with source, device, and artifact hashes. Until that gate
+passes, do not advertise browser vision transforms as GPU-resident.
+
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.
 - **Concept glossaries.** Promote the existing conceptual notes in `docs/` (e.g. _Quantum Reality Acceleration_) into a structured glossary. Call out how each concept maps onto concrete crates such as `st-core`, `st-tensor`, or `st-kdsl`.
