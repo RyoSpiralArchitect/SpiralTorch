@@ -22,6 +22,10 @@ var<workgroup> epsilon_sum: Wide;
 var<workgroup> input_denominator: Wide;
 var<workgroup> combined_safe: bool;
 var<workgroup> input_scale: Wide;
+var<workgroup> fast_denominator: f32;
+var<workgroup> fast_projection: f32;
+var<workgroup> fast_scale: f32;
+var<workgroup> fast_row_safe: bool;
 
 fn checked(value: Wide) -> f32 {
     let result = wide_float(value);
@@ -87,6 +91,14 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
         combined_safe = epsilon_sum.hi != 0.0 &&
                         (stats.square_sum.hi == 0.0 || epsilon_sum.exponent >= stats.square_sum.exponent - 20);
         input_scale = wide_div(stats.inverse_std, input_denominator);
+        fast_denominator = wide_float(input_denominator);
+        fast_projection = wide_float(projection);
+        fast_scale = wide_float(input_scale);
+        // Extreme row scales and weak epsilon stay on the Wide path.
+        fast_row_safe = params.cols >= 32u && params.epsilon >= 1e-5 && combined_safe &&
+                        fast_denominator > 1e-3 && fast_denominator < 1e8 &&
+                        abs(fast_projection) < 1e8 &&
+                        abs(fast_scale) > 1e-12 && abs(fast_scale) < 1e6;
     }
     workgroupBarrier();
     for (var col = lane; col < params.cols; col += 256u) {
@@ -95,6 +107,21 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
         // Cancel before dividing: squaring rounded normalized values introduces
         // a scale-direction residual that tiny variance can amplify enormously.
         let centered_g = wide_sub(g, mean);
+        if (fast_row_safe) {
+            let first = wide_float(centered_g) * fast_denominator;
+            let second = wide_float(centered_values[base + col]) * fast_projection;
+            let numerator = first - second;
+            let magnitude = abs(first) + abs(second);
+            // Cap cancellation amplification of f32 rounding at 128x.
+            if (magnitude > 0.0 && magnitude < 1e20 &&
+                abs(numerator) >= magnitude / 128.0) {
+                let value = numerator * fast_scale;
+                if (abs(value) < 1e30) {
+                    dx[base + col] = value;
+                    continue;
+                }
+            }
+        }
         var numerator: Wide;
         if (combined_safe) {
             numerator = wide_difference_of_products(centered_g, input_denominator,

@@ -801,6 +801,81 @@ fn layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance() {
 }
 
 #[test]
+fn layer_norm_wide_rows_input_vjp_matches_f64_with_and_without_cancellation() {
+    let Some(device) = device() else { return };
+    for cols in [256, 1025] {
+        let rows = 2;
+        let x: Vec<_> = (0..rows * cols)
+            .map(|i| (((i * 37 + 17) % 257) as f32 - 128.) / 64.)
+            .collect();
+        let beta = vec![0.; cols];
+        for scale_direction in [false, true] {
+            let gamma: Vec<_> = (0..cols)
+                .map(|i| {
+                    if scale_direction {
+                        1.
+                    } else {
+                        ((i * 17 % 23) as f32 - 11.) / 8.
+                    }
+                })
+                .collect();
+            let seed: Vec<_> = (0..rows * cols)
+                .map(|i| {
+                    if scale_direction {
+                        x[i] * 1e8
+                    } else {
+                        ((i * 11 % 31) as f32 - 15.) / 16.
+                    }
+                })
+                .collect();
+            for epsilon in [1e-5, 1e-9] {
+                let expected = reference(&x, &gamma, &beta, &seed, epsilon, 1.);
+                let input = device.upload(&[rows, cols], &x).unwrap();
+                let gain = device.upload(&[cols], &gamma).unwrap();
+                let bias = device.upload(&[cols], &beta).unwrap();
+                let upstream = device.upload(&[rows, cols], &seed).unwrap();
+                let tape = input.layer_norm_affine(&gain, &bias, epsilon).unwrap();
+                let gradients = tape.backward(&upstream, 1., [true; 3]).unwrap();
+                for (actual, expected) in gradients.iter().zip(&expected[1..]) {
+                    close(&read(actual.as_ref().unwrap()), expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn layer_norm_wide_rows_input_vjp_stays_stable_near_fast_guard_boundary() {
+    let Some(device) = device() else { return };
+    for cols in [256, 1025] {
+        for offset in [0., 1024.] {
+            let rows = 2;
+            let x: Vec<_> = (0..rows * cols)
+                .map(|i| offset + (((i * 37 + 17) % 257) as f32 - 128.) / 64.)
+                .collect();
+            let gamma = vec![1.; cols];
+            let beta = vec![0.; cols];
+            let input = device.upload(&[rows, cols], &x).unwrap();
+            let gain = device.upload(&[cols], &gamma).unwrap();
+            let bias = device.upload(&[cols], &beta).unwrap();
+            let tape = input.layer_norm_affine(&gain, &bias, 1e-5).unwrap();
+            for noise_scale in [1e5, 5e5, 1e6, 2e6, 5e6, 1e7] {
+                let seed: Vec<_> = (0..rows * cols)
+                    .map(|i| {
+                        (x[i] - offset) * 1e8
+                            + (((i * 11 + 3) % 31) as f32 - 15.) / 16. * noise_scale
+                    })
+                    .collect();
+                let expected = reference(&x, &gamma, &beta, &seed, 1e-5, 1.);
+                let upstream = device.upload(&[rows, cols], &seed).unwrap();
+                let [dx, _, _] = tape.backward(&upstream, 1., [true, false, false]).unwrap();
+                close(&read(dx.as_ref().unwrap()), &expected[1]);
+            }
+        }
+    }
+}
+
+#[test]
 fn layer_norm_retains_small_epsilon_after_scale_direction_cancellation() {
     let Some(device) = device() else { return };
     let epsilon = f32::from_bits(1);
