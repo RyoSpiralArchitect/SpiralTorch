@@ -16,7 +16,7 @@ struct ProfilePass {
 }
 
 impl ResidentGraphTraining {
-    fn profile_passes(&self) -> Vec<ProfilePass> {
+    fn profile_passes(&self, split_layer_norm: bool) -> Vec<ProfilePass> {
         let backend = self.adapter_info().backend;
         let mut passes = Vec::new();
         let width = forward_dispatches_per_pass(backend, self.nodes.len());
@@ -71,6 +71,20 @@ impl ResidentGraphTraining {
                             part,
                             dispatches: 1,
                             operand,
+                        });
+                    }
+                }
+                Node::LayerNorm(_) if split_layer_norm => {
+                    for (part, phase) in ["layer_norm_backward_input", "layer_norm_backward_affine"]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        passes.push(ProfilePass {
+                            phase,
+                            node: Some(node),
+                            part,
+                            dispatches: 1,
+                            operand: None,
                         });
                     }
                 }
@@ -192,9 +206,33 @@ impl ProfiledGraphTraining {
     /// Returned times exclude query resolution/readback and do not prove acceptance
     /// until read() validates both the GPU scopes and this attempt's loss/flags.
     pub fn step_profiled(&mut self, rate: f32) -> Result<GraphProfileReadback, TrainingError> {
+        self.step_profiled_inner(rate, false)
+    }
+
+    /// Diagnostic-only LayerNorm dispatch timings. Splitting its backward
+    /// compute pass changes the pass schedule; do not equate these durations
+    /// with unsplit training throughput. Other stages retain their schedule.
+    pub fn step_profiled_layer_norm_split(
+        &mut self,
+        rate: f32,
+    ) -> Result<GraphProfileReadback, TrainingError> {
+        self.step_profiled_inner(rate, true)
+    }
+
+    fn step_profiled_inner(
+        &mut self,
+        rate: f32,
+        split_layer_norm: bool,
+    ) -> Result<GraphProfileReadback, TrainingError> {
         self.ready()?;
         let attempt = self.inner.next_attempt(rate)?;
-        let passes = self.inner.profile_passes();
+        let split_layer_norm = split_layer_norm
+            && self
+                .inner
+                .nodes
+                .iter()
+                .any(|node| matches!(node, Node::LayerNorm(_)));
+        let passes = self.inner.profile_passes(split_layer_norm);
         let context = self.inner.device.runtime().context();
         let errors = TimestampErrorScopes::try_new(context.clone())?;
         let recorder = PassTimestampRecorder::new(
@@ -203,7 +241,8 @@ impl ProfiledGraphTraining {
         )?;
         let mut encoder = context.device().create_command_encoder(&Default::default());
         let mut cursor = PassTimestampCursor::new(&recorder);
-        self.inner.encode_step(&mut encoder, &mut cursor);
+        self.inner
+            .encode_step(&mut encoder, &mut cursor, split_layer_norm);
         cursor.finish();
         let loss = StepReadback {
             raw: readback::capture_into(
@@ -244,6 +283,7 @@ impl ProfiledGraphTraining {
             step: attempt,
             batch_generation: self.inner.batch_generation,
             direct_copy_bytes,
+            split_layer_norm,
         })
     }
 }
@@ -257,6 +297,7 @@ pub struct GraphProfileReadback {
     step: u64,
     batch_generation: u64,
     direct_copy_bytes: u64,
+    split_layer_norm: bool,
 }
 
 struct DeferredTimestamps {
@@ -340,6 +381,7 @@ impl GraphProfileReadback {
             step: self.step,
             batch_generation: self.batch_generation,
             direct_copy_bytes: self.direct_copy_bytes,
+            split_layer_norm: self.split_layer_norm,
         })
     }
 
@@ -355,6 +397,7 @@ impl GraphProfileReadback {
             step: self.step,
             batch_generation: self.batch_generation,
             direct_copy_bytes: self.direct_copy_bytes,
+            split_layer_norm: self.split_layer_norm,
         })
     }
 }
@@ -367,6 +410,7 @@ pub struct GraphGpuProfile {
     step: u64,
     batch_generation: u64,
     direct_copy_bytes: u64,
+    split_layer_norm: bool,
 }
 
 impl GraphGpuProfile {
@@ -411,8 +455,19 @@ impl GraphGpuProfile {
             .filter(|_| ambiguous_pairs == 0)
             .and_then(|(first, last)| last.end_tick.checked_sub(first.start_tick))
             .map(|ticks| ticks as f64 * self.timestamps.timestamp_period_ns);
+        let (pass_schedule, boundary) = if self.split_layer_norm {
+            (
+                "layer_norm_split",
+                "Diagnostic LayerNorm input and affine dispatches are timed in separate compute passes on a private device. This changes the original pass schedule; durations are not unsplit training throughput. Other stages retain their pass grouping. Excludes uploads, CPU encoding, query resolve/readback and untimed copies from compute sums; GPU span includes inter-pass/copy gaps. Instrumentation may perturb execution and browser timestamps may quantize to zero.",
+            )
+        } else {
+            (
+                "original",
+                "Diagnostic timestamps at existing compute-pass boundaries on a private device. No pass splitting; forward/dense-backward/update may each contain multiple dispatches. Excludes uploads, CPU encoding, query resolve/readback and untimed copies from compute sums; GPU span includes inter-pass/copy gaps. Instrumentation may perturb execution and browser timestamps may quantize to zero.",
+            )
+        };
         serde_json::json!({"schema":"spiraltorch.graph_training_gpu_profile.v1","instrumented":true,"accepted":true,
-            "boundary":"Diagnostic timestamps at existing compute-pass boundaries on a private device. No pass splitting; forward/dense-backward/update may each contain multiple dispatches. Excludes uploads, CPU encoding, query resolve/readback and untimed copies from compute sums; GPU span includes inter-pass/copy gaps. Instrumentation may perturb execution and browser timestamps may quantize to zero.",
+            "pass_schedule":pass_schedule,"boundary":boundary,
             "submitted_step":self.step.to_string(),"batch_generation":self.batch_generation.to_string(),"loss":self.loss,
             "timestamp_period_ns":self.timestamps.timestamp_period_ns,"zero_intervals":zero_intervals,"gpu_span_ns":span,
             "timing_complete":ambiguous_pairs == 0,"ambiguous_zero_pairs":ambiguous_pairs,
@@ -424,6 +479,115 @@ impl GraphGpuProfile {
 mod tests {
     use super::*;
     use crate::runtime::timestamps::PassTimestamp;
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn split_layer_norm_profile_preserves_state_and_labels() {
+        if std::env::var_os("SPIRALTORCH_RUN_WGPU_TIMESTAMP_TESTS").is_none() {
+            return;
+        }
+        let definition = GraphDefinition::new(
+            NdLayout::contiguous(&[2, 3]).unwrap(),
+            vec![GraphStage::LayerNorm {
+                gain: 0,
+                bias: 1,
+                epsilon: 1e-5,
+            }],
+            vec![
+                GraphParameter {
+                    role: ParameterRole::Gain,
+                    shape: vec![3],
+                    values: vec![1.; 3],
+                },
+                GraphParameter {
+                    role: ParameterRole::Bias,
+                    shape: vec![3],
+                    values: vec![0.; 3],
+                },
+            ],
+        )
+        .unwrap();
+        let mut graph = ProfiledGraphTraining::request_blocking(
+            definition,
+            GraphGradientPolicy::Exact,
+            MatmulTile::default(),
+            MatmulKernel::Scalar,
+            MatmulAccumulation::Sequential,
+        )
+        .unwrap();
+        assert_ne!(graph.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        graph
+            .upload_batch(&[-1., 0., 1., 2., 3., 4.], &[0.; 6])
+            .unwrap();
+        let original = graph.step_profiled(0.).unwrap().read().unwrap();
+        let original_state = graph.state_snapshot().unwrap().read().unwrap();
+        let split = graph
+            .step_profiled_layer_norm_split(0.)
+            .unwrap()
+            .read()
+            .unwrap();
+        let split_state = graph.state_snapshot().unwrap().read().unwrap();
+        let same_bits = |left: &[f32], right: &[f32]| {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+        };
+        assert_eq!(original_state.loss.to_bits(), split_state.loss.to_bits());
+        assert!(same_bits(
+            &original_state.prediction,
+            &split_state.prediction
+        ));
+        assert!(same_bits(
+            &original_state.input_gradient,
+            &split_state.input_gradient
+        ));
+        assert_eq!(
+            original_state.raw_gradients.len(),
+            split_state.raw_gradients.len()
+        );
+        for (left, right) in original_state
+            .raw_gradients
+            .iter()
+            .zip(&split_state.raw_gradients)
+        {
+            assert!(same_bits(left, right));
+        }
+        assert_eq!(
+            original_state.graph.parameters().len(),
+            split_state.graph.parameters().len()
+        );
+        for (left, right) in original_state
+            .graph
+            .parameters()
+            .iter()
+            .zip(split_state.graph.parameters())
+        {
+            assert!(same_bits(&left.values, &right.values));
+        }
+        let original = original.report();
+        let split = split.report();
+        assert_eq!(original["pass_schedule"], "original");
+        assert_eq!(split["pass_schedule"], "layer_norm_split");
+        assert_eq!(original["timing_complete"], true);
+        assert_eq!(split["timing_complete"], true);
+        assert_eq!(
+            split["passes"].as_array().unwrap().len(),
+            original["passes"].as_array().unwrap().len() + 1
+        );
+        for phase in ["layer_norm_backward_input", "layer_norm_backward_affine"] {
+            assert_eq!(
+                split["passes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|pass| pass["phase"] == phase)
+                    .count(),
+                1
+            );
+        }
+    }
 
     #[test]
     fn report_preserves_integer_ticks_zero_intervals_and_real_pass_groups() {
@@ -464,6 +628,7 @@ mod tests {
             step: u64::MAX,
             batch_generation: tick,
             direct_copy_bytes: 16,
+            split_layer_norm: false,
         };
         let report = profile.report();
         assert_eq!(report["zero_intervals"], 1);
@@ -476,6 +641,15 @@ mod tests {
         assert_eq!(report["phase_totals_ns"]["update"], 6.);
         assert_eq!(report["gpu_span_ns"], 16.);
         assert_eq!(report["timing_complete"], true);
+        assert_eq!(report["pass_schedule"], "original");
+        let mut split = profile.clone();
+        split.split_layer_norm = true;
+        let split_report = split.report();
+        assert_eq!(split_report["pass_schedule"], "layer_norm_split");
+        assert!(split_report["boundary"]
+            .as_str()
+            .unwrap()
+            .contains("changes the original pass schedule"));
         let mut unknown = profile;
         unknown.timestamps.passes[1] = PassTimestamp {
             start_tick: 0,

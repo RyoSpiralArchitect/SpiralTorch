@@ -10,6 +10,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         layout::NdLayout,
     };
 
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if !args.is_empty()
+        && (args.len() != 1 || (args[0] != "--paired" && args[0] != "--paired-reverse"))
+    {
+        return Err("usage: resident_graph_layer_norm_profile [--paired|--paired-reverse]".into());
+    }
+    let paired = !args.is_empty();
+    let reverse = paired && args[0] == "--paired-reverse";
+    let same_bits = |left: &[f32], right: &[f32]| {
+        left.len() == right.len()
+            && left
+                .iter()
+                .zip(right)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+    };
+
     let mut cases = Vec::new();
     for (rows, cols) in [(2, 3), (32, 256), (128, 1025)] {
         let definition = GraphDefinition::new(
@@ -53,13 +69,81 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             graph.step(0.01)?;
             graph.loss_snapshot()?.read()?;
         }
-        let profile = graph.step_profiled(0.01)?.read()?;
-        cases.push(serde_json::json!({
-            "rows": rows,
-            "cols": cols,
-            "adapter": format!("{:?}", graph.adapter_info()),
-            "report": profile.report(),
-        }));
+        if paired {
+            let (original, original_state, split, split_state) = if reverse {
+                let split = graph.step_profiled_layer_norm_split(0.)?.read()?;
+                let split_state = graph.state_snapshot()?.read()?;
+                let original = graph.step_profiled(0.)?.read()?;
+                let original_state = graph.state_snapshot()?.read()?;
+                (original, original_state, split, split_state)
+            } else {
+                let original = graph.step_profiled(0.)?.read()?;
+                let original_state = graph.state_snapshot()?.read()?;
+                let split = graph.step_profiled_layer_norm_split(0.)?.read()?;
+                let split_state = graph.state_snapshot()?.read()?;
+                (original, original_state, split, split_state)
+            };
+            assert_eq!(original_state.loss.to_bits(), split_state.loss.to_bits());
+            assert!(same_bits(
+                &original_state.prediction,
+                &split_state.prediction
+            ));
+            assert!(same_bits(
+                &original_state.input_gradient,
+                &split_state.input_gradient
+            ));
+            assert_eq!(
+                original_state.raw_gradients.len(),
+                split_state.raw_gradients.len()
+            );
+            assert_eq!(
+                original_state.effective_gradients.len(),
+                split_state.effective_gradients.len()
+            );
+            assert_eq!(
+                original_state.graph.parameters().len(),
+                split_state.graph.parameters().len()
+            );
+            for (left, right) in original_state
+                .raw_gradients
+                .iter()
+                .zip(&split_state.raw_gradients)
+            {
+                assert!(same_bits(left, right));
+            }
+            for (left, right) in original_state
+                .effective_gradients
+                .iter()
+                .zip(&split_state.effective_gradients)
+            {
+                assert!(same_bits(left, right));
+            }
+            for (left, right) in original_state
+                .graph
+                .parameters()
+                .iter()
+                .zip(split_state.graph.parameters())
+            {
+                assert!(same_bits(&left.values, &right.values));
+            }
+            cases.push(serde_json::json!({
+                "rows": rows,
+                "cols": cols,
+                "adapter": format!("{:?}", graph.adapter_info()),
+                "state_bits_equal": true,
+                "order": if reverse { "split_first" } else { "original_first" },
+                "original": original.report(),
+                "split": split.report(),
+            }));
+        } else {
+            let profile = graph.step_profiled(0.01)?.read()?;
+            cases.push(serde_json::json!({
+                "rows": rows,
+                "cols": cols,
+                "adapter": format!("{:?}", graph.adapter_info()),
+                "report": profile.report(),
+            }));
+        }
     }
     println!("{}", serde_json::to_string_pretty(&cases)?);
     Ok(())

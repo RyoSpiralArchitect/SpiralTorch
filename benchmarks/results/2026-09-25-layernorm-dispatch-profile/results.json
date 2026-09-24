@@ -1,0 +1,1017 @@
+{
+  "schema": "spiraltorch.layer_norm_dispatch_comparison.v1",
+  "source_commit": "a68070e184c8edb4a5a3d5b78c6102d87ffebd18",
+  "binary_sha256": "36dd22a082f48d486e4671b0d0677a9279bfe5932f6650ad83911a77d009405d",
+  "runs": [
+    {
+      "id": "paired-1",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 957167.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 488458.0,
+              "layer_norm_backward": 439417.0,
+              "loss": 10708.0,
+              "update": 12209.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 838375.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 427041.0,
+              "layer_norm_backward_affine": 91042.0,
+              "layer_norm_backward_input": 297667.0,
+              "loss": 8417.0,
+              "update": 10625.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1835333.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 535292.0,
+              "layer_norm_backward": 1266250.0,
+              "loss": 10000.0,
+              "update": 16375.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 2174416.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 533625.0,
+              "layer_norm_backward_affine": 265708.0,
+              "layer_norm_backward_input": 1347291.0,
+              "loss": 12500.0,
+              "update": 11041.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13382959.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4379625.0,
+              "layer_norm_backward": 8962250.0,
+              "loss": 26959.0,
+              "update": 10250.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13124041.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4073291.0,
+              "layer_norm_backward_affine": 1901875.0,
+              "layer_norm_backward_input": 7109875.0,
+              "loss": 24750.0,
+              "update": 10000.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paired-2",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 2589792.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 1326625.0,
+              "layer_norm_backward": 1195292.0,
+              "loss": 23083.0,
+              "update": 31500.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 2614708.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 1327833.0,
+              "layer_norm_backward_affine": 285125.0,
+              "layer_norm_backward_input": 928000.0,
+              "loss": 25625.0,
+              "update": 34000.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 5106667.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 1441542.0,
+              "layer_norm_backward": 3579334.0,
+              "loss": 36958.0,
+              "update": 35583.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 4998333.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 1457375.0,
+              "layer_norm_backward_affine": 814542.0,
+              "layer_norm_backward_input": 2648000.0,
+              "loss": 32625.0,
+              "update": 34583.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13057917.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4073709.0,
+              "layer_norm_backward": 8942416.0,
+              "loss": 25083.0,
+              "update": 10542.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13176291.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4139708.0,
+              "layer_norm_backward_affine": 1902542.0,
+              "layer_norm_backward_input": 7086125.0,
+              "loss": 29917.0,
+              "update": 9541.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paired-3",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 570667.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 287667.0,
+              "layer_norm_backward": 265459.0,
+              "loss": 7083.0,
+              "update": 7834.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 572541.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 287583.0,
+              "layer_norm_backward_affine": 62208.0,
+              "layer_norm_backward_input": 200667.0,
+              "loss": 6000.0,
+              "update": 9125.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1112875.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 317209.0,
+              "layer_norm_backward": 772000.0,
+              "loss": 9500.0,
+              "update": 8541.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1117250.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 312542.0,
+              "layer_norm_backward_affine": 184167.0,
+              "layer_norm_backward_input": 603250.0,
+              "loss": 6583.0,
+              "update": 7875.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13060375.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4110583.0,
+              "layer_norm_backward": 8909792.0,
+              "loss": 24208.0,
+              "update": 9083.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13074125.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4098125.0,
+              "layer_norm_backward_affine": 1883750.0,
+              "layer_norm_backward_input": 7049250.0,
+              "loss": 30416.0,
+              "update": 8791.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paired-4",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 569500.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 287958.0,
+              "layer_norm_backward": 264750.0,
+              "loss": 6125.0,
+              "update": 8208.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 574083.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 288125.0,
+              "layer_norm_backward_affine": 62291.0,
+              "layer_norm_backward_input": 200584.0,
+              "loss": 7083.0,
+              "update": 8958.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1130458.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 319542.0,
+              "layer_norm_backward": 788958.0,
+              "loss": 6708.0,
+              "update": 9291.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1131042.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 318292.0,
+              "layer_norm_backward_affine": 187875.0,
+              "layer_norm_backward_input": 606875.0,
+              "loss": 7125.0,
+              "update": 7875.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13054084.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4087417.0,
+              "layer_norm_backward": 8928834.0,
+              "loss": 23541.0,
+              "update": 9917.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13037042.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4109125.0,
+              "layer_norm_backward_affine": 1893292.0,
+              "layer_norm_backward_input": 6994416.0,
+              "loss": 25917.0,
+              "update": 10167.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paired-5",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 569125.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 288500.0,
+              "layer_norm_backward": 264959.0,
+              "loss": 5958.0,
+              "update": 7458.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 569625.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 289333.0,
+              "layer_norm_backward_affine": 62792.0,
+              "layer_norm_backward_input": 201625.0,
+              "loss": 6000.0,
+              "update": 7375.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1116084.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 314167.0,
+              "layer_norm_backward": 785125.0,
+              "loss": 6583.0,
+              "update": 7792.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1088167.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 308917.0,
+              "layer_norm_backward_affine": 174583.0,
+              "layer_norm_backward_input": 587042.0,
+              "loss": 6833.0,
+              "update": 7709.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "original_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13225875.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4111875.0,
+              "layer_norm_backward": 9068167.0,
+              "loss": 34041.0,
+              "update": 8750.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13005667.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4090959.0,
+              "layer_norm_backward_affine": 1891041.0,
+              "layer_norm_backward_input": 6982042.0,
+              "loss": 30084.0,
+              "update": 8417.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "reverse-1",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 574792.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 287833.0,
+              "layer_norm_backward": 265167.0,
+              "loss": 8666.0,
+              "update": 7542.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 574917.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 290500.0,
+              "layer_norm_backward_affine": 63292.0,
+              "layer_norm_backward_input": 201917.0,
+              "loss": 6167.0,
+              "update": 7500.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1338750.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 310208.0,
+              "layer_norm_backward": 1010708.0,
+              "loss": 6750.0,
+              "update": 8667.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1109875.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 317375.0,
+              "layer_norm_backward_affine": 175000.0,
+              "layer_norm_backward_input": 596041.0,
+              "loss": 6542.0,
+              "update": 8833.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13033250.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4037166.0,
+              "layer_norm_backward": 8953334.0,
+              "loss": 25292.0,
+              "update": 10000.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13120250.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4085250.0,
+              "layer_norm_backward_affine": 1890000.0,
+              "layer_norm_backward_input": 7103625.0,
+              "loss": 24541.0,
+              "update": 9916.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "reverse-2",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 582417.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 290833.0,
+              "layer_norm_backward": 269583.0,
+              "loss": 8417.0,
+              "update": 7584.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 571333.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 287625.0,
+              "layer_norm_backward_affine": 62167.0,
+              "layer_norm_backward_input": 200542.0,
+              "loss": 7875.0,
+              "update": 7541.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1137875.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 311084.0,
+              "layer_norm_backward": 801542.0,
+              "loss": 8333.0,
+              "update": 8750.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1128875.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 313791.0,
+              "layer_norm_backward_affine": 192167.0,
+              "layer_norm_backward_input": 591958.0,
+              "loss": 9458.0,
+              "update": 12459.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13192417.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4227625.0,
+              "layer_norm_backward": 8923042.0,
+              "loss": 24375.0,
+              "update": 10250.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13103084.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4082834.0,
+              "layer_norm_backward_affine": 1920208.0,
+              "layer_norm_backward_input": 7057625.0,
+              "loss": 28208.0,
+              "update": 10459.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "reverse-3",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 570958.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 287875.0,
+              "layer_norm_backward": 262250.0,
+              "loss": 6959.0,
+              "update": 7875.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 582000.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 290792.0,
+              "layer_norm_backward_affine": 62917.0,
+              "layer_norm_backward_input": 203583.0,
+              "loss": 8417.0,
+              "update": 7750.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1113083.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 314292.0,
+              "layer_norm_backward": 776625.0,
+              "loss": 6500.0,
+              "update": 9666.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1117500.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 308791.0,
+              "layer_norm_backward_affine": 186042.0,
+              "layer_norm_backward_input": 605750.0,
+              "loss": 6667.0,
+              "update": 7542.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13161375.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4121916.0,
+              "layer_norm_backward": 9003333.0,
+              "loss": 23875.0,
+              "update": 8917.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13156709.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4129625.0,
+              "layer_norm_backward_affine": 1905208.0,
+              "layer_norm_backward_input": 7084542.0,
+              "loss": 24458.0,
+              "update": 9167.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "reverse-4",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 568458.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 287708.0,
+              "layer_norm_backward": 265042.0,
+              "loss": 6083.0,
+              "update": 7417.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 575541.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 289000.0,
+              "layer_norm_backward_affine": 64166.0,
+              "layer_norm_backward_input": 204166.0,
+              "loss": 6125.0,
+              "update": 9291.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1111833.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 311417.0,
+              "layer_norm_backward": 782834.0,
+              "loss": 7209.0,
+              "update": 7750.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1137917.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 313958.0,
+              "layer_norm_backward_affine": 188958.0,
+              "layer_norm_backward_input": 618208.0,
+              "loss": 6583.0,
+              "update": 7709.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13137708.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4166416.0,
+              "layer_norm_backward": 8935708.0,
+              "loss": 24125.0,
+              "update": 8458.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13062750.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4056792.0,
+              "layer_norm_backward_affine": 1904750.0,
+              "layer_norm_backward_input": 7065792.0,
+              "loss": 23958.0,
+              "update": 8417.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "reverse-5",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 579625.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 290541.0,
+              "layer_norm_backward": 265459.0,
+              "loss": 7750.0,
+              "update": 7334.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.1596481800079346,
+            "gpu_span_ns": 580500.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 290208.0,
+              "layer_norm_backward_affine": 64750.0,
+              "layer_norm_backward_input": 204250.0,
+              "loss": 6000.0,
+              "update": 9125.0
+            }
+          }
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1117750.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 319084.0,
+              "layer_norm_backward": 778833.0,
+              "loss": 8250.0,
+              "update": 8708.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0911060571670532,
+            "gpu_span_ns": 1115625.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 309458.0,
+              "layer_norm_backward_affine": 184458.0,
+              "layer_norm_backward_input": 604583.0,
+              "loss": 6625.0,
+              "update": 7750.0
+            }
+          }
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+          "order": "split_first",
+          "state_bits_equal": true,
+          "original": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13081333.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4057750.0,
+              "layer_norm_backward": 8980375.0,
+              "loss": 29334.0,
+              "update": 10083.0
+            }
+          },
+          "split": {
+            "accepted": true,
+            "timing_complete": true,
+            "loss": 1.0912644863128662,
+            "gpu_span_ns": 13066791.0,
+            "phase_totals_ns": {
+              "forward_layer_norm": 4111125.0,
+              "layer_norm_backward_affine": 1891750.0,
+              "layer_norm_backward_input": 7022791.0,
+              "loss": 26583.0,
+              "update": 10666.0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
