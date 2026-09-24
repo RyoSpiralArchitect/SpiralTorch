@@ -1,0 +1,419 @@
+{
+  "schema": "spiraltorch.layer_norm.guarded_input_dispatch_profile.v1",
+  "baseline_commit": "9e9e10a62dc7a0bd2cb410b4234dad79e8c60cf2",
+  "candidate_commit": "c988b80db080412b18be3707fde2dd902cb479fa",
+  "baseline_binary_sha256": "36dd22a082f48d486e4671b0d0677a9279bfe5932f6650ad83911a77d009405d",
+  "candidate_binary_sha256": "454ede2b9d249f5f57c9792163059a99941e90c96ce455acc6eeae49ac800254",
+  "runs": [
+    {
+      "id": "baseline-profile-pinned-1.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 530541.0,
+          "split_input_ns": 682667.0,
+          "split_affine_ns": 173917.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 1509625.0,
+          "split_input_ns": 1131750.0,
+          "split_affine_ns": 379291.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 9267792.0,
+          "split_input_ns": 7957750.0,
+          "split_affine_ns": 2607542.0
+        }
+      ]
+    },
+    {
+      "id": "baseline-profile-pinned-2.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 334000.0,
+          "split_input_ns": 212083.0,
+          "split_affine_ns": 70084.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 774875.0,
+          "split_input_ns": 605417.0,
+          "split_affine_ns": 184084.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 10080167.0,
+          "split_input_ns": 7625292.0,
+          "split_affine_ns": 1995041.0
+        }
+      ]
+    },
+    {
+      "id": "baseline-profile-pinned-3.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 272083.0,
+          "split_input_ns": 217667.0,
+          "split_affine_ns": 74875.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 789958.0,
+          "split_input_ns": 575583.0,
+          "split_affine_ns": 176833.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 10453708.0,
+          "split_input_ns": 7143334.0,
+          "split_affine_ns": 2156291.0
+        }
+      ]
+    },
+    {
+      "id": "baseline-profile-pinned-4.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 284167.0,
+          "split_input_ns": 215666.0,
+          "split_affine_ns": 74792.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 760875.0,
+          "split_input_ns": 594209.0,
+          "split_affine_ns": 178458.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 9336334.0,
+          "split_input_ns": 7150417.0,
+          "split_affine_ns": 2140459.0
+        }
+      ]
+    },
+    {
+      "id": "baseline-profile-pinned-5.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 274375.0,
+          "split_input_ns": 206834.0,
+          "split_affine_ns": 69458.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 796708.0,
+          "split_input_ns": 595042.0,
+          "split_affine_ns": 185500.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 10283666.0,
+          "split_input_ns": 7910375.0,
+          "split_affine_ns": 2188167.0
+        }
+      ]
+    },
+    {
+      "id": "final-profile-pinned-1.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 683166.0,
+          "split_input_ns": 646125.0,
+          "split_affine_ns": 303333.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 1725250.0,
+          "split_input_ns": 1077208.0,
+          "split_affine_ns": 368334.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 7588208.0,
+          "split_input_ns": 6251625.0,
+          "split_affine_ns": 1970084.0
+        }
+      ]
+    },
+    {
+      "id": "final-profile-pinned-2.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 275708.0,
+          "split_input_ns": 225167.0,
+          "split_affine_ns": 409917.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 1093958.0,
+          "split_input_ns": 546750.0,
+          "split_affine_ns": 178042.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 7743125.0,
+          "split_input_ns": 6304333.0,
+          "split_affine_ns": 1957875.0
+        }
+      ]
+    },
+    {
+      "id": "final-profile-pinned-3.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 273750.0,
+          "split_input_ns": 209416.0,
+          "split_affine_ns": 87583.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 741208.0,
+          "split_input_ns": 536250.0,
+          "split_affine_ns": 178375.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 7846167.0,
+          "split_input_ns": 5553792.0,
+          "split_affine_ns": 2001000.0
+        }
+      ]
+    },
+    {
+      "id": "final-profile-pinned-4.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 456625.0,
+          "split_input_ns": 215709.0,
+          "split_affine_ns": 74542.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 717583.0,
+          "split_input_ns": 546791.0,
+          "split_affine_ns": 179708.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 8912042.0,
+          "split_input_ns": 5783792.0,
+          "split_affine_ns": 1979333.0
+        }
+      ]
+    },
+    {
+      "id": "final-profile-pinned-5.json",
+      "cases": [
+        {
+          "rows": 2,
+          "cols": 3,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 282333.0,
+          "split_input_ns": 211791.0,
+          "split_affine_ns": 73292.0
+        },
+        {
+          "rows": 32,
+          "cols": 256,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 725458.0,
+          "split_input_ns": 535584.0,
+          "split_affine_ns": 184875.0
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "state_bits_equal": true,
+          "original_accepted": true,
+          "split_accepted": true,
+          "original_timing_complete": true,
+          "split_timing_complete": true,
+          "original_backward_ns": 8068209.0,
+          "split_input_ns": 6796916.0,
+          "split_affine_ns": 2071875.0
+        }
+      ]
+    }
+  ]
+}

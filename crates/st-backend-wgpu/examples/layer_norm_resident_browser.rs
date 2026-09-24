@@ -214,6 +214,39 @@ mod browser {
             .await?;
             epsilon_cancellation_cases += 1;
         }
+        let cols = 256;
+        let epsilon = 1e-5f32;
+        let tiny_cotangent = f32::from_bits(1_000_000);
+        let seed: Vec<_> = (0..cols)
+            .map(|col| {
+                if col % 2 == 0 {
+                    tiny_cotangent
+                } else {
+                    -tiny_cotangent
+                }
+            })
+            .collect();
+        let input = device.upload(&[1, cols], &vec![0.; cols])?;
+        let tape = input.layer_norm_affine(
+            &device.upload(&[cols], &vec![1.; cols])?,
+            &device.upload(&[cols], &vec![0.; cols])?,
+            epsilon,
+        )?;
+        let upstream = device.upload(&[1, cols], &seed)?;
+        let [dx, _, _] = tape.backward(&upstream, 1., [true, false, false])?;
+        let expected = f64::from(tiny_cotangent) / f64::from(epsilon).sqrt();
+        if expected <= f64::from(f32::MIN_POSITIVE) {
+            return Err("Subnormal fixture did not amplify into normal range".into());
+        }
+        for (col, actual) in read(dx.as_ref().unwrap()).await?.into_iter().enumerate() {
+            let target = if col % 2 == 0 { expected } else { -expected };
+            if !actual.is_finite() || ((f64::from(actual) - target) / target).abs() >= 0.01 {
+                return Err(
+                    format!("Subnormal cotangent at col {col}: {actual} != {target}").into(),
+                );
+            }
+        }
+        let subnormal_cotangent_cases = 1;
         // Independently reproduced by decimal_probe.py on exact f32 inputs.
         let oracle = [
             -917.6735572182624,
@@ -357,6 +390,7 @@ mod browser {
             "adaptive_workgroup_cases": adaptive_workgroup_cases, "adaptive_workgroup_masks": 3,
             "scale_nullspace_cases": scale_nullspace_cases,
             "epsilon_cancellation_cases": epsilon_cancellation_cases,
+            "subnormal_cotangent_cases": subnormal_cotangent_cases,
             "dynamic_range_variants": dynamic_range_variants,
             "training_steps": 400, "first_loss": first, "last_loss": last,
             "intermediate_readbacks": 0, "guard_checks": 4, "batched_snapshot_checks": 4,

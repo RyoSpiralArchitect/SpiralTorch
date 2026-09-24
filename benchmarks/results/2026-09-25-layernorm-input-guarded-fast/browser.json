@@ -1,0 +1,100 @@
+{
+  "schema": "spiraltorch.layer_norm.guarded_input_browser_comparison.v1",
+  "baseline_commit": "9e9e10a62dc7a0bd2cb410b4234dad79e8c60cf2",
+  "candidate_commit": "c988b80db080412b18be3707fde2dd902cb479fa",
+  "runs": [
+    {
+      "id": "browser-matched-1.json",
+      "status": "passed",
+      "browser_version": "153.0.8010.53",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "baseline_wasm_sha256": "aefa060d9a3247dc98e3c6735d9325ed1e49db1de2b5f19eb52ef35ded1374c7",
+      "candidate_wasm_sha256": "a3035cb0478c79a464f311c0d5ac0fede0275af0f17b6919455e71fedab85e4d",
+      "page_sha256": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_median_ms": 48,
+          "candidate_median_ms": 46.90000003576279,
+          "max_scaled_error": 1.1640783700180843E-7
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_median_ms": 470.5,
+          "candidate_median_ms": 419.60000002384186,
+          "max_scaled_error": 1.0913891630864596E-8
+        }
+      ]
+    },
+    {
+      "id": "browser-matched-2.json",
+      "status": "passed",
+      "browser_version": "153.0.8010.53",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "baseline_wasm_sha256": "aefa060d9a3247dc98e3c6735d9325ed1e49db1de2b5f19eb52ef35ded1374c7",
+      "candidate_wasm_sha256": "a3035cb0478c79a464f311c0d5ac0fede0275af0f17b6919455e71fedab85e4d",
+      "page_sha256": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_median_ms": 49.69999998807907,
+          "candidate_median_ms": 51.80000001192093,
+          "max_scaled_error": 1.1640783700180843E-7
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_median_ms": 513.4000000357628,
+          "candidate_median_ms": 462.60000002384186,
+          "max_scaled_error": 1.0913891630864596E-8
+        }
+      ]
+    },
+    {
+      "id": "browser-matched-3.json",
+      "status": "passed",
+      "browser_version": "153.0.8010.53",
+      "adapter_probe": {
+        "vendor": "apple",
+        "is_fallback_adapter": false
+      },
+      "steps": 32,
+      "warmup": 2,
+      "iterations": 5,
+      "baseline_wasm_sha256": "aefa060d9a3247dc98e3c6735d9325ed1e49db1de2b5f19eb52ef35ded1374c7",
+      "candidate_wasm_sha256": "a3035cb0478c79a464f311c0d5ac0fede0275af0f17b6919455e71fedab85e4d",
+      "page_sha256": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+      "cases": [
+        {
+          "rows": 32,
+          "cols": 256,
+          "baseline_median_ms": 53.10000002384186,
+          "candidate_median_ms": 47.80000001192093,
+          "max_scaled_error": 1.1640783700180843E-7
+        },
+        {
+          "rows": 128,
+          "cols": 1025,
+          "baseline_median_ms": 497.80000001192093,
+          "candidate_median_ms": 454.39999997615814,
+          "max_scaled_error": 1.0913891630864596E-8
+        }
+      ]
+    }
+  ]
+}

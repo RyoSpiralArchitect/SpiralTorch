@@ -94,14 +94,14 @@ fn layer_norm_shaders_validate_without_adapter() {
     assert_eq!(std::mem::size_of::<Params>(), 32);
     let shape = LayerNormShape::new(&[1, 3], &[3]).unwrap();
     let mut limits = wgpu::Limits {
-        max_compute_workgroup_storage_size: 8287,
+        max_compute_workgroup_storage_size: 8291,
         ..Default::default()
     };
     assert!(matches!(
         preflight(shape, &limits),
         Err(TensorError::Limit("LayerNorm pipeline"))
     ));
-    limits.max_compute_workgroup_storage_size = 8288;
+    limits.max_compute_workgroup_storage_size = 8292;
     assert!(preflight(shape, &limits).is_ok());
 }
 
@@ -797,6 +797,107 @@ fn layer_norm_zero_epsilon_scale_direction_is_null_at_tiny_variance() {
         let actual = read(dx.as_ref().unwrap());
         eprintln!("scale-direction nullspace: scale={scale}, dx={actual:?}");
         close(&actual, &[0.; 3]);
+    }
+}
+
+#[test]
+fn layer_norm_wide_rows_input_vjp_matches_f64_with_and_without_cancellation() {
+    let Some(device) = device() else { return };
+    for cols in [256, 1025] {
+        let rows = 2;
+        let x: Vec<_> = (0..rows * cols)
+            .map(|i| (((i * 37 + 17) % 257) as f32 - 128.) / 64.)
+            .collect();
+        let beta = vec![0.; cols];
+        for scale_direction in [false, true] {
+            let gamma: Vec<_> = (0..cols)
+                .map(|i| {
+                    if scale_direction {
+                        1.
+                    } else {
+                        ((i * 17 % 23) as f32 - 11.) / 8.
+                    }
+                })
+                .collect();
+            let seed: Vec<_> = (0..rows * cols)
+                .map(|i| {
+                    if scale_direction {
+                        x[i] * 1e8
+                    } else {
+                        ((i * 11 % 31) as f32 - 15.) / 16.
+                    }
+                })
+                .collect();
+            for epsilon in [1e-5, 1e-9] {
+                let expected = reference(&x, &gamma, &beta, &seed, epsilon, 1.);
+                let input = device.upload(&[rows, cols], &x).unwrap();
+                let gain = device.upload(&[cols], &gamma).unwrap();
+                let bias = device.upload(&[cols], &beta).unwrap();
+                let upstream = device.upload(&[rows, cols], &seed).unwrap();
+                let tape = input.layer_norm_affine(&gain, &bias, epsilon).unwrap();
+                let gradients = tape.backward(&upstream, 1., [true; 3]).unwrap();
+                for (actual, expected) in gradients.iter().zip(&expected[1..]) {
+                    close(&read(actual.as_ref().unwrap()), expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn layer_norm_wide_rows_input_vjp_stays_stable_near_fast_guard_boundary() {
+    let Some(device) = device() else { return };
+    for cols in [256, 1025] {
+        for offset in [0., 1024.] {
+            let rows = 2;
+            let x: Vec<_> = (0..rows * cols)
+                .map(|i| offset + (((i * 37 + 17) % 257) as f32 - 128.) / 64.)
+                .collect();
+            let gamma = vec![1.; cols];
+            let beta = vec![0.; cols];
+            let input = device.upload(&[rows, cols], &x).unwrap();
+            let gain = device.upload(&[cols], &gamma).unwrap();
+            let bias = device.upload(&[cols], &beta).unwrap();
+            let tape = input.layer_norm_affine(&gain, &bias, 1e-5).unwrap();
+            for noise_scale in [1e5, 5e5, 1e6, 2e6, 5e6, 1e7] {
+                let seed: Vec<_> = (0..rows * cols)
+                    .map(|i| {
+                        (x[i] - offset) * 1e8
+                            + (((i * 11 + 3) % 31) as f32 - 15.) / 16. * noise_scale
+                    })
+                    .collect();
+                let expected = reference(&x, &gamma, &beta, &seed, 1e-5, 1.);
+                let upstream = device.upload(&[rows, cols], &seed).unwrap();
+                let [dx, _, _] = tape.backward(&upstream, 1., [true, false, false]).unwrap();
+                close(&read(dx.as_ref().unwrap()), &expected[1]);
+            }
+        }
+    }
+}
+
+#[test]
+fn layer_norm_wide_rows_preserve_amplified_subnormal_cotangents() {
+    let Some(device) = device() else { return };
+    let cols = 256;
+    let epsilon = 1e-5f32;
+    let tiny = f32::from_bits(1_000_000);
+    let seed: Vec<_> = (0..cols)
+        .map(|col| if col % 2 == 0 { tiny } else { -tiny })
+        .collect();
+    let input = device.upload(&[1, cols], &vec![0.; cols]).unwrap();
+    let gamma = device.upload(&[cols], &vec![1.; cols]).unwrap();
+    let beta = device.upload(&[cols], &vec![0.; cols]).unwrap();
+    let upstream = device.upload(&[1, cols], &seed).unwrap();
+    let tape = input.layer_norm_affine(&gamma, &beta, epsilon).unwrap();
+    let [dx, _, _] = tape.backward(&upstream, 1., [true, false, false]).unwrap();
+    let expected = f64::from(tiny) / f64::from(epsilon).sqrt();
+    assert!(expected > f64::from(f32::MIN_POSITIVE));
+    for (col, actual) in read(dx.as_ref().unwrap()).into_iter().enumerate() {
+        let target = if col % 2 == 0 { expected } else { -expected };
+        assert!(
+            actual.is_finite() && ((f64::from(actual) - target) / target).abs() < 0.01,
+            "subnormal cotangent at col {col}: {actual} != {target}"
+        );
     }
 }
 
