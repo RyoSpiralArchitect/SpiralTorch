@@ -1,12 +1,12 @@
 """Validate matched Rust/PyTorch training reports and derive all route medians."""
 
+import argparse
 import hashlib
 import json
 import math
 from pathlib import Path
 import statistics
 import struct
-import sys
 
 
 SHAPES = [(2, 3), (8, 257), (32, 256), (64, 768), (128, 1025), (256, 256)]
@@ -16,6 +16,7 @@ STAGES = ["readback_only", "forward", "mse", "backward_all",
           "backward_input", "backward_affine", "update"]
 TORCH_ROUTES = ["cpu", "mps"]
 TOLERANCE = 5e-4
+UPDATE_EXECUTIONS = ("sequential", "batched", "fused", "grouped_fused")
 
 
 def require(ok, message):
@@ -52,9 +53,12 @@ def validate_intervals(intervals, key, routes, count):
             for route in routes]
 
 
-def validate(native, torch):
+def validate(native, torch, expected_update_execution="sequential"):
     require(native["schema"] == "spiraltorch.layer_norm.training_residency_exploratory.v1",
             "Rust schema")
+    update_execution = native.get("update_execution", "sequential")
+    require(expected_update_execution in UPDATE_EXECUTIONS and
+            update_execution == expected_update_execution, "Rust update execution")
     require(torch["schema"] == "spiraltorch.layer_norm.training_residency_torch.v1"
             and torch["status"] == "passed", "PyTorch schema/status")
     require("device_type: IntegratedGpu" in native["adapter"] and
@@ -123,7 +127,7 @@ def validate(native, torch):
                                     "torch_cpu": torch_case["final_outputs"]["cpu"][0][0],
                                     "torch_mps": torch_case["final_outputs"]["mps"][0][0]}})
     return {"schema": "spiraltorch.layer_norm.training_residency_comparison.v1",
-            "status": "validated", "shapes": rows,
+            "status": "validated", "update_execution": update_execution, "shapes": rows,
             "routes": {"rust": RUST_ROUTES, "stages": STAGES, "pytorch": TORCH_ROUTES},
             "max_native_scaled_error": max_native_error,
             "max_cross_scaled_error": max_cross_error,
@@ -131,11 +135,15 @@ def validate(native, torch):
 
 
 def main():
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: compare.py NATIVE_JSON TORCH_JSON")
-    paths = [Path(name) for name in sys.argv[1:]]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("native_json", type=Path)
+    parser.add_argument("torch_json", type=Path)
+    parser.add_argument("--expected-update-execution", choices=UPDATE_EXECUTIONS,
+                        default="sequential")
+    args = parser.parse_args()
+    paths = [args.native_json, args.torch_json]
     reports = [json.loads(path.read_text()) for path in paths]
-    summary = validate(*reports)
+    summary = validate(*reports, expected_update_execution=args.expected_update_execution)
     summary["inputs"] = [{"name": path.name,
                           "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
                          for path in paths]
