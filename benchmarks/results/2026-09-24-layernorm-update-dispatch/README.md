@@ -85,13 +85,15 @@ SPIRALTORCH_STRICT_GPU=1 SPIRALTORCH_LAYER_NORM_UPDATE_EXECUTION=fused \
   target/release/examples/layer_norm_training_residency_bench \
   > "$RAW/fused-run1.json"
 python3 -I -B benchmarks/layer-norm-training/compare.py \
+  --expected-update-execution fused \
   "$RAW/fused-run1.json" "$TORCH/torch-b9b23501-run1.json" \
   > "$RAW/validated-fused-run1.json"
 ```
 
-Repeat in the counterbalanced order above for runs 2 and 3, using the
-matching fixed-input PyTorch control each time. For the grouped experiment,
-build from the separate source commit, compare `fused` against
-`grouped_fused`, and use pair orders `fused/grouped`, `grouped/fused`,
-`fused/grouped`. Do not run GPU modes concurrently. These records do not
-measure browser WebGPU performance or establish an NN training advantage.
+Repeat in the counterbalanced order above for runs 2 and 3, passing each
+run's expected update mode and matching fixed-input PyTorch control. For the
+grouped experiment, build from the separate source commit, compare `fused`
+against `grouped_fused` (pass that name as the expected mode), and use pair
+orders `fused/grouped`, `grouped/fused`, `fused/grouped`. Do not run GPU modes
+concurrently. These records do not measure browser WebGPU performance or
+establish an NN training advantage.

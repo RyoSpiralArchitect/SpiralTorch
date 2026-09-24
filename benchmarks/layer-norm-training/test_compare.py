@@ -59,7 +59,12 @@ class ComparisonTests(unittest.TestCase):
         native, torch = reports()
         for execution in compare.UPDATE_EXECUTIONS:
             native["update_execution"] = execution
-            self.assertEqual(compare.validate(native, torch)["update_execution"], execution)
+            self.assertEqual(compare.validate(
+                native, torch, expected_update_execution=execution)["update_execution"],
+                execution)
+        native["update_execution"] = "fused"
+        with self.assertRaisesRegex(ValueError, "Rust update execution"):
+            compare.validate(native, torch, expected_update_execution="batched")
         native["update_execution"] = "unrecognized"
         with self.assertRaisesRegex(ValueError, "Rust update execution"):
             compare.validate(native, torch)

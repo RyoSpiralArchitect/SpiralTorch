@@ -38,6 +38,10 @@ one GPU submission instead of two. `batched` keeps two dispatches per
 parameter; `fused` uses one dispatch. All routes retain the same update
 equation and final-output checks. This opt-in benchmark path does not change
 the default `Tensor`, NN trainer, or browser dispatch.
+When validating an opt-in report, pass
+`--expected-update-execution batched` or `--expected-update-execution fused`
+to `compare.py`; without the option it requires the original `sequential`
+route. This makes a missing environment variable fail validation.
 
 On an Apple Metal host with PyTorch MPS available, replay from the measured
 source commit and keep the full JSON reports outside the repository:
