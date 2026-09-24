@@ -19,6 +19,8 @@ var<workgroup> projections: array<Wide, 256>;
 var<workgroup> mean: Wide;
 var<workgroup> projection: Wide;
 var<workgroup> epsilon_sum: Wide;
+var<workgroup> input_denominator: Wide;
+var<workgroup> combined_safe: bool;
 var<workgroup> input_scale: Wide;
 
 fn checked(value: Wide) -> f32 {
@@ -79,7 +81,12 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
         // This divisor is row-constant. Keep its extended-range reciprocal on
         // GPU instead of repeating compensated division for every input VJP.
         let stats = row_stats[row];
-        input_scale = wide_div(stats.inverse_std, wide_add(stats.square_sum, epsilon_sum));
+        input_denominator = wide_add(stats.square_sum, epsilon_sum);
+        // Leave 20 exponent bits of margin: a distant epsilon can vanish from
+        // the rounded row sum before a scale-direction cancellation.
+        combined_safe = epsilon_sum.hi != 0.0 &&
+                        (stats.square_sum.hi == 0.0 || epsilon_sum.exponent >= stats.square_sum.exponent - 20);
+        input_scale = wide_div(stats.inverse_std, input_denominator);
     }
     workgroupBarrier();
     for (var col = lane; col < params.cols; col += 256u) {
@@ -88,9 +95,15 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
         // Cancel before dividing: squaring rounded normalized values introduces
         // a scale-direction residual that tiny variance can amplify enormously.
         let centered_g = wide_sub(g, mean);
-        let variance_residual = wide_difference_of_products(centered_g, stats.square_sum,
-                                                            centered_values[base + col], projection);
-        let numerator = wide_add(variance_residual, wide_mul(centered_g, epsilon_sum));
+        var numerator: Wide;
+        if (combined_safe) {
+            numerator = wide_difference_of_products(centered_g, input_denominator,
+                                                     centered_values[base + col], projection);
+        } else {
+            let variance_residual = wide_difference_of_products(centered_g, stats.square_sum,
+                                                                centered_values[base + col], projection);
+            numerator = wide_add(variance_residual, wide_mul(centered_g, epsilon_sum));
+        }
         dx[base + col] = checked(wide_mul(numerator, input_scale));
     }
 }
