@@ -19,6 +19,53 @@ def graph_plan(shape=(2, 1, 1), weight=1., gain=1.):
 
 
 class GraphSurface(unittest.TestCase):
+    def test_layer_norm_uses_the_rust_owned_v3_graph_plan(self):
+        model = st.nn.Sequential()
+        model.add(st.nn.LayerNorm("norm", 3, -1., 1e-5))
+        plan = model.inference_plan([2, 3])
+        payload = json.loads(plan.to_json())
+        self.assertEqual(payload["schema"], "spiraltorch.nn.inference_plan.v3")
+        self.assertEqual(payload["input_shape"], [2, 3])
+        self.assertEqual([p["role"] for p in payload["parameters"]], ["gain", "bias"])
+        self.assertEqual(payload["stages"][0]["kind"], "layer_norm")
+        self.assertAlmostEqual(payload["stages"][0]["epsilon"], 1.1e-5)
+        self.assertEqual(st.nn.InferencePlan.from_json(plan.to_json()).to_json(), plan.to_json())
+        payload["schema"] = "spiraltorch.nn.inference_plan.v2"
+        with self.assertRaises(ValueError):
+            st.nn.InferencePlan.from_json(json.dumps(payload))
+
+    @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
+    def test_layer_norm_v3_plan_runs_forward_and_training_on_gpu(self):
+        model = st.nn.Sequential()
+        model.add(st.nn.LayerNorm("norm", 3, -1., 1e-5))
+        plan = model.inference_plan([2, 3])
+        values = [1., 2., 4., 2., 0., -1.]
+        expected = [value for row in model(st.Tensor(2, 3, values)).tolist() for value in row]
+        forward = plan.compile_graph_wgpu()
+        forward.upload_values(values)
+        forward.dispatch()
+        observed = forward.snapshot().read_values()
+        self.assertEqual(len(observed), len(expected))
+        for actual, reference in zip(observed, expected):
+            self.assertAlmostEqual(actual, reference, places=5)
+        states = {}
+        for policy in ("exact", "module_compatible"):
+            gpu = plan.compile_graph_training_wgpu(gradient_policy=policy)
+            gpu.upload_batch_values(values, [0.] * len(values))
+            gpu.step(.01)
+            state = gpu.state_snapshot().read_state()
+            prediction = state.prediction_values()
+            self.assertEqual(len(prediction), len(expected))
+            for actual, reference in zip(prediction, expected):
+                self.assertAlmostEqual(actual, reference, places=5)
+            states[policy] = state
+        for parameter in range(2):
+            exact = states["exact"].parameter_gradient_values(parameter)
+            compatible = states["module_compatible"].effective_gradient_values(parameter)
+            self.assertEqual(len(compatible), len(exact))
+            for actual, reference in zip(compatible, exact):
+                self.assertAlmostEqual(actual, reference / 2, places=5)
+
     def test_imports_opaque_ownership_and_rich_lowering(self):
         from spiraltorch.nn import ResidentGraphTraining, GraphTrainingSnapshot
         from spiraltorch.nn import GraphTrainingParametersSnapshot, GraphTrainingState

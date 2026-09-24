@@ -1,5 +1,6 @@
 //! Versioned terminal producers, without a prediction-value capture/copy.
 use super::*;
+use crate::resident_tensor::normalization;
 use crate::resident_tensor::{capture::retention_limit, guard_capture::GuardCapture};
 
 struct Version {
@@ -85,6 +86,22 @@ impl PredictionOutputs {
                     tensor.values(),
                     &resources.empty_flags,
                     &g.pointwise_flags,
+                ))
+            }
+            (Node::LayerNorm(node), GraphStage::LayerNorm { gain, bias, .. }) => {
+                ForwardBinding::LayerNorm(normalization::bind(
+                    gpu,
+                    &g.layer_norm.as_ref().unwrap().forward_layout,
+                    [
+                        &g.activations[stage],
+                        &g.parameters[*gain],
+                        &g.parameters[*bias],
+                        &node.centered,
+                        &node.row_stats,
+                        tensor.values(),
+                        &g.validation,
+                        &node.forward_params,
+                    ],
                 ))
             }
             _ => unreachable!("validated terminal stage"),

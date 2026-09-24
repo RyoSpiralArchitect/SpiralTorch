@@ -163,6 +163,33 @@ impl InferencePlan {
                         parameters: vec![id],
                     });
                 }
+                InferenceOp::LayerNorm {
+                    gain,
+                    bias,
+                    epsilon,
+                } => {
+                    if gain.shape() != (1, width) || bias.shape() != (1, width) {
+                        return Err(InferenceError::Shape(stages.len()));
+                    }
+                    let gain = gain.to_layout(Layout::RowMajor)?;
+                    let bias = bias.to_layout(Layout::RowMajor)?;
+                    let id = parameters.len();
+                    parameters.push(GraphParameter {
+                        role: ParameterRole::Gain,
+                        shape: vec![width],
+                        values: gain.data().to_vec(),
+                    });
+                    parameters.push(GraphParameter {
+                        role: ParameterRole::Bias,
+                        shape: vec![width],
+                        values: bias.data().to_vec(),
+                    });
+                    stages.push(GraphStage::LayerNorm {
+                        gain: id,
+                        bias: id + 1,
+                        epsilon,
+                    });
+                }
                 InferenceOp::Gelu | InferenceOp::Relu => {
                     let gelu = matches!(op, InferenceOp::Gelu);
                     if gelu {
@@ -246,6 +273,9 @@ impl InferencePlan {
                 }
                 GraphStage::Pointwise { chain, .. } => {
                     source_operations += chain.steps().len();
+                }
+                GraphStage::LayerNorm { .. } => {
+                    source_operations += 1;
                 }
             }
         }
@@ -364,9 +394,78 @@ impl InferencePlan {
 mod tests {
     use super::*;
     use crate::{
-        layers::{Gelu, Relu, Scaler},
+        layers::{Gelu, LayerNorm, Relu, Scaler},
         Linear, Sequential,
     };
+
+    #[test]
+    fn module_layer_norm_lowers_to_versioned_owned_graph() {
+        let mut model = Sequential::new();
+        model.push(Linear::new("linear", 3, 4).unwrap());
+        model.push(LayerNorm::new("norm", 4, -1.0, 1e-5).unwrap());
+        let plan =
+            InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 3]).unwrap()).unwrap();
+        assert_eq!(plan.output_layout().shape(), &[2, 4]);
+        let graph = plan.graph_definition().unwrap();
+        assert_eq!(graph.parameter_owners(), &[0, 0, 1, 1]);
+        assert!(matches!(
+            graph.stages()[1],
+            GraphStage::LayerNorm { gain: 2, bias: 3, epsilon } if (epsilon - 1.1e-5).abs() < 1e-10
+        ));
+        let payload = plan.to_json().unwrap();
+        assert!(payload.contains(GRAPH_PLAN_SCHEMA_V3));
+        assert_eq!(
+            InferencePlan::from_json(&payload)
+                .unwrap()
+                .to_json()
+                .unwrap(),
+            payload
+        );
+        let downgraded = payload.replace(GRAPH_PLAN_SCHEMA_V3, GRAPH_PLAN_SCHEMA);
+        assert!(InferencePlan::from_json(&downgraded).is_err());
+        assert_eq!(plan.fuse_pointwise().unwrap().to_json().unwrap(), payload);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn module_layer_norm_forward_reuses_resident_graph() {
+        use crate::module::Module;
+        use st_backend_wgpu::{
+            resident_tensor::TensorDevice, runtime::ensure_default_runtime_blocking,
+        };
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = ensure_default_runtime_blocking("nn.layer_norm.resident").unwrap();
+        let device = TensorDevice::new(runtime).unwrap();
+        let layer = LayerNorm::new("norm", 3, -1.0, 1e-5).unwrap();
+        let values = [1.0, 2.0, 4.0, 2.0, 0.0, -1.0];
+        let input = device.upload(&[2, 3], &values).unwrap();
+        let reference = layer
+            .forward(&Tensor::from_vec(2, 3, values.to_vec()).unwrap())
+            .unwrap();
+        for _ in 0..3 {
+            let observed = layer
+                .forward_resident(&input)
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read()
+                .unwrap();
+            for (&actual, &expected) in observed.iter().zip(reference.data()) {
+                assert!((actual - expected).abs() <= 1e-5 * (1. + expected.abs()));
+            }
+        }
+        let stats = layer.resident_forward_stats().unwrap();
+        assert_eq!(
+            (
+                stats.compilations,
+                stats.cache_hits,
+                stats.submitted_forwards
+            ),
+            (1, 2, 3)
+        );
+    }
     #[test]
     fn pointwise_fusion_is_explicit_portable_and_keeps_dense_fast_path() {
         let mut model = Sequential::new();

@@ -302,7 +302,7 @@ declare module "spiraltorch-wasm" {
         parameterValues(parameter: number): Float32Array;
         parameterGradientValues(parameter: number): Float32Array;
         effectiveGradientValues(parameter: number): Float32Array;
-        /** Weight-only v2 plan, not runtime counters, batch or gradient policy. */
+        /** Versioned parameter plan (v2 or v3), not runtime state or gradient policy. */
         toPlan(): InferencePlan;
         free(): void;
     }

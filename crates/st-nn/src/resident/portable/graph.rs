@@ -1,4 +1,4 @@
-//! Version 2 preserves every role, parameter ID and pointwise stage.
+//! Version 2 preserves pointwise graphs; version 3 adds affine LayerNorm.
 use super::*;
 use crate::resident::{GraphDefinition, GraphParameter, GraphStage, ParameterRole};
 use st_kernel_contracts::{
@@ -8,6 +8,7 @@ use st_kernel_contracts::{
 };
 
 pub const GRAPH_PLAN_SCHEMA: &str = "spiraltorch.nn.inference_plan.v2";
+pub const GRAPH_PLAN_SCHEMA_V3: &str = "spiraltorch.nn.inference_plan.v3";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -42,6 +43,11 @@ enum Stage {
         parameters: Vec<u32>,
         steps: Vec<Step>,
     },
+    LayerNorm {
+        gain: u32,
+        bias: u32,
+        epsilon: f32,
+    },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,7 +67,16 @@ enum Op {
 
 pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError> {
     let record = Record {
-        schema: GRAPH_PLAN_SCHEMA.to_owned(),
+        schema: if graph
+            .stages()
+            .iter()
+            .any(|stage| matches!(stage, GraphStage::LayerNorm { .. }))
+        {
+            GRAPH_PLAN_SCHEMA_V3
+        } else {
+            GRAPH_PLAN_SCHEMA
+        }
+        .to_owned(),
         input_shape: graph
             .input_layout()
             .shape()
@@ -122,6 +137,15 @@ pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError>
                             })
                             .collect::<Result<_, InferenceError>>()?,
                     },
+                    GraphStage::LayerNorm {
+                        gain,
+                        bias,
+                        epsilon,
+                    } => Stage::LayerNorm {
+                        gain: portable_dim(*gain)?,
+                        bias: portable_dim(*bias)?,
+                        epsilon: *epsilon,
+                    },
                 })
             })
             .collect::<Result<_, InferenceError>>()?,
@@ -131,8 +155,19 @@ pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError>
 
 pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> {
     let record: Record = serde_json::from_str(payload)?;
-    if record.schema != GRAPH_PLAN_SCHEMA {
+    if record.schema != GRAPH_PLAN_SCHEMA && record.schema != GRAPH_PLAN_SCHEMA_V3 {
         return Err(InferenceError::Schema(record.schema));
+    }
+    if record.schema == GRAPH_PLAN_SCHEMA
+        && record
+            .stages
+            .iter()
+            .any(|stage| matches!(stage, Stage::LayerNorm { .. }))
+    {
+        return Err(InferenceError::Schema(format!(
+            "{} does not admit layer_norm",
+            record.schema
+        )));
     }
     let shape = record
         .input_shape
@@ -181,6 +216,15 @@ pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> 
                     )
                     .map_err(GraphError::from)?,
                     parameters: parameters.into_iter().map(|id| id as usize).collect(),
+                },
+                Stage::LayerNorm {
+                    gain,
+                    bias,
+                    epsilon,
+                } => GraphStage::LayerNorm {
+                    gain: gain as usize,
+                    bias: bias as usize,
+                    epsilon,
                 },
             })
         })

@@ -1,0 +1,91 @@
+{
+  "schema": "spiraltorch.layer_norm.resident_graph_measurements.v1",
+  "date": "2026-09-24",
+  "device": "Apple M4, Metal, integrated GPU",
+  "benchmark_source_sha256": "725d0482ebbbc3d424f8a351a78d7ff8cf391c62223ccb5d695fe3a45006c99f",
+  "steps": 32,
+  "warmup": 2,
+  "iterations": 5,
+  "routes": ["standalone_resident", "prepared_graph"],
+  "runs": [
+    {
+      "name": "first",
+      "local_raw_sha256": "4dfe18df56558aae17a69cc3abc43f69a36ef471a532f8e4cd2bfce6e800e948",
+      "cases": [
+        {
+          "shape": [2, 3],
+          "standalone_ms": [23.991333, 24.381083, 25.068709, 25.41225, 23.085542],
+          "graph_ms": [22.778958, 22.718959, 22.692541, 22.001833, 22.005416],
+          "standalone_median_ms": 24.381083,
+          "graph_median_ms": 22.692541,
+          "max_scaled_error": 0,
+          "terminal_loss": [0.48289936780929565, 0.48289936780929565]
+        },
+        {
+          "shape": [32, 256],
+          "standalone_ms": [51.365834, 50.950875, 51.619083, 51.136208, 51.65475],
+          "graph_ms": [49.101291, 49.097166, 49.894708, 48.750917, 49.920584],
+          "standalone_median_ms": 51.365834,
+          "graph_median_ms": 49.101291,
+          "max_scaled_error": 0,
+          "terminal_loss": [1.0864962339401245, 1.0864962339401245]
+        },
+        {
+          "shape": [128, 1025],
+          "standalone_ms": [723.41575, 654.806917, 644.106375, 677.565417, 662.750083],
+          "graph_ms": [729.023709, 681.5165, 623.523125, 659.425458, 648.64075],
+          "standalone_median_ms": 662.750083,
+          "graph_median_ms": 659.425458,
+          "max_scaled_error": 0,
+          "terminal_loss": [1.0901281833648682, 1.0901281833648682]
+        }
+      ]
+    },
+    {
+      "name": "final",
+      "local_raw_sha256": "6c6842d4b5e7c4e8aeb776b0125db0020d2c8bd863f26f7378d3d64a051fdd02",
+      "cases": [
+        {
+          "shape": [2, 3],
+          "standalone_ms": [22.644792, 22.691625, 22.311, 22.874625, 23.071875],
+          "graph_ms": [21.9545, 22.285959, 21.30225, 21.246625, 21.30225],
+          "standalone_median_ms": 22.691625,
+          "graph_median_ms": 21.30225,
+          "max_scaled_error": 0,
+          "terminal_loss": [0.48289936780929565, 0.48289936780929565]
+        },
+        {
+          "shape": [32, 256],
+          "standalone_ms": [52.7235, 51.825334, 52.886625, 52.913833, 51.528625],
+          "graph_ms": [49.645875, 51.197208, 50.147166, 51.717, 51.656583],
+          "standalone_median_ms": 52.7235,
+          "graph_median_ms": 51.197208,
+          "max_scaled_error": 0,
+          "terminal_loss": [1.0864962339401245, 1.0864962339401245]
+        },
+        {
+          "shape": [128, 1025],
+          "standalone_ms": [483.691417, 494.658083, 493.422, 483.404166, 482.811708],
+          "graph_ms": [482.269958, 481.8395, 479.836125, 480.777208, 480.2225],
+          "standalone_median_ms": 483.691417,
+          "graph_median_ms": 480.777208,
+          "max_scaled_error": 0,
+          "terminal_loss": [1.0901281833648682, 1.0901281833648682]
+        }
+      ]
+    }
+  ],
+  "browser": {
+    "status": "passed",
+    "schema": "spiraltorch.nn.inference_plan.v3",
+    "browser": "Chrome 153.0.8010.53",
+    "adapter_vendor": "apple",
+    "is_fallback_adapter": false,
+    "policies": ["exact", "module_compatible"],
+    "guard_rejected": true,
+    "page_errors": [],
+    "page_sha256": "5c4bfb98fad499c7b1061d67c6f00ad8ec496d23473a16baa1fa294fbe853866",
+    "wasm_sha256": "582877d00e00aeabda65d4e05eeebda9a992dd34f8692ff4bb21d3b5de40419f",
+    "local_raw_sha256": "4b8a9d1dc4759960e7b9d23c92b04583e895991273d7e0979c1a4189ce4d2cb6"
+  }
+}

@@ -22,16 +22,28 @@ pub(crate) use module_forward::{require_uncommitted_route, unary_forward, unary_
 #[cfg(feature = "wgpu")]
 pub use module_forward::{ResidentForwardCache, ResidentForwardStats};
 pub use module_update::{ModuleOptimizerStatePolicy, ResidentParameterBinding};
-pub use portable::{DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, INFERENCE_PLAN_SCHEMA};
+pub use portable::{
+    DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, GRAPH_PLAN_SCHEMA_V3, INFERENCE_PLAN_SCHEMA,
+};
 
 /// Modules must emit operations equivalent to their ordinary forward semantics.
 /// Descriptors may share live COW/foreign values; InferencePlan freezes them.
 #[derive(Clone, Debug)]
 pub enum InferenceOp {
-    Linear { weight: Tensor, bias: Tensor },
+    Linear {
+        weight: Tensor,
+        bias: Tensor,
+    },
+    LayerNorm {
+        gain: Tensor,
+        bias: Tensor,
+        epsilon: f32,
+    },
     Gelu,
     Relu,
-    Scale { gain: Tensor },
+    Scale {
+        gain: Tensor,
+    },
 }
 
 pub(crate) fn collect_inference_ops(
@@ -53,6 +65,15 @@ impl InferenceOp {
             },
             Self::Scale { gain } => Self::Scale {
                 gain: gain.snapshot(),
+            },
+            Self::LayerNorm {
+                gain,
+                bias,
+                epsilon,
+            } => Self::LayerNorm {
+                gain: gain.snapshot(),
+                bias: bias.snapshot(),
+                epsilon: *epsilon,
             },
             Self::Gelu => Self::Gelu,
             Self::Relu => Self::Relu,
@@ -148,7 +169,7 @@ impl InferencePlan {
         }
         let source_operations = operations.len();
         let rich = operations.iter().enumerate().any(|(i, op)| match op {
-            InferenceOp::Scale { .. } | InferenceOp::Relu => true,
+            InferenceOp::Scale { .. } | InferenceOp::Relu | InferenceOp::LayerNorm { .. } => true,
             InferenceOp::Gelu => i == 0 || !matches!(operations[i - 1], InferenceOp::Linear { .. }),
             _ => false,
         });
@@ -187,7 +208,7 @@ impl InferencePlan {
                         .ok_or(InferenceError::UnsupportedGelu)?;
                     stage.gelu = true;
                 }
-                InferenceOp::Scale { .. } | InferenceOp::Relu => {
+                InferenceOp::Scale { .. } | InferenceOp::Relu | InferenceOp::LayerNorm { .. } => {
                     unreachable!("rich operations were lowered above")
                 }
             }

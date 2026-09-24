@@ -4,7 +4,7 @@ use super::{InferenceError, InferenceOp, InferencePlan};
 use serde::{Deserialize, Serialize};
 use st_tensor::{NdLayout, Tensor};
 mod graph;
-pub use graph::GRAPH_PLAN_SCHEMA;
+pub use graph::{GRAPH_PLAN_SCHEMA, GRAPH_PLAN_SCHEMA_V3};
 
 pub const INFERENCE_PLAN_SCHEMA: &str = "spiraltorch.nn.inference_plan.v1";
 pub const DEFAULT_MAX_PLAN_JSON_BYTES: usize = 64 * 1024 * 1024;
@@ -108,7 +108,7 @@ impl InferencePlan {
             schema: String,
         }
         let schema: Schema = serde_json::from_str(payload)?;
-        if schema.schema == GRAPH_PLAN_SCHEMA {
+        if schema.schema == GRAPH_PLAN_SCHEMA || schema.schema == GRAPH_PLAN_SCHEMA_V3 {
             return graph::from_json(payload);
         }
         let record: PlanRecord = serde_json::from_str(payload)?;

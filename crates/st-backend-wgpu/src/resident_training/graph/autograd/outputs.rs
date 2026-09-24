@@ -3,6 +3,7 @@ use super::*;
 use crate::resident_tensor::{
     capture::{allocate_whole_outputs, retention_limit, whole_outputs_exclusively_owned},
     guard_capture::GuardCapture,
+    normalization,
     pointwise::vjp::VjpOutputBindings,
 };
 
@@ -13,6 +14,10 @@ enum OutputBindings {
         input: Option<Pass>,
     },
     Pointwise(VjpOutputBindings),
+    LayerNorm {
+        input: wgpu::BindGroup,
+        affine: wgpu::BindGroup,
+    },
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -185,6 +190,36 @@ impl GradientOutputs {
                         &g.pointwise_flags,
                     ))
                 }
+                (Node::LayerNorm(node), GraphStage::LayerNorm { .. }) => {
+                    let kernels = g.layer_norm.as_ref().unwrap();
+                    let bind = |destination: &wgpu::Buffer, params: &wgpu::Buffer| {
+                        normalization::bind(
+                            gpu,
+                            &kernels.backward_layout,
+                            [
+                                &node.centered,
+                                &g.parameters[node.gain],
+                                &g.gradients[i + 1],
+                                &node.row_stats,
+                                destination,
+                                &node.affine,
+                                &g.validation,
+                                params,
+                            ],
+                        )
+                    };
+                    OutputBindings::LayerNorm {
+                        input: bind(
+                            if i == 0 {
+                                tensors[0].values()
+                            } else {
+                                &g.gradients[i]
+                            },
+                            &node.input_params,
+                        ),
+                        affine: bind(&resources.unused_out, &node.affine_params),
+                    }
+                }
                 _ => unreachable!("validated graph node kinds"),
             });
         }
@@ -271,6 +306,37 @@ impl GradientOutputs {
                             .map(|&id| version.tensors[id + 1].values()),
                     );
                     plan.encode_prepared_to(encoder, workspace, outputs, destinations);
+                }
+                (Node::LayerNorm(node), OutputBindings::LayerNorm { input, affine }) => {
+                    let kernels = g.layer_norm.as_ref().unwrap();
+                    {
+                        let mut compute =
+                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("graph.autograd.layer_norm.backward"),
+                                timestamp_writes: None,
+                            });
+                        compute.set_pipeline(&kernels.input);
+                        compute.set_bind_group(0, input, &[]);
+                        compute.dispatch_workgroups(node.row_grid[0], node.row_grid[1], 1);
+                        compute.set_pipeline(&kernels.affine[node.affine_pipeline]);
+                        compute.set_bind_group(0, affine, &[]);
+                        compute.dispatch_workgroups(node.col_grid[0], node.col_grid[1], 1);
+                    }
+                    let bytes = node.cols as u64 * 4;
+                    encoder.copy_buffer_to_buffer(
+                        &node.affine,
+                        0,
+                        version.tensors[node.gain + 1].values(),
+                        0,
+                        bytes,
+                    );
+                    encoder.copy_buffer_to_buffer(
+                        &node.affine,
+                        bytes,
+                        version.tensors[node.bias + 1].values(),
+                        0,
+                        bytes,
+                    );
                 }
                 _ => unreachable!("prepared gradient output bindings"),
             }

@@ -1,5 +1,5 @@
 // Graph-owned parameter candidate and effective optimizer gradient.
-// p.gelu is the Gain-role bit here; step._pad0 is the explicit legacy policy.
+// p.gelu selects a legacy row-average parameter; step._pad0 enables the policy.
 @compute @workgroup_size(256)
 fn prepare_parameter(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let i = index(wid, lane);

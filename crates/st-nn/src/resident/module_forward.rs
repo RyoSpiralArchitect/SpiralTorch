@@ -27,6 +27,11 @@ enum OperationStamp {
         bias: Option<TensorContentStamp>,
     },
     Scale(Option<TensorContentStamp>),
+    LayerNorm {
+        gain: Option<TensorContentStamp>,
+        bias: Option<TensorContentStamp>,
+        epsilon_bits: u32,
+    },
     Gelu,
     Relu,
 }
@@ -39,6 +44,15 @@ impl OperationStamp {
                 bias: bias.content_stamp(),
             },
             InferenceOp::Scale { gain } => Self::Scale(gain.content_stamp()),
+            InferenceOp::LayerNorm {
+                gain,
+                bias,
+                epsilon,
+            } => Self::LayerNorm {
+                gain: gain.content_stamp(),
+                bias: bias.content_stamp(),
+                epsilon_bits: epsilon.to_bits(),
+            },
             InferenceOp::Gelu => Self::Gelu,
             InferenceOp::Relu => Self::Relu,
         }
@@ -143,6 +157,28 @@ fn same_operations(a: &[InferenceOp], b: &[InferenceOp], stamps: &mut [Operation
                     InferenceOp::Scale { gain: b },
                     OperationStamp::Scale(stamp),
                 ) => same_parameter(a, b, stamp),
+                (
+                    InferenceOp::LayerNorm {
+                        gain: ag,
+                        bias: ab,
+                        epsilon: ae,
+                    },
+                    InferenceOp::LayerNorm {
+                        gain: bg,
+                        bias: bb,
+                        epsilon: be,
+                    },
+                    OperationStamp::LayerNorm {
+                        gain,
+                        bias,
+                        epsilon_bits,
+                    },
+                ) => {
+                    ae.to_bits() == be.to_bits()
+                        && *epsilon_bits == ae.to_bits()
+                        && same_parameter(ag, bg, gain)
+                        && same_parameter(ab, bb, bias)
+                }
                 (InferenceOp::Gelu, InferenceOp::Gelu, OperationStamp::Gelu)
                 | (InferenceOp::Relu, InferenceOp::Relu, OperationStamp::Relu) => true,
                 _ => false,

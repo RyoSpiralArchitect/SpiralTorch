@@ -3,7 +3,7 @@ WIDE_ARITHMETIC
 
 struct Params {
     rows: u32, cols: u32, groups_x: u32, requested: u32,
-    epsilon: f32, scale: f32, beta_offset: u32, _pad: u32,
+    epsilon: f32, scale: f32, beta_offset: u32, flag_slot: u32,
 };
 
 @group(0) @binding(0) var<storage, read> input: array<f32>;
@@ -21,7 +21,7 @@ var<workgroup> row_inverse: Wide;
 
 fn checked(value: f32) -> f32 {
     if ((bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u) {
-        atomicOr(&flags[0], 1u);
+        atomicOr(&flags[params.flag_slot], 1u);
         return 0.0;
     }
     return value;
@@ -61,7 +61,7 @@ fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
     if (lane == 0u) {
         let square_sum = wide_add(sums[0], wide_mul(parts(params.epsilon), parts(f32(params.cols))));
         let denominator = wide_sqrt(wide_div(square_sum, parts(f32(params.cols))));
-        if (denominator.hi == 0.0) { atomicOr(&flags[0], 1u); }
+        if (denominator.hi == 0.0) { atomicOr(&flags[params.flag_slot], 1u); }
         row_inverse = wide_div(parts(1.0), denominator);
         // Retain the variance separately so epsilon survives cancellation in dx.
         row_stats[row] = LayerNormRow(row_inverse, sums[0]);

@@ -1,6 +1,7 @@
 //! Validated sequential graph and parameter ownership shared by all clients.
 use crate::{
     layout::{NdLayout, NdLayoutError},
+    normalization::{validate_epsilon, LayerNormError, LayerNormShape},
     pointwise::{PointwiseChain, PointwiseError},
 };
 use thiserror::Error;
@@ -22,8 +23,8 @@ impl ParameterRole {
     }
 }
 
-/// Exact is a mathematical VJP. ModuleCompatible retains Scaler's legacy
-/// extra row average without applying it to Linear weight/bias gradients.
+/// Exact is a mathematical VJP. ModuleCompatible retains the legacy row
+/// average for Scaler gain and LayerNorm gain/bias, but not Linear parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphGradientPolicy {
     Exact,
@@ -58,7 +59,7 @@ pub struct GraphParameter {
     pub values: Vec<f32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GraphStage {
     Linear {
         weight: usize,
@@ -68,6 +69,11 @@ pub enum GraphStage {
     Pointwise {
         chain: PointwiseChain,
         parameters: Vec<usize>,
+    },
+    LayerNorm {
+        gain: usize,
+        bias: usize,
+        epsilon: f32,
     },
 }
 
@@ -89,6 +95,8 @@ pub enum GraphError {
     Layout(#[from] NdLayoutError),
     #[error(transparent)]
     Pointwise(#[from] PointwiseError),
+    #[error(transparent)]
+    LayerNorm(#[from] LayerNormError),
 }
 
 /// Construction validates all stages/values before a backend allocates resources.
@@ -182,6 +190,25 @@ impl GraphDefinition {
                         operands.push(parameter_layouts[id].clone());
                     }
                     chain.validate_layouts(&operands)?;
+                    input.clone()
+                }
+                GraphStage::LayerNorm {
+                    gain,
+                    bias,
+                    epsilon,
+                } => {
+                    claim(*gain)?;
+                    claim(*bias)?;
+                    let g = &parameters[*gain];
+                    let b = &parameters[*bias];
+                    if g.role != ParameterRole::Gain
+                        || b.role != ParameterRole::Bias
+                        || b.shape != g.shape
+                    {
+                        return Err(GraphError::Stage(index));
+                    }
+                    validate_epsilon(*epsilon)?;
+                    LayerNormShape::new(input.shape(), &g.shape)?;
                     input.clone()
                 }
             };
@@ -286,6 +313,66 @@ impl GraphDefinition {
 mod tests {
     use super::*;
     use crate::{elementwise::ElementwiseOp, pointwise::PointwiseStep};
+
+    #[test]
+    fn layer_norm_stage_validates_affine_ownership_shape_and_epsilon() {
+        let input = NdLayout::contiguous(&[2, 3, 4]).unwrap();
+        let gain = GraphParameter {
+            role: ParameterRole::Gain,
+            shape: vec![4],
+            values: vec![1.; 4],
+        };
+        let bias = GraphParameter {
+            role: ParameterRole::Bias,
+            shape: vec![4],
+            values: vec![0.; 4],
+        };
+        let stage = GraphStage::LayerNorm {
+            gain: 0,
+            bias: 1,
+            epsilon: 1e-5,
+        };
+        let graph = GraphDefinition::new(
+            input.clone(),
+            vec![stage.clone()],
+            vec![gain.clone(), bias.clone()],
+        )
+        .unwrap();
+        assert_eq!(graph.output_layout(), &input);
+        assert_eq!(graph.parameter_owners(), &[0, 0]);
+        assert!(matches!(
+            GraphDefinition::new(
+                input.clone(),
+                vec![GraphStage::LayerNorm {
+                    gain: 0,
+                    bias: 1,
+                    epsilon: f32::NAN,
+                }],
+                vec![gain.clone(), bias.clone()]
+            ),
+            Err(GraphError::LayerNorm(LayerNormError::Epsilon))
+        ));
+        assert!(GraphDefinition::new(
+            input.clone(),
+            vec![stage.clone()],
+            vec![
+                GraphParameter {
+                    shape: vec![3],
+                    values: vec![1.; 3],
+                    ..gain.clone()
+                },
+                bias.clone()
+            ]
+        )
+        .is_err());
+        assert!(GraphDefinition::new(
+            input.clone(),
+            vec![stage.clone()],
+            vec![bias.clone(), gain.clone()]
+        )
+        .is_err());
+        assert!(GraphDefinition::new(input, vec![stage.clone(), stage], vec![gain, bias]).is_err());
+    }
 
     fn pointwise(ids: Vec<usize>, steps: &[(ElementwiseOp, Option<usize>)]) -> GraphStage {
         GraphStage::Pointwise {
