@@ -1,0 +1,525 @@
+{
+  "schema": "spiraltorch.layer_norm.affine_tiles_evidence.v1",
+  "baseline_commit": "4c537872c0fce5dd2778a8bd54b1877c93271de5",
+  "candidate_code_commit": "c10be57cb0fcc8e2f4513781eeef02880d9442b2",
+  "native_runs": [
+    {
+      "name": "baseline-final-1",
+      "result": {
+        "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+        "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "scope": "32-step affine LayerNorm + MSE + all VJPs + fused SGD; preloaded input and targets, preparation excluded, terminal read included",
+        "routes": [
+          "standalone_resident",
+          "prepared_graph"
+        ],
+        "steps": 32,
+        "warmup": 2,
+        "iterations": 5,
+        "rate": 0.009999999776482582,
+        "cases": [
+          {
+            "cols": 3,
+            "graph_median_ms": 22.570166999999998,
+            "graph_ms": [
+              23.240625,
+              22.536291,
+              22.570166999999998,
+              22.751791,
+              21.51875
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 2,
+            "standalone_median_ms": 25.341292000000003,
+            "standalone_ms": [
+              25.489749999999997,
+              25.341292000000003,
+              24.5545,
+              24.615624999999998,
+              25.390042
+            ],
+            "terminal_loss": [
+              0.48289936780929565,
+              0.48289936780929565
+            ]
+          },
+          {
+            "cols": 256,
+            "graph_median_ms": 52.897375000000004,
+            "graph_ms": [
+              49.513625,
+              51.309042,
+              53.691833,
+              53.721167,
+              52.897375000000004
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 32,
+            "standalone_median_ms": 55.622458,
+            "standalone_ms": [
+              52.350208,
+              56.177125000000004,
+              54.469417,
+              55.991082999999996,
+              55.622458
+            ],
+            "terminal_loss": [
+              1.0864962339401245,
+              1.0864962339401245
+            ]
+          },
+          {
+            "cols": 1025,
+            "graph_median_ms": 493.314542,
+            "graph_ms": [
+              501.60712500000005,
+              490.543458,
+              493.314542,
+              491.655125,
+              494.201542
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 128,
+            "standalone_median_ms": 500.552625,
+            "standalone_ms": [
+              500.552625,
+              532.73775,
+              527.568166,
+              497.680917,
+              495.952375
+            ],
+            "terminal_loss": [
+              1.0901281833648682,
+              1.0901281833648682
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "candidate-final-1",
+      "result": {
+        "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+        "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "scope": "32-step affine LayerNorm + MSE + all VJPs + fused SGD; preloaded input and targets, preparation excluded, terminal read included",
+        "routes": [
+          "standalone_resident",
+          "prepared_graph"
+        ],
+        "steps": 32,
+        "warmup": 2,
+        "iterations": 5,
+        "rate": 0.009999999776482582,
+        "cases": [
+          {
+            "cols": 3,
+            "graph_median_ms": 23.227584,
+            "graph_ms": [
+              22.453416999999998,
+              24.343291999999998,
+              23.833457999999997,
+              23.227584,
+              22.865125
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 2,
+            "standalone_median_ms": 28.954416000000002,
+            "standalone_ms": [
+              27.949082999999998,
+              29.394333000000003,
+              28.911583,
+              28.954416000000002,
+              29.432334
+            ],
+            "terminal_loss": [
+              0.48289936780929565,
+              0.48289936780929565
+            ]
+          },
+          {
+            "cols": 256,
+            "graph_median_ms": 42.42325,
+            "graph_ms": [
+              43.163,
+              42.42325,
+              43.740542,
+              41.710791,
+              41.639458
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 32,
+            "standalone_median_ms": 44.861417,
+            "standalone_ms": [
+              44.861417,
+              47.233667,
+              46.840333,
+              42.672959000000006,
+              42.070167
+            ],
+            "terminal_loss": [
+              1.0864962339401245,
+              1.0864962339401245
+            ]
+          },
+          {
+            "cols": 1025,
+            "graph_median_ms": 468.198542,
+            "graph_ms": [
+              468.198542,
+              488.511959,
+              466.8455,
+              469.269708,
+              466.14187499999997
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 128,
+            "standalone_median_ms": 472.77541699999995,
+            "standalone_ms": [
+              473.086167,
+              497.624625,
+              472.77541699999995,
+              471.058125,
+              472.47862499999997
+            ],
+            "terminal_loss": [
+              1.0901281833648682,
+              1.0901281833648682
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "candidate-final-2",
+      "result": {
+        "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+        "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "scope": "32-step affine LayerNorm + MSE + all VJPs + fused SGD; preloaded input and targets, preparation excluded, terminal read included",
+        "routes": [
+          "standalone_resident",
+          "prepared_graph"
+        ],
+        "steps": 32,
+        "warmup": 2,
+        "iterations": 5,
+        "rate": 0.009999999776482582,
+        "cases": [
+          {
+            "cols": 3,
+            "graph_median_ms": 29.341167000000002,
+            "graph_ms": [
+              26.099375000000002,
+              29.341167000000002,
+              29.398083,
+              30.835084,
+              28.177083
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 2,
+            "standalone_median_ms": 39.120250000000006,
+            "standalone_ms": [
+              64.609083,
+              37.408167,
+              39.84475,
+              37.186875,
+              39.120250000000006
+            ],
+            "terminal_loss": [
+              0.48289936780929565,
+              0.48289936780929565
+            ]
+          },
+          {
+            "cols": 256,
+            "graph_median_ms": 50.457625,
+            "graph_ms": [
+              50.457625,
+              49.83925,
+              53.512209,
+              50.107833,
+              50.591583
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 32,
+            "standalone_median_ms": 59.881499999999996,
+            "standalone_ms": [
+              59.881499999999996,
+              60.845542,
+              67.331208,
+              59.396499999999996,
+              58.355583
+            ],
+            "terminal_loss": [
+              1.0864962339401245,
+              1.0864962339401245
+            ]
+          },
+          {
+            "cols": 1025,
+            "graph_median_ms": 529.92925,
+            "graph_ms": [
+              528.887958,
+              529.92925,
+              554.9722499999999,
+              557.707875,
+              521.290875
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 128,
+            "standalone_median_ms": 544.998458,
+            "standalone_ms": [
+              559.366833,
+              531.8411669999999,
+              535.9973329999999,
+              544.998458,
+              546.979417
+            ],
+            "terminal_loss": [
+              1.0901281833648682,
+              1.0901281833648682
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "baseline-final-2",
+      "result": {
+        "schema": "spiraltorch.layer_norm.resident_graph_matched.v1",
+        "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "scope": "32-step affine LayerNorm + MSE + all VJPs + fused SGD; preloaded input and targets, preparation excluded, terminal read included",
+        "routes": [
+          "standalone_resident",
+          "prepared_graph"
+        ],
+        "steps": 32,
+        "warmup": 2,
+        "iterations": 5,
+        "rate": 0.009999999776482582,
+        "cases": [
+          {
+            "cols": 3,
+            "graph_median_ms": 29.7045,
+            "graph_ms": [
+              29.7045,
+              29.413124999999997,
+              32.534875,
+              30.297291,
+              29.004083
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 2,
+            "standalone_median_ms": 43.333834,
+            "standalone_ms": [
+              43.333834,
+              41.979958999999994,
+              44.158291000000006,
+              45.135166999999996,
+              35.00225
+            ],
+            "terminal_loss": [
+              0.48289936780929565,
+              0.48289936780929565
+            ]
+          },
+          {
+            "cols": 256,
+            "graph_median_ms": 61.147459,
+            "graph_ms": [
+              61.147459,
+              63.703333,
+              60.909,
+              60.658417,
+              63.839041
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 32,
+            "standalone_median_ms": 70.80024999999999,
+            "standalone_ms": [
+              67.282666,
+              76.68525,
+              74.16283299999999,
+              68.642542,
+              70.80024999999999
+            ],
+            "terminal_loss": [
+              1.0864962339401245,
+              1.0864962339401245
+            ]
+          },
+          {
+            "cols": 1025,
+            "graph_median_ms": 552.341,
+            "graph_ms": [
+              561.4171249999999,
+              551.988666,
+              552.341,
+              565.480833,
+              546.419834
+            ],
+            "max_scaled_error": 0.0,
+            "rows": 128,
+            "standalone_median_ms": 583.115542,
+            "standalone_ms": [
+              624.20025,
+              573.767375,
+              583.115542,
+              619.133167,
+              564.505375
+            ],
+            "terminal_loss": [
+              1.0901281833648682,
+              1.0901281833648682
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "browser_runs": [
+    {
+      "name": "browser-final-matched-1",
+      "result": {
+        "schema": "spiraltorch.layer_norm.browser_matched.v1",
+        "status": "passed",
+        "adapter_probe": {
+          "vendor": "apple",
+          "is_fallback_adapter": false
+        },
+        "browser_version": "153.0.8010.53",
+        "wasm_sha256": "343e596a2d171106b349a47ef88f85f0cb65f7127f2669334f34ceb144be0432",
+        "page_sha256": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+        "asset_sha256": {
+          "/": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+          "/module/spiraltorch_wasm.js": "eb546be5e25a57b3a9ced495f4a607aecda347316d3d2c6a3276ec1ddb7abd10",
+          "/module/spiraltorch_wasm_bg.wasm": "343e596a2d171106b349a47ef88f85f0cb65f7127f2669334f34ceb144be0432",
+          "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+          "/baseline/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+          "/baseline/spiraltorch_wasm.js": "b427488f59fe64bab91c5ac9ef3b091f12303c4a79a533dd8c2d1a165bacf7c1",
+          "/baseline/spiraltorch_wasm_bg.wasm": "1cba653d69d0e1f95e1bd3fc3b08a2104ef565d945355adfd307d817c7e5b3a1"
+        },
+        "page_errors": [],
+        "steps": 32,
+        "warmup": 2,
+        "iterations": 5,
+        "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+        "cases": [
+          {
+            "rows": 32,
+            "cols": 256,
+            "baseline_ms": [
+              57.39999997615814,
+              57.89999997615814,
+              57.10000002384186,
+              59.89999997615814,
+              58
+            ],
+            "candidate_ms": [
+              42.40000003576279,
+              42.10000002384186,
+              41.69999998807907,
+              43.89999997615814,
+              43.80000001192093
+            ],
+            "baseline_median_ms": 57.89999997615814,
+            "candidate_median_ms": 42.40000003576279,
+            "max_scaled_error": 0
+          },
+          {
+            "rows": 128,
+            "cols": 1025,
+            "baseline_ms": [
+              477.60000002384186,
+              500,
+              494.7999999523163,
+              477.5,
+              472.9000000357628
+            ],
+            "candidate_ms": [
+              449.89999997615814,
+              456.9000000357628,
+              455.89999997615814,
+              447,
+              455.39999997615814
+            ],
+            "baseline_median_ms": 477.60000002384186,
+            "candidate_median_ms": 455.39999997615814,
+            "max_scaled_error": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "browser-final-matched-2",
+      "result": {
+        "schema": "spiraltorch.layer_norm.browser_matched.v1",
+        "status": "passed",
+        "adapter_probe": {
+          "vendor": "apple",
+          "is_fallback_adapter": false
+        },
+        "browser_version": "153.0.8010.53",
+        "wasm_sha256": "343e596a2d171106b349a47ef88f85f0cb65f7127f2669334f34ceb144be0432",
+        "page_sha256": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+        "asset_sha256": {
+          "/": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+          "/module/spiraltorch_wasm.js": "eb546be5e25a57b3a9ced495f4a607aecda347316d3d2c6a3276ec1ddb7abd10",
+          "/module/spiraltorch_wasm_bg.wasm": "343e596a2d171106b349a47ef88f85f0cb65f7127f2669334f34ceb144be0432",
+          "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+          "/baseline/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+          "/baseline/spiraltorch_wasm.js": "b427488f59fe64bab91c5ac9ef3b091f12303c4a79a533dd8c2d1a165bacf7c1",
+          "/baseline/spiraltorch_wasm_bg.wasm": "1cba653d69d0e1f95e1bd3fc3b08a2104ef565d945355adfd307d817c7e5b3a1"
+        },
+        "page_errors": [],
+        "steps": 32,
+        "warmup": 2,
+        "iterations": 5,
+        "boundary": "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+        "cases": [
+          {
+            "rows": 32,
+            "cols": 256,
+            "baseline_ms": [
+              56.30000001192093,
+              57.69999998807907,
+              56.60000002384186,
+              57.89999997615814,
+              56.40000003576279
+            ],
+            "candidate_ms": [
+              41.5,
+              41.299999952316284,
+              40.5,
+              42.09999996423721,
+              42
+            ],
+            "baseline_median_ms": 56.60000002384186,
+            "candidate_median_ms": 41.5,
+            "max_scaled_error": 0
+          },
+          {
+            "rows": 128,
+            "cols": 1025,
+            "baseline_ms": [
+              498.9000000357628,
+              481.5,
+              478.89999997615814,
+              481.39999997615814,
+              498.5
+            ],
+            "candidate_ms": [
+              452,
+              447.30000001192093,
+              451.7000000476837,
+              450.30000001192093,
+              465.19999998807907
+            ],
+            "baseline_median_ms": 481.5,
+            "candidate_median_ms": 451.7000000476837,
+            "max_scaled_error": 0
+          }
+        ]
+      }
+    }
+  ]
+}

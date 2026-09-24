@@ -63,7 +63,7 @@ pub(crate) struct LayerNormKernels {
     pub(crate) forward: wgpu::ComputePipeline,
     statistics: wgpu::ComputePipeline,
     pub(crate) input: wgpu::ComputePipeline,
-    pub(crate) affine: [wgpu::ComputePipeline; 3],
+    pub(crate) affine: [wgpu::ComputePipeline; 4],
     guard: guard_capture::GuardCapture,
 }
 
@@ -138,6 +138,7 @@ impl LayerNormKernels {
                 "backward_affine_64",
                 "backward_affine_128",
                 "backward_affine",
+                "backward_affine_tiled",
             ]
             .map(|entry_point| pipeline(&backward_pipeline_layout, &backward_module, entry_point)),
             forward_layout,
@@ -197,6 +198,21 @@ pub(crate) fn affine_pipeline_index(rows: usize) -> usize {
         33..=64 => 0,
         65..=128 => 1,
         _ => 2,
+    }
+}
+
+pub(crate) fn affine_schedule(
+    shape: LayerNormShape,
+    limits: &wgpu::Limits,
+) -> Result<([u32; 2], usize), TensorError> {
+    // Keep unmeasured small shapes on the established reduction schedule.
+    if (32..=128).contains(&shape.rows) && shape.cols >= 256 {
+        Ok((groups(shape.cols.div_ceil(8), limits)?, 3))
+    } else {
+        Ok((
+            groups(shape.cols, limits)?,
+            affine_pipeline_index(shape.rows),
+        ))
     }
 }
 
@@ -557,22 +573,22 @@ impl LayerNormBackwardTape {
             },
             flag_slot: 0,
         };
-        for (enabled, count, pipeline) in [
+        let (affine_grid, affine_pipeline) = affine_schedule(self.shape, &gpu.limits())?;
+        for (enabled, grid, pipeline) in [
             (
                 requested[0] && self.shape.rows > 0,
-                self.shape.rows,
+                groups(self.shape.rows, &gpu.limits())?,
                 &kernels.input,
             ),
             (
                 requested[1] || requested[2],
-                self.shape.cols,
-                &kernels.affine[affine_pipeline_index(self.shape.rows)],
+                affine_grid,
+                &kernels.affine[affine_pipeline],
             ),
         ] {
             if !enabled {
                 continue;
             }
-            let grid = groups(count, &gpu.limits())?;
             params.groups_x = grid[0];
             let uniform = runtime::upload_slice(
                 gpu,

@@ -559,7 +559,8 @@ impl ResidentGraphTraining {
                     )
                     .map_err(TensorError::from)?;
                     let row_grid = normalization::groups(shape.rows, &limits)?;
-                    let col_grid = normalization::groups(shape.cols, &limits)?;
+                    let (col_grid, affine_pipeline) =
+                        normalization::affine_schedule(shape, &limits)?;
                     let centered = runtime::empty_buffer::<[u32; 4]>(
                         gpu,
                         "graph.layer_norm.centered",
@@ -643,7 +644,7 @@ impl ResidentGraphTraining {
                         affine_params,
                         row_grid,
                         col_grid,
-                        affine_pipeline: normalization::affine_pipeline_index(shape.rows),
+                        affine_pipeline,
                         gain: *gain,
                         bias: *bias,
                         cols: shape.cols,
