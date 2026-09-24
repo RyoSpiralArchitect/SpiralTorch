@@ -1,6 +1,7 @@
 {
   "schema": "spiraltorch.layer_norm.training_residency_comparison.v1",
   "status": "validated",
+  "update_execution": "fused",
   "shapes": [
     {
       "rows": 2,

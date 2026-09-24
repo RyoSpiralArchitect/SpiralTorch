@@ -47,8 +47,8 @@ All nine reports passed `benchmarks/layer-norm-training/compare.py`: matched
 f32 input/target digests, decreasing loss, 32-step outputs, and the strict
 numerical bound. Across the three modes and three runs, serialized final
 outputs were identical for every shape. The nine per-mode validation JSON
-files publish all route/stage medians,
-numerical checks, and SHA-256 hashes of the retained raw reports. The three
+files publish the validated update mode, all route/stage medians, numerical
+checks, and SHA-256 hashes of the retained raw reports. The three
 fixed-input PyTorch CPU/MPS controls from the earlier comparison were reused
 for **numerical validation only**, not a new PyTorch speed comparison. The raw
 1.4 MB reports and the binary remain local under

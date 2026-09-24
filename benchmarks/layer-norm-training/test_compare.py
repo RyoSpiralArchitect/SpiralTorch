@@ -51,7 +51,18 @@ def reports():
 class ComparisonTests(unittest.TestCase):
     def test_complete_matched_reports_pass(self):
         native, torch = reports()
-        self.assertEqual(compare.validate(native, torch)["status"], "validated")
+        summary = compare.validate(native, torch)
+        self.assertEqual(summary["status"], "validated")
+        self.assertEqual(summary["update_execution"], "sequential")
+
+    def test_update_execution_is_validated_and_preserved(self):
+        native, torch = reports()
+        for execution in compare.UPDATE_EXECUTIONS:
+            native["update_execution"] = execution
+            self.assertEqual(compare.validate(native, torch)["update_execution"], execution)
+        native["update_execution"] = "unrecognized"
+        with self.assertRaisesRegex(ValueError, "Rust update execution"):
+            compare.validate(native, torch)
 
     def test_mismatched_fixture_is_rejected(self):
         native, torch = reports()

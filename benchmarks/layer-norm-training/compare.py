@@ -16,6 +16,7 @@ STAGES = ["readback_only", "forward", "mse", "backward_all",
           "backward_input", "backward_affine", "update"]
 TORCH_ROUTES = ["cpu", "mps"]
 TOLERANCE = 5e-4
+UPDATE_EXECUTIONS = ("sequential", "batched", "fused", "grouped_fused")
 
 
 def require(ok, message):
@@ -55,6 +56,8 @@ def validate_intervals(intervals, key, routes, count):
 def validate(native, torch):
     require(native["schema"] == "spiraltorch.layer_norm.training_residency_exploratory.v1",
             "Rust schema")
+    update_execution = native.get("update_execution", "sequential")
+    require(update_execution in UPDATE_EXECUTIONS, "Rust update execution")
     require(torch["schema"] == "spiraltorch.layer_norm.training_residency_torch.v1"
             and torch["status"] == "passed", "PyTorch schema/status")
     require("device_type: IntegratedGpu" in native["adapter"] and
@@ -123,7 +126,7 @@ def validate(native, torch):
                                     "torch_cpu": torch_case["final_outputs"]["cpu"][0][0],
                                     "torch_mps": torch_case["final_outputs"]["mps"][0][0]}})
     return {"schema": "spiraltorch.layer_norm.training_residency_comparison.v1",
-            "status": "validated", "shapes": rows,
+            "status": "validated", "update_execution": update_execution, "shapes": rows,
             "routes": {"rust": RUST_ROUTES, "stages": STAGES, "pytorch": TORCH_ROUTES},
             "max_native_scaled_error": max_native_error,
             "max_cross_scaled_error": max_cross_error,
