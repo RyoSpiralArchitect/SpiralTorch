@@ -25,6 +25,31 @@ SpiralTorchVision extends SpiralTorch's native Z-space capabilities while stayin
 - **Long-term integrations**: Leveraging TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualization tools, and SpiralTorch-specific model heads.
 - **Modular vision backbones**: `st_vision::models` ships ergonomic ResNet, ViT, and ConvNeXt backbones built on the `st-nn` module trait. They expose configuration structs, state-dict interop, and forward passes tuned for SpiralTorch tensors.
 
+### Native WGPU preprocessing
+
+With the `st-vision/wgpu` feature, an opt-in `TransformPipeline` runs adjacent
+resize, center-crop, and sampled horizontal-flip stages as one GPU geometry
+sequence. Images enter and leave as `ImageTensor`; there is still one upload
+and one readback per contiguous sequence. Normalize and color-jitter stages
+remain separate, and the CPU path stays the default.
+
+```python
+import spiraltorch as st
+
+pipeline = st.TransformPipeline(seed=17)
+pipeline.add_resize(80, 96)
+pipeline.add_horizontal_flip(0.5)
+pipeline.add_center_crop(64, 64)
+pipeline.enable_wgpu()  # Raises RuntimeError if the build or adapter cannot provide WGPU.
+output = pipeline.apply(st.ImageTensor(3, 128, 128, [0.5] * (3 * 128 * 128)))
+pipeline.disable_wgpu()
+```
+
+The native WGPU route is tested against the seeded CPU route over repeated
+frames. `enable_wgpu()` is not a promise of browser support: the current
+dispatcher requires synchronous host-visible readback, so WASM needs a
+separate async resident path before the same contract can be exposed there.
+
 ### Backbone quickstart
 
 Instantiate and run a pretrained-friendly backbone directly from Rust. The modules implement `st_nn::module::Module`, so optimizers, telemetry, and serialization utilities interoperate out of the box:
