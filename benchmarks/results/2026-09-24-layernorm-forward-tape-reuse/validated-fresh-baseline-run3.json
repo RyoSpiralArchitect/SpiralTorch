@@ -1,0 +1,223 @@
+{
+  "schema": "spiraltorch.layer_norm.training_residency_comparison.v1",
+  "status": "validated",
+  "update_execution": "sequential",
+  "shapes": [
+    {
+      "rows": 2,
+      "cols": 3,
+      "rust_median_ms": [
+        0.036125,
+        27.489959000000002,
+        28.806874999999998,
+        26.377375
+      ],
+      "stage_median_ms": [
+        0.164625,
+        0.6776249999999999,
+        0.395375,
+        0.548833,
+        0.520042,
+        0.357125,
+        0.485459
+      ],
+      "torch_median_ms": [
+        2.101583,
+        6.608833
+      ],
+      "initial_loss": 1.2351263761520386,
+      "final_loss": {
+        "rust_cpu": 0.0678304135799408,
+        "torch_cpu": 0.0678304135799408,
+        "torch_mps": 0.0678303986787796
+      }
+    },
+    {
+      "rows": 8,
+      "cols": 257,
+      "rust_median_ms": [
+        0.646917,
+        45.466791,
+        44.411958,
+        28.128541
+      ],
+      "stage_median_ms": [
+        0.173875,
+        0.6571250000000001,
+        0.41800000000000004,
+        1.2200419999999998,
+        0.7891670000000001,
+        0.739375,
+        0.518708
+      ],
+      "torch_median_ms": [
+        2.127084,
+        6.759
+      ],
+      "initial_loss": 1.0956904888153076,
+      "final_loss": {
+        "rust_cpu": 0.08592843264341354,
+        "torch_cpu": 0.08592844009399414,
+        "torch_mps": 0.08592843264341354
+      }
+    },
+    {
+      "rows": 32,
+      "cols": 256,
+      "rust_median_ms": [
+        2.4264170000000003,
+        55.044541,
+        54.87675,
+        34.221458000000005
+      ],
+      "stage_median_ms": [
+        0.18275,
+        0.712125,
+        0.38808400000000004,
+        1.229208,
+        0.7120839999999999,
+        0.806709,
+        0.471167
+      ],
+      "torch_median_ms": [
+        2.356791,
+        6.93375
+      ],
+      "initial_loss": 1.0914247035980225,
+      "final_loss": {
+        "rust_cpu": 0.08959007263183594,
+        "torch_cpu": 0.08959007263183594,
+        "torch_mps": 0.08959007263183594
+      }
+    },
+    {
+      "rows": 64,
+      "cols": 768,
+      "rust_median_ms": [
+        13.85725,
+        194.184,
+        193.966375,
+        101.602208
+      ],
+      "stage_median_ms": [
+        0.22666599999999998,
+        2.207916,
+        0.49850000000000005,
+        4.515,
+        2.850792,
+        1.9950419999999998,
+        0.551209
+      ],
+      "torch_median_ms": [
+        4.229792,
+        7.064833
+      ],
+      "initial_loss": 1.0913630723953247,
+      "final_loss": {
+        "rust_cpu": 0.09077566862106323,
+        "torch_cpu": 0.09077566862106323,
+        "torch_mps": 0.09077566862106323
+      }
+    },
+    {
+      "rows": 128,
+      "cols": 1025,
+      "rust_median_ms": [
+        36.348708,
+        489.915208,
+        490.662125,
+        230.37975
+      ],
+      "stage_median_ms": [
+        0.31175,
+        5.1747499999999995,
+        0.590916,
+        10.239666,
+        8.128791999999999,
+        3.3525,
+        0.626417
+      ],
+      "torch_median_ms": [
+        5.155417,
+        7.265125
+      ],
+      "initial_loss": 1.0913429260253906,
+      "final_loss": {
+        "rust_cpu": 0.08682189881801605,
+        "torch_cpu": 0.08682190626859665,
+        "torch_mps": 0.08682190626859665
+      }
+    },
+    {
+      "rows": 256,
+      "cols": 256,
+      "rust_median_ms": [
+        18.055084,
+        268.75787499999996,
+        269.297917,
+        133.84995899999998
+      ],
+      "stage_median_ms": [
+        0.245042,
+        3.326,
+        0.50325,
+        4.420917,
+        3.3402089999999998,
+        1.916917,
+        0.5698749999999999
+      ],
+      "torch_median_ms": [
+        4.580916,
+        7.016125
+      ],
+      "initial_loss": 1.0914571285247803,
+      "final_loss": {
+        "rust_cpu": 0.09114880114793777,
+        "torch_cpu": 0.09114880114793777,
+        "torch_mps": 0.09114879369735718
+      }
+    }
+  ],
+  "routes": {
+    "rust": [
+      "rust_cpu_all",
+      "wgpu_host_to_host_all",
+      "wgpu_preloaded_all",
+      "wgpu_preloaded_affine_only"
+    ],
+    "stages": [
+      "readback_only",
+      "forward",
+      "mse",
+      "backward_all",
+      "backward_input",
+      "backward_affine",
+      "update"
+    ],
+    "pytorch": [
+      "cpu",
+      "mps"
+    ]
+  },
+  "max_native_scaled_error": {
+    "rust_cpu_all": 0.0,
+    "wgpu_host_to_host_all": 9.059770453954973e-05,
+    "wgpu_preloaded_all": 9.059770453954973e-05,
+    "wgpu_preloaded_affine_only": 9.059770453954973e-05
+  },
+  "max_cross_scaled_error": {
+    "cpu": 0.0002069599671126815,
+    "mps": 0.0002717931136186492
+  },
+  "boundary": "Same f32 input/target bits and 32-step update equation; separate Rust and PyTorch host stacks, no universal speed claim. Affine-only Rust route omits dx and is not work-matched to all-gradient controls.",
+  "inputs": [
+    {
+      "name": "fresh-baseline-run3.json",
+      "sha256": "46c37fc0574e99523335b1fe5ce97b8257e124dd843f18ee52e14288e1943ab1"
+    },
+    {
+      "name": "torch-b9b23501-run3.json",
+      "sha256": "615c784be40de2e8a8240f46c73d8e4ecd13fb4ba952054774209db37fbdb158"
+    }
+  ]
+}

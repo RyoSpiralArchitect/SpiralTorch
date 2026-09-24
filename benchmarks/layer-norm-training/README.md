@@ -77,3 +77,5 @@ validation are in `benchmarks/results/2026-09-24-layernorm-affine-workgroups/`.
 The prepared pointwise update comparison, including the separately rejected
 grouped-submission experiment, is in
 `benchmarks/results/2026-09-24-layernorm-update-dispatch/`.
+The forward centered-tape reuse comparison and browser correctness check are
+in `benchmarks/results/2026-09-24-layernorm-forward-tape-reuse/`.
