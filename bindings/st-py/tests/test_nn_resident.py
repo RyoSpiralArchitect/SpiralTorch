@@ -65,10 +65,10 @@ class ResidentPlanSurface(unittest.TestCase):
         for shape in ([], [0, 2], [2, 3], [True, 2], [2.0, 2], [2, -1]):
             with self.subTest(shape=shape), self.assertRaises((ValueError, TypeError, OverflowError)):
                 net.inference_plan(shape)
-        unsupported = st.nn.Sequential()
-        unsupported.add(st.nn.LayerNorm("unsupported", 2, -1., 1e-5))
+        invalid_norm = st.nn.Sequential()
+        invalid_norm.add(st.nn.LayerNorm("mismatched", 3, -1., 1e-5))
         with self.assertRaises(ValueError):
-            unsupported.inference_plan([2, 2])
+            invalid_norm.inference_plan([2, 2])
         payload = net.inference_plan([2, 2]).to_json()
         with self.assertRaises(ValueError):
             st.nn.InferencePlan.from_json(payload, max_bytes=len(payload.encode()) - 1)

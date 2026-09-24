@@ -355,6 +355,8 @@ pub struct LayerNorm {
     curvature: f32,
     gamma: Parameter,
     beta: Parameter,
+    #[cfg(feature = "wgpu")]
+    resident: crate::resident::ResidentForwardCache,
 }
 
 impl LayerNorm {
@@ -391,6 +393,8 @@ impl LayerNorm {
             curvature,
             gamma: Parameter::new(gamma_name, gamma),
             beta: Parameter::new(beta_name, beta),
+            #[cfg(feature = "wgpu")]
+            resident: Default::default(),
         })
     }
 
@@ -1954,6 +1958,62 @@ impl Module for ZSpaceLayerNorm {
 }
 
 impl Module for LayerNorm {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        self.resident.forward(self.inference_ops()?, input)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        self.resident.snapshot(self.inference_ops()?, input)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        Some(self.resident.stats())
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.resident.clear();
+    }
+
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        Ok(vec![
+            (crate::resident::ParameterRole::Gain, &self.gamma),
+            (crate::resident::ParameterRole::Bias, &self.beta),
+        ])
+    }
+
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        crate::resident::collect_inference_ops(self, 1)
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        operations.push(crate::resident::InferenceOp::LayerNorm {
+            gain: self.gamma.value().clone(),
+            bias: self.beta.value().clone(),
+            epsilon: self.effective_epsilon(),
+        });
+        Ok(())
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
         let (rows, cols) = input.shape();

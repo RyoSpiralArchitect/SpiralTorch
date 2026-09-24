@@ -3,7 +3,7 @@ WIDE_ARITHMETIC
 
 struct Params {
     rows: u32, cols: u32, groups_x: u32, requested: u32,
-    epsilon: f32, scale: f32, beta_offset: u32, _pad: u32,
+    epsilon: f32, scale: f32, beta_offset: u32, flag_slot: u32,
 };
 @group(0) @binding(0) var<storage, read> centered_values: array<Wide>;
 @group(0) @binding(1) var<storage, read> gamma: array<f32>;
@@ -24,7 +24,7 @@ var<workgroup> input_scale: Wide;
 fn checked(value: Wide) -> f32 {
     let result = wide_float(value);
     if ((bitcast<u32>(result) & 0x7f800000u) == 0x7f800000u) {
-        atomicOr(&flags[0], 1u);
+        atomicOr(&flags[params.flag_slot], 1u);
         return 0.0;
     }
     return result;

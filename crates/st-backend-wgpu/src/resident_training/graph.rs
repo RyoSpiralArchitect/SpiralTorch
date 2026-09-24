@@ -2,6 +2,7 @@
 //! Uses the same GEMM and pointwise VJP kernels as the specialized public plans.
 use super::*;
 use crate::resident_tensor::{
+    normalization::{self, LayerNormKernels, Params as LayerNormParams},
     pointwise::{
         vjp::{PointwiseVjpPlan, VjpWorkspace},
         PointwisePlan,
@@ -11,6 +12,7 @@ use crate::resident_tensor::{
 pub use st_kernel_contracts::graph::{
     GraphDefinition, GraphGradientPolicy, GraphParameter, GraphStage, ParameterRole,
 };
+use st_kernel_contracts::normalization::LayerNormShape;
 
 mod snapshot;
 pub use snapshot::{GraphParameterReadback, GraphState, GraphStateReadback};
@@ -36,11 +38,31 @@ enum Node {
         forward: wgpu::BindGroup,
         parameters: Vec<usize>,
     },
+    LayerNorm(Box<LayerNormNode>),
+}
+
+struct LayerNormNode {
+    forward: wgpu::BindGroup,
+    backward_input: wgpu::BindGroup,
+    backward_affine: wgpu::BindGroup,
+    centered: wgpu::Buffer,
+    row_stats: wgpu::Buffer,
+    affine: wgpu::Buffer,
+    forward_params: wgpu::Buffer,
+    input_params: wgpu::Buffer,
+    affine_params: wgpu::Buffer,
+    row_grid: [u32; 2],
+    col_grid: [u32; 2],
+    affine_pipeline: usize,
+    gain: usize,
+    bias: usize,
+    cols: usize,
 }
 
 enum ForwardBinding {
     Linear(Pass),
     Pointwise(wgpu::BindGroup),
+    LayerNorm(wgpu::BindGroup),
 }
 
 // Rebind owning predictions/VJPs without preparing another tape or kernels.
@@ -73,6 +95,7 @@ pub struct ResidentGraphTraining {
     effective_gradients: Vec<wgpu::Buffer>,
     candidates: Vec<wgpu::Buffer>,
     nodes: Vec<Node>,
+    layer_norm: Option<LayerNormKernels>,
     stage_resources: StageResources,
     loss_passes: Vec<Pass>,
     update_passes: Vec<Pass>,
@@ -166,13 +189,21 @@ impl ResidentGraphTraining {
             groups(p.values.len(), &limits)?;
         }
         storage_limit(count + 4, &limits)?;
-        for node in definition.stages() {
+        for (index, node) in definition.stages().iter().enumerate() {
             if let GraphStage::Linear { weight, .. } = node {
                 let shape = &definition.parameters()[*weight].shape;
                 let (k, n) = (shape[0], shape[1]);
                 for (r, k, n) in [(rows, k, n), (k, rows, n), (rows, n, k)] {
                     MatmulShape::new(r, k, n)?.validate(&limits, tile, kernel)?;
                 }
+            }
+            if let GraphStage::LayerNorm { gain, .. } = node {
+                let shape = LayerNormShape::new(
+                    definition.layouts()[index].shape(),
+                    &definition.parameters()[*gain].shape,
+                )
+                .map_err(TensorError::from)?;
+                normalization::preflight(shape, &limits)?;
             }
         }
         let storage = wgpu::BufferUsages::STORAGE
@@ -275,6 +306,11 @@ impl ResidentGraphTraining {
                 }
             }
         }
+        let layer_norm = definition
+            .stages()
+            .iter()
+            .any(|stage| matches!(stage, GraphStage::LayerNorm { .. }))
+            .then(|| LayerNormKernels::new(gpu));
         let entries: Vec<_> = (0..9)
             .map(|i| wgpu::BindGroupLayoutEntry {
                 binding: i,
@@ -512,6 +548,107 @@ impl ResidentGraphTraining {
                         parameters: ids.clone(),
                     }
                 }
+                GraphStage::LayerNorm {
+                    gain,
+                    bias,
+                    epsilon,
+                } => {
+                    let shape = LayerNormShape::new(
+                        definition.layouts()[i].shape(),
+                        &definition.parameters()[*gain].shape,
+                    )
+                    .map_err(TensorError::from)?;
+                    let row_grid = normalization::groups(shape.rows, &limits)?;
+                    let col_grid = normalization::groups(shape.cols, &limits)?;
+                    let centered = runtime::empty_buffer::<[u32; 4]>(
+                        gpu,
+                        "graph.layer_norm.centered",
+                        definition.layouts()[i].len(),
+                        storage,
+                    )?;
+                    let row_stats = runtime::empty_buffer::<[u32; 8]>(
+                        gpu,
+                        "graph.layer_norm.row_stats",
+                        shape.rows,
+                        storage,
+                    )?;
+                    let affine = empty("graph.layer_norm.affine", shape.cols * 2)?;
+                    let make_params = |label, groups_x, requested, beta_offset| {
+                        runtime::upload_slice(
+                            gpu,
+                            label,
+                            &[LayerNormParams {
+                                rows: shape.rows as u32,
+                                cols: shape.cols as u32,
+                                groups_x,
+                                requested,
+                                epsilon: *epsilon,
+                                scale: 1.0,
+                                beta_offset,
+                                flag_slot: i as u32,
+                            }],
+                            wgpu::BufferUsages::UNIFORM,
+                        )
+                    };
+                    let forward_params =
+                        make_params("graph.layer_norm.forward.params", row_grid[0], 0, 0)?;
+                    let input_params =
+                        make_params("graph.layer_norm.input.params", row_grid[0], 1, 0)?;
+                    let affine_params = make_params(
+                        "graph.layer_norm.affine.params",
+                        col_grid[0],
+                        6,
+                        shape.cols as u32,
+                    )?;
+                    let kernels = layer_norm.as_ref().unwrap();
+                    let forward = normalization::bind(
+                        gpu,
+                        &kernels.forward_layout,
+                        [
+                            &activations[i],
+                            &parameters[*gain],
+                            &parameters[*bias],
+                            &centered,
+                            &row_stats,
+                            &activations[i + 1],
+                            &validation,
+                            &forward_params,
+                        ],
+                    );
+                    let bind_backward = |output: &wgpu::Buffer, params: &wgpu::Buffer| {
+                        normalization::bind(
+                            gpu,
+                            &kernels.backward_layout,
+                            [
+                                &centered,
+                                &parameters[*gain],
+                                &gradients[i + 1],
+                                &row_stats,
+                                output,
+                                &affine,
+                                &validation,
+                                params,
+                            ],
+                        )
+                    };
+                    Node::LayerNorm(Box::new(LayerNormNode {
+                        forward,
+                        backward_input: bind_backward(&gradients[i], &input_params),
+                        backward_affine: bind_backward(&unused_out, &affine_params),
+                        centered,
+                        row_stats,
+                        affine,
+                        forward_params,
+                        input_params,
+                        affine_params,
+                        row_grid,
+                        col_grid,
+                        affine_pipeline: normalization::affine_pipeline_index(shape.rows),
+                        gain: *gain,
+                        bias: *bias,
+                        cols: shape.cols,
+                    }))
+                }
             });
         }
         let loss_params = params(count, 0, definition.output_layout().len(), false);
@@ -552,14 +689,11 @@ impl ResidentGraphTraining {
             let prepare = pipeline("prepare_parameter");
             let commit = pipeline("commit_sgd");
             for (id, p) in definition.parameters().iter().enumerate() {
+                let owner = definition.parameter_owners()[id];
+                let row_average = definition.module_compatible_row_average(id);
                 update_passes.push(element(
                     &prepare,
-                    params(
-                        definition.parameter_owners()[id],
-                        0,
-                        p.values.len(),
-                        p.role == ParameterRole::Gain,
-                    ),
+                    params(owner, 0, p.values.len(), row_average),
                     [
                         &parameters[id],
                         &unused_read,
@@ -611,6 +745,7 @@ impl ResidentGraphTraining {
             effective_gradients,
             candidates,
             nodes,
+            layer_norm,
             stage_resources: StageResources {
                 matrix_layout,
                 element_layout,
@@ -854,6 +989,16 @@ impl ResidentGraphTraining {
                     | (Node::Pointwise { plan, .. }, Some(ForwardBinding::Pointwise(forward))) => {
                         plan.forward().encode_in_pass(&mut compute, forward);
                     }
+                    (Node::LayerNorm(node), None) => {
+                        compute.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        compute.set_bind_group(0, &node.forward, &[]);
+                        compute.dispatch_workgroups(node.row_grid[0], node.row_grid[1], 1);
+                    }
+                    (Node::LayerNorm(node), Some(ForwardBinding::LayerNorm(binding))) => {
+                        compute.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        compute.set_bind_group(0, binding, &[]);
+                        compute.dispatch_workgroups(node.row_grid[0], node.row_grid[1], 1);
+                    }
                     _ => unreachable!("prepared terminal forward binding"),
                 }
             }
@@ -877,6 +1022,37 @@ impl ResidentGraphTraining {
                     let gradients = std::iter::once(&self.gradients[i])
                         .chain(parameters.iter().map(|&id| &self.raw_gradients[id]));
                     plan.encode_prepared_with_timestamps(encoder, workspace, gradients, timestamps);
+                }
+                Node::LayerNorm(node) => {
+                    let kernels = self.layer_norm.as_ref().unwrap();
+                    {
+                        let mut compute =
+                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("graph.layer_norm.backward"),
+                                timestamp_writes: timestamps.next(),
+                            });
+                        compute.set_pipeline(&kernels.input);
+                        compute.set_bind_group(0, &node.backward_input, &[]);
+                        compute.dispatch_workgroups(node.row_grid[0], node.row_grid[1], 1);
+                        compute.set_pipeline(&kernels.affine[node.affine_pipeline]);
+                        compute.set_bind_group(0, &node.backward_affine, &[]);
+                        compute.dispatch_workgroups(node.col_grid[0], node.col_grid[1], 1);
+                    }
+                    let bytes = node.cols as u64 * 4;
+                    encoder.copy_buffer_to_buffer(
+                        &node.affine,
+                        0,
+                        &self.raw_gradients[node.gain],
+                        0,
+                        bytes,
+                    );
+                    encoder.copy_buffer_to_buffer(
+                        &node.affine,
+                        bytes,
+                        &self.raw_gradients[node.bias],
+                        0,
+                        bytes,
+                    );
                 }
             }
         }
@@ -981,3 +1157,7 @@ mod tests {
         .unwrap();
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "graph/layer_norm_tests.rs"]
+mod layer_norm_tests;

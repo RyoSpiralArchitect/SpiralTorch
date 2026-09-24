@@ -36,15 +36,15 @@ struct LayerNormBackwardTape {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Params {
-    rows: u32,
-    cols: u32,
-    groups_x: u32,
-    requested: u32,
-    epsilon: f32,
-    scale: f32,
-    beta_offset: u32,
-    _pad: u32,
+pub(crate) struct Params {
+    pub(crate) rows: u32,
+    pub(crate) cols: u32,
+    pub(crate) groups_x: u32,
+    pub(crate) requested: u32,
+    pub(crate) epsilon: f32,
+    pub(crate) scale: f32,
+    pub(crate) beta_offset: u32,
+    pub(crate) flag_slot: u32,
 }
 
 fn source(template: &str) -> String {
@@ -57,18 +57,18 @@ fn source(template: &str) -> String {
 }
 
 #[derive(Debug)]
-pub(super) struct LayerNormKernels {
-    forward_layout: wgpu::BindGroupLayout,
-    backward_layout: wgpu::BindGroupLayout,
-    forward: wgpu::ComputePipeline,
+pub(crate) struct LayerNormKernels {
+    pub(crate) forward_layout: wgpu::BindGroupLayout,
+    pub(crate) backward_layout: wgpu::BindGroupLayout,
+    pub(crate) forward: wgpu::ComputePipeline,
     statistics: wgpu::ComputePipeline,
-    input: wgpu::ComputePipeline,
-    affine: [wgpu::ComputePipeline; 3],
+    pub(crate) input: wgpu::ComputePipeline,
+    pub(crate) affine: [wgpu::ComputePipeline; 3],
     guard: guard_capture::GuardCapture,
 }
 
 impl LayerNormKernels {
-    fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
         let layout = |read_only_until| {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("layer_norm.bindings"),
@@ -147,7 +147,7 @@ impl LayerNormKernels {
     }
 }
 
-fn preflight(shape: LayerNormShape, limits: &wgpu::Limits) -> Result<(), TensorError> {
+pub(crate) fn preflight(shape: LayerNormShape, limits: &wgpu::Limits) -> Result<(), TensorError> {
     if limits.max_bindings_per_bind_group < 8
         || limits.max_uniform_buffers_per_shader_stage < 1
         || limits.max_uniform_buffer_binding_size < 32
@@ -183,7 +183,7 @@ fn preflight(shape: LayerNormShape, limits: &wgpu::Limits) -> Result<(), TensorE
     Ok(())
 }
 
-fn groups(count: usize, limits: &wgpu::Limits) -> Result<[u32; 2], TensorError> {
+pub(crate) fn groups(count: usize, limits: &wgpu::Limits) -> Result<[u32; 2], TensorError> {
     let count = u32::try_from(count.max(1)).map_err(|_| TensorError::Limit("LayerNorm grid"))?;
     let x = count.min(limits.max_compute_workgroups_per_dimension);
     if x == 0 || count.div_ceil(x) > limits.max_compute_workgroups_per_dimension {
@@ -192,7 +192,7 @@ fn groups(count: usize, limits: &wgpu::Limits) -> Result<[u32; 2], TensorError> 
     Ok([x, count.div_ceil(x)])
 }
 
-fn affine_pipeline_index(rows: usize) -> usize {
+pub(crate) fn affine_pipeline_index(rows: usize) -> usize {
     match rows {
         33..=64 => 0,
         65..=128 => 1,
@@ -200,7 +200,7 @@ fn affine_pipeline_index(rows: usize) -> usize {
     }
 }
 
-fn bind(
+pub(crate) fn bind(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     buffers: [&wgpu::Buffer; 8],
@@ -340,7 +340,7 @@ impl ResidentTensor {
                 epsilon,
                 scale: 1.0,
                 beta_offset: 0,
-                _pad: 0,
+                flag_slot: 0,
             }],
             wgpu::BufferUsages::UNIFORM,
         )?;
@@ -435,7 +435,7 @@ impl ResidentTensor {
                 epsilon,
                 scale: 1.0,
                 beta_offset: 0,
-                _pad: 0,
+                flag_slot: 0,
             }],
             wgpu::BufferUsages::UNIFORM,
         )?;
@@ -555,7 +555,7 @@ impl LayerNormBackwardTape {
             } else {
                 0
             },
-            _pad: 0,
+            flag_slot: 0,
         };
         for (enabled, count, pipeline) in [
             (

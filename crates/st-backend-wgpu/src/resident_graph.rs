@@ -5,14 +5,17 @@ use crate::{
     resident_dense::{DenseDispatch, DenseError, DenseKernel},
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulShape, MatmulTile},
     resident_tensor::{
-        guard_capture::GuardCapture, pointwise::PointwisePlan, storage_limit, ResidentTensor,
-        TensorDevice, TensorError,
+        guard_capture::GuardCapture,
+        normalization::{self, LayerNormKernels, Params as LayerNormParams},
+        pointwise::PointwisePlan,
+        storage_limit, ResidentTensor, TensorDevice, TensorError,
     },
     runtime::{self, WgpuContext, WgpuRuntime, WgpuRuntimeError},
 };
 use st_kernel_contracts::{
     graph::{GraphDefinition, GraphStage},
     layout::NdLayout,
+    normalization::LayerNormShape,
 };
 use thiserror::Error;
 
@@ -50,15 +53,25 @@ pub enum GraphInferenceError {
 
 enum Node {
     Linear(DenseDispatch),
+    LayerNorm(Box<LayerNormNode>),
     Pointwise {
         plan: Box<PointwisePlan>,
         binding: wgpu::BindGroup,
     },
 }
 
+struct LayerNormNode {
+    binding: wgpu::BindGroup,
+    centered: wgpu::Buffer,
+    row_stats: wgpu::Buffer,
+    params: wgpu::Buffer,
+    grid: [u32; 2],
+}
+
 enum BoundaryBinding {
     Linear(DenseDispatch),
     RowLinear(DenseDispatch),
+    LayerNorm(wgpu::BindGroup),
     Pointwise(wgpu::BindGroup),
     ViewPointwise {
         plan: runtime::Shared<PointwisePlan>,
@@ -76,6 +89,7 @@ pub struct ResidentGraph {
     empty_flags: wgpu::Buffer,
     nodes: Vec<Node>,
     kernel: Option<DenseKernel>,
+    layer_norm: Option<LayerNormKernels>,
     row_input: RowInputCache,
     pointwise_input: Option<runtime::Shared<PointwisePlan>>,
     validation: wgpu::Buffer,
@@ -132,7 +146,7 @@ impl ResidentGraph {
                         .map_err(DenseError::from)?;
                     Ok(Some(shape))
                 }
-                GraphStage::Pointwise { .. } => Ok(None),
+                GraphStage::Pointwise { .. } | GraphStage::LayerNorm { .. } => Ok(None),
             })
             .collect::<Result<Vec<_>, DenseError>>()?;
         let kernel = if shapes.iter().any(Option::is_some) {
@@ -140,6 +154,11 @@ impl ResidentGraph {
         } else {
             None
         };
+        let layer_norm = definition
+            .stages()
+            .iter()
+            .any(|stage| matches!(stage, GraphStage::LayerNorm { .. }))
+            .then(|| LayerNormKernels::new(gpu));
         let usage = wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_SRC
             | wgpu::BufferUsages::COPY_DST;
@@ -221,6 +240,67 @@ impl ResidentGraph {
                         plan.bind_into(&inputs, &activations[i + 1], &empty_flags, &validation);
                     Node::Pointwise { plan, binding }
                 }
+                GraphStage::LayerNorm {
+                    gain,
+                    bias,
+                    epsilon,
+                } => {
+                    let shape = LayerNormShape::new(
+                        definition.layouts()[i].shape(),
+                        &definition.parameters()[*gain].shape,
+                    )
+                    .map_err(TensorError::from)?;
+                    normalization::preflight(shape, &limits)?;
+                    let grid = normalization::groups(shape.rows, &limits)?;
+                    let centered = runtime::empty_buffer::<[u32; 4]>(
+                        gpu,
+                        "graph.forward.layer_norm.centered",
+                        definition.layouts()[i].len(),
+                        wgpu::BufferUsages::STORAGE,
+                    )?;
+                    let row_stats = runtime::empty_buffer::<[u32; 8]>(
+                        gpu,
+                        "graph.forward.layer_norm.row_stats",
+                        shape.rows,
+                        wgpu::BufferUsages::STORAGE,
+                    )?;
+                    let params = runtime::upload_slice(
+                        gpu,
+                        "graph.forward.layer_norm.params",
+                        &[LayerNormParams {
+                            rows: shape.rows as u32,
+                            cols: shape.cols as u32,
+                            groups_x: grid[0],
+                            requested: 0,
+                            epsilon: *epsilon,
+                            scale: 1.0,
+                            beta_offset: 0,
+                            flag_slot: i as u32,
+                        }],
+                        wgpu::BufferUsages::UNIFORM,
+                    )?;
+                    let binding = normalization::bind(
+                        gpu,
+                        &layer_norm.as_ref().unwrap().forward_layout,
+                        [
+                            &activations[i],
+                            &parameters[*gain],
+                            &parameters[*bias],
+                            &centered,
+                            &row_stats,
+                            &activations[i + 1],
+                            &validation,
+                            &params,
+                        ],
+                    );
+                    Node::LayerNorm(Box::new(LayerNormNode {
+                        binding,
+                        centered,
+                        row_stats,
+                        params,
+                        grid,
+                    }))
+                }
             });
         }
         let readbacks = runtime::ReadbackPool::new::<u32>(
@@ -239,6 +319,7 @@ impl ResidentGraph {
             empty_flags,
             nodes,
             kernel,
+            layer_norm,
             row_input,
             pointwise_input: None,
             validation,
@@ -374,6 +455,22 @@ impl ResidentGraph {
                     &self.validation,
                 ))
             }
+            (Node::LayerNorm(node), GraphStage::LayerNorm { gain, bias, .. }) => {
+                BoundaryBinding::LayerNorm(normalization::bind(
+                    gpu,
+                    &self.layer_norm.as_ref().unwrap().forward_layout,
+                    [
+                        input,
+                        &self.parameters[*gain],
+                        &self.parameters[*bias],
+                        &node.centered,
+                        &node.row_stats,
+                        output,
+                        &self.validation,
+                        &node.params,
+                    ],
+                ))
+            }
             _ => unreachable!("node kind is fixed by the validated definition"),
         }
     }
@@ -468,6 +565,11 @@ impl ResidentGraph {
                     (Node::Pointwise { plan, .. }, Some(BoundaryBinding::Pointwise(binding))) => {
                         plan.encode_in_pass(&mut pass, binding)
                     }
+                    (Node::LayerNorm(node), Some(BoundaryBinding::LayerNorm(binding))) => {
+                        pass.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        pass.set_bind_group(0, binding, &[]);
+                        pass.dispatch_workgroups(node.grid[0], node.grid[1], 1);
+                    }
                     (
                         Node::Pointwise { .. },
                         Some(BoundaryBinding::ViewPointwise { plan, binding }),
@@ -479,6 +581,11 @@ impl ResidentGraph {
                         .encode_in_pass(&mut pass, binding),
                     (Node::Pointwise { plan, binding, .. }, None) => {
                         plan.encode_in_pass(&mut pass, binding)
+                    }
+                    (Node::LayerNorm(node), None) => {
+                        pass.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        pass.set_bind_group(0, &node.binding, &[]);
+                        pass.dispatch_workgroups(node.grid[0], node.grid[1], 1);
                     }
                     _ => unreachable!("boundary binding kind matches the graph node"),
                 }

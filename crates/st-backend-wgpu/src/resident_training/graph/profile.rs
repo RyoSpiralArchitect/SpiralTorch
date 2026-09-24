@@ -28,6 +28,7 @@ impl ResidentGraphTraining {
                     match nodes[0] {
                         Node::Linear { .. } => "forward_dense",
                         Node::Pointwise { .. } => "forward_pointwise",
+                        Node::LayerNorm(_) => "forward_layer_norm",
                     }
                 },
                 node: (nodes.len() == 1).then_some(part * width),
@@ -73,6 +74,13 @@ impl ResidentGraphTraining {
                         });
                     }
                 }
+                Node::LayerNorm(_) => passes.push(ProfilePass {
+                    phase: "layer_norm_backward",
+                    node: Some(node),
+                    part: 0,
+                    dispatches: 2,
+                    operand: None,
+                }),
             }
         }
         append(&mut passes, "update", None, &self.update_passes);
@@ -224,6 +232,7 @@ impl ProfiledGraphTraining {
             .map(|node| match node {
                 Node::Linear { .. } => 0,
                 Node::Pointwise { plan, .. } => plan.direct_copy_bytes(),
+                Node::LayerNorm(_) => 0,
             })
             .sum();
         self.inner.mark_step(attempt);

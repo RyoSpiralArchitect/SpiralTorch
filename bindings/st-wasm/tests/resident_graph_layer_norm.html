@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident LayerNorm graph</title>
+<pre id="result" data-status="running">Checking LayerNorm inside a resident graph</pre>
+<script type="module">
+import init, {InferencePlan} from "./module/spiraltorch_wasm.js";
+
+const result = document.querySelector("#result");
+const input = new Float32Array([1, 2, 4, 2, 0, -1]);
+const target = new Float32Array(6);
+const parameters = [
+  {role: "gain", shape: [3], values: [1, 0.5, 1.5]},
+  {role: "bias", shape: [3], values: [0.25, -0.5, 0.75]},
+];
+const planJson = {
+  schema: "spiraltorch.nn.inference_plan.v3",
+  input_shape: [2, 3],
+  parameters,
+  stages: [{kind: "layer_norm", gain: 0, bias: 1, epsilon: 1e-5}],
+};
+function close(actual, expected, label, tolerance = 3e-4) {
+  if (actual.length !== expected.length) throw Error(`${label}: length mismatch`);
+  for (let i = 0; i < actual.length; i++) {
+    if (!Number.isFinite(actual[i]) || Math.abs(actual[i] - expected[i]) > tolerance * (1 + Math.abs(expected[i])))
+      throw Error(`${label}[${i}]: ${actual[i]} != ${expected[i]}`);
+  }
+}
+function reference() {
+  const prediction = [];
+  const normalized = [];
+  for (let row = 0; row < 2; row++) {
+    const values = [...input.slice(row * 3, row * 3 + 3)];
+    const mean = values.reduce((sum, value) => sum + value, 0) / 3;
+    const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / 3;
+    for (let col = 0; col < 3; col++) {
+      const value = (values[col] - mean) / Math.sqrt(variance + 1e-5);
+      normalized.push(value);
+      prediction.push(value * parameters[0].values[col] + parameters[1].values[col]);
+    }
+  }
+  const gain = [0, 0, 0], bias = [0, 0, 0];
+  for (let i = 0; i < prediction.length; i++) {
+    const upstream = 2 * prediction[i] / prediction.length;
+    gain[i % 3] += upstream * normalized[i];
+    bias[i % 3] += upstream;
+  }
+  return {prediction, gain, bias};
+}
+
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference: "high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback WebGPU adapter not confirmed");
+  await init();
+  const plan = InferencePlan.fromJson(JSON.stringify(planJson));
+  if (JSON.parse(plan.toJson()).schema !== planJson.schema) throw Error("v3 plan did not roundtrip");
+  const expected = reference();
+  const forward = await plan.compileGraphWebGpu();
+  forward.upload(input);
+  forward.dispatch();
+  close(await forward.snapshot().readValues(), expected.prediction, "forward");
+
+  const policies = [];
+  for (const policy of ["exact", "module_compatible"]) {
+    const graph = await plan.compileGraphTrainingWebGpu(policy);
+    graph.uploadBatch(input, target);
+    graph.step(0.1);
+    const state = await graph.stateSnapshot().readState();
+    close(state.predictionValues(), expected.prediction, `${policy}.prediction`);
+    close(state.parameterGradientValues(0), expected.gain, `${policy}.gain`);
+    close(state.parameterGradientValues(1), expected.bias, `${policy}.bias`);
+    const scale = policy === "exact" ? 1 : 0.5;
+    close(state.effectiveGradientValues(0), expected.gain.map(value => value * scale), `${policy}.effective_gain`);
+    close(state.effectiveGradientValues(1), expected.bias.map(value => value * scale), `${policy}.effective_bias`);
+    close(state.parameterValues(0), parameters[0].values.map((value, i) => value - 0.1 * expected.gain[i] * scale), `${policy}.updated_gain`);
+    close(state.parameterValues(1), parameters[1].values.map((value, i) => value - 0.1 * expected.bias[i] * scale), `${policy}.updated_bias`);
+    policies.push(policy);
+  }
+  const bad = InferencePlan.fromJson(JSON.stringify({...planJson, parameters, stages: [{...planJson.stages[0], epsilon: 0}]}));
+  const guarded = await bad.compileGraphWebGpu();
+  guarded.upload(new Float32Array([1, 1, 1, 2, 2, 2]));
+  guarded.dispatch();
+  let rejected = false;
+  try { await guarded.snapshot().readValues(); } catch (error) { rejected = String(error).includes("stage 0"); }
+  if (!rejected) throw Error("Constant-row zero-epsilon guard did not reject stage 0");
+  result.textContent = JSON.stringify({status: "passed", schema: planJson.schema, policies,
+    forward: expected.prediction, guard_rejected: rejected,
+    adapter_probe: {vendor: adapter.info?.vendor, is_fallback_adapter: fallback}});
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>
