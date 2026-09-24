@@ -1,0 +1,31 @@
+{
+  "schema": "spiraltorch.vision_transform_sequence.v1",
+  "base_source": "9e9e10a62dc7a0bd2cb410b4234dad79e8c60cf2",
+  "measured_source": "db1f3e2c0266f85488e6ede42ecfaec67ed2272d",
+  "host": "Apple M4 / Metal / IntegratedGpu / macOS 26.4.1",
+  "benchmark_binary_sha256": "dec21ae5373adefec54ec0116ef5f50036a53d0a572d816d7d99719d527d00b8",
+  "python_wheel_sha256": "0952070b12970aa7d8e3c569872bcdcfb7f738f2b199f100980b1689a8a91210",
+  "input_shape": [3, 512, 512],
+  "operations": ["resize 384x384", "flip", "center crop 320x320", "flip"],
+  "routes": {
+    "separate": "Four WGPU calls, each with upload and readback",
+    "resident": "One WGPU geometry sequence with one upload and terminal readback"
+  },
+  "warmup_pairs_per_run": 2,
+  "timed_pairs_per_run": 7,
+  "run_medians_ms": [
+    {"run": 1, "separate": 7.828, "resident": 1.445, "paired_gain_percent": 81.54},
+    {"run": 2, "separate": 7.044, "resident": 1.258, "paired_gain_percent": 82.14},
+    {"run": 3, "separate": 6.788, "resident": 4.625, "paired_gain_percent": 31.87},
+    {"run": 4, "separate": 8.973, "resident": 2.143, "paired_gain_percent": 76.12},
+    {"run": 5, "separate": 5.253, "resident": 3.456, "paired_gain_percent": 34.21}
+  ],
+  "median_of_run_medians_ms": {"separate": 7.044, "resident": 2.143},
+  "correctness": "Every paired output finite and within 1e-5 absolute error",
+  "validation": {
+    "vision_wgpu_tests_passed": 82,
+    "vision_cpu_only_tests_passed": 53,
+    "python_wgpu_pipeline_tests_passed": 1,
+    "python_default_and_cpu_only_binding_checks": "passed"
+  }
+}
