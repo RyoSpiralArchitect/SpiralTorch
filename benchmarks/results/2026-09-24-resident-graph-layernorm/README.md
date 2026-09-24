@@ -22,22 +22,28 @@ finite and matched exactly in these runs (`max_scaled_error = 0` at tolerance
 | Shape | Run | Standalone median, ms | Graph median, ms | Graph/standalone |
 | --- | --- | ---: | ---: | ---: |
 | 2 x 3 | first | 24.381 | 22.693 | 0.931 |
-| 2 x 3 | final | 22.692 | 21.302 | 0.939 |
+| 2 x 3 | second | 22.692 | 21.302 | 0.939 |
+| 2 x 3 | post-review | 26.431 | 22.392 | 0.847 |
 | 32 x 256 | first | 51.366 | 49.101 | 0.956 |
-| 32 x 256 | final | 52.724 | 51.197 | 0.971 |
+| 32 x 256 | second | 52.724 | 51.197 | 0.971 |
+| 32 x 256 | post-review | 51.181 | 49.776 | 0.973 |
 | 128 x 1025 | first | 662.750 | 659.425 | 0.995 |
-| 128 x 1025 | final | 483.691 | 480.777 | 0.994 |
+| 128 x 1025 | second | 483.691 | 480.777 | 0.994 |
+| 128 x 1025 | post-review | 496.075 | 499.560 | 1.007 |
 
 The 128 x 1025 absolute latency moved markedly between runs for *both*
-routes. Treat its sub-1% median delta as parity, not a speedup. The smaller
+routes, and the final run slightly reversed direction. Treat its sub-1% median
+delta as parity, not a speedup. The smaller
 cases show a modest host-end-to-end advantage only under this workload.
 Neither run is a PyTorch comparison or a GPU-kernel-only measurement.
 
 All measured intervals, losses, and exactness checks are in
-[`results.json`](results.json). The unchanged source for both runs was
+[`results.json`](results.json). The unchanged benchmark example for all three runs was
 `crates/st-backend-wgpu/examples/resident_graph_layer_norm_bench.rs`, SHA-256
 `725d0482ebbbc3d424f8a351a78d7ff8cf391c62223ccb5d695fe3a45006c99f`.
-The complete local raw JSON files were retained under
+The first two runs preceded the review fix to learner clipping/EMA; the
+post-review run used the final source. The benchmarked exact-SGD route was
+unchanged by that fix. Complete local raw JSON files were retained under
 `~/Library/Logs/SpiralTorch/resident-graph-layernorm-v1/`; their SHA-256 values
 are in `results.json`.
 
@@ -50,7 +56,7 @@ the zero-epsilon stage guard. Its JS adapter probe reported Apple and
 for the Rust WGPU runtime. The browser page SHA-256 is
 `5c4bfb98fad499c7b1061d67c6f00ad8ec496d23473a16baa1fa294fbe853866`;
 the built WASM SHA-256 is
-`582877d00e00aeabda65d4e05eeebda9a992dd34f8692ff4bb21d3b5de40419f`.
+`57166a38a814437b787280d171d470214a2ba86b094f152f65faea5df1199000`.
 This confirms browser execution on this adapter, not parity across browsers.
 
 Rust checks: `st-kernel-contracts` 33 tests, `st-backend-wgpu` 214 tests,
