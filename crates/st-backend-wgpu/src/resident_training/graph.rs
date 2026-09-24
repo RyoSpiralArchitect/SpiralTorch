@@ -896,7 +896,7 @@ impl ResidentGraphTraining {
         self.write_rate(rate);
         let context = self.device.runtime().context();
         let mut encoder = context.device().create_command_encoder(&Default::default());
-        self.encode_step(&mut encoder, &mut Default::default());
+        self.encode_step(&mut encoder, &mut Default::default(), false);
         context.queue().submit(Some(encoder.finish()));
         self.mark_step(attempt);
         Ok(attempt)
@@ -930,6 +930,7 @@ impl ResidentGraphTraining {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         timestamps: &mut PassTimestampCursor<'_>,
+        split_layer_norm: bool,
     ) {
         encoder.clear_buffer(&self.validation, 0, None);
         encoder.clear_buffer(&self.pointwise_flags, 0, None);
@@ -946,7 +947,7 @@ impl ResidentGraphTraining {
         }
         self.encode_forward(encoder, timestamps);
         self.encode_passes(encoder, &self.loss_passes, timestamps);
-        self.encode_backward(encoder, timestamps);
+        self.encode_backward(encoder, timestamps, split_layer_norm);
         encoder.copy_buffer_to_buffer(
             &self.pointwise_flags,
             0,
@@ -1010,6 +1011,7 @@ impl ResidentGraphTraining {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         timestamps: &mut PassTimestampCursor<'_>,
+        split_layer_norm: bool,
     ) {
         for (i, node) in self.nodes.iter().enumerate().rev() {
             match node {
@@ -1026,7 +1028,26 @@ impl ResidentGraphTraining {
                 }
                 Node::LayerNorm(node) => {
                     let kernels = self.layer_norm.as_ref().unwrap();
-                    {
+                    if split_layer_norm {
+                        let mut compute =
+                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("graph.layer_norm.backward.input.diagnostic"),
+                                timestamp_writes: timestamps.next(),
+                            });
+                        compute.set_pipeline(&kernels.input);
+                        compute.set_bind_group(0, &node.backward_input, &[]);
+                        compute.dispatch_workgroups(node.row_grid[0], node.row_grid[1], 1);
+                        drop(compute);
+
+                        let mut compute =
+                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("graph.layer_norm.backward.affine.diagnostic"),
+                                timestamp_writes: timestamps.next(),
+                            });
+                        compute.set_pipeline(&kernels.affine[node.affine_pipeline]);
+                        compute.set_bind_group(0, &node.backward_affine, &[]);
+                        compute.dispatch_workgroups(node.col_grid[0], node.col_grid[1], 1);
+                    } else {
                         let mut compute =
                             encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                                 label: Some("graph.layer_norm.backward"),
