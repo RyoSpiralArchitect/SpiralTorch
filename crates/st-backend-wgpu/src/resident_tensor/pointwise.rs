@@ -320,6 +320,30 @@ impl PointwisePlan {
         self.run_validated(inputs, execution)
     }
 
+    /// Submit independent prepared fused chains together, returning outputs in
+    /// job order. Every job is validated before any GPU work is submitted.
+    pub fn run_many_fused(
+        jobs: &[(&Self, &[&ResidentTensor])],
+    ) -> Result<Vec<ResidentTensor>, TensorError> {
+        let Some((first, _)) = jobs.first() else {
+            return Ok(Vec::new());
+        };
+        let context = first.device.runtime().context();
+        for (plan, inputs) in jobs {
+            if !plan.device.runtime().context().shares_handles_with(context) {
+                return Err(TensorError::DeviceMismatch);
+            }
+            plan.validate_inputs(inputs)?;
+        }
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let outputs = jobs
+            .iter()
+            .map(|(plan, inputs)| plan.encode_fused(&mut encoder, inputs))
+            .collect::<Result<Vec<_>, _>>()?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(outputs)
+    }
+
     pub(crate) fn validate_inputs(&self, inputs: &[&ResidentTensor]) -> Result<(), TensorError> {
         if inputs.len() != self.layouts.len() {
             return Err(PointwiseError::Operands.into());
@@ -385,38 +409,47 @@ impl PointwisePlan {
             }
             current
         } else {
-            let layout = NdLayout::contiguous(self.layouts[0].shape())?;
-            let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
-            let values =
-                runtime::empty_buffer::<f32>(gpu, "pointwise.output", layout.len().max(1), usage)?;
-            let flags = runtime::empty_buffer::<u32>(gpu, "pointwise.flags", 1, usage)?;
-            let inherited = runtime::empty_buffer::<u32>(
-                gpu,
-                "pointwise.inherited",
-                inputs.len(),
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            )?;
-            for (i, input) in inputs.iter().enumerate() {
-                encoder.copy_buffer_to_buffer(input.flags(), 0, &inherited, i as u64 * 4, 4);
-            }
-            self.encode_into(
-                &mut encoder,
-                &inputs.iter().map(|t| t.values()).collect::<Vec<_>>(),
-                &values,
-                &inherited,
-                &flags,
-            );
-            ResidentTensor {
-                storage: Shared::new(Storage {
-                    values,
-                    flags: Shared::new(flags),
-                }),
-                layout,
-                device: self.device.clone(),
-            }
+            self.encode_fused(&mut encoder, inputs)?
         };
         context.queue().submit(Some(encoder.finish()));
         Ok(output)
+    }
+
+    fn encode_fused(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        inputs: &[&ResidentTensor],
+    ) -> Result<ResidentTensor, TensorError> {
+        let gpu = self.device.runtime().context().device();
+        let layout = NdLayout::contiguous(self.layouts[0].shape())?;
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+        let values =
+            runtime::empty_buffer::<f32>(gpu, "pointwise.output", layout.len().max(1), usage)?;
+        let flags = runtime::empty_buffer::<u32>(gpu, "pointwise.flags", 1, usage)?;
+        let inherited = runtime::empty_buffer::<u32>(
+            gpu,
+            "pointwise.inherited",
+            inputs.len(),
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        )?;
+        for (i, input) in inputs.iter().enumerate() {
+            encoder.copy_buffer_to_buffer(input.flags(), 0, &inherited, i as u64 * 4, 4);
+        }
+        self.encode_into(
+            encoder,
+            &inputs.iter().map(|t| t.values()).collect::<Vec<_>>(),
+            &values,
+            &inherited,
+            &flags,
+        );
+        Ok(ResidentTensor {
+            storage: Shared::new(Storage {
+                values,
+                flags: Shared::new(flags),
+            }),
+            layout,
+            device: self.device.clone(),
+        })
     }
 
     /// Internal graph workspace only: the caller owns same-device, exact-layout
@@ -483,6 +516,92 @@ impl PointwisePlan {
 mod tests {
     use super::*;
     use st_kernel_contracts::pointwise::PointwiseStep;
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn grouped_fused_matches_independent_views_and_preserves_guards() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = runtime::ensure_default_runtime_blocking("pointwise.grouped").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = TensorDevice::new(runtime).unwrap();
+        let gradients = device.upload(&[4], &[0.5, -0.25, 0.75, 1.25]).unwrap();
+        let dg = gradients.narrow(0, 0, 2).unwrap();
+        let db = gradients.narrow(0, 2, 2).unwrap();
+        let rate = device.upload(&[], &[-0.1]).unwrap();
+        let gamma = device.upload(&[2], &[1., 2.]).unwrap();
+        let beta = device.upload(&[2], &[3., 4.]).unwrap();
+        let chain = PointwiseChain::new(
+            3,
+            vec![
+                PointwiseStep::named("multiply", Some(1)).unwrap(),
+                PointwiseStep::named("add", Some(2)).unwrap(),
+            ],
+        )
+        .unwrap();
+        let plan = |gradient: &ResidentTensor, parameter: &ResidentTensor| {
+            PointwisePlan::new(
+                device.clone(),
+                chain.clone(),
+                vec![
+                    gradient.layout().clone(),
+                    rate.layout().clone(),
+                    parameter.layout().clone(),
+                ],
+            )
+            .unwrap()
+        };
+        let gamma_plan = plan(&dg, &gamma);
+        let beta_plan = plan(&db, &beta);
+        let expected_gamma = gamma_plan
+            .run(&[&dg, &rate, &gamma], PointwiseExecution::Fused)
+            .unwrap();
+        let expected_beta = beta_plan
+            .run(&[&db, &rate, &beta], PointwiseExecution::Fused)
+            .unwrap();
+        let grouped = PointwisePlan::run_many_fused(&[
+            (&gamma_plan, &[&dg, &rate, &gamma]),
+            (&beta_plan, &[&db, &rate, &beta]),
+        ])
+        .unwrap();
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(
+            grouped[0].snapshot().unwrap().read().unwrap(),
+            expected_gamma.snapshot().unwrap().read().unwrap()
+        );
+        assert_eq!(
+            grouped[1].snapshot().unwrap().read().unwrap(),
+            expected_beta.snapshot().unwrap().read().unwrap()
+        );
+        assert!(PointwisePlan::run_many_fused(&[]).unwrap().is_empty());
+        assert!(matches!(
+            PointwisePlan::run_many_fused(&[
+                (&gamma_plan, &[&dg, &rate, &gamma]),
+                (&beta_plan, &[&dg, &rate, &beta]),
+            ]),
+            Err(TensorError::Pointwise(PointwiseError::LayoutMismatch))
+        ));
+
+        let huge = device.upload(&[2], &[f32::MAX, 1.]).unwrap();
+        let two = device.upload(&[], &[2.]).unwrap();
+        let invalid = huge.mul(&two).unwrap();
+        let invalid_plan = plan(&dg, &invalid);
+        let guarded = PointwisePlan::run_many_fused(&[
+            (&gamma_plan, &[&dg, &rate, &gamma]),
+            (&invalid_plan, &[&dg, &rate, &invalid]),
+        ])
+        .unwrap();
+        assert_eq!(
+            guarded[0].snapshot().unwrap().read().unwrap(),
+            expected_gamma.snapshot().unwrap().read().unwrap()
+        );
+        assert!(matches!(
+            guarded[1].snapshot().unwrap().read(),
+            Err(TensorError::NonFinite)
+        ));
+    }
+
     #[test]
     fn generated_fusion_validates_at_program_bounds() {
         for count in [1, 3, 16] {

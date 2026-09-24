@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     struct UpdateRoute<'a> {
         plans: Option<&'a [PointwisePlan; 2]>,
         execution: PointwiseExecution,
+        grouped: bool,
     }
 
     fn values(n: usize, multiplier: usize, modulus: usize, divisor: f32) -> Vec<f32> {
@@ -153,6 +154,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ) -> Result<(ResidentTensor, ResidentTensor), st_backend_wgpu::resident_tensor::TensorError>
     {
         if let Some([gamma_plan, beta_plan]) = update.plans {
+            if update.grouped {
+                let mut outputs = PointwisePlan::run_many_fused(&[
+                    (gamma_plan, &[dg, rate, gamma]),
+                    (beta_plan, &[db, rate, beta]),
+                ])?;
+                let next_beta = outputs.pop().unwrap();
+                let next_gamma = outputs.pop().unwrap();
+                return Ok((next_gamma, next_beta));
+            }
             Ok((
                 gamma_plan.run(&[dg, rate, gamma], update.execution)?,
                 beta_plan.run(&[db, rate, beta], update.execution)?,
@@ -164,7 +174,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let update_execution_name = std::env::var("SPIRALTORCH_LAYER_NORM_UPDATE_EXECUTION")
         .unwrap_or_else(|_| "sequential".to_owned());
-    let update_execution = update_execution_name.parse::<PointwiseExecution>()?;
+    let grouped = update_execution_name == "grouped_fused";
+    let update_execution = if grouped {
+        PointwiseExecution::Fused
+    } else {
+        update_execution_name.parse::<PointwiseExecution>()?
+    };
 
     let _strict = st_tensor::execution::push_accelerator_fallback(
         st_tensor::execution::AcceleratorFallback::Forbid,
@@ -241,6 +256,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let update = UpdateRoute {
             plans: update_plans.as_ref(),
             execution: update_execution,
+            grouped,
         };
         let run = |route| -> BenchResult {
             match route {
