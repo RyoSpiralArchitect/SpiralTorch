@@ -2,8 +2,12 @@
 #[cfg(all(feature = "wgpu_dense", not(target_arch = "wasm32")))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use st_backend_wgpu::{
-        resident_tensor::{ResidentTensor, TensorDevice},
+        resident_tensor::{pointwise::PointwisePlan, ResidentTensor, TensorDevice},
         runtime,
+    };
+    use st_kernel_contracts::{
+        layout::NdLayout,
+        pointwise::{PointwiseChain, PointwiseExecution, PointwiseStep},
     };
     use st_tensor::{LayerNormBackend, Tensor, TensorUtilBackend};
     use std::time::Instant;
@@ -14,6 +18,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const EPSILON: f32 = 1e-5;
     const SCALED_TOLERANCE: f64 = 5e-4;
     type BenchResult = Result<(Vec<Vec<f32>>, usize), Box<dyn std::error::Error>>;
+
+    #[derive(Clone, Copy)]
+    struct UpdateRoute<'a> {
+        plans: Option<&'a [PointwisePlan; 2]>,
+        execution: PointwiseExecution,
+    }
 
     fn values(n: usize, multiplier: usize, modulus: usize, divisor: f32) -> Vec<f32> {
         (0..n)
@@ -106,6 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mut beta: ResidentTensor,
         rate: &ResidentTensor,
         requested: [bool; 3],
+        update: UpdateRoute<'_>,
     ) -> BenchResult {
         let mut final_loss = None;
         let mut final_dg = None;
@@ -116,8 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let [_, dg, db] = tape.backward(loss.prediction_gradient(), 1., requested)?;
             let dg = dg.unwrap();
             let db = db.unwrap();
-            gamma = gamma.add(&dg.mul(rate)?)?;
-            beta = beta.add(&db.mul(rate)?)?;
+            (gamma, beta) = update_pair(&gamma, &beta, &dg, &db, rate, update)?;
             final_loss = Some(loss);
             final_dg = Some(dg);
             final_db = Some(db);
@@ -132,6 +142,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let maps = pending.staging_buffer_count();
         Ok((pending.read()?, maps))
     }
+
+    fn update_pair(
+        gamma: &ResidentTensor,
+        beta: &ResidentTensor,
+        dg: &ResidentTensor,
+        db: &ResidentTensor,
+        rate: &ResidentTensor,
+        update: UpdateRoute<'_>,
+    ) -> Result<(ResidentTensor, ResidentTensor), st_backend_wgpu::resident_tensor::TensorError>
+    {
+        if let Some([gamma_plan, beta_plan]) = update.plans {
+            Ok((
+                gamma_plan.run(&[dg, rate, gamma], update.execution)?,
+                beta_plan.run(&[db, rate, beta], update.execution)?,
+            ))
+        } else {
+            Ok((gamma.add(&dg.mul(rate)?)?, beta.add(&db.mul(rate)?)?))
+        }
+    }
+
+    let update_execution_name = std::env::var("SPIRALTORCH_LAYER_NORM_UPDATE_EXECUTION")
+        .unwrap_or_else(|_| "sequential".to_owned());
+    let update_execution = update_execution_name.parse::<PointwiseExecution>()?;
 
     let _strict = st_tensor::execution::push_accelerator_fallback(
         st_tensor::execution::AcceleratorFallback::Forbid,
@@ -171,6 +204,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let gpu_gamma = device.upload(&[cols], &vec![1.; cols])?;
         let gpu_beta = device.upload(&[cols], &vec![0.; cols])?;
         let gpu_rate = device.upload(&[], &[rate])?;
+        let update_plans = if update_execution == PointwiseExecution::Sequential {
+            None
+        } else {
+            let chain = PointwiseChain::new(
+                3,
+                vec![
+                    PointwiseStep::named("multiply", Some(1))?,
+                    PointwiseStep::named("add", Some(2))?,
+                ],
+            )?;
+            let affine = NdLayout::contiguous(&[2 * cols])?;
+            let gamma_gradient = affine.narrow(0, 0, cols)?.reshape(&[cols])?;
+            let beta_gradient = affine.narrow(0, cols, cols)?.reshape(&[cols])?;
+            Some([
+                PointwisePlan::new(
+                    device.clone(),
+                    chain.clone(),
+                    vec![
+                        gamma_gradient,
+                        gpu_rate.layout().clone(),
+                        gpu_gamma.layout().clone(),
+                    ],
+                )?,
+                PointwisePlan::new(
+                    device.clone(),
+                    chain,
+                    vec![
+                        beta_gradient,
+                        gpu_rate.layout().clone(),
+                        gpu_beta.layout().clone(),
+                    ],
+                )?,
+            ])
+        };
+        let update = UpdateRoute {
+            plans: update_plans.as_ref(),
+            execution: update_execution,
+        };
         let run = |route| -> BenchResult {
             match route {
                 0 => Ok((run_cpu(&input, &target, rows, cols, rate)?, 0)),
@@ -181,6 +252,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     device.upload(&[cols], &vec![0.; cols])?,
                     &device.upload(&[], &[rate])?,
                     [true; 3],
+                    update,
                 ),
                 2 => run_gpu(
                     gpu_input.clone(),
@@ -189,6 +261,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     gpu_beta.clone(),
                     &gpu_rate,
                     [true; 3],
+                    update,
                 ),
                 3 => run_gpu(
                     gpu_input.clone(),
@@ -197,6 +270,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     gpu_beta.clone(),
                     &gpu_rate,
                     [false, true, true],
+                    update,
                 ),
                 _ => unreachable!(),
             }
@@ -288,10 +362,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .read()?
                 }
                 6 => {
-                    let next_gamma =
-                        gpu_gamma.add(&profile_gradients[1].as_ref().unwrap().mul(&gpu_rate)?)?;
-                    let next_beta =
-                        gpu_beta.add(&profile_gradients[2].as_ref().unwrap().mul(&gpu_rate)?)?;
+                    let (next_gamma, next_beta) = update_pair(
+                        &gpu_gamma,
+                        &gpu_beta,
+                        profile_gradients[1].as_ref().unwrap(),
+                        profile_gradients[2].as_ref().unwrap(),
+                        &gpu_rate,
+                        update,
+                    )?;
                     device
                         .snapshot_many(&[&gpu_input, &next_gamma, &next_beta])?
                         .read()?
@@ -329,6 +407,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
             "schema": "spiraltorch.layer_norm.training_residency_exploratory.v1",
+            "update_execution": update_execution_name,
             "adapter": format!("{:?}", runtime.adapter_info()),
             "scope": "32-step forward+MSE+all VJPs+SGD; host-to-host includes initial uploads and one terminal batch, preloaded excludes initial uploads; all routes return CPU-owned final loss, parameters and affine gradients",
         "routes": ["rust_cpu_all", "wgpu_host_to_host_all", "wgpu_preloaded_all", "wgpu_preloaded_affine_only"],
