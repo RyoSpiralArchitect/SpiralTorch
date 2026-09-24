@@ -250,14 +250,14 @@ class Gpu(unittest.TestCase):
         self.assertEqual(net.resident_cache_info()["compilations"], 3)
         self.assertEqual(first.snapshot().read_values(), original)
 
-    def test_standalone_layers_unsupported_modules_and_invalid_input(self):
+    def test_standalone_layers_and_invalid_input(self):
         x = self.d.upload([2,3],[-1.,0.,2.,-1.,0.,2.])
         for net in [st.nn.Linear(3,3), st.nn.Scaler("g",3), st.nn.Gelu(), st.nn.Relu()]:
             self.close(net(x), flat(net(st.Tensor(2,3,[-1.,0.,2.,-1.,0.,2.]))))
         net = st.nn.Sequential()
-        net.add(st.nn.LayerNorm("unsupported",3,-1.,1e-5))
-        with self.assertRaises(ValueError): net(x)
-        self.assertEqual(net.resident_cache_info()["compilations"], 0)
+        net.add(st.nn.LayerNorm("norm",3,-1.,1e-5))
+        self.close(net(x), flat(net(st.Tensor(2,3,[-1.,0.,2.,-1.,0.,2.]))))
+        self.assertEqual(net.resident_cache_info()["compilations"], 1)
         large = self.d.upload([2,3],[float.fromhex("0x1.fffffep+127")]*6)
         invalid = large.mul(large)
         net = st.nn.Sequential()
