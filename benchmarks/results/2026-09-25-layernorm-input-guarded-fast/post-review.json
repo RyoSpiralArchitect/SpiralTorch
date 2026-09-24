@@ -1,0 +1,35 @@
+{
+  "schema": "spiraltorch.layernorm_input_guarded_fast.post_review.v1",
+  "baseline_source": "9e9e10a62dc7a0bd2cb410b4234dad79e8c60cf2",
+  "candidate_source": "2f613aaab3df518cbaef1d79290bb6bff4c4600a",
+  "host": "Apple M4 / Metal, macOS 26.4.1",
+  "case": "128x1025, 32 training steps",
+  "native": {
+    "baseline_binary_sha256": "4b85b5dcbd6eb75794ece7d063c7f52e94896415fd169114784f3d7c2e40e0e7",
+    "candidate_binary_sha256": "ff926c3d61950d9ad99b2eeaad4cb6b44c3a10f90446a547e520d63d284a3231",
+    "baseline_graph_median_ms": [533.893709, 565.342917, 565.901125],
+    "candidate_graph_median_ms": [466.176708, 499.057292, 511.534042],
+    "paired_gain_percent": [12.6836, 11.7249, 9.6072],
+    "median_of_run_medians_ms": {"baseline": 565.342917, "candidate": 499.057292},
+    "max_scaled_error": 0.0
+  },
+  "browser": {
+    "candidate_wasm_sha256": "5ac677f1cbba39f5dbbefbc06fafd698d6bd70d1979bd348c17ee175341e2122",
+    "page_sha256": "85b6e7d530a4204e4dd03fff50698766c7e3b90b627d1862c28250fed4c44f38",
+    "adapter_probe": "apple / non-fallback",
+    "baseline_graph_median_ms": [490.1, 507.0, 500.0],
+    "candidate_graph_median_ms": [440.7, 445.7, 443.1],
+    "paired_gain_percent": [10.0796, 12.0907, 11.38],
+    "median_of_run_medians_ms": {"baseline": 500.0, "candidate": 443.1},
+    "max_scaled_error": 1.0913891630864596e-8,
+    "runs_passed": 3
+  },
+  "subnormal_browser_regression": {
+    "status": "passed",
+    "cases": 1,
+    "relative_tolerance": 0.01,
+    "training_steps": 400,
+    "wasm_sha256": "9db47c71d3d273b67da4a16727b9fa0f2897301eb62ff854865914f7ea323120",
+    "page_sha256": "130507177e511eeafaffce456af024b6ad851884f371effbce4de6333f5ce2e4"
+  }
+}

@@ -8,16 +8,34 @@ including the tiny-epsilon and near-null cases. The row reductions, affine
 gradient kernel, validation flags, and public API are unchanged.
 
 Baseline source: `9e9e10a62dc7a0bd2cb410b4234dad79e8c60cf2`.
-Candidate source: `c988b80db080412b18be3707fde2dd902cb479fa`.
-The follow-up preflight correction in this PR changes only the declared
-minimum workgroup-storage limit from 8288 to 8292 bytes; it does not change
-the measured shader or dispatch schedule.
+Initial measured candidate source: `c988b80db080412b18be3707fde2dd902cb479fa`.
+Final reviewed shader source: `2f613aaab3df518cbaef1d79290bb6bff4c4600a`.
+A review found that tiny weighted
+cotangents could underflow in the f32 numerator before the final scale.
+The final shader keeps products below `1e-30` on the Wide path. The separate
+preflight correction changes the declared minimum workgroup-storage limit
+from 8288 to 8292 bytes.
 Measurements used one Apple M4 / Metal host on macOS 26.4.1, rustc 1.98.0
 for WASM and the numerical control, PyTorch 2.12.1 for numerical validation,
 and Chrome 153.0.8010.53 on a non-fallback Apple WebGPU adapter. All runs
 were local; the Furnace GPU was not used.
 
-## Observed result
+## Final reviewed result
+
+The post-review source was rebuilt and measured against the same pinned
+baseline. Three alternating native pairs and three Chrome matched runs all
+passed their numerical gates. The native baseline/candidate medians of run
+medians were 565.343/499.057 ms (paired gains 9.61%-12.68%). Chrome medians
+were 500.0/443.1 ms (paired gains 10.08%-12.09%). The browser-specific
+subnormal-cotangent case also passed with a relative-error check and the
+existing 400-step training loop. See [`post-review.json`](post-review.json)
+for each pair, module/binary hashes, and correctness status. The new raw
+reports and candidate binary are listed separately in
+[`post-review-raw-SHA256SUMS`](post-review-raw-SHA256SUMS). The original
+measurements below are retained as the pre-review record, not attributed to
+the final shader.
+
+## Initial pre-review result
 
 | 128x1025, 32 training steps | Baseline | Candidate | Repeated-pair result |
 | --- | ---: | ---: | --- |
@@ -54,7 +72,7 @@ learning steps; its raw report remains local.
 
 ## Numerical gates
 
-The Rust backend's 221 real-WGPU tests passed, including new wide-row f64
+The initial Rust backend's 221 real-WGPU tests passed, including wide-row f64
 input-VJP tests for ordinary, scale-direction, tiny-epsilon, large-offset,
 and near-cancellation seeds. The `st-tensor` LayerNorm autograd and numerics
 integration suites passed 12 and 4 tests. The existing six-shape, all-VJP
@@ -66,6 +84,11 @@ validation record and hashes of its raw inputs. That protocol validates
 final loss, affine gradients, and parameters; the new f64 tests and the
 browser matched fixture independently cover input gradients. PyTorch
 timings are **not** used to claim a framework speed advantage.
+The final backend suite passed 222/222 real-WGPU tests. The post-review test
+adds a 256-column alternating subnormal cotangent whose
+expected input gradient is normal after scaling. Both native Metal and Chrome
+WebGPU passed a 1% relative-error bound; the initial absolute-error checks
+would not have caught this regression.
 
 All 33 original reports, binaries, and browser modules listed in
 [`raw-SHA256SUMS`](raw-SHA256SUMS) remain under
