@@ -52,6 +52,7 @@ fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
     for (var col = lane; col < params.cols; col += 256u) {
         let centered = wide_sub(wide_sub(parts(input[base + col]), origin), row_mean);
         sum = wide_add(sum, wide_mul(centered, centered));
+        centered_values[base + col] = centered;
     }
     // All lanes consumed the first reduction before reusing its scratch.
     workgroupBarrier();
@@ -66,10 +67,10 @@ fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
         row_stats[row] = LayerNormRow(row_inverse, sums[0]);
     }
     workgroupBarrier();
-    for (var col = lane; col < params.cols; col += 256u) {
-        let centered = wide_sub(wide_sub(parts(input[base + col]), origin), row_mean);
-        centered_values[base + col] = centered;
-        if (emit_value) {
+    if (emit_value) {
+        storageBarrier();
+        for (var col = lane; col < params.cols; col += 256u) {
+            let centered = centered_values[base + col];
             // Forward retains the existing f32 affine contract. Backward
             // consumes the unrounded, extended-range centered tape instead.
             // Decode the rounded f32 bits again: a subnormal normalized value
