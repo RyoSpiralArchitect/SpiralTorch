@@ -11,7 +11,7 @@ async function main() {
   if (!moduleDir || !executablePath || !outputPath) {
     throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [rank|rank-active-lanes|rank-tournament|rank-matched|rank-pruning-matched|rank-pair-lanes-matched|rank-prefix-matched|rank-count-matched|rank-profile|rank-adaptation|matmul|matmul-rank|tensor-mean|nn|nn-training|nn-graph-layer-norm|nd-tensor|nn-clients|nn-clients-cpu|nn-training-clients|nn-training-clients-cpu] [BASELINE_MODULE_DIR]");
   }
-if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nn-graph-layer-norm", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu", "nn-fusion-clients", "nn-autograd-clients", "nn-learner-clients", "pointwise-clients", "nn-module-handoff", "nn-module-forward", "nn-module-matched", "nn-module-intervals", "nn-module-terminal-intervals", "nn-module-terminal-matched-intervals", "nn-loss-clients", "nn-classification-clients", "nn-microbatch-clients", "nerf", "nerf-bench", "nerf-submit-bench", "nerf-row-input-bench", "nerf-pointwise-input-bench", "softmax-portable-bench", "consensus-readback-bench", "gelu-backward-bench", "layer-norm-resident"].includes(fixture)) throw Error("unknown fixture");
+if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nn-graph-layer-norm", "nn-graph-layer-norm-matched", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu", "nn-fusion-clients", "nn-autograd-clients", "nn-learner-clients", "pointwise-clients", "nn-module-handoff", "nn-module-forward", "nn-module-matched", "nn-module-intervals", "nn-module-terminal-intervals", "nn-module-terminal-matched-intervals", "nn-loss-clients", "nn-classification-clients", "nn-microbatch-clients", "nerf", "nerf-bench", "nerf-submit-bench", "nerf-row-input-bench", "nerf-pointwise-input-bench", "softmax-portable-bench", "consensus-readback-bench", "gelu-backward-bench", "layer-norm-resident"].includes(fixture)) throw Error("unknown fixture");
   const nnClientFixture = fixture === "nn-clients" || fixture === "nn-clients-cpu";
   const trainingClientFixture = fixture === "nn-training-clients" || fixture === "nn-training-clients-cpu";
   const graphClientFixture = fixture === "nn-graph-clients" || fixture === "nn-graph-clients-cpu";
@@ -20,7 +20,8 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
   const terminalIntervals=fixture === "nn-module-terminal-intervals" || sameTerminalApi;
   const moduleIntervals=fixture === "nn-module-intervals" || terminalIntervals;
   const moduleMatched=fixture === "nn-module-matched" || moduleIntervals;
-  if((matched || moduleMatched) !== Boolean(baselineDir)) throw Error("matched fixtures require BASELINE_MODULE_DIR; other fixtures must omit it");
+  const layerNormMatched=fixture === "nn-graph-layer-norm-matched";
+  if((matched || moduleMatched || layerNormMatched) !== Boolean(baselineDir)) throw Error("matched fixtures require BASELINE_MODULE_DIR; other fixtures must omit it");
   const rankFixture = fixture === "rank" || fixture === "rank-active-lanes" || fixture === "rank-tournament";
   const fd = fs.openSync(outputPath, "wx");
   let report, browser, server, page;
@@ -57,6 +58,7 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
     if(fixture === "nn-graph-training-profile") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_training_profile.html"), "text/html"]);
     if(fixture === "nn-graph-forward") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_forward.html"), "text/html"]);
     if(fixture === "nn-graph-layer-norm") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_layer_norm.html"), "text/html"]);
+    if(layerNormMatched) files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_graph_layer_norm_matched.html"), "text/html"]);
     if(fixture === "nerf" || fixture === "nerf-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/", fixture === "nerf" ? "resident_nerf.html" : "resident_nerf_bench.html"), "text/html"]);
     if(fixture === "nerf-submit-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_nerf_submit_bench.html"), "text/html"]);
     if(fixture === "nerf-row-input-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_nerf_row_input_bench.html"), "text/html"]);

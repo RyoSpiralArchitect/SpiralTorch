@@ -154,3 +154,42 @@ fn backward_affine(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoc
         if ((params.requested & 4u) != 0u) { affine[params.beta_offset + col] = checked(wide_mul(projections[0], scale)); }
     }
 }
+
+// Eight adjacent columns share a workgroup. Each column still has an ordered
+// 32-lane row reduction, while adjacent lanes read adjacent addresses.
+@compute @workgroup_size(256)
+fn backward_affine_tiled(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    let col_lane = lane & 7u;
+    let row_lane = lane >> 3u;
+    let tile = group.y * params.groups_x + group.x;
+    let col = tile * 8u + col_lane;
+    var dg = parts(0.0);
+    var db = parts(0.0);
+    if (col < params.cols) {
+        for (var row = row_lane; row < params.rows; row += 32u) {
+            let index = row * params.cols + col;
+            let seed = parts(upstream[index]);
+            if ((params.requested & 2u) != 0u) {
+                let normalized = wide_mul(centered_values[index], row_stats[row].inverse_std);
+                dg = wide_add(dg, wide_mul(seed, normalized));
+            }
+            if ((params.requested & 4u) != 0u) { db = wide_add(db, seed); }
+        }
+    }
+    sums[lane] = dg;
+    projections[lane] = db;
+    workgroupBarrier();
+    for (var stride = 16u; stride > 0u; stride >>= 1u) {
+        if (row_lane < stride) {
+            let other = lane + stride * 8u;
+            sums[lane] = wide_add(sums[lane], sums[other]);
+            projections[lane] = wide_add(projections[lane], projections[other]);
+        }
+        workgroupBarrier();
+    }
+    if (row_lane == 0u && col < params.cols) {
+        let scale = parts(params.scale);
+        if ((params.requested & 2u) != 0u) { affine[col] = checked(wide_mul(sums[lane], scale)); }
+        if ((params.requested & 4u) != 0u) { affine[params.beta_offset + col] = checked(wide_mul(projections[lane], scale)); }
+    }
+}

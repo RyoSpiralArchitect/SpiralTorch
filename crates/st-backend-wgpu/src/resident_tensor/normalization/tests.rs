@@ -429,6 +429,96 @@ fn layer_norm_affine_reduction_workgroup_boundaries() {
 }
 
 #[test]
+fn layer_norm_tiled_affine_matches_f64_at_shape_boundaries() {
+    let Some(device) = device() else { return };
+    let limits = device.runtime().context().device().limits();
+    for (rows, cols, tiled) in [
+        (31, 256, false),
+        (32, 255, false),
+        (32, 256, true),
+        (32, 257, true),
+        (64, 256, true),
+        (65, 257, true),
+        (128, 1025, true),
+        (129, 256, false),
+    ] {
+        let shape = LayerNormShape::new(&[rows, cols], &[cols]).unwrap();
+        let (grid, pipeline) = affine_schedule(shape, &limits).unwrap();
+        assert_eq!(pipeline == 3, tiled, "rows={rows} cols={cols}");
+        assert_eq!(
+            grid[0] as usize * grid[1] as usize,
+            if tiled { cols.div_ceil(8) } else { cols }
+        );
+        let x: Vec<_> = (0..rows * cols)
+            .map(|i| ((i * 17 + 3) % 53) as f32 / 16. - 1.)
+            .collect();
+        let gamma: Vec<_> = (0..cols).map(|i| 0.5 + (i % 13) as f32 / 16.).collect();
+        let beta = vec![0.125; cols];
+        let seed: Vec<_> = (0..x.len())
+            .map(|i| ((i * 11 + 5) % 37) as f32 / 32. - 0.5)
+            .collect();
+        let expected = reference(&x, &gamma, &beta, &seed, 1e-5, 0.5);
+        let input = device.upload(&[rows, cols], &x).unwrap();
+        let gain = device.upload(&[cols], &gamma).unwrap();
+        let bias = device.upload(&[cols], &beta).unwrap();
+        let upstream = device.upload(&[rows, cols], &seed).unwrap();
+        let tape = input.layer_norm_affine(&gain, &bias, 1e-5).unwrap();
+        close(&read(tape.value()), &expected[0]);
+        let gradients = tape.backward(&upstream, 0.5, [true; 3]).unwrap();
+        for i in 0..3 {
+            close(&read(gradients[i].as_ref().unwrap()), &expected[i + 1]);
+        }
+    }
+}
+
+#[test]
+fn layer_norm_tiled_affine_preserves_cancelling_gradients() {
+    let Some(device) = device() else { return };
+    let cols = 257;
+    let gamma: Vec<_> = (0..cols)
+        .map(|col| if col % 2 == 0 { 1e5 } else { -1e5 })
+        .collect();
+    let beta = vec![0.; cols];
+    for rows in [64, 128] {
+        let x: Vec<_> = (0..rows * cols)
+            .map(|i| {
+                let sign = if (i / cols) % 2 == 0 { 1. } else { -1. };
+                sign * ((i % cols) as f32 - 128.) * 1e-20
+            })
+            .collect();
+        let seed: Vec<_> = (0..x.len())
+            .map(|i| {
+                let sign = if (i / cols + i % cols) % 2 == 0 {
+                    1.
+                } else {
+                    -1.
+                };
+                sign * ((i % 5 + 1) as f32 * 1e5)
+            })
+            .collect();
+        let expected = reference(&x, &gamma, &beta, &seed, 1e-20, 0.5);
+        let input = device.upload(&[rows, cols], &x).unwrap();
+        let gpu_gamma = device.upload(&[cols], &gamma).unwrap();
+        let gpu_beta = device.upload(&[cols], &beta).unwrap();
+        let upstream = device.upload(&[rows, cols], &seed).unwrap();
+        let tape = input
+            .layer_norm_affine(&gpu_gamma, &gpu_beta, 1e-20)
+            .unwrap();
+        close(&read(tape.value()), &expected[0]);
+        for mask in 0..8 {
+            let requested = [mask & 1 != 0, mask & 2 != 0, mask & 4 != 0];
+            let gradients = tape.backward(&upstream, 0.5, requested).unwrap();
+            for i in 0..3 {
+                assert_eq!(gradients[i].is_some(), requested[i]);
+                if let Some(value) = &gradients[i] {
+                    close(&read(value), &expected[i + 1]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn layer_norm_affine_small_workgroups_preserve_cancelling_gradients() {
     let Some(device) = device() else { return };
     let cols = 7;

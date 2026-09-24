@@ -77,6 +77,39 @@ try {
     close(state.parameterValues(1), parameters[1].values.map((value, i) => value - 0.1 * expected.bias[i] * scale), `${policy}.updated_bias`);
     policies.push(policy);
   }
+  const wideRows = 32, wideCols = 257;
+  const wideInput = Float32Array.from({length: wideRows * wideCols}, (_, i) =>
+    (((Math.floor(i / wideCols) * 17 + (i % wideCols) * 11) % 41) - 20) / 8);
+  const wideParameters = [
+    {role: "gain", shape: [wideCols], values: Array(wideCols).fill(1)},
+    {role: "bias", shape: [wideCols], values: Array(wideCols).fill(0)},
+  ];
+  const widePlan = InferencePlan.fromJson(JSON.stringify({
+    schema: planJson.schema, input_shape: [wideRows, wideCols], parameters: wideParameters,
+    stages: [{kind: "layer_norm", gain: 0, bias: 1, epsilon: 1e-5}],
+  }));
+  const wideExpected = {prediction: [], gain: Array(wideCols).fill(0), bias: Array(wideCols).fill(0)};
+  for (let row = 0; row < wideRows; row++) {
+    const values = [...wideInput.slice(row * wideCols, (row + 1) * wideCols)];
+    const mean = values.reduce((sum, value) => sum + value, 0) / wideCols;
+    const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / wideCols;
+    for (let col = 0; col < wideCols; col++) {
+      const normalized = (values[col] - mean) / Math.sqrt(variance + 1e-5);
+      const upstream = 2 * normalized / (wideRows * wideCols);
+      wideExpected.prediction.push(normalized);
+      wideExpected.gain[col] += upstream * normalized;
+      wideExpected.bias[col] += upstream;
+    }
+  }
+  const wideGraph = await widePlan.compileGraphTrainingWebGpu("exact");
+  wideGraph.uploadBatch(wideInput, new Float32Array(wideInput.length));
+  wideGraph.step(0.01);
+  const wideState = await wideGraph.stateSnapshot().readState();
+  close(wideState.predictionValues(), wideExpected.prediction, "wide.prediction");
+  close(wideState.parameterGradientValues(0), wideExpected.gain, "wide.gain");
+  close(wideState.parameterGradientValues(1), wideExpected.bias, "wide.bias");
+  close(wideState.parameterValues(0), wideExpected.gain.map(value => 1 - 0.01 * value), "wide.updated_gain");
+  close(wideState.parameterValues(1), wideExpected.bias.map(value => -0.01 * value), "wide.updated_bias");
   const bad = InferencePlan.fromJson(JSON.stringify({...planJson, parameters, stages: [{...planJson.stages[0], epsilon: 0}]}));
   const guarded = await bad.compileGraphWebGpu();
   guarded.upload(new Float32Array([1, 1, 1, 2, 2, 2]));
@@ -85,7 +118,7 @@ try {
   try { await guarded.snapshot().readValues(); } catch (error) { rejected = String(error).includes("stage 0"); }
   if (!rejected) throw Error("Constant-row zero-epsilon guard did not reject stage 0");
   result.textContent = JSON.stringify({status: "passed", schema: planJson.schema, policies,
-    forward: expected.prediction, guard_rejected: rejected,
+    forward: expected.prediction, guard_rejected: rejected, tiled_affine_shape: [wideRows, wideCols],
     adapter_probe: {vendor: adapter.info?.vendor, is_fallback_adapter: fallback}});
   result.dataset.status = "passed";
 } catch (error) {

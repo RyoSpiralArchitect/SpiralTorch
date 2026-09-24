@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident LayerNorm matched WebGPU benchmark</title>
+<pre id="result" data-status="running">Measuring matched LayerNorm training</pre>
+<script type="module">
+import initCandidate, {InferencePlan as CandidatePlan} from "/module/spiraltorch_wasm.js";
+import initBaseline, {InferencePlan as BaselinePlan} from "/baseline/spiraltorch_wasm.js";
+
+const result = document.querySelector("#result");
+const steps = 32, warmup = 2, iterations = 5;
+function values(n, multiplier, modulus, divisor) {
+  return Float32Array.from({length: n}, (_, i) => (((i * multiplier + 17) % modulus) - Math.floor(modulus / 2)) / divisor);
+}
+function close(actual, expected, label) {
+  if (actual.length !== expected.length) throw Error(`${label}: length mismatch`);
+  for (let i = 0; i < actual.length; i++) {
+    if (!Number.isFinite(actual[i]) || Math.abs(actual[i] - expected[i]) > 5e-4 * (1 + Math.abs(expected[i])))
+      throw Error(`${label}[${i}]: ${actual[i]} != ${expected[i]}`);
+  }
+}
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference: "high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback WebGPU adapter not confirmed");
+  await initCandidate();
+  await initBaseline();
+  const cases = [];
+  for (const [rows, cols] of [[32, 256], [128, 1025]]) {
+    const input = values(rows * cols, 37, 257, 64);
+    const target = values(rows * cols, 11, 67, 64);
+    const json = JSON.stringify({
+      schema: "spiraltorch.nn.inference_plan.v3", input_shape: [rows, cols],
+      parameters: [
+        {role: "gain", shape: [cols], values: Array(cols).fill(1)},
+        {role: "bias", shape: [cols], values: Array(cols).fill(0)},
+      ],
+      stages: [{kind: "layer_norm", gain: 0, bias: 1, epsilon: 1e-5}],
+    });
+    const plans = [BaselinePlan.fromJson(json), CandidatePlan.fromJson(json)];
+    const intervals = [[], []];
+    let reference = null;
+    let maxScaledError = 0;
+    for (let iteration = 0; iteration < warmup + iterations; iteration++) {
+      for (let j = 0; j < 2; j++) {
+        const route = (iteration + j) % 2;
+        const graph = await plans[route].compileGraphTrainingWebGpu("exact");
+        graph.uploadBatch(input, target);
+        const start = performance.now();
+        for (let step = 0; step < steps; step++) graph.step(0.01);
+        const state = await graph.stateSnapshot().readState();
+        const elapsed = performance.now() - start;
+        const output = [state.loss, ...state.predictionValues(), ...state.inputGradientValues(),
+          ...state.parameterValues(0), ...state.parameterValues(1),
+          ...state.parameterGradientValues(0), ...state.parameterGradientValues(1)];
+        if (reference) {
+          close(output, reference, `${rows}x${cols}.route${route}`);
+          for (let i = 0; i < output.length; i++)
+            maxScaledError = Math.max(maxScaledError, Math.abs(output[i] - reference[i]) / (5e-4 * (1 + Math.abs(reference[i]))));
+        } else {
+          reference = output;
+        }
+        if (iteration >= warmup) intervals[route].push(elapsed);
+        state.free();
+        graph.free();
+      }
+    }
+    const median = intervals.map(times => [...times].sort((a, b) => a - b)[Math.floor(iterations / 2)]);
+    cases.push({rows, cols, baseline_ms: intervals[0], candidate_ms: intervals[1],
+      baseline_median_ms: median[0], candidate_median_ms: median[1], max_scaled_error: maxScaledError});
+  }
+  result.textContent = JSON.stringify({status: "passed", schema: "spiraltorch.layer_norm.browser_matched.v1",
+    adapter_probe: {vendor: adapter.info?.vendor, is_fallback_adapter: fallback},
+    boundary: "32 same-batch training steps; preparation and upload excluded, terminal guarded read included; browser wall time, not GPU-only",
+    steps, warmup, iterations, cases});
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>
