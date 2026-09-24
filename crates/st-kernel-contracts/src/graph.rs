@@ -244,6 +244,17 @@ impl GraphDefinition {
         &self.owners
     }
 
+    /// Whether the module-compatible update averages this owned parameter over rows.
+    /// `parameter` must be an existing parameter ID of this validated graph.
+    pub fn module_compatible_row_average(&self, parameter: usize) -> bool {
+        let role = self.parameters[parameter].role;
+        match self.stages[self.owners[parameter]] {
+            GraphStage::Linear { .. } => false,
+            GraphStage::Pointwise { .. } => role == ParameterRole::Gain,
+            GraphStage::LayerNorm { .. } => true,
+        }
+    }
+
     /// Return a new graph with adjacent, composable pointwise stages joined.
     /// Parameter IDs, values, roles and operation order are unchanged. Stage IDs
     /// (including diagnostics and parameter owners) refer to the returned graph.
@@ -340,6 +351,8 @@ mod tests {
         .unwrap();
         assert_eq!(graph.output_layout(), &input);
         assert_eq!(graph.parameter_owners(), &[0, 0]);
+        assert!(graph.module_compatible_row_average(0));
+        assert!(graph.module_compatible_row_average(1));
         assert!(matches!(
             GraphDefinition::new(
                 input.clone(),
@@ -372,6 +385,38 @@ mod tests {
         )
         .is_err());
         assert!(GraphDefinition::new(input, vec![stage.clone(), stage], vec![gain, bias]).is_err());
+    }
+
+    #[test]
+    fn module_row_average_depends_on_the_owner_stage() {
+        let linear = GraphDefinition::new(
+            NdLayout::contiguous(&[2, 3]).unwrap(),
+            vec![GraphStage::Linear {
+                weight: 0,
+                bias: 1,
+                gelu: false,
+            }],
+            vec![
+                GraphParameter {
+                    role: ParameterRole::Weight,
+                    shape: vec![3, 2],
+                    values: vec![1.; 6],
+                },
+                GraphParameter {
+                    role: ParameterRole::Bias,
+                    shape: vec![2],
+                    values: vec![0.; 2],
+                },
+            ],
+        )
+        .unwrap();
+        assert!(!linear.module_compatible_row_average(0));
+        assert!(!linear.module_compatible_row_average(1));
+        let pointwise = graph(
+            vec![pointwise(vec![0], &[(ElementwiseOp::Multiply, Some(1))])],
+            &[1.],
+        );
+        assert!(pointwise.module_compatible_row_average(0));
     }
 
     fn pointwise(ids: Vec<usize>, steps: &[(ElementwiseOp, Option<usize>)]) -> GraphStage {

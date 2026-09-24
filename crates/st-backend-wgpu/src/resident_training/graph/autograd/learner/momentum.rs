@@ -23,7 +23,7 @@ fn parameter_params(g: &ResidentGraphTraining, id: usize) -> Params {
         len: p.values.len() as u32,
         stage: g.definition.parameter_owners()[id] as u32,
         stages: (g.nodes.len() + 2) as u32,
-        gelu: u32::from(p.role == ParameterRole::Gain),
+        gelu: u32::from(g.definition.module_compatible_row_average(id)),
         groups_x: 1,
         partials: 0,
     }

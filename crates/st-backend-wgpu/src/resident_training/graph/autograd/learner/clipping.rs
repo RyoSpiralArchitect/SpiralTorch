@@ -144,7 +144,7 @@ impl Clipping {
             let params = Params {
                 len: p.values.len() as u32,
                 cols: offset,
-                gelu: u32::from(p.role == ParameterRole::Gain),
+                gelu: u32::from(g.definition.module_compatible_row_average(id)),
                 partials: counts[id] as u32,
                 ..base
             };
@@ -179,7 +179,7 @@ impl Clipping {
         for (id, p) in g.definition.parameters().iter().enumerate() {
             let params = Params {
                 len: p.values.len() as u32,
-                gelu: u32::from(p.role == ParameterRole::Gain),
+                gelu: u32::from(g.definition.module_compatible_row_average(id)),
                 stage: g.definition.parameter_owners()[id] as u32,
                 ..base
             };

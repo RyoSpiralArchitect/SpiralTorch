@@ -53,9 +53,10 @@ the built WASM SHA-256 is
 `582877d00e00aeabda65d4e05eeebda9a992dd34f8692ff4bb21d3b5de40419f`.
 This confirms browser execution on this adapter, not parity across browsers.
 
-Rust checks: `st-kernel-contracts` 32 tests, `st-backend-wgpu` 213 tests,
+Rust checks: `st-kernel-contracts` 33 tests, `st-backend-wgpu` 214 tests,
 `st-nn --features wgpu` 774 unit tests plus integration suites; the focused
-single/staged/stacked LayerNorm tests also passed on actual Metal. Native
+single/staged/stacked LayerNorm tests and the learner's plain/clipped/EMA/
+clipped-EMA parameter updates also passed on actual Metal. Native
 Python binding `cargo check`, WASM `webgpu` build, and scoped strict Clippy for
 backend/contracts passed. An isolated Python install passed all 10 graph
 training tests on Metal, including v3 LayerNorm forward/training. Workspace

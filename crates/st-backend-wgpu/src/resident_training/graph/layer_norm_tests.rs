@@ -1,6 +1,7 @@
 use super::*;
 use crate::resident_graph::{GraphInferenceError, ResidentGraph};
 use st_kernel_contracts::pointwise::{PointwiseChain, PointwiseStep};
+use st_kernel_contracts::{gradient_clip::GlobalNormClip, momentum::EmaMomentum};
 
 fn runtime() -> Option<WgpuRuntime> {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
@@ -439,5 +440,91 @@ fn stacked_layer_norm_preserves_nd_forward_and_all_vjps() {
             &reference.snapshot().unwrap().read().unwrap(),
             1e-4,
         );
+    }
+}
+
+#[test]
+fn layer_norm_learner_averages_bias_for_clipping_and_momentum() {
+    let Some(runtime) = runtime() else { return };
+    let definition = definition(1e-5);
+    let values = [1., 2., 4., 2., 0., -1.];
+    for (clipping, momentum) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut learner = ResidentGraphLearner::new(
+            runtime.clone(),
+            definition.clone(),
+            GraphGradientPolicy::ModuleCompatible,
+            MatmulTile::default(),
+            MatmulKernel::Scalar,
+            MatmulAccumulation::Sequential,
+        )
+        .unwrap();
+        if clipping {
+            learner.set_grad_clip_max_norm(0.25).unwrap();
+        }
+        if momentum {
+            learner.set_momentum_damping(0.5).unwrap();
+        }
+        learner.upload(&values).unwrap();
+        let forward = learner.forward().unwrap();
+        let prediction = forward.prediction().snapshot().unwrap().read().unwrap();
+        let seed = learner
+            .tensor_device()
+            .upload(
+                &[2, 3],
+                &prediction
+                    .iter()
+                    .map(|&value| value / 3.)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        let gradients = learner.backward(&forward, &seed).unwrap();
+        let mut expected: Vec<Vec<f32>> = gradients
+            .parameter_gradients()
+            .iter()
+            .map(|tensor| tensor.snapshot().unwrap().read().unwrap())
+            .collect();
+        for value in expected.iter_mut().flatten() {
+            *value *= 0.5;
+        }
+        if clipping {
+            let norm_squared = expected
+                .iter()
+                .flatten()
+                .map(|&value| f64::from(value).powi(2))
+                .sum();
+            let factors = GlobalNormClip::new(0.25)
+                .unwrap()
+                .factors(norm_squared)
+                .unwrap();
+            assert!(!factors.as_slice().is_empty());
+            for value in expected.iter_mut().flatten() {
+                for &factor in factors.as_slice() {
+                    *value *= factor;
+                }
+            }
+        }
+        if momentum {
+            let ema = EmaMomentum::new(0.5).unwrap();
+            for value in expected.iter_mut().flatten() {
+                *value = ema.transition(*value, 0.).unwrap();
+            }
+        }
+        learner.sgd(&gradients, 0.1).unwrap();
+        learner.update_snapshot().unwrap().read().unwrap();
+        let updated = learner.parameter_snapshot().unwrap().read().unwrap();
+        for (id, parameter) in updated.parameters().iter().enumerate() {
+            let baseline = &definition.parameters()[id].values;
+            let next: Vec<_> = baseline
+                .iter()
+                .zip(&expected[id])
+                .map(|(&value, &gradient)| value - 0.1 * gradient)
+                .collect();
+            assert_close(&parameter.values, &next, 1e-5);
+        }
+        if momentum {
+            for (actual, expected) in learner.momentum_tensors().unwrap().iter().zip(&expected) {
+                assert_close(&actual.snapshot().unwrap().read().unwrap(), expected, 1e-5);
+            }
+        }
     }
 }

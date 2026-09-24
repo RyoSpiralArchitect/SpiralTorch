@@ -690,11 +690,7 @@ impl ResidentGraphTraining {
             let commit = pipeline("commit_sgd");
             for (id, p) in definition.parameters().iter().enumerate() {
                 let owner = definition.parameter_owners()[id];
-                let row_average = match definition.stages()[owner] {
-                    GraphStage::Linear { .. } => false,
-                    GraphStage::Pointwise { .. } => p.role == ParameterRole::Gain,
-                    GraphStage::LayerNorm { .. } => true,
-                };
+                let row_average = definition.module_compatible_row_average(id);
                 update_passes.push(element(
                     &prepare,
                     params(owner, 0, p.values.len(), row_average),

@@ -1,5 +1,5 @@
-// Shared by clip-only SGD and fused EMA preparation. The Gain-role bit and
-// explicit legacy policy are independent; only their conjunction normalizes.
+// Shared by clip-only SGD and fused EMA preparation. The parameter-specific
+// row-average bit and explicit legacy policy are independent.
 fn effective(value: f32) -> f32 {
     check(value, 4096u);
     var scale = 1.0;
