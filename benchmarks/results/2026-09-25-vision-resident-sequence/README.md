@@ -1,8 +1,9 @@
 # Vision resident geometry sequence: bounded native result
 
 `st-vision` now groups adjacent resize, crop, and sampled horizontal-flip
-stages into one WGPU geometry sequence. The prior path uploaded and read back
-the image at every stage. Python can explicitly select this native path with
+stages into one WGPU geometry sequence. Resize and crop were already grouped,
+but an intervening flip used to split the sequence and require another
+upload/readback. Python can explicitly select this native path with
 `TransformPipeline.enable_wgpu()`; the CPU path remains the default.
 
 The measured source was `db1f3e2c0266f85488e6ede42ecfaec67ed2272d`
