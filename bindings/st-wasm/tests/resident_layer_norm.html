@@ -16,6 +16,7 @@ try {
       report.cases !== 7 || report.masks_per_case !== 8 || report.training_steps !== 400 ||
       report.adaptive_workgroup_cases !== 2 || report.adaptive_workgroup_masks !== 3 ||
       report.scale_nullspace_cases !== 5 || report.epsilon_cancellation_cases !== 2 ||
+      report.subnormal_cotangent_cases !== 1 ||
       report.dynamic_range_variants !== 20 ||
       report.guard_checks !== 4 || report.intermediate_readbacks !== 0 ||
       report.batched_snapshot_checks !== 4 || report.statistics_only_vjp_checks !== 6) throw Error("Incomplete LayerNorm checks");

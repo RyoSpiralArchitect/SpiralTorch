@@ -876,6 +876,32 @@ fn layer_norm_wide_rows_input_vjp_stays_stable_near_fast_guard_boundary() {
 }
 
 #[test]
+fn layer_norm_wide_rows_preserve_amplified_subnormal_cotangents() {
+    let Some(device) = device() else { return };
+    let cols = 256;
+    let epsilon = 1e-5f32;
+    let tiny = f32::from_bits(1_000_000);
+    let seed: Vec<_> = (0..cols)
+        .map(|col| if col % 2 == 0 { tiny } else { -tiny })
+        .collect();
+    let input = device.upload(&[1, cols], &vec![0.; cols]).unwrap();
+    let gamma = device.upload(&[cols], &vec![1.; cols]).unwrap();
+    let beta = device.upload(&[cols], &vec![0.; cols]).unwrap();
+    let upstream = device.upload(&[1, cols], &seed).unwrap();
+    let tape = input.layer_norm_affine(&gamma, &beta, epsilon).unwrap();
+    let [dx, _, _] = tape.backward(&upstream, 1., [true, false, false]).unwrap();
+    let expected = f64::from(tiny) / f64::from(epsilon).sqrt();
+    assert!(expected > f64::from(f32::MIN_POSITIVE));
+    for (col, actual) in read(dx.as_ref().unwrap()).into_iter().enumerate() {
+        let target = if col % 2 == 0 { expected } else { -expected };
+        assert!(
+            actual.is_finite() && ((f64::from(actual) - target) / target).abs() < 0.01,
+            "subnormal cotangent at col {col}: {actual} != {target}"
+        );
+    }
+}
+
+#[test]
 fn layer_norm_retains_small_epsilon_after_scale_direction_cancellation() {
     let Some(device) = device() else { return };
     let epsilon = f32::from_bits(1);

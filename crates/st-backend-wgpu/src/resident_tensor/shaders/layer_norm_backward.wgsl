@@ -112,8 +112,9 @@ fn backward_input(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invoca
             let second = wide_float(centered_values[base + col]) * fast_projection;
             let numerator = first - second;
             let magnitude = abs(first) + abs(second);
+            // Keep both products well above the subnormal range before scaling.
             // Cap cancellation amplification of f32 rounding at 128x.
-            if (magnitude > 0.0 && magnitude < 1e20 &&
+            if (abs(first) >= 1e-30 && abs(second) >= 1e-30 && magnitude < 1e20 &&
                 abs(numerator) >= magnitude / 128.0) {
                 let value = numerator * fast_scale;
                 if (abs(value) < 1e30) {
