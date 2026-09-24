@@ -6,6 +6,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     use std::time::Instant;
 
+    let (runtime, _) = st_backend_wgpu::runtime::ensure_default_runtime_blocking(
+        "vision.transform.sequence.benchmark",
+    )?;
+    println!("adapter={:?}", runtime.adapter_info());
     let dispatcher = TransformDispatcher::new_default_gpu()?;
     let initial = ImageGeometry {
         channels: 3,
