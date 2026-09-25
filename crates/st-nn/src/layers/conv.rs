@@ -1260,13 +1260,14 @@ impl DepthwiseConv2d {
 impl Module for DepthwiseConv2d {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (batch, oh, ow) = self.validate_input(input)?;
-        let work = batch
+        let output_values = batch
             .saturating_mul(self.channels)
             .saturating_mul(oh)
-            .saturating_mul(ow)
+            .saturating_mul(ow);
+        let work = output_values
             .saturating_mul(self.kernel.0)
             .saturating_mul(self.kernel.1);
-        let route = current_tensor_util_route(work);
+        let route = current_tensor_util_route(output_values);
         let requested_backend = route.requested_backend_label();
         let attempt_wgpu = batch > 0 && should_attempt_depthwise_wgpu(route.selected_backend, work);
         let mut fallback = None;
@@ -3922,6 +3923,39 @@ mod tests {
             *op == "depthwise_conv2d_forward"
                 && data["backend"] == "cpu"
                 && data["fallback"]["message"] == "wgpu feature is not enabled"
+        }));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn depthwise_conv2d_respects_output_value_threshold() {
+        use crate::execution::{
+            push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+        };
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let _lock = observer_lock();
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 19),
+        );
+        let _guard = push_backend_policy(policy);
+        let layer = DepthwiseConv2d::new("dw", 2, (3, 3), (1, 1), (1, 1), (1, 1), (3, 3)).unwrap();
+        let input = Tensor::from_vec(1, 18, vec![1.0; 18]).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        layer.forward(&input).unwrap();
+        st_tensor::set_thread_meta_observer(previous);
+        assert!(events.lock().unwrap().iter().any(|(op, data)| {
+            *op == "depthwise_conv2d_forward"
+                && data["backend"] == "cpu"
+                && data["requested_backend"] == "wgpu"
         }));
     }
 

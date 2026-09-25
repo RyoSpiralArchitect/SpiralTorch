@@ -3341,6 +3341,30 @@ mod tests {
     }
 
     #[test]
+    fn depthwise_conv2d_rejects_mismatched_output_geometry() {
+        let result = depthwise_conv2d_forward(
+            &[1.0; 4],
+            &[1.0],
+            &[0.0],
+            1,
+            1,
+            2,
+            2,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            2,
+        );
+        assert!(result.unwrap_err().contains("output geometry"));
+    }
+
+    #[test]
     fn fused_conv_shader_keeps_edge_tile_invocations_until_final_write() {
         let source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, TileConfig::new(8, 8, 8));
 
@@ -9826,9 +9850,25 @@ pub fn depthwise_conv2d_forward(
     if input.len() != input_volume || weights.len() != weight_volume || bias.len() != channels {
         return Err("depthwise convolution buffer length mismatch".into());
     }
+    let expected_extent =
+        |input: usize, kernel: usize, stride: usize, padding: usize, dilation: usize| {
+            let padded = input.checked_add(padding.checked_mul(2)?)?;
+            let effective = kernel
+                .checked_sub(1)?
+                .checked_mul(dilation)?
+                .checked_add(1)?;
+            (padded >= effective).then(|| (padded - effective) / stride + 1)
+        };
+    if expected_extent(input_h, kernel_h, stride_h, pad_h as usize, dilation_h) != Some(out_h)
+        || expected_extent(input_w, kernel_w, stride_w, pad_w as usize, dilation_w) != Some(out_w)
+    {
+        return Err("depthwise convolution output geometry mismatch".into());
+    }
     let dimensions = [
         batch,
         channels,
+        input_volume,
+        weight_volume,
         input_h,
         input_w,
         kernel_h,
