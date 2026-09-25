@@ -8,6 +8,7 @@ use crate::runtime::ensure_default_runtime_blocking;
 #[cfg(target_arch = "wasm32")]
 use crate::runtime::read_buffer_async;
 use crate::{
+    resident_tensor::{ResidentTensor, TensorDevice, TensorError},
     runtime::{
         empty_buffer, ensure_blocking_readback_supported, read_buffer, upload_slice, Shared,
         WgpuContext, WgpuRuntimeError,
@@ -35,6 +36,10 @@ pub enum TransformDispatchError {
     InvalidGeometry(String),
     #[error(transparent)]
     Runtime(#[from] WgpuRuntimeError),
+    #[error(transparent)]
+    Tensor(#[from] TensorError),
+    #[error("resident geometry output requires a GPU transform dispatcher")]
+    RequiresGpu,
 }
 
 #[repr(C)]
@@ -588,6 +593,51 @@ impl TransformDispatcher {
                 Ok((output, final_geometry))
             }
         }
+    }
+
+    /// Keep the transformed CHW image on the same GPU for a later tensor/NN
+    /// operation. The returned tensor owns the final buffer; no map or copy to
+    /// the host occurs. The tensor import scans GPU values for non-finite data.
+    pub fn run_geometry_sequence_resident(
+        &self,
+        input: &[f32],
+        initial: ImageGeometry,
+        commands: &[GeometryCommand],
+        tensor_device: &TensorDevice,
+    ) -> Result<ResidentTensor, TransformDispatchError> {
+        validate_sequence_input(input, initial)?;
+        let geometries = validate_sequence_commands(initial, commands)?;
+        let Backend::Gpu(ctx) = &self.backend else {
+            return Err(TransformDispatchError::RequiresGpu);
+        };
+        if !tensor_device
+            .runtime()
+            .context()
+            .shares_handles_with(&ctx.context)
+        {
+            return Err(TensorError::DeviceMismatch.into());
+        }
+        if !input.iter().all(|value| value.is_finite()) {
+            return Err(TensorError::NonFinite.into());
+        }
+        if commands.is_empty() {
+            return tensor_device
+                .upload(&[initial.channels, initial.height, initial.width], input)
+                .map_err(Into::into);
+        }
+        let output = dispatch_geometry_sequence(ctx, input, commands)?;
+        let final_geometry = *geometries.last().unwrap();
+        tensor_device
+            .adopt_checked_values(
+                &ctx.context,
+                &[
+                    final_geometry.channels,
+                    final_geometry.height,
+                    final_geometry.width,
+                ],
+                output,
+            )
+            .map_err(Into::into)
     }
 }
 
@@ -1291,6 +1341,65 @@ mod tests {
         assert!(matches!(
             result,
             Err(TransformDispatchError::InvalidGeometry(_))
+        ));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resident_geometry_handoff_matches_cpu_and_stays_on_gpu() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = ensure_default_runtime_blocking("transform.resident_handoff").unwrap();
+        let tensor_device = TensorDevice::new(runtime.clone()).unwrap();
+        let gpu = TransformDispatcher::with_gpu(
+            runtime.context().shared_device(),
+            runtime.context().shared_queue(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TRANSFORM_SHADER_DIR),
+        )
+        .unwrap();
+        let cpu = TransformDispatcher::cpu();
+        let initial = ImageGeometry {
+            channels: 1,
+            height: 3,
+            width: 4,
+        };
+        let commands = [
+            GeometryCommand::Resize(ResizeConfig {
+                channels: 1,
+                src_height: 3,
+                src_width: 4,
+                dst_height: 4,
+                dst_width: 5,
+            }),
+            GeometryCommand::CenterCrop(CenterCropConfig {
+                channels: 1,
+                src_height: 4,
+                src_width: 5,
+                crop_height: 2,
+                crop_width: 3,
+            }),
+        ];
+        let input = (0..12).map(|i| i as f32 / 11.).collect::<Vec<_>>();
+        let (expected, _) = cpu
+            .run_geometry_sequence(&input, initial, &commands)
+            .unwrap();
+        let output = gpu
+            .run_geometry_sequence_resident(&input, initial, &commands, &tensor_device)
+            .unwrap();
+        assert_eq!(output.layout().shape(), &[1, 2, 3]);
+        let downstream = output.reshape(&[1, 6]).unwrap().relu().unwrap();
+        let actual = downstream.snapshot().unwrap().read().unwrap();
+        for (left, right) in actual.iter().zip(&expected) {
+            assert!((left - right).abs() <= 1e-6);
+        }
+        assert!(matches!(
+            cpu.run_geometry_sequence_resident(&input, initial, &commands, &tensor_device),
+            Err(TransformDispatchError::RequiresGpu)
+        ));
+        assert!(matches!(
+            gpu.run_geometry_sequence_resident(&[f32::NAN; 12], initial, &commands, &tensor_device),
+            Err(TransformDispatchError::Tensor(TensorError::NonFinite))
         ));
     }
 

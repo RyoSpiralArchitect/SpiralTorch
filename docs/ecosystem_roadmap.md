@@ -23,13 +23,22 @@ Native Rust and fresh-wheel Python tests cover
 the same sequence. The bounded result and replay instructions live in
 [`benchmarks/results/2026-09-25-vision-wasm-async/`](../benchmarks/results/2026-09-25-vision-wasm-async/README.md).
 
-This is **resident within one geometry sequence**, not a claim that image
-batches stay on GPU across a model graph. On the measured small 3x128x128
-browser case, WebGPU end-to-end latency was higher than WASM CPU latency.
-Normalize and ColorJitter are not in the browser GPU geometry interface; they
-must not silently fall back under a WebGPU label. The next optimization gate
-is a GPU-resident handoff from transformed images into downstream inference or
-training, then batched inputs and a shape sweep to locate any real crossover.
+The next slice now hands a transformed CHW image directly to the existing
+guarded `ResidentTensor`. Rust `apply_geometry_resident`, Python
+`apply_resident(image, device)`, and browser `applyResident(...)` make the
+handoff explicit. A browser `Sequential` forward consumes the image without
+an intermediate readback; only its output is mapped. The GPU values are
+checked for non-finite results before they enter the tensor/NN contract.
+The bounded browser result is in
+[`benchmarks/results/2026-09-25-vision-resident-handoff/`](../benchmarks/results/2026-09-25-vision-resident-handoff/README.md).
+
+On one 3x128x128 Chrome case, the full WebGPU geometry route with terminal
+readback was slower than WASM CPU. For geometry followed by a GPU NN layer,
+the matched resident handoff was faster than the GPU readback/reupload route
+on that same host and shape; neither result establishes general superiority.
+Normalize and ColorJitter are not in the browser GPU geometry interface and
+must not silently fall back. Multi-image batching, wider shape sweeps, and
+training-graph integration remain the next gates.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

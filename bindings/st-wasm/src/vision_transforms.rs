@@ -1,5 +1,7 @@
 //! Browser-facing geometry transforms backed by the same st-vision pipeline as native Rust.
+use crate::wgpu_tensor::WasmWgpuTensor;
 use js_sys::Float32Array;
+use st_backend_wgpu::resident_tensor::TensorDevice;
 use st_backend_wgpu::transform::TransformDispatcher;
 use st_vision::{
     CenterCrop, ImageTensor, RandomHorizontalFlip, Resize, TransformOperation, TransformPipeline,
@@ -14,6 +16,7 @@ fn error(err: impl std::fmt::Display) -> JsValue {
 pub struct WasmVisionTransformPipeline {
     inner: TransformPipeline,
     gpu: bool,
+    tensor_device: Option<TensorDevice>,
     adapter_info: Option<String>,
 }
 
@@ -24,6 +27,7 @@ impl WasmVisionTransformPipeline {
         Self {
             inner: TransformPipeline::with_seed(u64::from(seed)),
             gpu: false,
+            tensor_device: None,
             adapter_info: None,
         }
     }
@@ -31,6 +35,7 @@ impl WasmVisionTransformPipeline {
     #[wasm_bindgen(js_name = createGpu)]
     pub async fn create_gpu(seed: u32) -> Result<Self, JsValue> {
         let runtime = crate::wgpu_resident::ensure_runtime().await?;
+        let tensor_device = TensorDevice::new(runtime.clone()).map_err(error)?;
         let info = runtime.adapter_info();
         let adapter_info = serde_json::json!({
             "name": info.name,
@@ -47,6 +52,7 @@ impl WasmVisionTransformPipeline {
         Ok(Self {
             inner: TransformPipeline::with_seed(u64::from(seed)).with_gpu_dispatcher(dispatcher),
             gpu: true,
+            tensor_device: Some(tensor_device),
             adapter_info: Some(adapter_info),
         })
     }
@@ -95,6 +101,30 @@ impl WasmVisionTransformPipeline {
             self.inner.apply(&mut image).map_err(error)?;
         }
         Ok(WasmVisionImage { inner: image })
+    }
+
+    /// Submit transforms without a terminal GPU-to-host readback.
+    #[wasm_bindgen(js_name = applyResident)]
+    pub fn apply_resident(
+        &mut self,
+        channels: u32,
+        height: u32,
+        width: u32,
+        data: JsValue,
+    ) -> Result<WasmWgpuTensor, JsValue> {
+        let device = self
+            .tensor_device
+            .as_ref()
+            .ok_or_else(|| error("resident image output requires createGpu"))?;
+        let data = crate::wgpu_tensor::values(data)?.to_vec();
+        let image = ImageTensor::new(channels as usize, height as usize, width as usize, data)
+            .map_err(error)?;
+        Ok(WasmWgpuTensor {
+            inner: self
+                .inner
+                .apply_geometry_resident(&image, device)
+                .map_err(error)?,
+        })
     }
 
     #[wasm_bindgen(getter, js_name = backend)]

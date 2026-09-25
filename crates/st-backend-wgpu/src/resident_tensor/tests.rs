@@ -36,6 +36,41 @@ fn shader_and_portable_addressing_are_checked() {
 }
 
 #[test]
+fn checked_import_shader_is_valid_wgsl() {
+    let module = naga::front::wgsl::parse_str(include_str!("shaders/checked_import.wgsl")).unwrap();
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .unwrap();
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn checked_import_flags_external_nonfinite_values_on_real_gpu() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) = runtime::ensure_default_runtime_blocking("tensor.checked_import").unwrap();
+    let device = TensorDevice::new(runtime.clone()).unwrap();
+    let values = runtime::upload_slice(
+        runtime.context().device(),
+        "tensor.checked_import.test_values",
+        &[f32::NAN],
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    )
+    .unwrap();
+    let imported = device
+        .adopt_checked_values(runtime.context(), &[1], values)
+        .unwrap();
+    assert!(matches!(
+        imported.relu().unwrap().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+}
+
+#[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn resident_views_broadcasts_chains_and_failures_on_real_gpu() {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
