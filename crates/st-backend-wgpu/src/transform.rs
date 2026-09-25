@@ -5,6 +5,8 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::ensure_default_runtime_blocking;
+#[cfg(target_arch = "wasm32")]
+use crate::runtime::read_buffer_async;
 use crate::{
     runtime::{
         empty_buffer, ensure_blocking_readback_supported, read_buffer, upload_slice, Shared,
@@ -169,6 +171,25 @@ impl Pipelines {
 
         let shader_root = shader_dir.as_ref();
         let cache = ShaderCache::new(shader_root);
+        #[cfg(target_arch = "wasm32")]
+        {
+            cache.preload_inline(
+                "resize.wgsl",
+                include_str!("../shaders/transforms/resize.wgsl"),
+            );
+            cache.preload_inline(
+                "center_crop.wgsl",
+                include_str!("../shaders/transforms/center_crop.wgsl"),
+            );
+            cache.preload_inline(
+                "horizontal_flip.wgsl",
+                include_str!("../shaders/transforms/horizontal_flip.wgsl"),
+            );
+            cache.preload_inline(
+                "color_jitter.wgsl",
+                include_str!("../shaders/transforms/color_jitter.wgsl"),
+            );
+        }
         cache.prefetch([
             "resize.wgsl",
             "center_crop.wgsl",
@@ -501,32 +522,11 @@ impl TransformDispatcher {
         initial: ImageGeometry,
         commands: &[GeometryCommand],
     ) -> Result<(Vec<f32>, ImageGeometry), TransformDispatchError> {
-        Self::validate_volume(
-            "initial image",
-            initial.channels,
-            initial.height,
-            initial.width,
-        )?;
-        let expected = initial.element_count()?;
-        if input.len() != expected {
-            return Err(TransformDispatchError::InvalidGeometry(format!(
-                "input length {} does not match geometry {}x{}x{}",
-                input.len(),
-                initial.channels,
-                initial.height,
-                initial.width
-            )));
-        }
+        validate_sequence_input(input, initial)?;
         if commands.is_empty() {
             return Ok((input.to_vec(), initial));
         }
-
-        let mut geometries = Vec::with_capacity(commands.len());
-        let mut current = initial;
-        for command in commands {
-            current = validate_geometry_transition(current, *command)?;
-            geometries.push(current);
-        }
+        let geometries = validate_sequence_commands(initial, commands)?;
 
         match &self.backend {
             Backend::Cpu => {
@@ -546,32 +546,11 @@ impl TransformDispatcher {
             }
             Backend::Gpu(ctx) => {
                 ensure_blocking_readback_supported("host-visible transform sequence")?;
-                let device = ctx.context.device();
-                let queue = ctx.context.queue();
-                let mut current_buffer = upload_slice(
-                    device,
-                    "st.backend.transform.sequence.input",
-                    input,
-                    BufferUsages::STORAGE,
-                )?;
-                for (command, _geometry) in commands.iter().zip(&geometries) {
-                    let next_buffer = match *command {
-                        GeometryCommand::Resize(config) => {
-                            dispatch_resize_buffer(ctx, &current_buffer, config)?
-                        }
-                        GeometryCommand::CenterCrop(config) => {
-                            dispatch_center_crop_buffer(ctx, &current_buffer, config)?
-                        }
-                        GeometryCommand::HorizontalFlip(config) => {
-                            dispatch_horizontal_flip_buffer(ctx, &current_buffer, config)?
-                        }
-                    };
-                    current_buffer = next_buffer;
-                }
+                let current_buffer = dispatch_geometry_sequence(ctx, input, commands)?;
                 let final_geometry = *geometries.last().unwrap();
                 let output = read_buffer(
-                    device,
-                    queue,
+                    ctx.context.device(),
+                    ctx.context.queue(),
                     &current_buffer,
                     final_geometry.element_count()?,
                     "st.backend.transform.sequence.readback",
@@ -580,6 +559,98 @@ impl TransformDispatcher {
             }
         }
     }
+
+    /// Execute a geometry-only sequence with one upload and one asynchronous browser readback.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn run_geometry_sequence_async(
+        &self,
+        input: &[f32],
+        initial: ImageGeometry,
+        commands: &[GeometryCommand],
+    ) -> Result<(Vec<f32>, ImageGeometry), TransformDispatchError> {
+        validate_sequence_input(input, initial)?;
+        if commands.is_empty() {
+            return Ok((input.to_vec(), initial));
+        }
+        let geometries = validate_sequence_commands(initial, commands)?;
+        match &self.backend {
+            Backend::Cpu => self.run_geometry_sequence(input, initial, commands),
+            Backend::Gpu(ctx) => {
+                let current_buffer = dispatch_geometry_sequence(ctx, input, commands)?;
+                let final_geometry = *geometries.last().unwrap();
+                let output = read_buffer_async(
+                    ctx.context.clone(),
+                    &current_buffer,
+                    final_geometry.element_count()?,
+                    "st.backend.transform.sequence.readback",
+                )
+                .await?;
+                Ok((output, final_geometry))
+            }
+        }
+    }
+}
+
+fn validate_sequence_input(
+    input: &[f32],
+    initial: ImageGeometry,
+) -> Result<(), TransformDispatchError> {
+    TransformDispatcher::validate_volume(
+        "initial image",
+        initial.channels,
+        initial.height,
+        initial.width,
+    )?;
+    if input.len() != initial.element_count()? {
+        return Err(TransformDispatchError::InvalidGeometry(format!(
+            "input length {} does not match geometry {}x{}x{}",
+            input.len(),
+            initial.channels,
+            initial.height,
+            initial.width
+        )));
+    }
+    Ok(())
+}
+
+fn validate_sequence_commands(
+    initial: ImageGeometry,
+    commands: &[GeometryCommand],
+) -> Result<Vec<ImageGeometry>, TransformDispatchError> {
+    let mut geometries = Vec::with_capacity(commands.len());
+    let mut current = initial;
+    for command in commands {
+        current = validate_geometry_transition(current, *command)?;
+        geometries.push(current);
+    }
+    Ok(geometries)
+}
+
+fn dispatch_geometry_sequence(
+    ctx: &GpuContext,
+    input: &[f32],
+    commands: &[GeometryCommand],
+) -> Result<Buffer, TransformDispatchError> {
+    let mut current_buffer = upload_slice(
+        ctx.context.device(),
+        "st.backend.transform.sequence.input",
+        input,
+        BufferUsages::STORAGE,
+    )?;
+    for command in commands {
+        current_buffer = match *command {
+            GeometryCommand::Resize(config) => {
+                dispatch_resize_buffer(ctx, &current_buffer, config)?
+            }
+            GeometryCommand::CenterCrop(config) => {
+                dispatch_center_crop_buffer(ctx, &current_buffer, config)?
+            }
+            GeometryCommand::HorizontalFlip(config) => {
+                dispatch_horizontal_flip_buffer(ctx, &current_buffer, config)?
+            }
+        };
+    }
+    Ok(current_buffer)
 }
 
 fn workgroup_dims(

@@ -3758,6 +3758,91 @@ impl TransformPipeline {
         image: &mut ImageTensor,
         dispatcher: &TransformDispatcher,
     ) -> PureResult<usize> {
+        let (index, commands, sampled_rng) = self.plan_geometry_sequence(start_idx, image);
+        if commands.is_empty() {
+            self.rng = sampled_rng;
+            return Ok(index);
+        }
+
+        let (output, final_geometry) = dispatcher
+            .run_geometry_sequence(
+                image.as_slice(),
+                ImageGeometry {
+                    channels: image.channels(),
+                    height: image.height(),
+                    width: image.width(),
+                },
+                &commands,
+            )
+            .map_err(map_dispatch_error)?;
+
+        *image = ImageTensor::new(
+            final_geometry.channels,
+            final_geometry.height,
+            final_geometry.width,
+            output,
+        )?;
+        self.rng = sampled_rng;
+
+        Ok(index)
+    }
+
+    /// Browser WebGPU geometry path; all operations must be resize, crop, or flip.
+    /// It never silently executes an unsupported stage on the CPU.
+    #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+    pub async fn apply_geometry_async(&mut self, image: &mut ImageTensor) -> PureResult<()> {
+        if self.ops.is_empty() {
+            return Ok(());
+        }
+        let dispatcher = self
+            .dispatcher
+            .clone()
+            .ok_or_else(|| TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "async geometry pipeline requires a GPU dispatcher".into(),
+            })?;
+        let (index, commands, sampled_rng) = self.plan_geometry_sequence(0, image);
+        if index != self.ops.len() {
+            return Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: format!(
+                    "async geometry pipeline does not support {}",
+                    self.ops[index].name()
+                ),
+            });
+        }
+        if commands.is_empty() {
+            self.rng = sampled_rng;
+            return Ok(());
+        }
+        let (output, final_geometry) = dispatcher
+            .run_geometry_sequence_async(
+                image.as_slice(),
+                ImageGeometry {
+                    channels: image.channels(),
+                    height: image.height(),
+                    width: image.width(),
+                },
+                &commands,
+            )
+            .await
+            .map_err(map_dispatch_error)?;
+        *image = ImageTensor::new(
+            final_geometry.channels,
+            final_geometry.height,
+            final_geometry.width,
+            output,
+        )?;
+        self.rng = sampled_rng;
+        Ok(())
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn plan_geometry_sequence(
+        &self,
+        start_idx: usize,
+        image: &ImageTensor,
+    ) -> (usize, Vec<GeometryCommand>, StdRng) {
         let mut commands = Vec::new();
         let mut index = start_idx;
         let mut sampled_rng = self.rng.clone();
@@ -3809,33 +3894,7 @@ impl TransformPipeline {
                 _ => break,
             }
         }
-
-        if commands.is_empty() {
-            self.rng = sampled_rng;
-            return Ok(index);
-        }
-
-        let (output, final_geometry) = dispatcher
-            .run_geometry_sequence(
-                image.as_slice(),
-                ImageGeometry {
-                    channels: image.channels(),
-                    height: image.height(),
-                    width: image.width(),
-                },
-                &commands,
-            )
-            .map_err(map_dispatch_error)?;
-
-        *image = ImageTensor::new(
-            final_geometry.channels,
-            final_geometry.height,
-            final_geometry.width,
-            output,
-        )?;
-        self.rng = sampled_rng;
-
-        Ok(index)
+        (index, commands, sampled_rng)
     }
 }
 
@@ -5594,6 +5653,44 @@ mod tests {
             assert_eq!(actual.shape(), expected.shape());
             for (&lhs, &rhs) in actual.as_slice().iter().zip(expected.as_slice()) {
                 assert!((lhs - rhs).abs() < 1e-6, "frame={frame}: {lhs} != {rhs}");
+            }
+        }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn geometry_sequence_browser_fixture_matches_native_wgpu() {
+        let Ok(dispatcher) = TransformDispatcher::new_default_gpu() else {
+            eprintln!("Skipping vision WGPU browser fixture: no adapter available");
+            return;
+        };
+        let mut direct = TransformPipeline::with_seed(17);
+        direct
+            .add(TransformOperation::Resize(Resize::new(8, 10).unwrap()))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(0.5).unwrap(),
+            ))
+            .add(TransformOperation::CenterCrop(
+                CenterCrop::new(6, 6).unwrap(),
+            ))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(0.0).unwrap(),
+            ))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(1.0).unwrap(),
+            ));
+        let mut sequenced = direct.clone().with_gpu_dispatcher(dispatcher);
+        for frame in 0..12 {
+            let pixels: Vec<_> = (0..3 * 12 * 14)
+                .map(|i| ((i * 37 + frame * 13) % 257) as f32 / 256.)
+                .collect();
+            let mut expected = ImageTensor::new(3, 12, 14, pixels.clone()).unwrap();
+            let mut actual = ImageTensor::new(3, 12, 14, pixels).unwrap();
+            direct.apply(&mut expected).unwrap();
+            sequenced.apply(&mut actual).unwrap();
+            assert_eq!(actual.shape(), expected.shape());
+            for (&lhs, &rhs) in actual.as_slice().iter().zip(expected.as_slice()) {
+                assert!((lhs - rhs).abs() < 1e-5, "frame={frame}: {lhs} != {rhs}");
             }
         }
     }

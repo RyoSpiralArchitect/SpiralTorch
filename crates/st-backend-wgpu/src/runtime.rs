@@ -799,17 +799,14 @@ impl Drop for ReadbackLease {
     }
 }
 
-/// Copy a POD buffer to host memory with bounded map polling.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn read_buffer<T: Pod>(
+fn validate_readback<T: Pod>(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
     buffer: &wgpu::Buffer,
     elements: usize,
     label: &str,
-) -> Result<Vec<T>, WgpuRuntimeError> {
+) -> Result<u64, WgpuRuntimeError> {
     if elements == 0 {
-        return Ok(Vec::new());
+        return Ok(0);
     }
     let size = validate_buffer_size::<T>(
         device,
@@ -836,6 +833,22 @@ pub fn read_buffer<T: Pod>(
             available: buffer.size(),
         });
     }
+    Ok(size)
+}
+
+/// Copy a POD buffer to host memory with bounded map polling.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_buffer<T: Pod>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    buffer: &wgpu::Buffer,
+    elements: usize,
+    label: &str,
+) -> Result<Vec<T>, WgpuRuntimeError> {
+    let size = validate_readback::<T>(device, buffer, elements, label)?;
+    if size == 0 {
+        return Ok(Vec::new());
+    }
 
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
@@ -853,6 +866,42 @@ pub fn read_buffer<T: Pod>(
     // Stable Rust cannot use size_of::<T>() as an as_chunks const argument.
     #[allow(clippy::chunks_exact_to_as_chunks)]
     let output = mapped
+        .chunks_exact(size_of::<T>())
+        .map(bytemuck::pod_read_unaligned)
+        .collect();
+    Ok(output)
+}
+
+/// Browser readback uses the same range and usage checks as native readback.
+#[cfg(target_arch = "wasm32")]
+pub async fn read_buffer_async<T: Pod>(
+    context: WgpuContext,
+    buffer: &wgpu::Buffer,
+    elements: usize,
+    label: &str,
+) -> Result<Vec<T>, WgpuRuntimeError> {
+    let size = validate_readback::<T>(context.device(), buffer, elements, label)?;
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let staging = context.device().create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut encoder = context
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("st.backend.wgpu.readback.encoder"),
+        });
+    encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
+    context.queue().submit(Some(encoder.finish()));
+    let bytes = ReadbackLease::unpooled(staging)
+        .read_async(context, label)
+        .await?;
+    #[allow(clippy::chunks_exact_to_as_chunks)]
+    let output = bytes
         .chunks_exact(size_of::<T>())
         .map(bytemuck::pod_read_unaligned)
         .collect();

@@ -61,6 +61,10 @@ pub use wgpu_resident::*;
 mod wgpu_tensor;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
 pub use wgpu_tensor::*;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+mod vision_transforms;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+pub use vision_transforms::*;
 
 pub use api_llm_policy::*;
 pub use autograd::*;

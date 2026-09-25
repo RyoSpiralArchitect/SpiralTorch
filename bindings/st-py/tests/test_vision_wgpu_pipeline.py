@@ -11,6 +11,7 @@ class VisionWgpuPipelineTests(unittest.TestCase):
             pipeline.add_resize(8, 10)
             pipeline.add_horizontal_flip(0.5)
             pipeline.add_center_crop(6, 6)
+            pipeline.add_horizontal_flip(0.0)
             pipeline.add_horizontal_flip(1.0)
 
         self.assertFalse(gpu.has_gpu_dispatcher())
@@ -23,7 +24,7 @@ class VisionWgpuPipelineTests(unittest.TestCase):
             raise
         self.assertTrue(gpu.has_gpu_dispatcher())
 
-        for frame in range(3):
+        for frame in range(12):
             values = [((i * 37 + frame * 13) % 257) / 256 for i in range(3 * 12 * 14)]
             image = st.ImageTensor(3, 12, 14, values)
             expected = cpu.apply(image)
