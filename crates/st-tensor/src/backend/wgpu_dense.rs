@@ -9892,6 +9892,9 @@ pub fn depthwise_conv2d_forward(
     {
         return Err("depthwise convolution exceeds shader index range".into());
     }
+    if cfg!(target_arch = "wasm32") {
+        return Err("depthwise host Tensor WGPU requires asynchronous browser readback".into());
+    }
 
     let ctx = dense_context()?;
     let device = ctx.device();

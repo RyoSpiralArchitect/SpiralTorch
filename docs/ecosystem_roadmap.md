@@ -72,8 +72,9 @@ backward pass is CPU-only. A matched Apple M4 host CPU/WGPU timing sweep is
 recorded in `benchmarks/results/2026-09-26-vision-depthwise-m4.md`: the small
 shape is slower on WGPU, while larger shapes improve on that one host. The
 exploratory Auto threshold therefore avoids the measured small-workload range.
-WASM compilation is checked, but browser execution of this synchronous
-host-Tensor kernel is not yet established. Next gates are an async browser
+WASM compilation is checked; the synchronous host-Tensor WGPU route explicitly
+rejects browser execution before dispatch because browser readback is async.
+The browser CPU reference remains available. Next gates are an async browser
 depthwise route, finishing the VJP migration for specialized `st-nn` layers
 and resident compatibility, resident model training, and matched real-dataset
 accuracy/throughput.
