@@ -30,9 +30,9 @@ Raw measured milliseconds from this run, sorted for compact comparison:
 
 The 48x48 case is near the crossover and WGPU samples vary substantially. The provisional Auto guard is 1,500,000 estimated multiply-accumulate opportunities, above that case and below the measured 64x64 case. This is a conservative route for the measured host, not a universal device-calibrated threshold. Backward remains CPU-only; neither complete ConvNeXt training throughput nor accuracy is measured here.
 
-## Final-tree repeat
+## Post-rebase repeat
 
-After rebasing on merged PR #2136, separating output-value policy routing from the depthwise work estimate, and validating the low-level output geometry, the same strict benchmark was run again. Its release binary SHA-256 is `ebf4dcc96fd97fb411070258e6a6b69b9260199f1999566c42ff34a1b287fe10`. The original run above remains visible rather than being replaced by the repeat.
+After rebasing on merged PR #2136, separating output-value policy routing from the depthwise work estimate, and validating the low-level output geometry, the same strict benchmark was run again. Its release binary SHA-256 is `ebf4dcc96fd97fb411070258e6a6b69b9260199f1999566c42ff34a1b287fe10`. This binary predates the later `Auto + Forbid` failure-routing fix; the benchmark forces WGPU and every measured call succeeded, so that fix does not change the measured success path. The original run above remains visible rather than being replaced by the repeat.
 
 | NCHW | CPU median ms | WGPU median ms | WGPU / CPU | Max absolute error |
 | --- | ---: | ---: | ---: | ---: |
