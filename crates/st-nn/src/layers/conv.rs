@@ -29,6 +29,15 @@ fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     Ok(())
 }
 
+fn validate_finite_gradient(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        if !value.is_finite() {
+            return Err(TensorError::NonFiniteValue { label, value });
+        }
+    }
+    Ok(())
+}
+
 fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
     match backend {
         TensorUtilBackend::Auto => "auto",
@@ -496,20 +505,20 @@ impl Conv1d {
         )?;
         self.output_matrix_to_feature_tensor(matrix.data(), batch, out_width)
     }
-}
 
-impl Module for Conv1d {
-    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
-        let (batch, cols) = input.shape();
-        let width = self.infer_width(cols)?;
-        let out_width = self.output_width(width)?;
-        if batch == 0 {
-            return Tensor::zeros(batch, self.out_channels * out_width);
+    /// Keeps legacy composite modules' parameter normalization explicit while
+    /// `Module::backward` remains the unscaled vector-Jacobian product.
+    pub(crate) fn backward_with_parameter_gradient_scale(
+        &mut self,
+        input: &Tensor,
+        grad_output: &Tensor,
+        parameter_gradient_scale: f32,
+    ) -> PureResult<Tensor> {
+        if !parameter_gradient_scale.is_finite() || parameter_gradient_scale <= 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "conv1d_parameter_gradient_scale",
+            });
         }
-        self.forward_im2col(input, batch, width, out_width)
-    }
-
-    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let (batch, cols) = input.shape();
         let width = self.infer_width(cols)?;
         let out_width = self.output_width(width)?;
@@ -564,23 +573,44 @@ impl Module for Conv1d {
                 }
             }
         }
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
-        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
-            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
-        } else {
-            for value in grad_weight.data_mut() {
-                *value *= inv_batch;
-            }
-            grad_weight
-        };
-        for value in &mut grad_bias {
-            *value *= inv_batch;
-        }
+        validate_finite_gradient("conv1d_weight_gradient", grad_weight.data())?;
+        validate_finite_gradient("conv1d_bias_gradient", &grad_bias)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        let grad_weight = if parameter_gradient_scale == 1.0 {
+            grad_weight
+        } else {
+            grad_weight.scale_with_backend(
+                parameter_gradient_scale,
+                current_tensor_util_backend_for_values(grad_weight.data().len()),
+            )?
+        };
+        let bias_tensor = if parameter_gradient_scale == 1.0 {
+            bias_tensor
+        } else {
+            bias_tensor.scale_with_backend(
+                parameter_gradient_scale,
+                current_tensor_util_backend_for_values(bias_tensor.data().len()),
+            )?
+        };
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
+    }
+}
+
+impl Module for Conv1d {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let width = self.infer_width(cols)?;
+        let out_width = self.output_width(width)?;
+        if batch == 0 {
+            return Tensor::zeros(batch, self.out_channels * out_width);
+        }
+        self.forward_im2col(input, batch, width, out_width)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward_with_parameter_gradient_scale(input, grad_output, 1.0)
     }
 
     fn visit_parameters(
@@ -790,12 +820,11 @@ impl Conv2d {
         }
         let grad_weight = grad_matrix.matmul_lhs_transpose_scaled_with_backend(
             patches,
-            1.0 / batch as f32,
+            1.0,
             current_matmul_backend(),
         )?;
         let bias_backend = current_tensor_util_backend_for_values(grad_matrix.data().len());
-        let bias_sums =
-            grad_matrix.try_sum_axis0_scaled_with_backend(1.0 / batch as f32, bias_backend)?;
+        let bias_sums = grad_matrix.try_sum_axis0_scaled_with_backend(1.0, bias_backend)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
         let grad_input = if let Some(grad) = self.try_grad_input_wgpu(grad_matrix, batch, oh, ow)? {
             grad
@@ -1537,21 +1566,9 @@ impl Module for Conv3d {
                 }
             }
         }
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
-        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
-            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
-        } else {
-            for value in grad_weight.data_mut() {
-                *value *= inv_batch;
-            }
-            grad_weight
-        };
+        validate_finite_gradient("conv3d_weight_gradient", grad_weight.data())?;
+        validate_finite_gradient("conv3d_bias_gradient", &grad_bias)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
-        let bias_tensor = bias_tensor.scale_with_backend(
-            inv_batch,
-            current_tensor_util_backend_for_values(bias_tensor.data().len()),
-        )?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -2199,21 +2216,9 @@ impl Module for Conv4d {
                 }
             }
         }
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
-        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
-            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
-        } else {
-            for value in grad_weight.data_mut() {
-                *value *= inv_batch;
-            }
-            grad_weight
-        };
+        validate_finite_gradient("conv4d_weight_gradient", grad_weight.data())?;
+        validate_finite_gradient("conv4d_bias_gradient", &grad_bias)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
-        let bias_tensor = bias_tensor.scale_with_backend(
-            inv_batch,
-            current_tensor_util_backend_for_values(bias_tensor.data().len()),
-        )?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -2522,15 +2527,10 @@ impl Module for Conv6da {
         debug_assert!(input_rows.remainder().is_empty());
         debug_assert!(grad_rows.remainder().is_empty());
         debug_assert!(grad_input_rows.into_remainder().is_empty());
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.len());
-        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?
-            .scale_with_backend(inv_batch, tensor_util_backend)?;
-        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?
-            .scale_with_backend(
-                inv_batch,
-                current_tensor_util_backend_for_values(self.out_channels),
-            )?;
+        validate_finite_gradient("conv6da_weight_gradient", &grad_weight)?;
+        validate_finite_gradient("conv6da_bias_gradient", &grad_bias)?;
+        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?;
+        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight_tensor)?;
         self.bias.accumulate_euclidean(&grad_bias_tensor)?;
         Ok(grad_input)
@@ -3652,7 +3652,7 @@ mod tests {
     }
 
     #[test]
-    fn conv6da_parameter_gradients_are_batch_normalized() {
+    fn conv6da_parameter_gradients_sum_shared_rows() {
         let mut single = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
         for value in single.weight.value_mut().data_mut() {
             *value = 1.0;
@@ -3687,7 +3687,7 @@ mod tests {
             .zip(repeated_weight.data().iter())
             .enumerate()
         {
-            let delta = (single_value - repeated_value).abs();
+            let delta = (2.0 * single_value - repeated_value).abs();
             assert!(
                 delta <= 1.0e-6,
                 "weight gradient mismatch at {idx}: single={single_value} repeated={repeated_value} delta={delta}"
@@ -3699,7 +3699,7 @@ mod tests {
             .zip(repeated_bias.data().iter())
             .enumerate()
         {
-            let delta = (single_value - repeated_value).abs();
+            let delta = (2.0 * single_value - repeated_value).abs();
             assert!(
                 delta <= 1.0e-6,
                 "bias gradient mismatch at {idx}: single={single_value} repeated={repeated_value} delta={delta}"
@@ -3761,6 +3761,33 @@ mod tests {
         let output = conv.forward(&input).unwrap();
         assert_eq!(output.shape(), (1, 3));
         assert_eq!(output.data(), &[4.0, 6.0, 8.0]);
+    }
+
+    #[test]
+    fn conv1d_composite_scale_changes_only_parameter_gradients() {
+        let mut vjp = Conv1d::new("conv", 1, 1, 1, 1, 0, 1).unwrap();
+        let mut legacy = Conv1d::new("conv", 1, 1, 1, 1, 0, 1).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.2, -0.1, 0.35, 0.05]).unwrap();
+        let seed = Tensor::from_vec(2, 2, vec![0.08, -0.04, 0.06, 0.03]).unwrap();
+        let dx = vjp.backward(&input, &seed).unwrap();
+        let legacy_dx = legacy
+            .backward_with_parameter_gradient_scale(&input, &seed, 0.5)
+            .unwrap();
+        assert_eq!(dx.data(), legacy_dx.data());
+        for (full, scaled) in [
+            (
+                vjp.weight.gradient().unwrap(),
+                legacy.weight.gradient().unwrap(),
+            ),
+            (
+                vjp.bias.gradient().unwrap(),
+                legacy.bias.gradient().unwrap(),
+            ),
+        ] {
+            for (&full, &scaled) in full.data().iter().zip(scaled.data()) {
+                assert!((scaled - full * 0.5).abs() <= 1e-6);
+            }
+        }
     }
 
     #[cfg(feature = "wgpu")]

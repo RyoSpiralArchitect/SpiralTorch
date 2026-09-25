@@ -1237,7 +1237,7 @@ impl Module for BatchNorm1d {
             "batchnorm_backward_input_grad",
         )?;
 
-        let gradient_scale = 1.0 / batch as f32;
+        let gradient_scale = 1.0;
         let (grad_gamma, grad_beta, affine_gradient_backend) =
             backend_affine_gradients(grad_output, &normed, gradient_scale)?;
         self.gamma.accumulate_euclidean(&grad_gamma)?;
@@ -1577,7 +1577,7 @@ impl Module for ZSpaceBatchNorm1d {
             "zspace_batchnorm_backward_input_grad",
         )?;
 
-        let gradient_scale = 1.0 / batch as f32;
+        let gradient_scale = 1.0;
         let projected = Tensor::from_vec(batch, features, projected)?;
         let (grad_gamma_tensor, grad_beta_tensor, affine_gradient_backend) =
             backend_affine_gradients(grad_output, &projected, gradient_scale)?;
@@ -1917,7 +1917,7 @@ impl Module for ZSpaceLayerNorm {
             "zspace_layernorm_backward_input_grad",
         )?;
 
-        let gradient_scale = 1.0 / rows as f32;
+        let gradient_scale = 1.0;
         let projected = Tensor::from_vec(rows, features, projected)?;
         let (grad_gamma_tensor, grad_beta_tensor, affine_gradient_backend) =
             backend_affine_gradients(grad_output, &projected, gradient_scale)?;
@@ -2057,7 +2057,7 @@ impl Module for LayerNorm {
             );
             return Ok(output);
         }
-        let gradient_scale = 1.0 / rows as f32;
+        let gradient_scale = 1.0;
         let input_gradient_backend =
             current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let (output, grad_gamma_tensor, grad_beta_tensor) = input
@@ -2222,7 +2222,11 @@ mod tests {
     }
 
     #[test]
-    fn normalization_affine_gradients_are_batch_normalized() {
+    fn normalization_affine_gradients_sum_shared_rows() {
+        let assert_doubled = |single: &[f32], repeated: &[f32]| {
+            let expected: Vec<f32> = single.iter().map(|value| value * 2.0).collect();
+            assert_close_slice(&expected, repeated);
+        };
         let mut ln_single = LayerNorm::new("ln", 3, -1.0, 1e-5).unwrap();
         let input_single = Tensor::from_vec(1, 3, vec![0.45, -0.8, 1.25]).unwrap();
         let grad_single = Tensor::from_vec(1, 3, vec![0.2, -0.15, 0.35]).unwrap();
@@ -2236,14 +2240,18 @@ mod tests {
         let _ = ln_repeated
             .backward(&input_repeated, &grad_repeated)
             .unwrap();
-        assert_close_slice(
-            ln_single.gamma.gradient().unwrap().data(),
-            ln_repeated.gamma.gradient().unwrap().data(),
-        );
-        assert_close_slice(
-            ln_single.beta.gradient().unwrap().data(),
-            ln_repeated.beta.gradient().unwrap().data(),
-        );
+        for (single, repeated) in [
+            (
+                ln_single.gamma.gradient().unwrap(),
+                ln_repeated.gamma.gradient().unwrap(),
+            ),
+            (
+                ln_single.beta.gradient().unwrap(),
+                ln_repeated.beta.gradient().unwrap(),
+            ),
+        ] {
+            assert_doubled(single.data(), repeated.data());
+        }
 
         let bn_input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 1.0, 0.5]).unwrap();
         let bn_grad = Tensor::from_vec(2, 2, vec![0.1, -0.2, 0.05, 0.3]).unwrap();
@@ -2260,11 +2268,11 @@ mod tests {
         let _ = bn_repeated
             .backward(&bn_input_repeated, &bn_grad_repeated)
             .unwrap();
-        assert_close_slice(
+        assert_doubled(
             bn_base.gamma.gradient().unwrap().data(),
             bn_repeated.gamma.gradient().unwrap().data(),
         );
-        assert_close_slice(
+        assert_doubled(
             bn_base.beta.gradient().unwrap().data(),
             bn_repeated.beta.gradient().unwrap().data(),
         );
@@ -2283,11 +2291,11 @@ mod tests {
         let _ = zln_repeated
             .backward(&input_repeated, &grad_repeated)
             .unwrap();
-        assert_close_slice(
+        assert_doubled(
             zln_single.gamma.gradient().unwrap().data(),
             zln_repeated.gamma.gradient().unwrap().data(),
         );
-        assert_close_slice(
+        assert_doubled(
             zln_single.beta.gradient().unwrap().data(),
             zln_repeated.beta.gradient().unwrap().data(),
         );
@@ -2306,11 +2314,11 @@ mod tests {
         let _ = zbn_repeated
             .backward(&bn_input_repeated, &bn_grad_repeated)
             .unwrap();
-        assert_close_slice(
+        assert_doubled(
             zbn_base.gamma.gradient().unwrap().data(),
             zbn_repeated.gamma.gradient().unwrap().data(),
         );
-        assert_close_slice(
+        assert_doubled(
             zbn_base.beta.gradient().unwrap().data(),
             zbn_repeated.beta.gradient().unwrap().data(),
         );
@@ -2350,13 +2358,13 @@ mod tests {
         assert_eq!(meta.1["input_gradient_axis"], "feature");
         assert_eq!(meta.1["input_gradient_formula"], "affine_norm_vjp");
         assert_eq!(meta.1["affine_gradient_backend"], "cpu");
-        assert_eq!(meta.1["gradient_scale"], 0.5);
-        assert_eq!(meta.1["parameter_gradient_scale"], 0.5);
+        assert_eq!(meta.1["gradient_scale"], 1.0);
+        assert_eq!(meta.1["parameter_gradient_scale"], 1.0);
         assert_eq!(meta.1["input_gradient_scale"], 1.0);
         assert!(events.iter().any(|(op_name, data)| {
             *op_name == "layer_norm_affine_backward"
                 && data["semantic_owner"] == "st-tensor"
-                && data["parameter_gradient_scale"] == 0.5
+                && data["parameter_gradient_scale"] == 1.0
                 && data["backend"] == "cpu"
         }));
     }

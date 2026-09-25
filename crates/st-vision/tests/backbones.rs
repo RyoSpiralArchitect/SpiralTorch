@@ -486,14 +486,13 @@ fn convnext_input_gradient_matches_finite_difference_through_downsample() {
         );
     }
 
-    // Existing st-nn layers use different parameter-gradient reductions.
-    for (name, index, reduction) in [
-        ("convnext.stem::weight", 0, 2.0),
-        ("convnext.stage0.block0.dw::weight", 24, 2.0),
-        ("convnext.stage0.block0.ln_gamma", 0, 32.0),
-        ("convnext.stage0.block0.fc1::weight", 0, 1.0),
-        ("convnext.stage0.downsample::weight", 0, 2.0),
-        ("convnext.final_norm_gamma", 0, 2.0),
+    for (name, index) in [
+        ("convnext.stem::weight", 0),
+        ("convnext.stage0.block0.dw::weight", 24),
+        ("convnext.stage0.block0.ln_gamma", 0),
+        ("convnext.stage0.block0.fc1::weight", 0),
+        ("convnext.stage0.downsample::weight", 0),
+        ("convnext.final_norm_gamma", 0),
     ] {
         let mut analytical_parameter = None;
         model
@@ -526,7 +525,7 @@ fn convnext_input_gradient_matches_finite_difference_through_downsample() {
         let plus = objective(original + epsilon);
         let minus = objective(original - epsilon);
         objective(original);
-        let numerical = (plus - minus) / (2.0 * epsilon * reduction);
+        let numerical = (plus - minus) / (2.0 * epsilon);
         let actual = analytical_parameter.unwrap();
         let tolerance = 0.01 + 0.05 * numerical.abs();
         assert!(

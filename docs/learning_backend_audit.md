@@ -4086,3 +4086,31 @@ Next steps:
 4. Thin Python/WASM exposure for the deterministic Rust `AmebaAutograd`
    checkpoint/restore and replay-receipt contract.
 5. End-to-end parity harnesses for char-LM and graph-regressor one-step runs.
+
+### 2026-09-25: Host Module VJP reduction migration
+
+The earlier batch-average parameter-gradient policy described above is
+historical for the convolution and affine-normalization families. Host
+`Conv1d`, `Conv2d`, `Conv3d`, `Conv4d`, `Conv6da`, `BatchNorm1d`,
+`ZSpaceBatchNorm1d`, `ZSpaceLayerNorm`, and `LayerNorm` now sum the parameter
+VJP contributions passed to `Module::backward`. Mean-reduced losses already
+carry their own reduction in `grad_output`; applying another `1 / batch` or
+`1 / rows` inside a layer made finite-difference gradients smaller and made
+updates change when an identical batch was duplicated. The regression test
+`st-nn/tests/training_gradient_reduction.rs` checks both properties for these
+families and for the existing Linear/LoRA paths. Empty batches still create no
+parameter update, and input VJPs are unchanged.
+
+This is a host Module optimizer-semantic change for multi-row inputs. Existing
+learning rates and checkpoint continuations may produce different updates;
+re-evaluate them before claiming matched-training parity. The resident
+`module_compatible` microbatch policy and specialized RNN/Embedding/other
+layers are not automatically migrated by this change and need their own
+contract and parity audit. Prior measurements using the old reduction are not
+retroactively comparable.
+
+`WaveRnn` and `WaveScan` keep their historical composite parameter scale by
+requesting `1 / batch` for their embedded `Conv1d`; otherwise this migration
+would change its scale relative to their gate and readout parameters. The
+standalone `Conv1d::backward` still follows the one-VJP contract. Duplicated
+batch tests pin the composite behavior until those models are migrated whole.
