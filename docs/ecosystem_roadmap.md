@@ -32,13 +32,26 @@ checked for non-finite results before they enter the tensor/NN contract.
 The bounded browser result is in
 [`benchmarks/results/2026-09-25-vision-resident-handoff/`](../benchmarks/results/2026-09-25-vision-resident-handoff/README.md).
 
+The next slice processes a homogeneous NCHW batch through the same Rust-owned
+geometry planner, with one image-data upload, one transform submission, per-image
+seeded flip choices, and a guarded resident output. Python
+`apply_resident_batch(images, device)` and browser
+`applyResidentBatch(n, c, h, w, data)` expose the same route. The browser
+fixture connects it both to NN inference and to one supervised `GraphLearner`
+update without a geometry-to-learner readback. A six-condition shape/batch
+sweep compares this route with per-image resident execution; full conditions
+and limits are in
+[`benchmarks/results/2026-09-25-vision-resident-batch/`](../benchmarks/results/2026-09-25-vision-resident-batch/README.md).
+
 On one 3x128x128 Chrome case, the full WebGPU geometry route with terminal
 readback was slower than WASM CPU. For geometry followed by a GPU NN layer,
 the matched resident handoff was faster than the GPU readback/reupload route
-on that same host and shape; neither result establishes general superiority.
+on that same host and shape. The batch sweep probes a different comparison:
+one batch versus N separately resident images, including all NN readbacks.
+Neither establishes general superiority or full-model training throughput.
 Normalize and ColorJitter are not in the browser GPU geometry interface and
-must not silently fall back. Multi-image batching, wider shape sweeps, and
-training-graph integration remain the next gates.
+must not silently fall back. Real image-model training, mixed-size batches,
+and matched cross-framework comparisons remain open gates.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

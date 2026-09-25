@@ -120,6 +120,8 @@ declare module "spiraltorch-wasm" {
         apply(channels: number, height: number, width: number, data: Float32Array): Promise<VisionImage>;
         /** Submit on WebGPU; the returned image remains resident until snapshot. */
         applyResident(channels: number, height: number, width: number, data: Float32Array): WgpuTensor;
+        /** Transform packed NCHW images with one image-data upload; returns a resident rank-4 tensor. */
+        applyResidentBatch(batchSize: number, channels: number, height: number, width: number, data: Float32Array): WgpuTensor;
         readonly backend: "cpu" | "webgpu";
         readonly adapterInfo: string | undefined;
         free(): void;

@@ -137,6 +137,66 @@ try {
   catch (error) { rejectedNonfinite = /non-finite/.test(String(error)); }
   if (!rejectedNonfinite) throw Error("Resident input accepted non-finite values");
 
+  const batchCpu = VisionTransformPipeline.createCpu(271);
+  const batchGpu = await VisionTransformPipeline.createGpu(271);
+  for (const pipeline of [batchCpu, batchGpu]) {
+    pipeline.addResize(8, 10);
+    pipeline.addRandomHorizontalFlip(0.5);
+    pipeline.addCenterCrop(6, 6);
+    pipeline.addRandomHorizontalFlip(0.5);
+  }
+  const batchCount = 5, batchChannels = 2, batchHeight = 9, batchWidth = 11;
+  const imageLength = batchChannels * batchHeight * batchWidth;
+  const batchPixels = Float32Array.from({length: batchCount * imageLength}, (_, i) =>
+    ((i % imageLength * 31 + Math.floor(i / imageLength) * 17) % 257) / 256);
+  let rejectedBatchLength = false;
+  try { batchGpu.applyResidentBatch(batchCount, batchChannels, batchHeight, batchWidth, batchPixels.slice(0, -1)); }
+  catch (error) { rejectedBatchLength = /length/.test(String(error)); }
+  if (!rejectedBatchLength) throw Error("Resident batch accepted a truncated NCHW buffer");
+  const expectedBatch = [];
+  for (let image = 0; image < batchCount; image++) {
+    const sample = batchPixels.slice(image * imageLength, (image + 1) * imageLength);
+    expectedBatch.push(...(await batchCpu.apply(batchChannels, batchHeight, batchWidth, sample)).values);
+  }
+  const residentBatch = batchGpu.applyResidentBatch(batchCount, batchChannels, batchHeight, batchWidth, batchPixels);
+  if (Array.from(residentBatch.shape).join(",") !== "5,2,6,6") throw Error("Resident batch shape mismatch");
+  const flatBatch = residentBatch.reshape([batchCount, 72]);
+  if (!flatBatch.sharesStorageWith(residentBatch)) throw Error("Batch reshape lost resident storage");
+  const batchModel = new Sequential();
+  batchModel.addScaler("vision_batch_gain", new Float32Array(72).fill(2));
+  const batchValues = await batchModel.forwardSnapshot(flatBatch).readValues();
+  let batchForwardError = 0;
+  for (let i = 0; i < expectedBatch.length; i++) {
+    batchForwardError = Math.max(batchForwardError, Math.abs(batchValues[i] - expectedBatch[i] * 2));
+  }
+  if (batchForwardError > 1e-5) throw Error(`Resident batch-to-NN mismatch: ${batchForwardError}`);
+  let rejectedBatchNonfinite = false;
+  try { batchGpu.applyResidentBatch(1, batchChannels, batchHeight, batchWidth, new Float32Array(imageLength).fill(NaN)); }
+  catch (error) { rejectedBatchNonfinite = /non-finite/.test(String(error)); }
+  if (!rejectedBatchNonfinite) throw Error("Resident batch accepted non-finite input");
+
+  const trainModel = new Sequential();
+  trainModel.addScaler("vision_batch_train_gain", new Float32Array(72).fill(1));
+  const trainPlan = trainModel.inferencePlan([batchCount, 72]);
+  const learner = await trainPlan.compileGraphLearnerWebGpu("exact");
+  learner.setInputTensor(flatBatch);
+  const trainDevice = learner.tensorDevice();
+  const target = trainDevice.upload([batchCount, 72], Float32Array.from(expectedBatch, value => value * 0.5));
+  const negative = trainDevice.upload([], new Float32Array([-1]));
+  const mse = values => values.reduce((sum, value, i) => sum + (value - expectedBatch[i] * 0.5) ** 2, 0) / values.length;
+  const before = learner.forward();
+  const beforePrediction = before.predictionTensor();
+  const beforeValues = await beforePrediction.snapshot().readValues();
+  const errorTensor = beforePrediction.add(target.mul(negative));
+  const gradients = learner.backward(before, errorTensor);
+  learner.sgd(gradients, 0.01);
+  const update = learner.updateSnapshot();
+  await update.read();
+  const after = learner.forward();
+  const afterValues = await after.predictionTensor().snapshot().readValues();
+  const lossBefore = mse(beforeValues), lossAfter = mse(afterValues);
+  if (!(lossAfter < lossBefore)) throw Error(`Vision batch training did not reduce MSE: ${lossBefore} -> ${lossAfter}`);
+
   const roundTrip = await VisionTransformPipeline.createGpu(23);
   const resident = await VisionTransformPipeline.createGpu(23);
   for (const pipeline of [roundTrip, resident]) {
@@ -179,8 +239,69 @@ try {
   }
   if (handoffMaxAbsError > 1e-5) throw Error(`Handoff benchmark output mismatch: ${handoffMaxAbsError}`);
 
+  const batchSweep = [];
+  for (const [channels, height, width] of [[1, 64, 64], [3, 128, 128]]) {
+    const outputHeight = height / 2, outputWidth = width / 2;
+    const features = channels * outputHeight * outputWidth;
+    for (const count of [1, 4, 16]) {
+      const one = await VisionTransformPipeline.createGpu(811);
+      const many = await VisionTransformPipeline.createGpu(811);
+      for (const pipeline of [one, many]) {
+        pipeline.addResize(outputHeight + 8, outputWidth + 8);
+        pipeline.addRandomHorizontalFlip(0.5);
+        pipeline.addCenterCrop(outputHeight, outputWidth);
+      }
+      const sampleLength = channels * height * width;
+      const pixels = Float32Array.from({length: count * sampleLength}, (_, i) => (i % 251) / 250);
+      const perImageScaler = new Sequential();
+      const batchScaler = new Sequential();
+      for (const model of [perImageScaler, batchScaler]) {
+        model.addScaler(`vision_sweep_${channels}_${count}`, new Float32Array(features).fill(1.1));
+      }
+      const oneMs = [], manyMs = [];
+      let maxError = 0;
+      const perImage = async () => {
+        const start = performance.now();
+        const values = [];
+        for (let image = 0; image < count; image++) {
+          const sample = pixels.subarray(image * sampleLength, (image + 1) * sampleLength);
+          const resident = one.applyResident(channels, height, width, sample);
+          values.push(...await perImageScaler.forwardSnapshot(resident.reshape([1, features])).readValues());
+        }
+        return {values, elapsed: performance.now() - start};
+      };
+      const batched = async () => {
+        const start = performance.now();
+        const resident = many.applyResidentBatch(count, channels, height, width, pixels);
+        const values = await batchScaler.forwardSnapshot(resident.reshape([count, features])).readValues();
+        return {values, elapsed: performance.now() - start};
+      };
+      for (let repeat = 0; repeat < 25; repeat++) {
+        let sequential, batch;
+        if (repeat % 2 === 0) {
+          sequential = await perImage();
+          batch = await batched();
+        } else {
+          batch = await batched();
+          sequential = await perImage();
+        }
+        if (sequential.values.length !== batch.values.length) throw Error("Batch sweep output length mismatch");
+        for (let i = 0; i < batch.values.length; i++) {
+          maxError = Math.max(maxError, Math.abs(batch.values[i] - sequential.values[i]));
+        }
+        if (repeat >= 5) { oneMs.push(sequential.elapsed); manyMs.push(batch.elapsed); }
+      }
+      if (maxError > 1e-5) throw Error(`Batch sweep mismatch at ${channels}x${height}x${width}, N=${count}: ${maxError}`);
+      batchSweep.push({input_shape: [count, channels, height, width], output_shape: [count, channels, outputHeight, outputWidth],
+        warmups: 5, samples: 20, order: "alternating per-image/batch order per repeat",
+        timing: "browser wall time from initial upload to all NN output readbacks",
+        per_image_resident_ms: oneMs, batch_resident_ms: manyMs,
+        per_image_median_ms: median(oneMs), batch_median_ms: median(manyMs), max_abs_error: maxError});
+    }
+  }
+
   result.textContent = JSON.stringify({
-    schema: "spiraltorch.vision.transforms.browser.v1",
+    schema: "spiraltorch.vision.transforms.browser.v2",
     status: "passed",
     cases,
     max_abs_error: maxAbsError,
@@ -195,6 +316,13 @@ try {
       output_shape: Array.from(modelOutput.shape), terminal_readback_only: true,
       max_abs_error: residentForwardError, rejected_invalid_crop: rejectedResidentCrop,
       rejected_nonfinite_input: rejectedNonfinite},
+    resident_batch: {input_shape: [batchCount, batchChannels, batchHeight, batchWidth],
+      output_shape: Array.from(residentBatch.shape), model: "Sequential(Scaler x2)",
+      terminal_readback_only: true, max_abs_error: batchForwardError,
+      rejected_truncated_input: rejectedBatchLength, rejected_nonfinite_input: rejectedBatchNonfinite},
+    resident_batch_training: {model: "GraphLearner(Scaler)", input_shape: [batchCount, 72],
+      update_rate: 0.01, loss_before: lossBefore, loss_after: lossAfter,
+      geometry_to_learner_readback: false, parameter_updates: 1},
     handoff_benchmark: {input_shape: [3, 128, 128], transformed_shape: [3, 64, 64],
       model: "Sequential(Scaler x1.1)", warmups: 5, samples: 20,
       order: "alternating round-trip/resident per repeat",
@@ -202,6 +330,7 @@ try {
       round_trip_ms: roundTripMs, resident_ms: residentMs,
       round_trip_median_ms: median(roundTripMs), resident_median_ms: median(residentMs),
       max_abs_error: handoffMaxAbsError},
+    batch_sweep: batchSweep,
     rust_runtime_adapter: runtimeAdapter,
     browser_adapter_probe: {vendor: adapter.info?.vendor, architecture: adapter.info?.architecture,
       is_fallback_adapter: fallback, boundary: "Separate probe, not attestation of the Rust runtime device"},

@@ -127,6 +127,35 @@ impl WasmVisionTransformPipeline {
         })
     }
 
+    /// A contiguous NCHW batch uploads image values once and stays resident for NN work.
+    #[wasm_bindgen(js_name = applyResidentBatch)]
+    pub fn apply_resident_batch(
+        &mut self,
+        batch_size: u32,
+        channels: u32,
+        height: u32,
+        width: u32,
+        #[wasm_bindgen(unchecked_param_type = "Float32Array")] data: JsValue,
+    ) -> Result<WasmWgpuTensor, JsValue> {
+        let device = self
+            .tensor_device
+            .as_ref()
+            .ok_or_else(|| error("resident image output requires createGpu"))?;
+        let data = crate::wgpu_tensor::values(data)?.to_vec();
+        let shape = [
+            batch_size as usize,
+            channels as usize,
+            height as usize,
+            width as usize,
+        ];
+        Ok(WasmWgpuTensor {
+            inner: self
+                .inner
+                .apply_packed_geometry_batch_resident(&shape, &data, device)
+                .map_err(error)?,
+        })
+    }
+
     #[wasm_bindgen(getter, js_name = backend)]
     pub fn backend(&self) -> String {
         if self.gpu { "webgpu" } else { "cpu" }.into()

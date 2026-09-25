@@ -21,8 +21,8 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingType, Buffer, BufferUsages, ComputePipeline, Device,
-    PipelineLayoutDescriptor, Queue, ShaderStages,
+    BindGroupLayoutEntry, BindingType, Buffer, BufferUsages, CommandEncoder, ComputePipeline,
+    Device, PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -79,6 +79,15 @@ struct FlipParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+struct BatchFlipParams {
+    height: u32,
+    width: u32,
+    channels_per_image: u32,
+    batch_size: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 struct ColorJitterParams {
     dims: [u32; 4],
     factors: [f32; 4],
@@ -124,9 +133,11 @@ pub struct ColorJitterConfig {
 
 struct Pipelines {
     bind_layout: BindGroupLayout,
+    batch_flip_layout: BindGroupLayout,
     resize: Shared<ComputePipeline>,
     center_crop: Shared<ComputePipeline>,
     horizontal_flip: Shared<ComputePipeline>,
+    batch_horizontal_flip: Shared<ComputePipeline>,
     color_jitter: Shared<ComputePipeline>,
 }
 
@@ -174,6 +185,57 @@ impl Pipelines {
             push_constant_ranges: &[],
         });
 
+        let batch_flip_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("st.backend.transform.batch_flip.bind_layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let batch_flip_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("st.backend.transform.batch_flip.pipeline_layout"),
+            bind_group_layouts: &[&batch_flip_layout],
+            push_constant_ranges: &[],
+        });
+
         let shader_root = shader_dir.as_ref();
         let cache = ShaderCache::new(shader_root);
         #[cfg(target_arch = "wasm32")]
@@ -191,6 +253,10 @@ impl Pipelines {
                 include_str!("../shaders/transforms/horizontal_flip.wgsl"),
             );
             cache.preload_inline(
+                "batch_horizontal_flip.wgsl",
+                include_str!("../shaders/transforms/batch_horizontal_flip.wgsl"),
+            );
+            cache.preload_inline(
                 "color_jitter.wgsl",
                 include_str!("../shaders/transforms/color_jitter.wgsl"),
             );
@@ -199,6 +265,7 @@ impl Pipelines {
             "resize.wgsl",
             "center_crop.wgsl",
             "horizontal_flip.wgsl",
+            "batch_horizontal_flip.wgsl",
             "color_jitter.wgsl",
         ])?;
 
@@ -223,6 +290,13 @@ impl Pipelines {
             "main",
             Some(&pipeline_layout),
         )?;
+        let batch_horizontal_flip = cache.load_compute_pipeline_with_layout(
+            device,
+            "batch_horizontal_flip.wgsl",
+            "st.transform.batch_horizontal_flip",
+            "main",
+            Some(&batch_flip_pipeline_layout),
+        )?;
         let color_jitter = cache.load_compute_pipeline_with_layout(
             device,
             "color_jitter.wgsl",
@@ -233,9 +307,11 @@ impl Pipelines {
 
         Ok(Self {
             bind_layout,
+            batch_flip_layout,
             resize,
             center_crop,
             horizontal_flip,
+            batch_horizontal_flip,
             color_jitter,
         })
     }
@@ -267,6 +343,14 @@ pub enum GeometryCommand {
     Resize(ResizeConfig),
     CenterCrop(CenterCropConfig),
     HorizontalFlip(HorizontalFlipConfig),
+}
+
+/// A stage shared by a contiguous NCHW image batch. Flip choices remain per image.
+#[derive(Clone, Debug)]
+pub enum BatchGeometryCommand {
+    Resize { height: usize, width: usize },
+    CenterCrop { height: usize, width: usize },
+    HorizontalFlip(Vec<bool>),
 }
 
 struct GpuContext {
@@ -367,14 +451,20 @@ impl TransformDispatcher {
                 ))
             })?;
         }
-        channels
+        let volume = channels
             .checked_mul(height)
             .and_then(|count| count.checked_mul(width))
             .ok_or_else(|| {
                 TransformDispatchError::InvalidGeometry(format!(
                     "{label} volume overflow for {channels}x{height}x{width}"
                 ))
-            })
+            })?;
+        if volume > u32::MAX as usize {
+            return Err(TransformDispatchError::InvalidGeometry(format!(
+                "{label} volume exceeds WGSL u32 indexing"
+            )));
+        }
+        Ok(volume)
     }
 
     fn validate_finite(label: &str, value: f32) -> Result<(), TransformDispatchError> {
@@ -639,6 +729,110 @@ impl TransformDispatcher {
             )
             .map_err(Into::into)
     }
+
+    /// Transform a homogeneous NCHW batch with one image-value upload and no
+    /// terminal readback. Resize and crop operate across N*C planes; flips use one mask
+    /// entry per image rather than applying the same random choice to all rows.
+    pub fn run_geometry_batch_resident(
+        &self,
+        input: &[f32],
+        batch_size: usize,
+        initial: ImageGeometry,
+        commands: &[BatchGeometryCommand],
+        tensor_device: &TensorDevice,
+    ) -> Result<ResidentTensor, TransformDispatchError> {
+        let total_channels = batch_channels(batch_size, initial.channels)?;
+        validate_sequence_input(
+            input,
+            ImageGeometry {
+                channels: total_channels,
+                ..initial
+            },
+        )?;
+        let geometries = validate_batch_commands(batch_size, initial, commands)?;
+        let Backend::Gpu(ctx) = &self.backend else {
+            return Err(TransformDispatchError::RequiresGpu);
+        };
+        if !tensor_device
+            .runtime()
+            .context()
+            .shares_handles_with(&ctx.context)
+        {
+            return Err(TensorError::DeviceMismatch.into());
+        }
+        if !input.iter().all(|value| value.is_finite()) {
+            return Err(TensorError::NonFinite.into());
+        }
+        let final_geometry = geometries.last().copied().unwrap_or(initial);
+        let shape = [
+            batch_size,
+            final_geometry.channels,
+            final_geometry.height,
+            final_geometry.width,
+        ];
+        if commands.is_empty() {
+            return tensor_device.upload(&shape, input).map_err(Into::into);
+        }
+        let output = dispatch_geometry_batch(ctx, input, batch_size, initial, commands)?;
+        tensor_device
+            .adopt_checked_values(&ctx.context, &shape, output)
+            .map_err(Into::into)
+    }
+}
+
+fn batch_channels(batch_size: usize, channels: usize) -> Result<usize, TransformDispatchError> {
+    if batch_size == 0 {
+        return Err(TransformDispatchError::InvalidGeometry(
+            "image batch must not be empty".into(),
+        ));
+    }
+    batch_size.checked_mul(channels).ok_or_else(|| {
+        TransformDispatchError::InvalidGeometry("batch channel count overflow".into())
+    })
+}
+
+fn validate_batch_commands(
+    batch_size: usize,
+    initial: ImageGeometry,
+    commands: &[BatchGeometryCommand],
+) -> Result<Vec<ImageGeometry>, TransformDispatchError> {
+    let channels = batch_channels(batch_size, initial.channels)?;
+    TransformDispatcher::validate_volume("batch source", channels, initial.height, initial.width)?;
+    let mut geometry = initial;
+    let mut geometries = Vec::with_capacity(commands.len());
+    for command in commands {
+        match command {
+            BatchGeometryCommand::Resize { height, width } => {
+                geometry.height = *height;
+                geometry.width = *width;
+            }
+            BatchGeometryCommand::CenterCrop { height, width } => {
+                if *height > geometry.height || *width > geometry.width {
+                    return Err(TransformDispatchError::InvalidGeometry(
+                        "batch crop must fit inside source".into(),
+                    ));
+                }
+                geometry.height = *height;
+                geometry.width = *width;
+            }
+            BatchGeometryCommand::HorizontalFlip(flags) => {
+                if flags.len() != batch_size {
+                    return Err(TransformDispatchError::InvalidGeometry(format!(
+                        "batch flip mask length {} does not match batch size {batch_size}",
+                        flags.len()
+                    )));
+                }
+            }
+        }
+        TransformDispatcher::validate_volume(
+            "batch stage",
+            channels,
+            geometry.height,
+            geometry.width,
+        )?;
+        geometries.push(geometry);
+    }
+    Ok(geometries)
 }
 
 fn validate_sequence_input(
@@ -687,19 +881,101 @@ fn dispatch_geometry_sequence(
         input,
         BufferUsages::STORAGE,
     )?;
+    let mut encoder =
+        ctx.context
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.backend.transform.sequence.encoder"),
+            });
     for command in commands {
         current_buffer = match *command {
             GeometryCommand::Resize(config) => {
-                dispatch_resize_buffer(ctx, &current_buffer, config)?
+                encode_resize_buffer(ctx, &mut encoder, &current_buffer, config)?
             }
             GeometryCommand::CenterCrop(config) => {
-                dispatch_center_crop_buffer(ctx, &current_buffer, config)?
+                encode_center_crop_buffer(ctx, &mut encoder, &current_buffer, config)?
             }
             GeometryCommand::HorizontalFlip(config) => {
-                dispatch_horizontal_flip_buffer(ctx, &current_buffer, config)?
+                encode_horizontal_flip_buffer(ctx, &mut encoder, &current_buffer, config)?
             }
         };
     }
+    ctx.context
+        .queue()
+        .submit(std::iter::once(encoder.finish()));
+    Ok(current_buffer)
+}
+
+fn dispatch_geometry_batch(
+    ctx: &GpuContext,
+    input: &[f32],
+    batch_size: usize,
+    initial: ImageGeometry,
+    commands: &[BatchGeometryCommand],
+) -> Result<Buffer, TransformDispatchError> {
+    let channels = batch_channels(batch_size, initial.channels)?;
+    let mut geometry = initial;
+    let mut current_buffer = upload_slice(
+        ctx.context.device(),
+        "st.backend.transform.batch.input",
+        input,
+        BufferUsages::STORAGE,
+    )?;
+    let mut encoder =
+        ctx.context
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.backend.transform.batch.encoder"),
+            });
+    for command in commands {
+        current_buffer = match command {
+            BatchGeometryCommand::Resize { height, width } => {
+                let output = encode_resize_buffer(
+                    ctx,
+                    &mut encoder,
+                    &current_buffer,
+                    ResizeConfig {
+                        channels,
+                        src_height: geometry.height,
+                        src_width: geometry.width,
+                        dst_height: *height,
+                        dst_width: *width,
+                    },
+                )?;
+                geometry.height = *height;
+                geometry.width = *width;
+                output
+            }
+            BatchGeometryCommand::CenterCrop { height, width } => {
+                let output = encode_center_crop_buffer(
+                    ctx,
+                    &mut encoder,
+                    &current_buffer,
+                    CenterCropConfig {
+                        channels,
+                        src_height: geometry.height,
+                        src_width: geometry.width,
+                        crop_height: *height,
+                        crop_width: *width,
+                    },
+                )?;
+                geometry.height = *height;
+                geometry.width = *width;
+                output
+            }
+            BatchGeometryCommand::HorizontalFlip(flags) => encode_batch_flip_buffer(
+                ctx,
+                &mut encoder,
+                &current_buffer,
+                batch_size,
+                geometry,
+                flags,
+            )?,
+        };
+    }
+    ctx.context
+        .queue()
+        .submit(std::iter::once(encoder.finish()));
     Ok(current_buffer)
 }
 
@@ -1054,8 +1330,26 @@ fn dispatch_resize_buffer(
     input: &Buffer,
     config: ResizeConfig,
 ) -> Result<Buffer, TransformDispatchError> {
+    let mut encoder =
+        ctx.context
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.backend.transform.resize.seq.encoder"),
+            });
+    let output = encode_resize_buffer(ctx, &mut encoder, input, config)?;
+    ctx.context
+        .queue()
+        .submit(std::iter::once(encoder.finish()));
+    Ok(output)
+}
+
+fn encode_resize_buffer(
+    ctx: &GpuContext,
+    encoder: &mut CommandEncoder,
+    input: &Buffer,
+    config: ResizeConfig,
+) -> Result<Buffer, TransformDispatchError> {
     let device = ctx.context.device();
-    let queue = ctx.context.queue();
     let out_elements = TransformDispatcher::validate_volume(
         "resize destination",
         config.channels,
@@ -1084,9 +1378,6 @@ fn dispatch_resize_buffer(
         usage: BufferUsages::UNIFORM,
     });
     let bind_group = ctx.bind_group(input, &out_buffer, &params_buffer);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st.backend.transform.resize.seq.encoder"),
-    });
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.backend.transform.resize.seq.pass"),
@@ -1105,7 +1396,6 @@ fn dispatch_resize_buffer(
         )?;
         pass.dispatch_workgroups(gx, gy, gz);
     }
-    queue.submit(std::iter::once(encoder.finish()));
     Ok(out_buffer)
 }
 
@@ -1114,8 +1404,26 @@ fn dispatch_center_crop_buffer(
     input: &Buffer,
     config: CenterCropConfig,
 ) -> Result<Buffer, TransformDispatchError> {
+    let mut encoder =
+        ctx.context
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.backend.transform.crop.seq.encoder"),
+            });
+    let output = encode_center_crop_buffer(ctx, &mut encoder, input, config)?;
+    ctx.context
+        .queue()
+        .submit(std::iter::once(encoder.finish()));
+    Ok(output)
+}
+
+fn encode_center_crop_buffer(
+    ctx: &GpuContext,
+    encoder: &mut CommandEncoder,
+    input: &Buffer,
+    config: CenterCropConfig,
+) -> Result<Buffer, TransformDispatchError> {
     let device = ctx.context.device();
-    let queue = ctx.context.queue();
     let out_elements = TransformDispatcher::validate_volume(
         "center crop destination",
         config.channels,
@@ -1144,9 +1452,6 @@ fn dispatch_center_crop_buffer(
         usage: BufferUsages::UNIFORM,
     });
     let bind_group = ctx.bind_group(input, &out_buffer, &params_buffer);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st.backend.transform.crop.seq.encoder"),
-    });
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.backend.transform.crop.seq.pass"),
@@ -1165,7 +1470,6 @@ fn dispatch_center_crop_buffer(
         )?;
         pass.dispatch_workgroups(gx, gy, gz);
     }
-    queue.submit(std::iter::once(encoder.finish()));
     Ok(out_buffer)
 }
 
@@ -1174,8 +1478,26 @@ fn dispatch_horizontal_flip_buffer(
     input: &Buffer,
     config: HorizontalFlipConfig,
 ) -> Result<Buffer, TransformDispatchError> {
+    let mut encoder =
+        ctx.context
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.backend.transform.flip.seq.encoder"),
+            });
+    let output = encode_horizontal_flip_buffer(ctx, &mut encoder, input, config)?;
+    ctx.context
+        .queue()
+        .submit(std::iter::once(encoder.finish()));
+    Ok(output)
+}
+
+fn encode_horizontal_flip_buffer(
+    ctx: &GpuContext,
+    encoder: &mut CommandEncoder,
+    input: &Buffer,
+    config: HorizontalFlipConfig,
+) -> Result<Buffer, TransformDispatchError> {
     let device = ctx.context.device();
-    let queue = ctx.context.queue();
     let out_elements = TransformDispatcher::validate_volume(
         "horizontal flip",
         config.channels,
@@ -1200,9 +1522,6 @@ fn dispatch_horizontal_flip_buffer(
         usage: BufferUsages::UNIFORM,
     });
     let bind_group = ctx.bind_group(input, &out_buffer, &params_buffer);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("st.backend.transform.flip.seq.encoder"),
-    });
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.backend.transform.flip.seq.pass"),
@@ -1221,7 +1540,86 @@ fn dispatch_horizontal_flip_buffer(
         )?;
         pass.dispatch_workgroups(gx, gy, gz);
     }
-    queue.submit(std::iter::once(encoder.finish()));
+    Ok(out_buffer)
+}
+
+fn encode_batch_flip_buffer(
+    ctx: &GpuContext,
+    encoder: &mut CommandEncoder,
+    input: &Buffer,
+    batch_size: usize,
+    geometry: ImageGeometry,
+    flags: &[bool],
+) -> Result<Buffer, TransformDispatchError> {
+    let device = ctx.context.device();
+    let channels = batch_channels(batch_size, geometry.channels)?;
+    let out_elements = TransformDispatcher::validate_volume(
+        "batch horizontal flip",
+        channels,
+        geometry.height,
+        geometry.width,
+    )?;
+    let out_buffer = empty_buffer::<f32>(
+        device,
+        "st.backend.transform.batch_flip.output",
+        out_elements,
+        BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+    )?;
+    let params = BatchFlipParams {
+        height: shader_dimension("height", geometry.height)?,
+        width: shader_dimension("width", geometry.width)?,
+        channels_per_image: shader_dimension("channels per image", geometry.channels)?,
+        batch_size: shader_dimension("batch size", batch_size)?,
+    };
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.backend.transform.batch_flip.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: BufferUsages::UNIFORM,
+    });
+    let mask = flags
+        .iter()
+        .map(|flag| u32::from(*flag))
+        .collect::<Vec<_>>();
+    let mask_buffer = upload_slice(
+        device,
+        "st.backend.transform.batch_flip.mask",
+        &mask,
+        BufferUsages::STORAGE,
+    )?;
+    let entries = [
+        BindGroupEntry {
+            binding: 0,
+            resource: input.as_entire_binding(),
+        },
+        BindGroupEntry {
+            binding: 1,
+            resource: out_buffer.as_entire_binding(),
+        },
+        BindGroupEntry {
+            binding: 2,
+            resource: params_buffer.as_entire_binding(),
+        },
+        BindGroupEntry {
+            binding: 3,
+            resource: mask_buffer.as_entire_binding(),
+        },
+    ];
+    let bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("st.backend.transform.batch_flip.bind_group"),
+        layout: &ctx.pipelines.batch_flip_layout,
+        entries: &entries,
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.backend.transform.batch_flip.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(ctx.pipelines.batch_horizontal_flip.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        let (gx, gy, gz) =
+            workgroup_dims(device, geometry.width, geometry.height, channels, 16, 16, 1)?;
+        pass.dispatch_workgroups(gx, gy, gz);
+    }
     Ok(out_buffer)
 }
 
@@ -1342,6 +1740,118 @@ mod tests {
             result,
             Err(TransformDispatchError::InvalidGeometry(_))
         ));
+    }
+
+    #[test]
+    fn batch_geometry_rejects_empty_mismatched_and_invalid_stages() {
+        let initial = ImageGeometry {
+            channels: 2,
+            height: 4,
+            width: 5,
+        };
+        assert!(validate_batch_commands(0, initial, &[]).is_err());
+        assert!(validate_batch_commands(
+            3,
+            initial,
+            &[BatchGeometryCommand::HorizontalFlip(vec![true, false])]
+        )
+        .is_err());
+        assert!(validate_batch_commands(
+            3,
+            initial,
+            &[BatchGeometryCommand::CenterCrop {
+                height: 5,
+                width: 5
+            }]
+        )
+        .is_err());
+        assert!(validate_batch_commands(
+            usize::MAX,
+            initial,
+            &[BatchGeometryCommand::Resize {
+                height: 2,
+                width: 2
+            }]
+        )
+        .is_err());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resident_batch_flip_matches_per_image_cpu() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = ensure_default_runtime_blocking("transform.resident_batch").unwrap();
+        let tensor_device = TensorDevice::new(runtime.clone()).unwrap();
+        let gpu = TransformDispatcher::with_gpu(
+            runtime.context().shared_device(),
+            runtime.context().shared_queue(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TRANSFORM_SHADER_DIR),
+        )
+        .unwrap();
+        let cpu = TransformDispatcher::cpu();
+        let initial = ImageGeometry {
+            channels: 2,
+            height: 3,
+            width: 4,
+        };
+        let batch_size = 3;
+        let sample_size = initial.element_count().unwrap();
+        let input = (0..batch_size * sample_size)
+            .map(|i| i as f32 / 47.)
+            .collect::<Vec<_>>();
+        let flags = [true, false, true];
+        let commands = [
+            BatchGeometryCommand::Resize {
+                height: 4,
+                width: 5,
+            },
+            BatchGeometryCommand::HorizontalFlip(flags.to_vec()),
+            BatchGeometryCommand::CenterCrop {
+                height: 2,
+                width: 3,
+            },
+        ];
+        let output = gpu
+            .run_geometry_batch_resident(&input, batch_size, initial, &commands, &tensor_device)
+            .unwrap();
+        assert_eq!(output.layout().shape(), &[3, 2, 2, 3]);
+        let actual = output.snapshot().unwrap().read().unwrap();
+        let mut expected = Vec::new();
+        for (image, flag) in flags.into_iter().enumerate() {
+            let per_image = [
+                GeometryCommand::Resize(ResizeConfig {
+                    channels: 2,
+                    src_height: 3,
+                    src_width: 4,
+                    dst_height: 4,
+                    dst_width: 5,
+                }),
+                GeometryCommand::HorizontalFlip(HorizontalFlipConfig {
+                    channels: 2,
+                    height: 4,
+                    width: 5,
+                    apply: flag,
+                }),
+                GeometryCommand::CenterCrop(CenterCropConfig {
+                    channels: 2,
+                    src_height: 4,
+                    src_width: 5,
+                    crop_height: 2,
+                    crop_width: 3,
+                }),
+            ];
+            let start = image * sample_size;
+            expected.extend(
+                cpu.run_geometry_sequence(&input[start..start + sample_size], initial, &per_image)
+                    .unwrap()
+                    .0,
+            );
+        }
+        for (left, right) in actual.iter().zip(&expected) {
+            assert!((left - right).abs() <= 1e-6, "{left} != {right}");
+        }
     }
 
     #[test]
