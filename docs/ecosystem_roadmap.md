@@ -11,13 +11,25 @@ geometry sequence with one upload and terminal readback on native platforms.
 The seeded CPU route remains the behavioral reference; Python exposes an
 explicit `TransformPipeline.enable_wgpu()` opt-in and `disable_wgpu()` fallback.
 
-The browser is **not yet equivalent**: the current transform dispatcher uses
-synchronous host-visible readback, which is unavailable for WebGPU in WASM.
-The next milestone is an async resident transform interface and a real-browser
-fixture for the same seeded image sequence. Admission requires matching Rust
-CPU, native WGPU, Python, and browser outputs and random decisions, plus a
-paired benchmark with source, device, and artifact hashes. Until that gate
-passes, do not advertise browser vision transforms as GPU-resident.
+The browser geometry slice now has the same Rust-owned semantics. Transform
+WGSL is embedded in the WASM build; `VisionTransformPipeline.createGpu(seed)`
+uses the `st-vision` planner and runs adjacent resize, center-crop, and sampled
+horizontal-flip stages with one upload and one **async terminal readback**.
+`createCpu(seed)` is the in-browser Rust CPU reference. The real-Chrome parity
+fixture compares 12 seeded frames, rejects invalid geometry, and records the
+actual Rust runtime adapter. A failed geometry run leaves the image and flip
+seed unchanged on both CPU and GPU, including a subsequent valid retry.
+Native Rust and fresh-wheel Python tests cover
+the same sequence. The bounded result and replay instructions live in
+[`benchmarks/results/2026-09-25-vision-wasm-async/`](../benchmarks/results/2026-09-25-vision-wasm-async/README.md).
+
+This is **resident within one geometry sequence**, not a claim that image
+batches stay on GPU across a model graph. On the measured small 3x128x128
+browser case, WebGPU end-to-end latency was higher than WASM CPU latency.
+Normalize and ColorJitter are not in the browser GPU geometry interface; they
+must not silently fall back under a WebGPU label. The next optimization gate
+is a GPU-resident handoff from transformed images into downstream inference or
+training, then batched inputs and a shape sweep to locate any real crossover.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

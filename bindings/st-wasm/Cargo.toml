@@ -14,7 +14,7 @@ path = "src/lib.rs"
 
 [features]
 nn = ["dep:st-nn", "dep:wasm-bindgen-futures"]
-webgpu = ["dep:st-backend-wgpu", "dep:wasm-bindgen-futures", "nn", "st-nn/wgpu"]
+webgpu = ["dep:st-backend-wgpu", "dep:st-vision", "dep:wasm-bindgen-futures", "nn", "st-nn/wgpu"]
 
 [dependencies]
 st-nn = { path = "../../crates/st-nn", optional = true, default-features = false }
@@ -37,4 +37,5 @@ web-sys = { version = "0.3", features = [
 serde-wasm-bindgen = "0.5"
 getrandom = { version = "0.2", features = ["js"] }
 st-backend-wgpu = { path = "../../crates/st-backend-wgpu", optional = true }
+st-vision = { path = "../../crates/st-vision", optional = true, default-features = false, features = ["wgpu"] }
 wasm-bindgen-futures = { version = "0.4", optional = true }

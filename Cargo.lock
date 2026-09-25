@@ -3112,6 +3112,7 @@ dependencies = [
  "st-frac",
  "st-nn",
  "st-tensor",
+ "st-vision",
  "time",
  "wasm-bindgen",
  "wasm-bindgen-futures",
