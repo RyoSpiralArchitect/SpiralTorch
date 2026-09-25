@@ -29,6 +29,15 @@ fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
     Ok(())
 }
 
+fn validate_finite_gradient(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        if !value.is_finite() {
+            return Err(TensorError::NonFiniteValue { label, value });
+        }
+    }
+    Ok(())
+}
+
 fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
     match backend {
         TensorUtilBackend::Auto => "auto",
@@ -564,6 +573,8 @@ impl Module for Conv1d {
                 }
             }
         }
+        validate_finite_gradient("conv1d_weight_gradient", grad_weight.data())?;
+        validate_finite_gradient("conv1d_bias_gradient", &grad_bias)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
@@ -1523,6 +1534,8 @@ impl Module for Conv3d {
                 }
             }
         }
+        validate_finite_gradient("conv3d_weight_gradient", grad_weight.data())?;
+        validate_finite_gradient("conv3d_bias_gradient", &grad_bias)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
@@ -2171,6 +2184,8 @@ impl Module for Conv4d {
                 }
             }
         }
+        validate_finite_gradient("conv4d_weight_gradient", grad_weight.data())?;
+        validate_finite_gradient("conv4d_bias_gradient", &grad_bias)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
@@ -2480,6 +2495,8 @@ impl Module for Conv6da {
         debug_assert!(input_rows.remainder().is_empty());
         debug_assert!(grad_rows.remainder().is_empty());
         debug_assert!(grad_input_rows.into_remainder().is_empty());
+        validate_finite_gradient("conv6da_weight_gradient", &grad_weight)?;
+        validate_finite_gradient("conv6da_bias_gradient", &grad_bias)?;
         let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?;
         let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight_tensor)?;

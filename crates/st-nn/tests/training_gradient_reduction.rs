@@ -213,6 +213,31 @@ fn normalization_family_mse_parameter_and_input_gradients_are_one_vjp() {
     check_mse_vjp_with_tolerance(zspace_batch_norm(), 1e-4);
 }
 
+fn check_convolution_overflow_is_rejected(mut model: impl Module) {
+    let input = Tensor::from_vec(1, 2, vec![1.0e30; 2]).unwrap();
+    let seed = Tensor::from_vec(1, 2, vec![1.0e30; 2]).unwrap();
+    assert!(model.backward(&input, &seed).is_err());
+    model
+        .visit_parameters(&mut |parameter| {
+            assert!(
+                parameter.gradient().is_none(),
+                "{} was updated",
+                parameter.name()
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn overflowing_convolution_vjps_do_not_poison_parameter_gradients() {
+    check_convolution_overflow_is_rejected(conv1d());
+    check_convolution_overflow_is_rejected(conv2d());
+    check_convolution_overflow_is_rejected(conv3d());
+    check_convolution_overflow_is_rejected(conv4d());
+    check_convolution_overflow_is_rejected(conv6da());
+}
+
 fn duplicated_batch_update<M: Module>(make: impl Fn() -> M) {
     let mut reference = None;
     for copies in [1, 2, 5] {
