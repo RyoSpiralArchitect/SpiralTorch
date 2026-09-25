@@ -83,12 +83,29 @@ try {
   if (benchMaxAbsError > 1e-5) throw Error(`Benchmark CPU/WebGPU mismatch: ${benchMaxAbsError}`);
   const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
-  const bad = await VisionTransformPipeline.createGpu(19);
-  bad.addCenterCrop(13, 13);
-  let rejectedInvalidCrop = false;
-  try { await bad.apply(3, 12, 14, new Float32Array(3 * 12 * 14)); }
-  catch (error) { rejectedInvalidCrop = /crop must fit inside source/.test(String(error)); }
-  if (!rejectedInvalidCrop) throw Error("Invalid crop did not fail before dispatch");
+  const retryCpu = VisionTransformPipeline.createCpu(19);
+  const retryGpu = await VisionTransformPipeline.createGpu(19);
+  const freshCpu = VisionTransformPipeline.createCpu(19);
+  for (const pipeline of [retryCpu, retryGpu, freshCpu]) {
+    pipeline.addRandomHorizontalFlip(0.5);
+    pipeline.addCenterCrop(13, 13);
+  }
+  let rejectedInvalidCrop = true;
+  for (const pipeline of [retryCpu, retryGpu]) {
+    try { await pipeline.apply(3, 12, 14, new Float32Array(3 * 12 * 14)); rejectedInvalidCrop = false; }
+    catch (error) { rejectedInvalidCrop &&= /center_crop_size/.test(String(error)); }
+  }
+  if (!rejectedInvalidCrop) throw Error("Invalid crop did not fail before consuming RNG");
+  const retryPixels = Float32Array.from({length: 3 * 14 * 14}, (_, i) => ((i * 17 + 3) % 257) / 256);
+  const fresh = (await freshCpu.apply(3, 14, 14, retryPixels)).values;
+  const retriedCpu = (await retryCpu.apply(3, 14, 14, retryPixels)).values;
+  const retriedGpu = (await retryGpu.apply(3, 14, 14, retryPixels)).values;
+  let retryCpuError = 0, retryGpuError = 0;
+  for (let i = 0; i < fresh.length; i++) {
+    retryCpuError = Math.max(retryCpuError, Math.abs(fresh[i] - retriedCpu[i]));
+    retryGpuError = Math.max(retryGpuError, Math.abs(fresh[i] - retriedGpu[i]));
+  }
+  if (retryCpuError !== 0 || retryGpuError > 1e-5) throw Error("Retry changed seeded flip decision");
 
   result.textContent = JSON.stringify({
     schema: "spiraltorch.vision.transforms.browser.v1",
@@ -100,6 +117,8 @@ try {
       cpu_ms: cpuMs, webgpu_ms: gpuMs, cpu_median_ms: median(cpuMs), webgpu_median_ms: median(gpuMs),
       max_abs_error: benchMaxAbsError},
     rejected_invalid_crop: rejectedInvalidCrop,
+    retry_matches_fresh_seed: true,
+    retry_max_abs_error: retryGpuError,
     rust_runtime_adapter: runtimeAdapter,
     browser_adapter_probe: {vendor: adapter.info?.vendor, architecture: adapter.info?.architecture,
       is_fallback_adapter: fallback, boundary: "Separate probe, not attestation of the Rust runtime device"},

@@ -11,20 +11,24 @@ pipeline without a GPU dispatcher.
 The real Chrome 153 browser fixture passed 12 consecutive seeded frames with
 3x12x14 input and 3x6x6 output, including a probability-0 and probability-1
 flip. The maximum absolute CPU/WebGPU difference was
-`5.960464477539063e-8`; invalid crop dimensions were rejected. The actual
+`5.960464477539063e-8`; invalid crop dimensions were rejected. A flip before
+an invalid crop does not consume the seed or mutate the image: a later valid
+retry matched a fresh-seed pipeline on both CPU and WebGPU (GPU error `0`).
+The actual
 Rust runtime reports `BrowserWebGpu` and non-CPU device type. An independent
 browser probe reported Apple `metal-3` with a non-fallback adapter; that probe
 is not an attestation that the Rust runtime chose the exact same adapter.
 Native `st-vision` geometry-sequence tests passed 4/4, backend transform tests
-passed 3/3, and the complete WGPU-enabled/no-NN vision suite passed 57/57.
-A fresh 0.4.27 wheel installed into an isolated venv passed
-the Python 12-frame CPU/WGPU parity test from outside the source tree. WASM
+passed 3/3, the complete WGPU-enabled/no-NN vision suite passed 58/58, and
+the CPU-only suite passed 54/54. A fresh 0.4.27 wheel installed into an
+isolated venv passed two Python tests, including 12-frame parity and failed
+application/retry, from outside the source tree. WASM
 target check and release build passed.
 
 The paired browser wall-time sample uses the same 3x128x128 input, resize to
 80x96, seeded flip, and center crop to 64x64. Five warmups precede 20
 alternating-order pairs. Median WASM CPU was about 0.10 ms versus browser
-WebGPU about 0.60 ms, **including upload and readback**. This is a single-host,
+WebGPU about 0.50 ms, **including upload and readback**. This is a single-host,
 single-shape latency result, not a WebGPU speedup or training-throughput claim.
 Raw per-pair timings, outputs, runtime metadata, and hashes are in
 [`browser-report.json`](browser-report.json). The initial browser attempt is
@@ -52,9 +56,9 @@ source tree so the repository's `spiraltorch` shim cannot shadow the wheel.
 module and wheel are kept locally under
 `~/Library/Logs/SpiralTorch/vision-wasm-async-v1/` rather than committed.
 The bound WASM module SHA-256 is
-`f95b1b302dd2cd83d2d9173da4c27475dc98cf55e8064eb3f5406b5b9c521125`;
+`50b4256d0821718130058335b5f915b879a755d9fca1912ff5554159c8408475`;
 the fresh Python wheel SHA-256 is
-`0a6b87cbb8866d9067af06983c9ed62e4ad2bc7d0e67b21914535a8f57d8cda5`.
+`d84325da3968ae5a9e46a9678a95ed92d54d7c187f06b98914d379d7eb144540`.
 
 Scope limit: this public browser API intentionally supports geometry-only
 pipelines. Normalize, ColorJitter, multi-image batches, and direct GPU-resident

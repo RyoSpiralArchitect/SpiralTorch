@@ -35,3 +35,33 @@ class VisionWgpuPipelineTests(unittest.TestCase):
 
         gpu.disable_wgpu()
         self.assertFalse(gpu.has_gpu_dispatcher())
+
+    def test_invalid_crop_does_not_consume_flip_seed(self):
+        cpu = st.TransformPipeline(seed=19)
+        gpu = st.TransformPipeline(seed=19)
+        fresh = st.TransformPipeline(seed=19)
+        for pipeline in (cpu, gpu, fresh):
+            pipeline.add_horizontal_flip(0.5)
+            pipeline.add_center_crop(13, 13)
+
+        try:
+            gpu.enable_wgpu()
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            if "adapter" in message or "not available in this" in message:
+                self.skipTest(str(exc))
+            raise
+
+        bad = st.ImageTensor(3, 12, 14, [0.25] * (3 * 12 * 14))
+        for pipeline in (cpu, gpu):
+            with self.assertRaisesRegex(Exception, "center_crop_size"):
+                pipeline.apply(bad)
+
+        values = [((i * 17 + 3) % 257) / 256 for i in range(3 * 14 * 14)]
+        valid = st.ImageTensor(3, 14, 14, values)
+        expected = fresh.apply(valid)
+        for pipeline in (cpu, gpu):
+            actual = pipeline.apply(valid)
+            self.assertEqual(actual.shape(), expected.shape())
+            for left, right in zip(actual.flatten(), expected.flatten()):
+                self.assertAlmostEqual(left, right, delta=1e-5)

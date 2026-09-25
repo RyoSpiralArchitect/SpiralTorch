@@ -3580,6 +3580,7 @@ impl TransformPipeline {
                 TransformOperation::Resize(_)
                 | TransformOperation::CenterCrop(_)
                 | TransformOperation::RandomHorizontalFlip(_) => {
+                    self.validate_geometry_run(idx, image)?;
                     #[cfg(feature = "wgpu")]
                     {
                         if let Some(dispatcher) = self.dispatcher.clone() {
@@ -3609,6 +3610,30 @@ impl TransformPipeline {
                     self.apply_color_jitter(&op, image)?;
                     idx += 1;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_geometry_run(&self, start_idx: usize, image: &ImageTensor) -> PureResult<()> {
+        let (mut height, mut width) = (image.height(), image.width());
+        for op in self.ops.iter().skip(start_idx) {
+            match op {
+                TransformOperation::Resize(op) => {
+                    height = op.height;
+                    width = op.width;
+                }
+                TransformOperation::CenterCrop(op) => {
+                    if op.height > height || op.width > width {
+                        return Err(TensorError::InvalidValue {
+                            label: "center_crop_size",
+                        });
+                    }
+                    height = op.height;
+                    width = op.width;
+                }
+                TransformOperation::RandomHorizontalFlip(_) => {}
+                _ => break,
             }
         }
         Ok(())
@@ -3794,6 +3819,7 @@ impl TransformPipeline {
         if self.ops.is_empty() {
             return Ok(());
         }
+        self.validate_geometry_run(0, image)?;
         let dispatcher = self
             .dispatcher
             .clone()
@@ -5654,6 +5680,50 @@ mod tests {
             for (&lhs, &rhs) in actual.as_slice().iter().zip(expected.as_slice()) {
                 assert!((lhs - rhs).abs() < 1e-6, "frame={frame}: {lhs} != {rhs}");
             }
+        }
+    }
+
+    #[test]
+    fn invalid_geometry_run_does_not_advance_image_or_rng() {
+        use rand::Rng;
+
+        let make_pipeline = || {
+            let mut pipeline = TransformPipeline::with_seed(17);
+            pipeline
+                .add(TransformOperation::Resize(Resize::new(8, 10).unwrap()))
+                .add(TransformOperation::RandomHorizontalFlip(
+                    RandomHorizontalFlip::new(0.5).unwrap(),
+                ))
+                .add(TransformOperation::CenterCrop(
+                    CenterCrop::new(13, 13).unwrap(),
+                ));
+            pipeline
+        };
+        let original = ImageTensor::new(3, 12, 14, vec![0.25; 3 * 12 * 14]).unwrap();
+        let mut direct = make_pipeline();
+        let expected_draw = direct.rng.clone().gen::<f32>();
+        let mut image = original.clone();
+        assert!(matches!(
+            direct.apply(&mut image),
+            Err(TensorError::InvalidValue {
+                label: "center_crop_size"
+            })
+        ));
+        assert_eq!(image, original);
+        assert_eq!(direct.rng.gen::<f32>(), expected_draw);
+
+        #[cfg(feature = "wgpu")]
+        {
+            let mut sequenced = make_pipeline().with_gpu_dispatcher(TransformDispatcher::cpu());
+            let mut image = original.clone();
+            assert!(matches!(
+                sequenced.apply(&mut image),
+                Err(TensorError::InvalidValue {
+                    label: "center_crop_size"
+                })
+            ));
+            assert_eq!(image, original);
+            assert_eq!(sequenced.rng.gen::<f32>(), expected_draw);
         }
     }
 

@@ -17,7 +17,9 @@ uses the `st-vision` planner and runs adjacent resize, center-crop, and sampled
 horizontal-flip stages with one upload and one **async terminal readback**.
 `createCpu(seed)` is the in-browser Rust CPU reference. The real-Chrome parity
 fixture compares 12 seeded frames, rejects invalid geometry, and records the
-actual Rust runtime adapter. Native Rust and fresh-wheel Python tests cover
+actual Rust runtime adapter. A failed geometry run leaves the image and flip
+seed unchanged on both CPU and GPU, including a subsequent valid retry.
+Native Rust and fresh-wheel Python tests cover
 the same sequence. The bounded result and replay instructions live in
 [`benchmarks/results/2026-09-25-vision-wasm-async/`](../benchmarks/results/2026-09-25-vision-wasm-async/README.md).
 
