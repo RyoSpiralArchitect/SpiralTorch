@@ -37,3 +37,7 @@ copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
 [[example]]
 name = "convnext_image_classification"
 required-features = ["nn"]
+
+[[example]]
+name = "depthwise_conv2d_bench"
+required-features = ["nn", "wgpu"]

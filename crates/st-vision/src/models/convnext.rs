@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use st_nn::io;
-use st_nn::layers::conv::Conv2d;
+use st_nn::layers::conv::{Conv2d, DepthwiseConv2d};
 use st_nn::layers::gelu::Gelu;
 use st_nn::layers::linear::Linear;
 use st_nn::layers::normalization::LayerNorm;
@@ -92,8 +92,7 @@ impl Default for ConvNeXtConfig {
 
 #[derive(Debug)]
 struct ConvNeXtBlock {
-    // Keep the existing checkpoint key; this Conv2d is dense until grouped kernels land.
-    depthwise: Conv2d,
+    depthwise: DepthwiseConv2d,
     norm: LayerNorm,
     mlp1: Linear,
     activation: Gelu,
@@ -110,9 +109,8 @@ impl ConvNeXtBlock {
         curvature: f32,
         epsilon: f32,
     ) -> PureResult<Self> {
-        let depthwise = Conv2d::new(
+        let depthwise = DepthwiseConv2d::new(
             format!("{name}.dw"),
-            channels,
             channels,
             (7, 7),
             (1, 1),

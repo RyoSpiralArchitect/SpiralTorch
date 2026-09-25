@@ -4,8 +4,8 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::execution::{
-    current_matmul_backend, current_prepacked_matmul_backend,
-    current_tensor_util_backend_for_values,
+    current_accelerator_fallback, current_matmul_backend, current_prepacked_matmul_backend,
+    current_tensor_util_backend_for_values, current_tensor_util_route,
 };
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
@@ -36,6 +36,14 @@ fn validate_finite_gradient(label: &'static str, values: &[f32]) -> PureResult<(
         }
     }
     Ok(())
+}
+
+// Host uploads/readback outweigh the kernel for small depthwise workloads.
+const DEPTHWISE_AUTO_WGPU_MIN_WORK: usize = 1_500_000;
+
+fn should_attempt_depthwise_wgpu(backend: TensorUtilBackend, work: usize) -> bool {
+    matches!(backend, TensorUtilBackend::GpuWgpu)
+        || (matches!(backend, TensorUtilBackend::Auto) && work >= DEPTHWISE_AUTO_WGPU_MIN_WORK)
 }
 
 fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
@@ -1039,6 +1047,391 @@ impl Module for Conv2d {
         visitor(&mut self.weight)?;
         visitor(&mut self.bias)?;
         Ok(())
+    }
+}
+
+/// Channel-wise two-dimensional convolution on flattened NCHW tensors.
+#[derive(Debug)]
+pub struct DepthwiseConv2d {
+    weight: Parameter,
+    bias: Parameter,
+    channels: usize,
+    kernel: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+    dilation: (usize, usize),
+    input_hw: (usize, usize),
+}
+
+impl DepthwiseConv2d {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: impl Into<String>,
+        channels: usize,
+        kernel: (usize, usize),
+        stride: (usize, usize),
+        padding: (usize, usize),
+        dilation: (usize, usize),
+        input_hw: (usize, usize),
+    ) -> PureResult<Self> {
+        for value in [
+            channels, kernel.0, kernel.1, stride.0, stride.1, dilation.0, dilation.1, input_hw.0,
+            input_hw.1,
+        ] {
+            validate_positive(value, "depthwise_conv2d_dimension")?;
+        }
+        let span = kernel
+            .0
+            .checked_mul(kernel.1)
+            .ok_or(TensorError::InvalidDimensions {
+                rows: kernel.0,
+                cols: kernel.1,
+            })?;
+        if channels.checked_mul(span).is_none()
+            || channels
+                .checked_mul(input_hw.0)
+                .and_then(|value| value.checked_mul(input_hw.1))
+                .is_none()
+        {
+            return Err(TensorError::InvalidDimensions {
+                rows: channels,
+                cols: span,
+            });
+        }
+        let name = name.into();
+        let mut seed = 0.02f32;
+        let weight = Tensor::from_fn(channels, span, |_channel, _kernel| {
+            let value = seed;
+            seed = (seed * 1.57).rem_euclid(0.15).max(5e-3);
+            value
+        })?;
+        let layer = Self {
+            weight: Parameter::new(format!("{name}::weight"), weight),
+            bias: Parameter::new(format!("{name}::bias"), Tensor::zeros(1, channels)?),
+            channels,
+            kernel,
+            stride,
+            padding,
+            dilation,
+            input_hw,
+        };
+        let (oh, ow) = layer.output_hw()?;
+        if channels
+            .checked_mul(oh)
+            .and_then(|value| value.checked_mul(ow))
+            .is_none()
+        {
+            return Err(TensorError::InvalidDimensions {
+                rows: channels,
+                cols: oh,
+            });
+        }
+        Ok(layer)
+    }
+
+    fn output_hw(&self) -> PureResult<(usize, usize)> {
+        let padded_h = self
+            .padding
+            .0
+            .checked_mul(2)
+            .and_then(|pad| self.input_hw.0.checked_add(pad));
+        let padded_w = self
+            .padding
+            .1
+            .checked_mul(2)
+            .and_then(|pad| self.input_hw.1.checked_add(pad));
+        let effective_h = dilated_extent(self.kernel.0, self.dilation.0)?;
+        let effective_w = dilated_extent(self.kernel.1, self.dilation.1)?;
+        let (Some(padded_h), Some(padded_w)) = (padded_h, padded_w) else {
+            return Err(TensorError::InvalidDimensions {
+                rows: self.input_hw.0,
+                cols: self.input_hw.1,
+            });
+        };
+        if padded_h < effective_h || padded_w < effective_w {
+            return Err(TensorError::InvalidDimensions {
+                rows: padded_h,
+                cols: padded_w,
+            });
+        }
+        Ok((
+            (padded_h - effective_h) / self.stride.0 + 1,
+            (padded_w - effective_w) / self.stride.1 + 1,
+        ))
+    }
+
+    fn validate_input(&self, input: &Tensor) -> PureResult<(usize, usize, usize)> {
+        let (batch, cols) = input.shape();
+        let expected_cols = self.channels * self.input_hw.0 * self.input_hw.1;
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (batch, cols),
+                right: (batch, expected_cols),
+            });
+        }
+        let (oh, ow) = self.output_hw()?;
+        Ok((batch, oh, ow))
+    }
+
+    fn input_coordinate(&self, output: (usize, usize), kernel: (usize, usize)) -> Option<usize> {
+        let row = output.0 * self.stride.0 + kernel.0 * self.dilation.0;
+        let col = output.1 * self.stride.1 + kernel.1 * self.dilation.1;
+        let row = row.checked_sub(self.padding.0)?;
+        let col = col.checked_sub(self.padding.1)?;
+        if row < self.input_hw.0 && col < self.input_hw.1 {
+            Some(row * self.input_hw.1 + col)
+        } else {
+            None
+        }
+    }
+
+    fn emit_meta(
+        &self,
+        op_name: &'static str,
+        batch: usize,
+        output_hw: (usize, usize),
+        backend: &'static str,
+        requested_backend: &'static str,
+        fallback: Option<&str>,
+    ) {
+        emit_tensor_op(
+            op_name,
+            &[batch, self.channels, self.input_hw.0, self.input_hw.1],
+            &[batch, self.channels, output_hw.0, output_hw.1],
+        );
+        emit_tensor_op_meta(op_name, || {
+            let mut data = serde_json::json!({
+                "backend": backend,
+                "requested_backend": requested_backend,
+                "kernel": "depthwise_conv2d",
+                "batch": batch,
+                "channels": self.channels,
+                "input_height": self.input_hw.0,
+                "input_width": self.input_hw.1,
+                "output_height": output_hw.0,
+                "output_width": output_hw.1,
+                "kernel_height": self.kernel.0,
+                "kernel_width": self.kernel.1,
+                "weight_values": self.channels * self.kernel.0 * self.kernel.1,
+                "empty": batch == 0,
+            });
+            if let Some(message) = fallback {
+                data["fallback"] = serde_json::json!({"from": "wgpu", "message": message});
+            }
+            data
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_wgpu(
+        &self,
+        input: &Tensor,
+        batch: usize,
+        oh: usize,
+        ow: usize,
+    ) -> Result<Tensor, String> {
+        let pad_h = i32::try_from(self.padding.0)
+            .map_err(|_| "depthwise padding exceeds shader index range".to_string())?;
+        let pad_w = i32::try_from(self.padding.1)
+            .map_err(|_| "depthwise padding exceeds shader index range".to_string())?;
+        let data = wgpu_dense::depthwise_conv2d_forward(
+            input.data(),
+            self.weight.value().data(),
+            self.bias.value().data(),
+            batch,
+            self.channels,
+            self.input_hw.0,
+            self.input_hw.1,
+            self.kernel.0,
+            self.kernel.1,
+            self.stride.0,
+            self.stride.1,
+            pad_h,
+            pad_w,
+            self.dilation.0,
+            self.dilation.1,
+            oh,
+            ow,
+        )?;
+        Tensor::from_vec(batch, self.channels * oh * ow, data).map_err(|err| err.to_string())
+    }
+}
+
+impl Module for DepthwiseConv2d {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, oh, ow) = self.validate_input(input)?;
+        let output_values = batch
+            .saturating_mul(self.channels)
+            .saturating_mul(oh)
+            .saturating_mul(ow);
+        let work = output_values
+            .saturating_mul(self.kernel.0)
+            .saturating_mul(self.kernel.1);
+        let route = current_tensor_util_route(output_values);
+        let requested_backend = route.requested_backend_label();
+        let attempt_wgpu = batch > 0 && should_attempt_depthwise_wgpu(route.selected_backend, work);
+        let mut fallback = None;
+        if attempt_wgpu {
+            #[cfg(feature = "wgpu")]
+            let result = self.forward_wgpu(input, batch, oh, ow);
+            #[cfg(not(feature = "wgpu"))]
+            let result: Result<Tensor, String> = Err("wgpu feature is not enabled".into());
+            match result {
+                Ok(output) => {
+                    self.emit_meta(
+                        "depthwise_conv2d_forward",
+                        batch,
+                        (oh, ow),
+                        "wgpu_dense",
+                        requested_backend,
+                        None,
+                    );
+                    return Ok(output);
+                }
+                Err(message) if current_accelerator_fallback().allows_fallback() => {
+                    fallback = Some(message);
+                }
+                Err(message) => {
+                    return Err(TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message,
+                    });
+                }
+            }
+        }
+        let input_spatial = self.input_hw.0 * self.input_hw.1;
+        let output_spatial = oh * ow;
+        let span = self.kernel.0 * self.kernel.1;
+        let mut output = Tensor::zeros(batch, self.channels * output_spatial)?;
+        let input_data = input.data();
+        let weight_data = self.weight.value().data();
+        let bias_data = self.bias.value().data();
+        let output_data = output.data_mut();
+        for b in 0..batch {
+            for channel in 0..self.channels {
+                for y in 0..oh {
+                    for x in 0..ow {
+                        let mut value = bias_data[channel];
+                        for kh in 0..self.kernel.0 {
+                            for kw in 0..self.kernel.1 {
+                                if let Some(position) = self.input_coordinate((y, x), (kh, kw)) {
+                                    let input_idx =
+                                        (b * self.channels + channel) * input_spatial + position;
+                                    let weight_idx = channel * span + kh * self.kernel.1 + kw;
+                                    value += input_data[input_idx] * weight_data[weight_idx];
+                                }
+                            }
+                        }
+                        if !value.is_finite() {
+                            return Err(TensorError::NonFiniteValue {
+                                label: "depthwise_conv2d_output",
+                                value,
+                            });
+                        }
+                        let output_idx =
+                            (b * self.channels + channel) * output_spatial + y * ow + x;
+                        output_data[output_idx] = value;
+                    }
+                }
+            }
+        }
+        self.emit_meta(
+            "depthwise_conv2d_forward",
+            batch,
+            (oh, ow),
+            "cpu",
+            requested_backend,
+            fallback.as_deref(),
+        );
+        Ok(output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (batch, oh, ow) = self.validate_input(input)?;
+        let input_spatial = self.input_hw.0 * self.input_hw.1;
+        let output_spatial = oh * ow;
+        let expected = (batch, self.channels * output_spatial);
+        if grad_output.shape() != expected {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: expected,
+            });
+        }
+        if batch == 0 {
+            let grad_input = Tensor::zeros(0, self.channels * input_spatial)?;
+            self.emit_meta(
+                "depthwise_conv2d_backward",
+                batch,
+                (oh, ow),
+                "cpu",
+                "cpu",
+                None,
+            );
+            return Ok(grad_input);
+        }
+        let span = self.kernel.0 * self.kernel.1;
+        let mut grad_weight = vec![0.0f32; self.channels * span];
+        let mut grad_bias = vec![0.0f32; self.channels];
+        let mut grad_input = Tensor::zeros(batch, self.channels * input_spatial)?;
+        let input_data = input.data();
+        let seed_data = grad_output.data();
+        let weight_data = self.weight.value().data();
+        let grad_input_data = grad_input.data_mut();
+        for b in 0..batch {
+            for channel in 0..self.channels {
+                for y in 0..oh {
+                    for x in 0..ow {
+                        let output_idx =
+                            (b * self.channels + channel) * output_spatial + y * ow + x;
+                        let seed = seed_data[output_idx];
+                        grad_bias[channel] += seed;
+                        for kh in 0..self.kernel.0 {
+                            for kw in 0..self.kernel.1 {
+                                if let Some(position) = self.input_coordinate((y, x), (kh, kw)) {
+                                    let input_idx =
+                                        (b * self.channels + channel) * input_spatial + position;
+                                    let weight_idx = channel * span + kh * self.kernel.1 + kw;
+                                    grad_weight[weight_idx] += seed * input_data[input_idx];
+                                    grad_input_data[input_idx] += seed * weight_data[weight_idx];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        validate_finite_gradient("depthwise_conv2d_weight_gradient", &grad_weight)?;
+        validate_finite_gradient("depthwise_conv2d_bias_gradient", &grad_bias)?;
+        validate_finite_gradient("depthwise_conv2d_input_gradient", grad_input.data())?;
+        self.weight
+            .accumulate_euclidean(&Tensor::from_vec(self.channels, span, grad_weight)?)?;
+        self.bias
+            .accumulate_euclidean(&Tensor::from_vec(1, self.channels, grad_bias)?)?;
+        self.emit_meta(
+            "depthwise_conv2d_backward",
+            batch,
+            (oh, ow),
+            "cpu",
+            "cpu",
+            None,
+        );
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.weight)?;
+        visitor(&self.bias)
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.weight)?;
+        visitor(&mut self.bias)
     }
 }
 
@@ -3405,6 +3798,270 @@ mod tests {
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::test_global_state_lock()
+    }
+
+    #[test]
+    fn depthwise_auto_route_avoids_measured_small_workload() {
+        assert!(!should_attempt_depthwise_wgpu(
+            TensorUtilBackend::Auto,
+            8 * 48 * 48 * 49
+        ));
+        assert!(should_attempt_depthwise_wgpu(
+            TensorUtilBackend::Auto,
+            8 * 64 * 64 * 49
+        ));
+        assert!(should_attempt_depthwise_wgpu(TensorUtilBackend::GpuWgpu, 1));
+        assert!(!should_attempt_depthwise_wgpu(
+            TensorUtilBackend::Cpu,
+            usize::MAX
+        ));
+    }
+
+    #[test]
+    fn depthwise_conv2d_keeps_channels_independent_and_backpropagates() {
+        let mut layer =
+            DepthwiseConv2d::new("dw", 2, (2, 2), (1, 1), (0, 0), (1, 1), (2, 2)).unwrap();
+        assert_eq!(layer.weight.value().shape(), (2, 4));
+        layer
+            .weight
+            .value_mut()
+            .data_mut()
+            .copy_from_slice(&[1.0; 8]);
+        layer.weight.value_mut().data_mut()[4..].fill(2.0);
+        let input =
+            Tensor::from_vec(1, 8, vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0]).unwrap();
+        assert_eq!(layer.forward(&input).unwrap().data(), &[10.0, 200.0]);
+
+        let seed = Tensor::from_vec(1, 2, vec![1.0, 1.0]).unwrap();
+        let input_gradient = layer.backward(&input, &seed).unwrap();
+        assert_eq!(
+            input_gradient.data(),
+            &[1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0]
+        );
+        assert_eq!(
+            layer.weight.gradient().unwrap().data(),
+            &[1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0]
+        );
+        assert_eq!(layer.bias.gradient().unwrap().data(), &[1.0, 1.0]);
+    }
+
+    #[test]
+    fn depthwise_conv2d_rejects_nonfinite_gradients_before_accumulation() {
+        let mut layer =
+            DepthwiseConv2d::new("dw", 2, (1, 1), (1, 1), (0, 0), (1, 1), (1, 1)).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![1.0e30; 2]).unwrap();
+        let seed = Tensor::from_vec(1, 2, vec![1.0e30; 2]).unwrap();
+        assert!(matches!(
+            layer.backward(&input, &seed),
+            Err(TensorError::NonFiniteValue { .. })
+        ));
+        assert!(layer.weight.gradient().is_none());
+        assert!(layer.bias.gradient().is_none());
+    }
+
+    #[test]
+    fn depthwise_conv2d_empty_batch_has_no_parameter_update() {
+        let mut layer =
+            DepthwiseConv2d::new("dw", 2, (1, 1), (1, 1), (0, 0), (1, 1), (1, 1)).unwrap();
+        let input = Tensor::zeros(0, 2).unwrap();
+        let seed = Tensor::zeros(0, 2).unwrap();
+        assert_eq!(layer.backward(&input, &seed).unwrap().shape(), (0, 2));
+        assert!(layer.weight.gradient().is_none());
+        assert!(layer.bias.gradient().is_none());
+    }
+
+    #[test]
+    fn depthwise_conv2d_reports_cpu_forward_and_backward() {
+        use crate::execution::{push_backend_policy, BackendPolicy};
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let _lock = observer_lock();
+        let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let mut layer =
+            DepthwiseConv2d::new("dw", 1, (1, 1), (1, 1), (0, 0), (1, 1), (2, 2)).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![1.0; 4]).unwrap();
+        let output = layer.forward(&input).unwrap();
+        layer.backward(&input, &output).unwrap();
+        st_tensor::set_thread_meta_observer(previous);
+        let events = events.lock().unwrap();
+        for name in ["depthwise_conv2d_forward", "depthwise_conv2d_backward"] {
+            assert!(events.iter().any(|(op, data)| {
+                *op == name && data["backend"] == "cpu" && data["kernel"] == "depthwise_conv2d"
+            }));
+        }
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn depthwise_conv2d_auto_without_gpu_records_fallback() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let layer =
+            DepthwiseConv2d::new("dw", 8, (7, 7), (1, 1), (3, 3), (1, 1), (64, 64)).unwrap();
+        let input = Tensor::from_vec(1, 8 * 64 * 64, vec![1.0; 8 * 64 * 64]).unwrap();
+        assert_eq!(layer.forward(&input).unwrap().shape(), (1, 8 * 64 * 64));
+        st_tensor::set_thread_meta_observer(previous);
+        assert!(events.lock().unwrap().iter().any(|(op, data)| {
+            *op == "depthwise_conv2d_forward"
+                && data["backend"] == "cpu"
+                && data["fallback"]["message"] == "wgpu feature is not enabled"
+        }));
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn depthwise_conv2d_auto_without_gpu_honors_strict_fallback() {
+        use crate::execution::{
+            push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+        };
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1),
+        );
+        assert_eq!(policy.tensor_util_backend_label(), "auto");
+        let _guard = push_backend_policy(policy);
+        let layer =
+            DepthwiseConv2d::new("dw", 8, (7, 7), (1, 1), (3, 3), (1, 1), (64, 64)).unwrap();
+        let input = Tensor::from_vec(1, 8 * 64 * 64, vec![1.0; 8 * 64 * 64]).unwrap();
+        assert!(matches!(
+            layer.forward(&input),
+            Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                ..
+            })
+        ));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn depthwise_conv2d_respects_output_value_threshold() {
+        use crate::execution::{
+            push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+        };
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let _lock = observer_lock();
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 19),
+        );
+        let _guard = push_backend_policy(policy);
+        let layer = DepthwiseConv2d::new("dw", 2, (3, 3), (1, 1), (1, 1), (1, 1), (3, 3)).unwrap();
+        let input = Tensor::from_vec(1, 18, vec![1.0; 18]).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        layer.forward(&input).unwrap();
+        st_tensor::set_thread_meta_observer(previous);
+        assert!(events.lock().unwrap().iter().any(|(op, data)| {
+            *op == "depthwise_conv2d_forward"
+                && data["backend"] == "cpu"
+                && data["requested_backend"] == "wgpu"
+        }));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn depthwise_conv2d_forced_wgpu_matches_cpu_and_reports_actual_backend() {
+        use crate::execution::{
+            push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+        };
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let available = wgpu_dense::is_available();
+        if std::env::var_os("SPIRALTORCH_REQUIRE_WGPU_DEPTHWISE").is_some() {
+            assert!(
+                available,
+                "depthwise WGPU runtime is required for this test"
+            );
+        }
+        if !available {
+            return;
+        }
+        let _lock = observer_lock();
+        let layer = DepthwiseConv2d::new("dw", 2, (3, 3), (1, 1), (1, 1), (1, 1), (3, 3)).unwrap();
+        let input = Tensor::from_fn(2, 18, |row, col| {
+            ((row * 17 + col * 13) % 29) as f32 * 0.03 - 0.25
+        })
+        .unwrap();
+        let cpu = {
+            let _guard = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+            layer.forward(&input).unwrap()
+        };
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let gpu = {
+            let policy = BackendPolicy::from_device_caps_with_config(
+                DeviceCaps::wgpu(32, true, 256),
+                ExecutionConfig::new(AcceleratorFallback::Forbid, 1),
+            );
+            let _guard = push_backend_policy(policy);
+            layer.forward(&input).unwrap()
+        };
+        st_tensor::set_thread_meta_observer(previous);
+        for (index, (&expected, &actual)) in cpu.data().iter().zip(gpu.data()).enumerate() {
+            assert!(
+                (expected - actual).abs() <= 1e-5,
+                "depthwise output {index}: cpu={expected}, wgpu={actual}"
+            );
+        }
+        assert!(events.lock().unwrap().iter().any(|(name, data)| {
+            *name == "depthwise_conv2d_forward" && data["backend"] == "wgpu_dense"
+        }));
+
+        let asymmetric =
+            DepthwiseConv2d::new("asymmetric", 2, (2, 3), (2, 1), (1, 2), (2, 1), (5, 4)).unwrap();
+        let asymmetric_input = Tensor::from_fn(2, 2 * 5 * 4, |row, col| {
+            ((row * 11 + col * 7) % 19) as f32 * 0.07 - 0.3
+        })
+        .unwrap();
+        let asymmetric_cpu = {
+            let _guard = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+            asymmetric.forward(&asymmetric_input).unwrap()
+        };
+        let asymmetric_gpu = {
+            let policy = BackendPolicy::from_device_caps_with_config(
+                DeviceCaps::wgpu(32, true, 256),
+                ExecutionConfig::new(AcceleratorFallback::Forbid, 1),
+            );
+            let _guard = push_backend_policy(policy);
+            asymmetric.forward(&asymmetric_input).unwrap()
+        };
+        assert_eq!(asymmetric_cpu.shape(), asymmetric_gpu.shape());
+        for (&expected, &actual) in asymmetric_cpu.data().iter().zip(asymmetric_gpu.data()) {
+            assert!(
+                (expected - actual).abs() <= 1e-5,
+                "cpu={expected}, wgpu={actual}"
+            );
+        }
     }
 
     #[test]

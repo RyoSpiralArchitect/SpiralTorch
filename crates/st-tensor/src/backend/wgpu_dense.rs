@@ -42,6 +42,7 @@ mod indexing;
 pub use indexing::{gather_rows, scatter_add_rows};
 
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
+const DEPTHWISE_CONV2D_WGSL: &str = include_str!("../wgpu_shaders/depthwise_conv2d.wgsl");
 const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_grad_input_col2im.wgsl");
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -741,6 +742,7 @@ struct GpuContext {
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+    depthwise_conv2d_pipeline: OnceLock<Arc<ComputePipeline>>,
     fused_grad_input_layout: BindGroupLayout,
     fused_grad_input_pipeline_layout: PipelineLayout,
     fused_grad_input_pipeline: OnceLock<Arc<ComputePipeline>>,
@@ -1480,6 +1482,7 @@ impl GpuContext {
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
+            depthwise_conv2d_pipeline: OnceLock::new(),
             fused_grad_input_layout,
             fused_grad_input_pipeline_layout,
             fused_grad_input_pipeline: OnceLock::new(),
@@ -2763,6 +2766,30 @@ impl GpuContext {
         Ok(pipeline)
     }
 
+    fn depthwise_conv2d_pipeline(&self) -> Result<Arc<ComputePipeline>, String> {
+        if let Some(pipeline) = self.depthwise_conv2d_pipeline.get() {
+            return Ok(pipeline.clone());
+        }
+        let shader = create_wgsl_module(
+            self.device(),
+            "st.tensor.wgpu_dense.depthwise_conv2d",
+            DEPTHWISE_CONV2D_WGSL,
+        )
+        .map_err(|err| err.to_string())?;
+        let pipeline = Arc::new(
+            create_compute_pipeline(
+                self.device(),
+                "st.tensor.wgpu_dense.depthwise_conv2d.pipeline",
+                Some(&self.fused_conv_pipeline_layout),
+                &shader,
+                "main",
+            )
+            .map_err(|err| err.to_string())?,
+        );
+        let _ = self.depthwise_conv2d_pipeline.set(pipeline.clone());
+        Ok(pipeline)
+    }
+
     fn fused_conv_bind_group(
         &self,
         input: &Buffer,
@@ -3276,6 +3303,65 @@ mod tests {
     fn fused_conv_shader_wgsl_is_valid() {
         let source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, TileConfig::new(8, 8, 8));
         assert_parses("fused conv", &source);
+    }
+
+    #[test]
+    fn depthwise_conv2d_shader_wgsl_is_valid() {
+        assert_parses("depthwise conv2d", DEPTHWISE_CONV2D_WGSL);
+    }
+
+    #[test]
+    fn depthwise_conv2d_gpu_keeps_channels_independent() {
+        if !is_available() {
+            return;
+        }
+        let input = [1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0];
+        let weights = [1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let output = depthwise_conv2d_forward(
+            &input,
+            &weights,
+            &[0.5, -0.5],
+            1,
+            2,
+            2,
+            2,
+            2,
+            2,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        assert_eq!(output, [10.5, 199.5]);
+    }
+
+    #[test]
+    fn depthwise_conv2d_rejects_mismatched_output_geometry() {
+        let result = depthwise_conv2d_forward(
+            &[1.0; 4],
+            &[1.0],
+            &[0.0],
+            1,
+            1,
+            2,
+            2,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            2,
+        );
+        assert!(result.unwrap_err().contains("output geometry"));
     }
 
     #[test]
@@ -9713,6 +9799,184 @@ pub fn supports_fused_attention_workload(
         && z_bias_fits
         && attn_bias_fits
         && ctx.fused_attention_kernel().is_some()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn depthwise_conv2d_forward(
+    input: &[f32],
+    weights: &[f32],
+    bias: &[f32],
+    batch: usize,
+    channels: usize,
+    input_h: usize,
+    input_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: i32,
+    pad_w: i32,
+    dilation_h: usize,
+    dilation_w: usize,
+    out_h: usize,
+    out_w: usize,
+) -> Result<Vec<f32>, String> {
+    if [
+        batch, channels, input_h, input_w, kernel_h, kernel_w, stride_h, stride_w, dilation_h,
+        dilation_w, out_h, out_w,
+    ]
+    .contains(&0)
+        || pad_h < 0
+        || pad_w < 0
+    {
+        return Err("depthwise convolution dimensions must be valid".into());
+    }
+    let input_volume = batch
+        .checked_mul(channels)
+        .and_then(|value| value.checked_mul(input_h))
+        .and_then(|value| value.checked_mul(input_w))
+        .ok_or_else(|| "depthwise input volume overflow".to_string())?;
+    let span = kernel_h
+        .checked_mul(kernel_w)
+        .ok_or_else(|| "depthwise kernel span overflow".to_string())?;
+    let weight_volume = channels
+        .checked_mul(span)
+        .ok_or_else(|| "depthwise weight volume overflow".to_string())?;
+    let output_volume = batch
+        .checked_mul(channels)
+        .and_then(|value| value.checked_mul(out_h))
+        .and_then(|value| value.checked_mul(out_w))
+        .ok_or_else(|| "depthwise output volume overflow".to_string())?;
+    if input.len() != input_volume || weights.len() != weight_volume || bias.len() != channels {
+        return Err("depthwise convolution buffer length mismatch".into());
+    }
+    let expected_extent =
+        |input: usize, kernel: usize, stride: usize, padding: usize, dilation: usize| {
+            let padded = input.checked_add(padding.checked_mul(2)?)?;
+            let effective = kernel
+                .checked_sub(1)?
+                .checked_mul(dilation)?
+                .checked_add(1)?;
+            (padded >= effective).then(|| (padded - effective) / stride + 1)
+        };
+    if expected_extent(input_h, kernel_h, stride_h, pad_h as usize, dilation_h) != Some(out_h)
+        || expected_extent(input_w, kernel_w, stride_w, pad_w as usize, dilation_w) != Some(out_w)
+    {
+        return Err("depthwise convolution output geometry mismatch".into());
+    }
+    let dimensions = [
+        batch,
+        channels,
+        input_volume,
+        weight_volume,
+        input_h,
+        input_w,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        dilation_h,
+        dilation_w,
+        out_h,
+        out_w,
+        span,
+        output_volume,
+    ];
+    if dimensions
+        .iter()
+        .any(|&value| u32::try_from(value).is_err())
+        || input_h > i32::MAX as usize
+        || input_w > i32::MAX as usize
+        || input_h.saturating_add(2 * pad_h as usize) > i32::MAX as usize
+        || input_w.saturating_add(2 * pad_w as usize) > i32::MAX as usize
+    {
+        return Err("depthwise convolution exceeds shader index range".into());
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Err("depthwise host Tensor WGPU requires asynchronous browser readback".into());
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let groups = output_volume.div_ceil(64);
+    if groups > device.limits().max_compute_workgroups_per_dimension as usize
+        || !storage_values_fit(device, input_volume)
+        || !storage_values_fit(device, weight_volume)
+        || !storage_values_fit(device, channels)
+        || !storage_values_fit(device, output_volume)
+    {
+        return Err("depthwise convolution exceeds device limits".into());
+    }
+
+    let input_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.depthwise.input"),
+        contents: bytemuck::cast_slice(input),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let weight_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.depthwise.weight"),
+        contents: bytemuck::cast_slice(weights),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.depthwise.bias"),
+        contents: bytemuck::cast_slice(bias),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.depthwise.output",
+        output_volume,
+    );
+    let params = ConvGemmParams {
+        batch: batch as u32,
+        in_channels: channels as u32,
+        input_h: input_h as u32,
+        input_w: input_w as u32,
+        kernel_h: kernel_h as u32,
+        kernel_w: kernel_w as u32,
+        stride_h: stride_h as u32,
+        stride_w: stride_w as u32,
+        pad_h,
+        pad_w,
+        dilation_h: dilation_h as u32,
+        dilation_w: dilation_w as u32,
+        out_h: out_h as u32,
+        out_w: out_w as u32,
+        span: span as u32,
+        out_channels: channels as u32,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.depthwise.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group =
+        ctx.fused_conv_bind_group(&input_buf, &weight_buf, &output_buf, &bias_buf, &params_buf);
+    let pipeline = ctx.depthwise_conv2d_pipeline()?;
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.depthwise.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.depthwise.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(groups as u32, 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+    let output = readback_f32(device, queue, &output_buf, output_volume)?;
+    if output.iter().any(|value| !value.is_finite()) {
+        return Err("depthwise convolution produced a non-finite output".into());
+    }
+    Ok(output)
 }
 
 #[allow(clippy::too_many_arguments)]
