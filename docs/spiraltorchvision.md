@@ -23,7 +23,7 @@ SpiralTorchVision extends SpiralTorch's native Z-space capabilities while stayin
 - **Video stream projection**: Pipe temporally ordered volumes through `VideoStreamProjector` to mix diffusion, super-resolution, generative resonance, and temporal smoothing while tracking previous feedback.
 - **Long-term integrations**: Leverage TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualisation tools, and SpiralTorch-specific model heads.
 - **Long-term integrations**: Leveraging TorchVision datasets/transforms as inputs while adding Z-space-native losses, visualization tools, and SpiralTorch-specific model heads.
-- **Modular vision backbones**: `st_vision::models` ships ergonomic ResNet, ViT, and ConvNeXt backbones built on the `st-nn` module trait. They expose configuration structs, state-dict interop, and forward passes tuned for SpiralTorch tensors.
+- **Modular vision backbones**: `st_vision::models` ships ResNet, ViT, and ConvNeXt-style backbones built on the `st-nn` module trait. They expose configuration structs and state-dict interop; ResNet and ConvNeXt-style backbones also support backward passes.
 
 ### Native WGPU preprocessing
 
@@ -128,7 +128,14 @@ let mut wide_cifar = ResNetConfig::from_depth(56)?;
 wide_cifar.stage_channels = vec![32, 64, 128];
 ```
 
-The `ViTBackbone` exports `load_weights_json`/`load_weights_bincode` helpers, accepts patch/grid tweaks, and emits CLS-token embeddings by default. `ConvNeXtBackbone` mirrors ConvNeXt-T style stage depths, returning flattened feature maps ready for detection heads or Z-space projection.
+The `ViTBackbone` exports `load_weights_json`/`load_weights_bincode` helpers, accepts patch/grid tweaks, and emits CLS-token embeddings by default. Its backward pass is not yet implemented. `ConvNeXtBackbone` mirrors ConvNeXt-T style stage depths and returns flattened feature maps. Its block, stage, and stem backward passes now support a trainable Rust classifier:
+
+```bash
+cargo run -p st-vision --example convnext_image_classification
+cargo run -p st-vision --example convnext_image_classification --features wgpu
+```
+
+The example trains a two-class, two-image synthetic task with cross-entropy loss and an `st-nn` linear head. The backward test checks the input VJP against finite differences and checks parameter gradients against the existing per-layer reduction rules, including a stage downsample; the training test also verifies that backbone weights change and survive a save/reload round trip. `Conv2d` and `LayerNorm` currently average parameter gradients across their input rows while `Linear` sums them. This means a mean-reduced loss can further shrink some updates as batch or token count grows; training rates and mixed-size batches need a separate, consistent gradient-reduction contract before a robustness claim. The `wgpu` feature now propagates to `st-nn`, but this example uses host `Tensor` values: `Conv2d` may dispatch some operations to WGPU and read them back, while small or unsupported operations can stay on CPU. It is not a GPU-resident image-training graph or a strict CPU-versus-GPU benchmark. The current spatial convolution inside each ConvNeXt-style block is also a dense `Conv2d`, not true channel-wise depthwise convolution. Architecture parity, resident training, and real-dataset quality remain open.
 
 Need a CIFAR-style network? `ResNetConfig::resnet56_cifar(true)` wires a 56-layer backbone with SpiralTorch's learnable skip scalers and a default **slip schedule** that eases each residual bridge in before letting it run at full strength. If you opt out of the learnable gates, the helper leaves skip slip disabled so the baseline topology stays untouched. Override the schedule to taste by swapping in your own `SkipSlipSchedule`:
 

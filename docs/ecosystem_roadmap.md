@@ -53,6 +53,20 @@ Normalize and ColorJitter are not in the browser GPU geometry interface and
 must not silently fall back. Real image-model training, mixed-size batches,
 and matched cross-framework comparisons remain open gates.
 
+The next Rust-only model slice makes the ConvNeXt-style backbone trainable:
+block residuals, stage downsampling, final normalization, and the stem now
+propagate gradients into their parameters. A two-image classification example
+exercises the full backbone and head; finite differences check input gradients
+and document the existing layer-specific parameter-gradient reductions through
+a downsampling stage. `st-vision/wgpu` now enables `st-nn/wgpu` when
+the optional NN dependency is present. This does not yet close the real-image
+training gate: the current block uses a dense spatial convolution rather than
+true depthwise convolution, and host `Tensor` training can dispatch and read
+back individual WGPU operations. Next gates are architecture-correct
+depthwise convolution, a consistent parameter-gradient reduction contract
+across `st-nn` layers and loss reductions, resident model training, and matched
+real-dataset accuracy/throughput with explicit backend receipts.
+
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.
 - **Concept glossaries.** Promote the existing conceptual notes in `docs/` (e.g. _Quantum Reality Acceleration_) into a structured glossary. Call out how each concept maps onto concrete crates such as `st-core`, `st-tensor`, or `st-kdsl`.

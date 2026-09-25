@@ -8,7 +8,7 @@ license = "AGPL-3.0-or-later"
 
 [features]
 default = ["nn"]
-wgpu = ["dep:st-backend-wgpu", "st-tensor/wgpu"]
+wgpu = ["dep:st-backend-wgpu", "st-tensor/wgpu", "st-nn?/wgpu"]
 nerf = ["nn"]
 nn = ["dep:st-nn"]
 
@@ -33,3 +33,7 @@ tempfile = "3"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
+
+[[example]]
+name = "convnext_image_classification"
+required-features = ["nn"]

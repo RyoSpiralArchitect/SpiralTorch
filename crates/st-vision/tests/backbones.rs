@@ -6,6 +6,8 @@
 #![cfg(feature = "nn")]
 
 use st_nn::io;
+use st_nn::layers::linear::Linear;
+use st_nn::loss::{CrossEntropyWithLogits, Loss};
 use st_nn::module::{Module, Parameter};
 use st_nn::PureResult;
 use st_tensor::Tensor;
@@ -431,4 +433,195 @@ fn convnext_stage_shapes_are_consistent() {
     let output = convnext.forward(&input).unwrap();
     let (channels, hw) = convnext.output_shape();
     assert_eq!(output.shape(), (1, channels * hw.0 * hw.1));
+}
+
+#[test]
+fn convnext_rejects_empty_stages() {
+    let config = ConvNeXtConfig {
+        stage_dims: vec![],
+        stage_depths: vec![],
+        ..Default::default()
+    };
+    assert!(ConvNeXtBackbone::new(config).is_err());
+}
+
+#[test]
+fn convnext_input_gradient_matches_finite_difference_through_downsample() {
+    let config = ConvNeXtConfig {
+        input_channels: 1,
+        input_hw: (8, 8),
+        stage_dims: vec![2, 4],
+        stage_depths: vec![1, 1],
+        patch_size: (2, 2),
+        ..Default::default()
+    };
+    let mut model = ConvNeXtBackbone::new(config).unwrap();
+    let input = Tensor::random_normal(2, 64, 0.0, 0.4, Some(77)).unwrap();
+    let output = model.forward(&input).unwrap();
+    let grad_output = Tensor::random_normal(2, output.shape().1, 0.0, 0.2, Some(79)).unwrap();
+    let analytical = model.backward(&input, &grad_output).unwrap();
+    assert_eq!(analytical.shape(), input.shape());
+
+    let epsilon = 1.0e-3;
+    for index in [0, 9, 27, 45, 63, 64, 89, 127] {
+        let mut plus = input.clone();
+        plus.data_mut()[index] += epsilon;
+        let mut minus = input.clone();
+        minus.data_mut()[index] -= epsilon;
+        let plus_out = model.forward(&plus).unwrap();
+        let minus_out = model.forward(&minus).unwrap();
+        let numerical = plus_out
+            .data()
+            .iter()
+            .zip(minus_out.data())
+            .zip(grad_output.data())
+            .map(|((&hi, &lo), &grad)| (hi - lo) * grad)
+            .sum::<f32>()
+            / (2.0 * epsilon);
+        let actual = analytical.data()[index];
+        let tolerance = 0.01 + 0.05 * numerical.abs();
+        assert!(
+            (actual - numerical).abs() < tolerance,
+            "input gradient {index}: analytical={actual}, numerical={numerical}"
+        );
+    }
+
+    // Existing st-nn layers use different parameter-gradient reductions.
+    for (name, index, reduction) in [
+        ("convnext.stem::weight", 0, 2.0),
+        ("convnext.stage0.block0.dw::weight", 24, 2.0),
+        ("convnext.stage0.block0.ln_gamma", 0, 32.0),
+        ("convnext.stage0.block0.fc1::weight", 0, 1.0),
+        ("convnext.stage0.downsample::weight", 0, 2.0),
+        ("convnext.final_norm_gamma", 0, 2.0),
+    ] {
+        let mut analytical_parameter = None;
+        model
+            .visit_parameters(&mut |parameter| {
+                if parameter.name() == name {
+                    analytical_parameter = Some(parameter.gradient().unwrap().data()[index]);
+                }
+                Ok(())
+            })
+            .unwrap();
+        let original = model.state_dict().unwrap()[name].data()[index];
+        let mut objective = |value| {
+            model
+                .visit_parameters_mut(&mut |parameter| {
+                    if parameter.name() == name {
+                        parameter.value_mut().data_mut()[index] = value;
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            model
+                .forward(&input)
+                .unwrap()
+                .data()
+                .iter()
+                .zip(grad_output.data())
+                .map(|(&output, &grad)| output * grad)
+                .sum::<f32>()
+        };
+        let plus = objective(original + epsilon);
+        let minus = objective(original - epsilon);
+        objective(original);
+        let numerical = (plus - minus) / (2.0 * epsilon * reduction);
+        let actual = analytical_parameter.unwrap();
+        let tolerance = 0.01 + 0.05 * numerical.abs();
+        assert!(
+            (actual - numerical).abs() < tolerance,
+            "parameter {name}[{index}]: analytical={actual}, numerical={numerical}"
+        );
+    }
+}
+
+#[test]
+fn convnext_classifier_learns_from_image_batch() {
+    let config = ConvNeXtConfig {
+        input_channels: 1,
+        input_hw: (8, 8),
+        stage_dims: vec![2, 4],
+        stage_depths: vec![1, 1],
+        patch_size: (2, 2),
+        ..Default::default()
+    };
+    let mut backbone = ConvNeXtBackbone::new(config.clone()).unwrap();
+    let (channels, hw) = backbone.output_shape();
+    let mut head = Linear::new("vision.classifier", channels * hw.0 * hw.1, 2).unwrap();
+    let images = Tensor::from_fn(2, 64, |sample, pixel| {
+        let row = pixel / 8;
+        let col = pixel % 8;
+        if (sample == 0 && col < 4) || (sample == 1 && row < 4) {
+            1.0
+        } else {
+            0.0
+        }
+    })
+    .unwrap();
+    let targets = Tensor::from_vec(2, 1, vec![0.0, 1.0]).unwrap();
+    let loss = |prediction: &Tensor| {
+        CrossEntropyWithLogits::default()
+            .forward(prediction, &targets)
+            .unwrap()
+            .data()[0]
+    };
+    let initial = loss(&head.forward(&backbone.forward(&images).unwrap()).unwrap());
+    let initial_state = backbone.state_dict().unwrap();
+
+    for _ in 0..20 {
+        let features = backbone.forward(&images).unwrap();
+        let prediction = head.forward(&features).unwrap();
+        let grad_prediction = CrossEntropyWithLogits::default()
+            .backward(&prediction, &targets)
+            .unwrap();
+        let grad_features = head.backward(&features, &grad_prediction).unwrap();
+        let grad_images = backbone.backward(&images, &grad_features).unwrap();
+        assert_eq!(grad_images.shape(), images.shape());
+        assert!(grad_images.data().iter().all(|value| value.is_finite()));
+        backbone
+            .visit_parameters_mut(&mut |parameter| parameter.apply_step(0.01))
+            .unwrap();
+        head.visit_parameters_mut(&mut |parameter| parameter.apply_step(0.01))
+            .unwrap();
+    }
+
+    let final_prediction = head.forward(&backbone.forward(&images).unwrap()).unwrap();
+    let final_loss = loss(&final_prediction);
+    assert!(
+        final_loss < initial * 0.8,
+        "classification loss did not improve: {initial} -> {final_loss}"
+    );
+    assert!(final_prediction.data()[0] > final_prediction.data()[1]);
+    assert!(final_prediction.data()[3] > final_prediction.data()[2]);
+    let final_state = backbone.state_dict().unwrap();
+    for name in [
+        "convnext.stem::weight",
+        "convnext.stage0.block0.dw::weight",
+        "convnext.stage0.block0.fc1::weight",
+        "convnext.stage0.downsample::weight",
+        "convnext.stage1.block0.dw::weight",
+        "convnext.final_norm_gamma",
+    ] {
+        let before = initial_state.get(name).unwrap();
+        let after = final_state.get(name).unwrap();
+        assert!(
+            before
+                .data()
+                .iter()
+                .zip(after.data())
+                .any(|(&old, &new)| (old - new).abs() > 1.0e-8),
+            "{name} did not update"
+        );
+    }
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("trained_convnext.bin");
+    io::save_bincode(&backbone, &path).unwrap();
+    let mut restored = ConvNeXtBackbone::new(config).unwrap();
+    restored.load_weights_bincode(&path).unwrap();
+    assert_eq!(
+        backbone.forward(&images).unwrap().data(),
+        restored.forward(&images).unwrap().data()
+    );
 }
