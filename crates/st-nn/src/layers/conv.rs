@@ -505,20 +505,20 @@ impl Conv1d {
         )?;
         self.output_matrix_to_feature_tensor(matrix.data(), batch, out_width)
     }
-}
 
-impl Module for Conv1d {
-    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
-        let (batch, cols) = input.shape();
-        let width = self.infer_width(cols)?;
-        let out_width = self.output_width(width)?;
-        if batch == 0 {
-            return Tensor::zeros(batch, self.out_channels * out_width);
+    /// Keeps legacy composite modules' parameter normalization explicit while
+    /// `Module::backward` remains the unscaled vector-Jacobian product.
+    pub(crate) fn backward_with_parameter_gradient_scale(
+        &mut self,
+        input: &Tensor,
+        grad_output: &Tensor,
+        parameter_gradient_scale: f32,
+    ) -> PureResult<Tensor> {
+        if !parameter_gradient_scale.is_finite() || parameter_gradient_scale <= 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "conv1d_parameter_gradient_scale",
+            });
         }
-        self.forward_im2col(input, batch, width, out_width)
-    }
-
-    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let (batch, cols) = input.shape();
         let width = self.infer_width(cols)?;
         let out_width = self.output_width(width)?;
@@ -576,9 +576,41 @@ impl Module for Conv1d {
         validate_finite_gradient("conv1d_weight_gradient", grad_weight.data())?;
         validate_finite_gradient("conv1d_bias_gradient", &grad_bias)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        let grad_weight = if parameter_gradient_scale == 1.0 {
+            grad_weight
+        } else {
+            grad_weight.scale_with_backend(
+                parameter_gradient_scale,
+                current_tensor_util_backend_for_values(grad_weight.data().len()),
+            )?
+        };
+        let bias_tensor = if parameter_gradient_scale == 1.0 {
+            bias_tensor
+        } else {
+            bias_tensor.scale_with_backend(
+                parameter_gradient_scale,
+                current_tensor_util_backend_for_values(bias_tensor.data().len()),
+            )?
+        };
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
+    }
+}
+
+impl Module for Conv1d {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, cols) = input.shape();
+        let width = self.infer_width(cols)?;
+        let out_width = self.output_width(width)?;
+        if batch == 0 {
+            return Tensor::zeros(batch, self.out_channels * out_width);
+        }
+        self.forward_im2col(input, batch, width, out_width)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward_with_parameter_gradient_scale(input, grad_output, 1.0)
     }
 
     fn visit_parameters(
@@ -3729,6 +3761,33 @@ mod tests {
         let output = conv.forward(&input).unwrap();
         assert_eq!(output.shape(), (1, 3));
         assert_eq!(output.data(), &[4.0, 6.0, 8.0]);
+    }
+
+    #[test]
+    fn conv1d_composite_scale_changes_only_parameter_gradients() {
+        let mut vjp = Conv1d::new("conv", 1, 1, 1, 1, 0, 1).unwrap();
+        let mut legacy = Conv1d::new("conv", 1, 1, 1, 1, 0, 1).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.2, -0.1, 0.35, 0.05]).unwrap();
+        let seed = Tensor::from_vec(2, 2, vec![0.08, -0.04, 0.06, 0.03]).unwrap();
+        let dx = vjp.backward(&input, &seed).unwrap();
+        let legacy_dx = legacy
+            .backward_with_parameter_gradient_scale(&input, &seed, 0.5)
+            .unwrap();
+        assert_eq!(dx.data(), legacy_dx.data());
+        for (full, scaled) in [
+            (
+                vjp.weight.gradient().unwrap(),
+                legacy.weight.gradient().unwrap(),
+            ),
+            (
+                vjp.bias.gradient().unwrap(),
+                legacy.bias.gradient().unwrap(),
+            ),
+        ] {
+            for (&full, &scaled) in full.data().iter().zip(scaled.data()) {
+                assert!((scaled - full * 0.5).abs() <= 1e-6);
+            }
+        }
     }
 
     #[cfg(feature = "wgpu")]

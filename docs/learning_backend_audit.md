@@ -4108,3 +4108,9 @@ re-evaluate them before claiming matched-training parity. The resident
 layers are not automatically migrated by this change and need their own
 contract and parity audit. Prior measurements using the old reduction are not
 retroactively comparable.
+
+`WaveRnn` and `WaveScan` keep their historical composite parameter scale by
+requesting `1 / batch` for their embedded `Conv1d`; otherwise this migration
+would change its scale relative to their gate and readout parameters. The
+standalone `Conv1d::backward` still follows the one-VJP contract. Duplicated
+batch tests pin the composite behavior until those models are migrated whole.

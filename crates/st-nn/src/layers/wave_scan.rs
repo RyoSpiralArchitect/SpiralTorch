@@ -354,7 +354,16 @@ impl WaveScan {
         let grad_gate_out = grad_gate_out.reshape(cache.batch * cache.out_steps, cache.features)?;
         let grad_gate_in = self.gate.backward(&cache.gating_in, &grad_gate_out)?;
         let grad_conv_out = grad_gate_in.reshape(cache.batch, cache.features * cache.out_steps)?;
-        let grad_input = self.conv.backward(&cache.input, &grad_conv_out)?;
+        let conv_scale = if cache.batch == 0 {
+            1.0
+        } else {
+            1.0 / cache.batch as f32
+        };
+        let grad_input = self.conv.backward_with_parameter_gradient_scale(
+            &cache.input,
+            &grad_conv_out,
+            conv_scale,
+        )?;
         emit_wave_scan_meta(
             "wave_scan_backward",
             "wave_scan_final_step_scatter",
@@ -707,6 +716,48 @@ mod tests {
         let grad_out = Tensor::from_vec(2, 4, vec![0.05; 8]).unwrap();
         let grad_in = scan.backward(&input, &grad_out).unwrap();
         assert_eq!(grad_in.shape(), input.shape());
+    }
+
+    #[test]
+    fn wave_scan_parameter_gradients_keep_legacy_batch_duplication_scale() {
+        let make = || WaveScan::new("ws", 1, 3, 1, 1, 0, 1, -1.0, 0.7).unwrap();
+        let mut single = make();
+        let mut repeated = make();
+        repeated
+            .load_state_dict(&single.state_dict().unwrap())
+            .unwrap();
+        let input = Tensor::from_vec(1, 4, vec![0.2, -0.1, 0.35, 0.05]).unwrap();
+        let duplicated = Tensor::from_vec(2, 4, [input.data(), input.data()].concat()).unwrap();
+        let seed = Tensor::from_vec(1, 3, vec![0.08, -0.04, 0.06]).unwrap();
+        let duplicated_seed = Tensor::from_vec(2, 3, [seed.data(), seed.data()].concat()).unwrap();
+        single.forward(&input).unwrap();
+        repeated.forward(&duplicated).unwrap();
+        single.backward(&input, &seed).unwrap();
+        repeated.backward(&duplicated, &duplicated_seed).unwrap();
+        let mut expected = std::collections::BTreeMap::new();
+        single
+            .visit_parameters(&mut |parameter| {
+                expected.insert(
+                    parameter.name().to_owned(),
+                    parameter.gradient().unwrap().data().to_vec(),
+                );
+                Ok(())
+            })
+            .unwrap();
+        repeated
+            .visit_parameters(&mut |parameter| {
+                let actual = parameter.gradient().unwrap().data();
+                let reference = &expected[parameter.name()];
+                for (index, (&a, &b)) in actual.iter().zip(reference).enumerate() {
+                    assert!(
+                        (a - b).abs() <= 1e-5,
+                        "{}[{index}]: duplicated={a}, single={b}",
+                        parameter.name()
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
