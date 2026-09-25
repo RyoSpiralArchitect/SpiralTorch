@@ -446,6 +446,24 @@ fn convnext_rejects_empty_stages() {
 }
 
 #[test]
+fn convnext_depthwise_weights_are_compact_and_reject_legacy_dense_shape() {
+    let config = ConvNeXtConfig {
+        input_channels: 1,
+        input_hw: (8, 8),
+        stage_dims: vec![2],
+        stage_depths: vec![1],
+        patch_size: (2, 2),
+        ..Default::default()
+    };
+    let mut model = ConvNeXtBackbone::new(config).unwrap();
+    let mut state = model.state_dict().unwrap();
+    let key = "convnext.stage0.block0.dw::weight";
+    assert_eq!(state[key].shape(), (2, 49));
+    state.insert(key.to_string(), Tensor::zeros(2, 2 * 49).unwrap());
+    assert!(model.load_state_dict(&state).is_err());
+}
+
+#[test]
 fn convnext_input_gradient_matches_finite_difference_through_downsample() {
     let config = ConvNeXtConfig {
         input_channels: 1,

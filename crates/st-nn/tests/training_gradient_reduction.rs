@@ -1,6 +1,6 @@
 use st_nn::{
     layers::{
-        conv::{Conv1d, Conv2d, Conv3d, Conv4d, Conv6da},
+        conv::{Conv1d, Conv2d, Conv3d, Conv4d, Conv6da, DepthwiseConv2d},
         normalization::{BatchNorm1d, LayerNorm, ZSpaceBatchNorm1d, ZSpaceLayerNorm},
         Gelu,
     },
@@ -133,6 +133,10 @@ fn conv2d() -> Conv2d {
     Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (1, 1), (1, 2)).unwrap()
 }
 
+fn depthwise_conv2d() -> DepthwiseConv2d {
+    DepthwiseConv2d::new("depthwise", 2, (1, 1), (1, 1), (0, 0), (1, 1), (1, 1)).unwrap()
+}
+
 fn conv1d() -> Conv1d {
     Conv1d::new("conv1", 1, 1, 1, 1, 0, 1).unwrap()
 }
@@ -199,6 +203,7 @@ fn convolution_family_mse_parameter_and_input_gradients_are_one_vjp() {
 #[test]
 fn conv2d_mse_parameter_and_input_gradients_are_one_vjp() {
     check_mse_vjp(conv2d());
+    check_mse_vjp(depthwise_conv2d());
 }
 
 #[test]
@@ -268,6 +273,7 @@ fn mean_loss_updates_are_invariant_to_batch_duplication() {
     duplicated_batch_update(lora);
     duplicated_batch_update(sequential);
     duplicated_batch_update(conv2d);
+    duplicated_batch_update(depthwise_conv2d);
     duplicated_batch_update(layer_norm);
     duplicated_batch_update(conv1d);
     duplicated_batch_update(conv3d);

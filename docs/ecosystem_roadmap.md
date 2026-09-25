@@ -61,14 +61,16 @@ parameter gradients through a downsampling stage. Host convolutions
 (`Conv1d` through `Conv4d`, plus `Conv6da`) and the four affine-normalization
 variants now use the supplied loss gradient without another per-layer batch
 average. Mean-loss VJP and duplicated-batch tests cover this migration.
-`st-vision/wgpu` now enables `st-nn/wgpu` when
-the optional NN dependency is present. This does not yet close the real-image
-training gate: the current block uses a dense spatial convolution rather than
-true depthwise convolution, and host `Tensor` training can dispatch and read
-back individual WGPU operations. Next gates are architecture-correct
-depthwise convolution, finishing the VJP migration for specialized `st-nn`
+`st-vision/wgpu` now enables `st-nn/wgpu` when the optional NN dependency is
+present. ConvNeXt blocks now use a channel-wise `DepthwiseConv2d` with compact
+weights, CPU reference forward/backward, and numerical VJP checks. This changes
+the old dense block weight shape, so old checkpoints require an explicit
+migration rather than a silent reload. A dedicated WGPU depthwise route is
+still pending; the host `Tensor` training path can dispatch other operations
+to WGPU and read them back individually. Next gates are depthwise WGPU parity
+and backend receipts, finishing the VJP migration for specialized `st-nn`
 layers and resident compatibility, resident model training, and matched
-real-dataset accuracy/throughput with explicit backend receipts.
+real-dataset accuracy/throughput.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.
