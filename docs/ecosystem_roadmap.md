@@ -56,15 +56,18 @@ and matched cross-framework comparisons remain open gates.
 The next Rust-only model slice makes the ConvNeXt-style backbone trainable:
 block residuals, stage downsampling, final normalization, and the stem now
 propagate gradients into their parameters. A two-image classification example
-exercises the full backbone and head; finite differences check input gradients
-and document the existing layer-specific parameter-gradient reductions through
-a downsampling stage. `st-vision/wgpu` now enables `st-nn/wgpu` when
+exercises the full backbone and head; finite differences check input and
+parameter gradients through a downsampling stage. Host convolutions
+(`Conv1d` through `Conv4d`, plus `Conv6da`) and the four affine-normalization
+variants now use the supplied loss gradient without another per-layer batch
+average. Mean-loss VJP and duplicated-batch tests cover this migration.
+`st-vision/wgpu` now enables `st-nn/wgpu` when
 the optional NN dependency is present. This does not yet close the real-image
 training gate: the current block uses a dense spatial convolution rather than
 true depthwise convolution, and host `Tensor` training can dispatch and read
 back individual WGPU operations. Next gates are architecture-correct
-depthwise convolution, a consistent parameter-gradient reduction contract
-across `st-nn` layers and loss reductions, resident model training, and matched
+depthwise convolution, finishing the VJP migration for specialized `st-nn`
+layers and resident compatibility, resident model training, and matched
 real-dataset accuracy/throughput with explicit backend receipts.
 
 ## Documentation & Learning

@@ -1,6 +1,12 @@
 use st_nn::{
-    layers::Gelu, loss::Loss, module::Module, Linear, LoraLinear, MeanSquaredError, Sequential,
-    Tensor,
+    layers::{
+        conv::{Conv1d, Conv2d, Conv3d, Conv4d, Conv6da},
+        normalization::{BatchNorm1d, LayerNorm, ZSpaceBatchNorm1d, ZSpaceLayerNorm},
+        Gelu,
+    },
+    loss::Loss,
+    module::Module,
+    Linear, LoraLinear, MeanSquaredError, Sequential, Tensor,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -36,7 +42,11 @@ fn mse(model: &impl Module, x: &Tensor, target: &Tensor) -> f64 {
         / prediction.data().len() as f64
 }
 
-fn check_mse_vjp(mut model: impl Module) {
+fn check_mse_vjp<M: Module>(model: M) {
+    check_mse_vjp_with_tolerance(model, 2e-5);
+}
+
+fn check_mse_vjp_with_tolerance<M: Module>(mut model: M, tolerance: f32) {
     let x = Tensor::from_vec(3, 2, vec![0.7, -0.4, -0.2, 0.9, 0.5, 0.8]).unwrap();
     let target = Tensor::from_vec(3, 2, vec![0.4, -0.7, 0.3, -0.1, -0.2, 0.5]).unwrap();
     let seed = MeanSquaredError::new()
@@ -46,7 +56,8 @@ fn check_mse_vjp(mut model: impl Module) {
     let analytic = gradients(&model);
     let state = model.state_dict().unwrap();
     let eps = 0.002;
-    for (name, parameter) in &state {
+    for (name, gradient) in &analytic {
+        let parameter = &state[name];
         for (index, &original) in parameter.data().iter().enumerate() {
             let mut perturbed = state.clone();
             perturbed.get_mut(name).unwrap().data_mut()[index] = original + eps;
@@ -56,7 +67,12 @@ fn check_mse_vjp(mut model: impl Module) {
             model.load_state_dict(&perturbed).unwrap();
             let minus = mse(&model, &x, &target);
             let numeric = ((plus - minus) / f64::from(2. * eps)) as f32;
-            close(&[analytic[name].data()[index]], &[numeric], 2e-5);
+            let actual = gradient.data()[index];
+            assert!(
+                actual.is_finite() && numeric.is_finite() && (actual - numeric).abs() <= tolerance,
+                "{} {name}[{index}]: analytical={actual}, numerical={numeric}",
+                std::any::type_name::<M>()
+            );
         }
     }
     model.load_state_dict(&state).unwrap();
@@ -69,7 +85,7 @@ fn check_mse_vjp(mut model: impl Module) {
         close(
             &[dx.data()[index]],
             &[((plus - minus) / f64::from(2. * eps)) as f32],
-            2e-5,
+            tolerance,
         );
     }
 }
@@ -113,6 +129,90 @@ fn sequential_mse_parameter_and_input_gradients_are_one_vjp() {
     check_mse_vjp(sequential());
 }
 
+fn conv2d() -> Conv2d {
+    Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (1, 1), (1, 2)).unwrap()
+}
+
+fn conv1d() -> Conv1d {
+    Conv1d::new("conv1", 1, 1, 1, 1, 0, 1).unwrap()
+}
+
+fn conv3d() -> Conv3d {
+    Conv3d::new(
+        "conv3",
+        1,
+        1,
+        (1, 1, 1),
+        (1, 1, 1),
+        (0, 0, 0),
+        (1, 1, 1),
+        (1, 1, 2),
+    )
+    .unwrap()
+}
+
+fn conv4d() -> Conv4d {
+    Conv4d::new(
+        "conv4",
+        1,
+        1,
+        (1, 1, 1, 1),
+        (1, 1, 1, 1),
+        (0, 0, 0, 0),
+        (1, 1, 1, 1),
+        (1, 1, 1, 2),
+    )
+    .unwrap()
+}
+
+fn conv6da() -> Conv6da {
+    Conv6da::new("conv6", 1, 1, (1, 1, 2), 24, 0.0).unwrap()
+}
+
+fn layer_norm() -> LayerNorm {
+    LayerNorm::new("norm", 2, -1.0, 1e-5).unwrap()
+}
+
+fn batch_norm() -> BatchNorm1d {
+    BatchNorm1d::new("batch_norm", 2, 0.2, 1e-5).unwrap()
+}
+
+fn zspace_layer_norm() -> ZSpaceLayerNorm {
+    ZSpaceLayerNorm::new("zspace_norm", 2, -0.9, 1e-5).unwrap()
+}
+
+fn zspace_batch_norm() -> ZSpaceBatchNorm1d {
+    ZSpaceBatchNorm1d::new("zspace_batch_norm", 2, -0.75, 0.5, 1e-4)
+        .unwrap()
+        .with_projector_gain(0.6)
+        .unwrap()
+}
+
+#[test]
+fn convolution_family_mse_parameter_and_input_gradients_are_one_vjp() {
+    check_mse_vjp(conv1d());
+    check_mse_vjp(conv3d());
+    check_mse_vjp(conv4d());
+    check_mse_vjp(conv6da());
+}
+
+#[test]
+fn conv2d_mse_parameter_and_input_gradients_are_one_vjp() {
+    check_mse_vjp(conv2d());
+}
+
+#[test]
+fn layer_norm_mse_parameter_and_input_gradients_are_one_vjp() {
+    check_mse_vjp(layer_norm());
+}
+
+#[test]
+fn normalization_family_mse_parameter_and_input_gradients_are_one_vjp() {
+    check_mse_vjp_with_tolerance(batch_norm(), 1e-4);
+    check_mse_vjp_with_tolerance(zspace_layer_norm(), 1e-4);
+    check_mse_vjp_with_tolerance(zspace_batch_norm(), 1e-4);
+}
+
 fn duplicated_batch_update<M: Module>(make: impl Fn() -> M) {
     let mut reference = None;
     for copies in [1, 2, 5] {
@@ -142,4 +242,13 @@ fn mean_loss_updates_are_invariant_to_batch_duplication() {
     duplicated_batch_update(|| Linear::new("head", 2, 2).unwrap());
     duplicated_batch_update(lora);
     duplicated_batch_update(sequential);
+    duplicated_batch_update(conv2d);
+    duplicated_batch_update(layer_norm);
+    duplicated_batch_update(conv1d);
+    duplicated_batch_update(conv3d);
+    duplicated_batch_update(conv4d);
+    duplicated_batch_update(conv6da);
+    duplicated_batch_update(batch_norm);
+    duplicated_batch_update(zspace_layer_norm);
+    duplicated_batch_update(zspace_batch_norm);
 }

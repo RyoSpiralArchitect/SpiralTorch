@@ -564,19 +564,6 @@ impl Module for Conv1d {
                 }
             }
         }
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
-        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
-            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
-        } else {
-            for value in grad_weight.data_mut() {
-                *value *= inv_batch;
-            }
-            grad_weight
-        };
-        for value in &mut grad_bias {
-            *value *= inv_batch;
-        }
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
@@ -790,12 +777,11 @@ impl Conv2d {
         }
         let grad_weight = grad_matrix.matmul_lhs_transpose_scaled_with_backend(
             patches,
-            1.0 / batch as f32,
+            1.0,
             current_matmul_backend(),
         )?;
         let bias_backend = current_tensor_util_backend_for_values(grad_matrix.data().len());
-        let bias_sums =
-            grad_matrix.try_sum_axis0_scaled_with_backend(1.0 / batch as f32, bias_backend)?;
+        let bias_sums = grad_matrix.try_sum_axis0_scaled_with_backend(1.0, bias_backend)?;
         let bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
         let grad_input = if let Some(grad) = self.try_grad_input_wgpu(grad_matrix, batch, oh, ow)? {
             grad
@@ -1537,21 +1523,7 @@ impl Module for Conv3d {
                 }
             }
         }
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
-        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
-            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
-        } else {
-            for value in grad_weight.data_mut() {
-                *value *= inv_batch;
-            }
-            grad_weight
-        };
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
-        let bias_tensor = bias_tensor.scale_with_backend(
-            inv_batch,
-            current_tensor_util_backend_for_values(bias_tensor.data().len()),
-        )?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -2199,21 +2171,7 @@ impl Module for Conv4d {
                 }
             }
         }
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
-        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
-            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
-        } else {
-            for value in grad_weight.data_mut() {
-                *value *= inv_batch;
-            }
-            grad_weight
-        };
         let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
-        let bias_tensor = bias_tensor.scale_with_backend(
-            inv_batch,
-            current_tensor_util_backend_for_values(bias_tensor.data().len()),
-        )?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -2522,15 +2480,8 @@ impl Module for Conv6da {
         debug_assert!(input_rows.remainder().is_empty());
         debug_assert!(grad_rows.remainder().is_empty());
         debug_assert!(grad_input_rows.into_remainder().is_empty());
-        let inv_batch = 1.0 / batch as f32;
-        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.len());
-        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?
-            .scale_with_backend(inv_batch, tensor_util_backend)?;
-        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?
-            .scale_with_backend(
-                inv_batch,
-                current_tensor_util_backend_for_values(self.out_channels),
-            )?;
+        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?;
+        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight_tensor)?;
         self.bias.accumulate_euclidean(&grad_bias_tensor)?;
         Ok(grad_input)
@@ -3652,7 +3603,7 @@ mod tests {
     }
 
     #[test]
-    fn conv6da_parameter_gradients_are_batch_normalized() {
+    fn conv6da_parameter_gradients_sum_shared_rows() {
         let mut single = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
         for value in single.weight.value_mut().data_mut() {
             *value = 1.0;
@@ -3687,7 +3638,7 @@ mod tests {
             .zip(repeated_weight.data().iter())
             .enumerate()
         {
-            let delta = (single_value - repeated_value).abs();
+            let delta = (2.0 * single_value - repeated_value).abs();
             assert!(
                 delta <= 1.0e-6,
                 "weight gradient mismatch at {idx}: single={single_value} repeated={repeated_value} delta={delta}"
@@ -3699,7 +3650,7 @@ mod tests {
             .zip(repeated_bias.data().iter())
             .enumerate()
         {
-            let delta = (single_value - repeated_value).abs();
+            let delta = (2.0 * single_value - repeated_value).abs();
             assert!(
                 delta <= 1.0e-6,
                 "bias gradient mismatch at {idx}: single={single_value} repeated={repeated_value} delta={delta}"
