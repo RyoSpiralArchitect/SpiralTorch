@@ -1288,10 +1288,7 @@ impl Module for DepthwiseConv2d {
                     );
                     return Ok(output);
                 }
-                Err(message)
-                    if matches!(route.selected_backend, TensorUtilBackend::Auto)
-                        || current_accelerator_fallback().allows_fallback() =>
-                {
+                Err(message) if current_accelerator_fallback().allows_fallback() => {
                     fallback = Some(message);
                 }
                 Err(message) => {
@@ -3924,6 +3921,32 @@ mod tests {
                 && data["backend"] == "cpu"
                 && data["fallback"]["message"] == "wgpu feature is not enabled"
         }));
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[test]
+    fn depthwise_conv2d_auto_without_gpu_honors_strict_fallback() {
+        use crate::execution::{
+            push_backend_policy, AcceleratorFallback, BackendPolicy, ExecutionConfig,
+        };
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let policy = BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 1),
+        );
+        assert_eq!(policy.tensor_util_backend_label(), "auto");
+        let _guard = push_backend_policy(policy);
+        let layer =
+            DepthwiseConv2d::new("dw", 8, (7, 7), (1, 1), (3, 3), (1, 1), (64, 64)).unwrap();
+        let input = Tensor::from_vec(1, 8 * 64 * 64, vec![1.0; 8 * 64 * 64]).unwrap();
+        assert!(matches!(
+            layer.forward(&input),
+            Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                ..
+            })
+        ));
     }
 
     #[cfg(feature = "wgpu")]
