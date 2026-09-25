@@ -92,6 +92,7 @@ impl Default for ConvNeXtConfig {
 
 #[derive(Debug)]
 struct ConvNeXtBlock {
+    // Keep the existing checkpoint key; this Conv2d is dense until grouped kernels land.
     depthwise: Conv2d,
     norm: LayerNorm,
     mlp1: Linear,
@@ -147,10 +148,27 @@ impl Module for ConvNeXtBlock {
         conv_layout.add(input)
     }
 
-    fn backward(&mut self, _input: &Tensor, _grad_output: &Tensor) -> PureResult<Tensor> {
-        Err(TensorError::InvalidValue {
-            label: "convnext_block_backward",
-        })
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        if grad_output.shape() != input.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: input.shape(),
+            });
+        }
+        let dw = self.depthwise.forward(input)?;
+        let tokens = conv_to_tokens(&dw, self.channels, self.hw)?;
+        let normed = self.norm.forward(&tokens)?;
+        let hidden = self.mlp1.forward(&normed)?;
+        let activated = self.activation.forward(&hidden)?;
+
+        let grad_projected = conv_to_tokens(grad_output, self.channels, self.hw)?;
+        let grad_activated = self.mlp2.backward(&activated, &grad_projected)?;
+        let grad_hidden = self.activation.backward(&hidden, &grad_activated)?;
+        let grad_normed = self.mlp1.backward(&normed, &grad_hidden)?;
+        let grad_tokens = self.norm.backward(&tokens, &grad_normed)?;
+        let grad_dw = tokens_to_conv(&grad_tokens, input.shape().0, self.channels, self.hw)?;
+        let grad_main = self.depthwise.backward(input, &grad_dw)?;
+        grad_main.add(grad_output)
     }
 
     fn visit_parameters(
@@ -232,10 +250,27 @@ impl Module for ConvNeXtStage {
         Ok(activ)
     }
 
-    fn backward(&mut self, _input: &Tensor, _grad_output: &Tensor) -> PureResult<Tensor> {
-        Err(TensorError::InvalidValue {
-            label: "convnext_stage_backward",
-        })
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let mut block_inputs = Vec::with_capacity(self.blocks.len());
+        let mut activ = input.clone();
+        for block in &self.blocks {
+            block_inputs.push(activ.clone());
+            activ = block.forward(&activ)?;
+        }
+        let mut grad = if let Some(down) = &mut self.downsample {
+            down.backward(&activ, grad_output)?
+        } else {
+            grad_output.clone()
+        };
+        for (block, block_input) in self
+            .blocks
+            .iter_mut()
+            .rev()
+            .zip(block_inputs.into_iter().rev())
+        {
+            grad = block.backward(&block_input, &grad)?;
+        }
+        Ok(grad)
     }
 
     fn visit_parameters(
@@ -276,6 +311,11 @@ pub struct ConvNeXtBackbone {
 
 impl ConvNeXtBackbone {
     pub fn new(config: ConvNeXtConfig) -> PureResult<Self> {
+        if config.stage_dims.is_empty() {
+            return Err(TensorError::InvalidValue {
+                label: "convnext_stage_dims",
+            });
+        }
         if config.stage_dims.len() != config.stage_depths.len() {
             return Err(TensorError::InvalidDimensions {
                 rows: config.stage_dims.len(),
@@ -369,10 +409,24 @@ impl Module for ConvNeXtBackbone {
         self.final_norm.forward(&activ)
     }
 
-    fn backward(&mut self, _input: &Tensor, _grad_output: &Tensor) -> PureResult<Tensor> {
-        Err(TensorError::InvalidValue {
-            label: "convnext_backbone_backward",
-        })
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let stem_output = self.stem.forward(input)?;
+        let mut stage_inputs = Vec::with_capacity(self.stages.len());
+        let mut activ = stem_output;
+        for stage in &self.stages {
+            stage_inputs.push(activ.clone());
+            activ = stage.forward(&activ)?;
+        }
+        let mut grad = self.final_norm.backward(&activ, grad_output)?;
+        for (stage, stage_input) in self
+            .stages
+            .iter_mut()
+            .rev()
+            .zip(stage_inputs.into_iter().rev())
+        {
+            grad = stage.backward(&stage_input, &grad)?;
+        }
+        self.stem.backward(input, &grad)
     }
 
     fn visit_parameters(
