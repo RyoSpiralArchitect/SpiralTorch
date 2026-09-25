@@ -25,11 +25,13 @@ WebGPU and the same Rust NN model. The baseline read the transformed image
 back to the host, reuploaded it, then read the NN output; the resident arm
 read only the NN output. Five warmups preceded 20 alternating-order pairs.
 The browser wall-time medians, including initial upload and final readback,
-were **1.0 ms round-trip** and **0.7 ms resident** in the final build. An
-earlier build before the strict external-buffer-size check measured 0.9 ms
-and 0.6 ms respectively; its complete report is preserved as
-[`browser-report-initial.json`](browser-report-initial.json). Both runs' terminal
-values matched exactly. This is a single-host, single-shape result, not a general
+were **1.2 ms round-trip** and **0.8 ms resident** in the final typed build.
+The earlier strict-buffer build measured 1.0/0.7 ms and the first build
+measured 0.9/0.6 ms; their complete reports remain as
+[`browser-report-pre-types.json`](browser-report-pre-types.json) and
+[`browser-report-initial.json`](browser-report-initial.json). All three runs'
+terminal values matched exactly. These variable browser-wall times are a
+single-host, single-shape result, not a general
 WebGPU speedup, training-throughput result, or PyTorch comparison. The
 browser's non-fallback Apple adapter probe is separate from the Rust runtime
 metadata (`BrowserWebGpu`, device type `Other`); it does not attest to an
@@ -54,7 +56,10 @@ For Python, build a new WGPU-enabled wheel from
 package cannot shadow the wheel. The wheel and generated WASM package stay
 local under `~/Library/Logs/SpiralTorch/vision-resident-handoff-v1/` and are
 not committed. The final generated WASM module SHA-256 is
-`80fe08c8caa38bedcff775a2676eb3ae9e851eea2c1dccdc58844b305792a0b5`.
+`88f7a1f33163923c18da5856940a80e9a036e8cefb58ee595e664a72dd03710d`.
+The generated TypeScript declarations type both image inputs as `Float32Array`
+(SHA-256 `1eed44ee3daf6a3acc720041b61d157213dbdd8e41915b977b34390b1d24f9e8`);
+the checked-in module declaration also passes `tsc --noEmit`.
 The final local wheel SHA-256 is
 `af5a7d296a5f7b7bf52f8b15efe3c23c42e59fa42cc4f1260f8f0c631a87aac7`.
 `SHA256SUMS` binds the published report and source inputs.

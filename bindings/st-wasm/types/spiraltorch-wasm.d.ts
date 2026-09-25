@@ -108,6 +108,28 @@ declare module "spiraltorch-wasm" {
         readValues(): Promise<Float32Array>;
         free(): void;
     }
+
+    /** CHW geometry transforms backed by the same Rust planner as native st-vision. */
+    export class VisionTransformPipeline {
+        private constructor();
+        static createCpu(seed: number): VisionTransformPipeline;
+        static createGpu(seed: number): Promise<VisionTransformPipeline>;
+        addResize(height: number, width: number): void;
+        addCenterCrop(height: number, width: number): void;
+        addRandomHorizontalFlip(probability: number): void;
+        apply(channels: number, height: number, width: number, data: Float32Array): Promise<VisionImage>;
+        /** Submit on WebGPU; the returned image remains resident until snapshot. */
+        applyResident(channels: number, height: number, width: number, data: Float32Array): WgpuTensor;
+        readonly backend: "cpu" | "webgpu";
+        readonly adapterInfo: string | undefined;
+        free(): void;
+    }
+    export class VisionImage {
+        private constructor();
+        readonly shape: Uint32Array;
+        readonly values: Float32Array;
+        free(): void;
+    }
     export class ResidentGraphInference {
         private constructor();
         readonly inputShape: Uint32Array;

@@ -87,7 +87,7 @@ impl WasmVisionTransformPipeline {
         channels: u32,
         height: u32,
         width: u32,
-        data: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Float32Array")] data: JsValue,
     ) -> Result<WasmVisionImage, JsValue> {
         let data = crate::wgpu_tensor::values(data)?.to_vec();
         let mut image = ImageTensor::new(channels as usize, height as usize, width as usize, data)
@@ -110,7 +110,7 @@ impl WasmVisionTransformPipeline {
         channels: u32,
         height: u32,
         width: u32,
-        data: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Float32Array")] data: JsValue,
     ) -> Result<WasmWgpuTensor, JsValue> {
         let device = self
             .tensor_device

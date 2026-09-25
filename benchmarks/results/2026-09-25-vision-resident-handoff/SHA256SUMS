@@ -1,5 +1,6 @@
-3f97926d7ade8c45e18b1e12e8e7794b3bcdeb4dcad2ab58761a503ba9835034  README.md
-d8d439ead9637320fd3ae7c196f19dff5f9dc4ef73ba8c190387a7a7c305a021  browser-report.json
+bb777a947992cfd06619e295c85a3e557718e1d28f7b3a67270d38e8355dded4  README.md
+7924f87d484ec86fc29fd10b496a177c3adcc4cd0dc12b8abaff4732dfda7299  browser-report.json
+d8d439ead9637320fd3ae7c196f19dff5f9dc4ef73ba8c190387a7a7c305a021  browser-report-pre-types.json
 4126954d36716e20e585244b62d052719ce111aa6ba9b99ce6ee5b7eba375614  browser-report-initial.json
 f07c10f719478fc0acfeebff194117734b098857be6feaf201273d9b9dfa2317  ../../../Cargo.lock
 55e199e978f3bd55df69e1ca7c8295d84b77a84e7a780f2cdee68ada0c237ee1  ../../../bindings/st-py/Cargo.toml
@@ -7,8 +8,9 @@ f07c10f719478fc0acfeebff194117734b098857be6feaf201273d9b9dfa2317  ../../../Cargo
 553a083df5fb003ee67adca725304f8a38fee496ef1dfeaf4eacd827ec120fa2  ../../../bindings/st-py/src/vision.rs
 82b57702770b6c3b5e8b3e21a3934613ad03b80f0e44ca51d22d9a8db19847d9  ../../../bindings/st-py/tests/test_vision_wgpu_pipeline.py
 8869275a72369afa2394c2f2a2bcf2f4e418feb14184b089635dd836343f8804  ../../../bindings/st-wasm/Cargo.toml
-e9a34ca57c14e93b56d5e85d29c5765bbbdc5d693491dfaec940083b5e775b57  ../../../bindings/st-wasm/src/vision_transforms.rs
+9b9f2fc74bf58b20b5e62d8475112378ef225e4937412fd9856140047597f530  ../../../bindings/st-wasm/src/vision_transforms.rs
 23e58126eb2e5feea518040c266752ed413b933242d71d0199246cf7811eb92f  ../../../bindings/st-wasm/tests/vision_transforms.html
+4cc1ed13fd6c7ed2a6a86ca99e42f7ee3786c0b9ef3968a783ca77a2ca31eaca  ../../../bindings/st-wasm/types/spiraltorch-wasm.d.ts
 be455ef4ffe541bc6769bfda7ca2c7ba593bcf201be6a48352b6ece2df3a6f1c  ../../../crates/st-backend-wgpu/src/resident_tensor.rs
 f4e4cc7c457767ccd4bd27e85426d6af90424ba6021930a4ceb73b32406ff6df  ../../../crates/st-backend-wgpu/src/resident_tensor/checked_import.rs
 c3f1d57959550a1e34fc126c2c43273e31321e1e0c47d911a107471f8ea26824  ../../../crates/st-backend-wgpu/src/resident_tensor/shaders/checked_import.wgsl
