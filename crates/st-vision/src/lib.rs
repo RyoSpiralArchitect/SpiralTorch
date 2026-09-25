@@ -92,8 +92,9 @@ use st_backend_wgpu::{
     render::TemporalVolumeLike,
     resident_tensor::{ResidentTensor, TensorDevice},
     transform::{
-        CenterCropConfig, ColorJitterConfig, GeometryCommand, HorizontalFlipConfig, ImageGeometry,
-        ResizeConfig, TransformDispatchError, TransformDispatcher,
+        BatchGeometryCommand, CenterCropConfig, ColorJitterConfig, GeometryCommand,
+        HorizontalFlipConfig, ImageGeometry, ResizeConfig, TransformDispatchError,
+        TransformDispatcher,
     },
 };
 
@@ -3617,7 +3618,15 @@ impl TransformPipeline {
     }
 
     fn validate_geometry_run(&self, start_idx: usize, image: &ImageTensor) -> PureResult<()> {
-        let (mut height, mut width) = (image.height(), image.width());
+        self.validate_geometry_shape(start_idx, image.height(), image.width())
+    }
+
+    fn validate_geometry_shape(
+        &self,
+        start_idx: usize,
+        mut height: usize,
+        mut width: usize,
+    ) -> PureResult<()> {
         for op in self.ops.iter().skip(start_idx) {
             match op {
                 TransformOperation::Resize(op) => {
@@ -3897,6 +3906,153 @@ impl TransformPipeline {
                     channels: image.channels(),
                     height: image.height(),
                     width: image.width(),
+                },
+                &commands,
+                tensor_device,
+            )
+            .map_err(map_dispatch_error)?;
+        self.rng = sampled_rng;
+        Ok(output)
+    }
+
+    /// Pack equal-sized CHW images once, then return a resident NCHW tensor.
+    #[cfg(feature = "wgpu")]
+    pub fn apply_geometry_batch_resident(
+        &mut self,
+        images: &[ImageTensor],
+        tensor_device: &TensorDevice,
+    ) -> PureResult<ResidentTensor> {
+        let Some(first) = images.first() else {
+            return Err(TensorError::EmptyInput("vision_batch"));
+        };
+        let (channels, height, width) = first.shape();
+        let size = first.as_slice().len();
+        let capacity = size
+            .checked_mul(images.len())
+            .ok_or(TensorError::InvalidValue {
+                label: "vision_batch_volume",
+            })?;
+        for image in images {
+            if image.shape() != first.shape() {
+                let (actual_channels, actual_height, actual_width) = image.shape();
+                return Err(TensorError::ShapeMismatch {
+                    left: (actual_channels, actual_height.saturating_mul(actual_width)),
+                    right: (channels, height.saturating_mul(width)),
+                });
+            }
+        }
+        self.validate_geometry_shape(0, height, width)?;
+        let mut packed = Vec::with_capacity(capacity);
+        for image in images {
+            packed.extend_from_slice(image.as_slice());
+        }
+        self.apply_packed_geometry_batch_resident(
+            &[images.len(), channels, height, width],
+            &packed,
+            tensor_device,
+        )
+    }
+
+    /// Transform an already contiguous NCHW batch without repacking it on the host.
+    #[cfg(feature = "wgpu")]
+    pub fn apply_packed_geometry_batch_resident(
+        &mut self,
+        shape: &[usize; 4],
+        input: &[f32],
+        tensor_device: &TensorDevice,
+    ) -> PureResult<ResidentTensor> {
+        let &[batch_size, channels, height, width] = shape;
+        if batch_size == 0 {
+            return Err(TensorError::EmptyInput("vision_batch"));
+        }
+        if channels == 0 || height == 0 || width == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "vision_batch_shape",
+            });
+        }
+        let expected = batch_size
+            .checked_mul(channels)
+            .and_then(|count| count.checked_mul(height))
+            .and_then(|count| count.checked_mul(width))
+            .ok_or(TensorError::InvalidValue {
+                label: "vision_batch_volume",
+            })?;
+        if input.len() != expected {
+            return Err(TensorError::DataLength {
+                expected,
+                got: input.len(),
+            });
+        }
+        self.validate_geometry_shape(0, height, width)?;
+        if let Some(op) = self.ops.iter().find(|op| {
+            !matches!(
+                op,
+                TransformOperation::Resize(_)
+                    | TransformOperation::CenterCrop(_)
+                    | TransformOperation::RandomHorizontalFlip(_)
+            )
+        }) {
+            return Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: format!("resident geometry pipeline does not support {}", op.name()),
+            });
+        }
+        let dispatcher = self
+            .dispatcher
+            .clone()
+            .ok_or_else(|| TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "resident geometry pipeline requires a GPU dispatcher".into(),
+            })?;
+
+        // Sequential per-image application consumes randomness in image-major order.
+        let mut sampled_rng = self.rng.clone();
+        let flip_count = self
+            .ops
+            .iter()
+            .filter(|op| matches!(op, TransformOperation::RandomHorizontalFlip(_)))
+            .count();
+        let mut flip_masks = vec![Vec::with_capacity(batch_size); flip_count];
+        for _ in 0..batch_size {
+            let mut flip_index = 0;
+            for op in &self.ops {
+                if let TransformOperation::RandomHorizontalFlip(flip) = op {
+                    flip_masks[flip_index].push(flip.should_apply(&mut sampled_rng));
+                    flip_index += 1;
+                }
+            }
+        }
+        let mut masks = flip_masks.into_iter();
+        let mut commands = Vec::with_capacity(self.ops.len());
+        for op in &self.ops {
+            match op {
+                TransformOperation::Resize(resize) => commands.push(BatchGeometryCommand::Resize {
+                    height: resize.height,
+                    width: resize.width,
+                }),
+                TransformOperation::CenterCrop(crop) => {
+                    commands.push(BatchGeometryCommand::CenterCrop {
+                        height: crop.height,
+                        width: crop.width,
+                    });
+                }
+                TransformOperation::RandomHorizontalFlip(_) => {
+                    let mask = masks.next().expect("one mask per flip stage");
+                    if mask.iter().any(|apply| *apply) {
+                        commands.push(BatchGeometryCommand::HorizontalFlip(mask));
+                    }
+                }
+                _ => unreachable!("unsupported stages rejected before sampling"),
+            }
+        }
+        let output = dispatcher
+            .run_geometry_batch_resident(
+                input,
+                batch_size,
+                ImageGeometry {
+                    channels,
+                    height,
+                    width,
                 },
                 &commands,
                 tensor_device,
@@ -5852,6 +6008,85 @@ mod tests {
         for (left, right) in actual.iter().zip(expected.as_slice()) {
             assert!((left - right).abs() <= 1e-6);
         }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn geometry_resident_batch_matches_sequential_cpu_and_retries_cleanly() {
+        use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+
+        let Ok((runtime, _)) = ensure_default_runtime_blocking("vision.resident_batch") else {
+            eprintln!("Skipping vision resident batch: no adapter available");
+            return;
+        };
+        let tensor_device = TensorDevice::new(runtime).unwrap();
+        let mut cpu = TransformPipeline::with_seed(271);
+        cpu.add(TransformOperation::Resize(Resize::new(8, 10).unwrap()))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(0.5).unwrap(),
+            ))
+            .add(TransformOperation::CenterCrop(
+                CenterCrop::new(6, 6).unwrap(),
+            ))
+            .add(TransformOperation::RandomHorizontalFlip(
+                RandomHorizontalFlip::new(0.5).unwrap(),
+            ));
+        let mut gpu = cpu
+            .clone()
+            .with_gpu_dispatcher(TransformDispatcher::new_default_gpu().unwrap());
+        let inputs = (0..5)
+            .map(|frame| {
+                ImageTensor::new(
+                    2,
+                    9,
+                    11,
+                    (0..2 * 9 * 11)
+                        .map(|i| ((i * 31 + frame * 17) % 257) as f32 / 256.)
+                        .collect(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let invalid = [inputs[0].clone(), ImageTensor::zeros(2, 8, 11).unwrap()];
+        assert!(gpu
+            .apply_geometry_batch_resident(&invalid, &tensor_device)
+            .is_err());
+        let nonfinite = ImageTensor::new(2, 9, 11, vec![f32::NAN; 2 * 9 * 11]).unwrap();
+        assert!(gpu
+            .apply_geometry_batch_resident(&[nonfinite], &tensor_device)
+            .is_err());
+        let mut expected = Vec::new();
+        for input in &inputs {
+            let mut image = input.clone();
+            cpu.apply(&mut image).unwrap();
+            expected.extend_from_slice(image.as_slice());
+        }
+        let output = gpu
+            .apply_geometry_batch_resident(&inputs, &tensor_device)
+            .unwrap();
+        assert_eq!(output.layout().shape(), &[5, 2, 6, 6]);
+        let actual = output.snapshot().unwrap().read().unwrap();
+        for (left, right) in actual.iter().zip(&expected) {
+            assert!((left - right).abs() <= 1e-5, "{left} != {right}");
+        }
+        let mut identity = TransformPipeline::new()
+            .with_gpu_dispatcher(TransformDispatcher::new_default_gpu().unwrap());
+        let unchanged = identity
+            .apply_geometry_batch_resident(&inputs, &tensor_device)
+            .unwrap();
+        assert_eq!(unchanged.layout().shape(), &[5, 2, 9, 11]);
+        let packed = inputs
+            .iter()
+            .flat_map(|image| image.as_slice().iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(unchanged.snapshot().unwrap().read().unwrap(), packed);
+        assert!(gpu
+            .apply_packed_geometry_batch_resident(
+                &[2, 2, 9, 11],
+                &[0.0; 2 * 9 * 11],
+                &tensor_device,
+            )
+            .is_err());
     }
 
     #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]

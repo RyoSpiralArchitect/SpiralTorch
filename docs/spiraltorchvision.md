@@ -28,10 +28,10 @@ SpiralTorchVision extends SpiralTorch's native Z-space capabilities while stayin
 ### Native WGPU preprocessing
 
 With the `st-vision/wgpu` feature, an opt-in `TransformPipeline` runs adjacent
-resize, center-crop, and sampled horizontal-flip stages as one GPU geometry
-sequence. Images enter and leave as `ImageTensor`; there is still one upload
-and one readback per contiguous sequence. Normalize and color-jitter stages
-remain separate, and the CPU path stays the default.
+resize, center-crop, and sampled horizontal-flip stages in one GPU submission.
+Ordinary `apply` still enters and leaves as `ImageTensor`, with one upload and
+one readback per contiguous sequence. Normalize and color-jitter stages remain
+separate, and the CPU path stays the default.
 
 ```python
 import spiraltorch as st
@@ -65,13 +65,34 @@ It rejects unsupported stages, non-finite host input, and device mismatches
 instead of silently falling back to CPU. A failed run does not consume the
 seeded flip decision.
 
+For a homogeneous image batch, pack the images once and keep the output in
+`[N, C, H, W]` order. Flip decisions are sampled independently per image, in
+the same order as repeated CPU `apply` calls. The reshape below is a view;
+the first host readback is the final NN snapshot.
+
+```python
+images = [st.ImageTensor(3, 128, 128, [0.5] * (3 * 128 * 128)) for _ in range(4)]
+resident = pipeline.apply_resident_batch(images, device)
+prediction = model(resident.reshape([4, 3 * 64 * 64]))
+values = prediction.snapshot().read_values()
+```
+
+Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed
+`apply_packed_geometry_batch_resident(&[n, c, h, w], &values, &device)` entry
+for callers that already own contiguous NCHW data. Empty, ragged, and
+non-finite batches fail; unsupported photometric stages never fall back.
+
 In a WebGPU-enabled browser build, the same Rust planner is available through
 `VisionTransformPipeline.createGpu(seed)`. `apply(...)` returns a host image
 after asynchronous readback, whereas `applyResident(...)` returns a
 `WgpuTensor` suitable for `Sequential.forward(...)` and an explicit terminal
-snapshot. The CPU browser constructor remains the parity reference. See the
-[bounded browser result](../benchmarks/results/2026-09-25-vision-resident-handoff/README.md)
-for the exact fixture and performance limits.
+snapshot. `applyResidentBatch(n, c, h, w, packedFloat32Array)` uses the same
+Rust batch planner and returns a rank-4 resident tensor, which can be reshaped
+to `[n, features]` for a resident NN graph. The CPU browser constructor
+remains the parity reference. See the
+[single-image result](../benchmarks/results/2026-09-25-vision-resident-handoff/README.md)
+and [batch result](../benchmarks/results/2026-09-25-vision-resident-batch/README.md)
+for bounded measurements and replay instructions.
 
 ### Backbone quickstart
 

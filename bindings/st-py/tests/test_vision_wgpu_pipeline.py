@@ -100,3 +100,41 @@ class VisionWgpuPipelineTests(unittest.TestCase):
 
         with self.assertRaisesRegex(Exception, "non-finite"):
             gpu.apply_resident(st.ImageTensor(1, 8, 8, [float("nan")] * 64), device)
+
+    def test_resident_batch_matches_sequential_cpu_and_nn(self):
+        cpu = st.TransformPipeline(seed=271)
+        gpu = st.TransformPipeline(seed=271)
+        for pipeline in (cpu, gpu):
+            pipeline.add_resize(8, 10)
+            pipeline.add_horizontal_flip(0.5)
+            pipeline.add_center_crop(6, 6)
+            pipeline.add_horizontal_flip(0.5)
+        try:
+            gpu.enable_wgpu()
+            device = st.WgpuTensorDevice.create()
+        except (RuntimeError, NotImplementedError) as exc:
+            message = str(exc).lower()
+            if "adapter" in message or "not available" in message or "wgpu" in message:
+                self.skipTest(str(exc))
+            raise
+
+        images = [
+            st.ImageTensor(2, 9, 11, [((i * 31 + frame * 17) % 257) / 256 for i in range(198)])
+            for frame in range(5)
+        ]
+        with self.assertRaises(Exception):
+            gpu.apply_resident_batch([images[0], st.ImageTensor.zeros(2, 8, 11)], device)
+        expected = [value for image in images for value in cpu.apply(image).flatten()]
+        resident = gpu.apply_resident_batch(images, device)
+        self.assertEqual(resident.shape, (5, 2, 6, 6))
+        flat = resident.reshape([5, 72])
+        self.assertTrue(flat.shares_storage_with(resident))
+        net = st.nn.Sequential()
+        net.add(st.nn.Scaler.from_gain("vision_batch_gain", st.Tensor(1, 72, [2.0] * 72)))
+        actual = net(flat).snapshot().read_values()
+        self.assertEqual(len(actual), len(expected))
+        for left, right in zip(actual, expected):
+            self.assertAlmostEqual(left, right * 2, delta=1e-5)
+
+        with self.assertRaisesRegex(Exception, "non-finite"):
+            gpu.apply_resident_batch([st.ImageTensor(2, 9, 11, [float("nan")] * 198)], device)

@@ -595,10 +595,42 @@ impl PyTransformPipeline {
         Ok(crate::wgpu_tensor::PyWgpuTensor { inner: output })
     }
 
+    /// Keep a homogeneous image batch in NCHW order for resident NN execution.
+    #[cfg(feature = "wgpu")]
+    fn apply_resident_batch(
+        &mut self,
+        py: Python<'_>,
+        images: Vec<PyImageTensor>,
+        device: &crate::wgpu_tensor::PyWgpuTensorDevice,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        let images = images
+            .into_iter()
+            .map(|image| image.inner)
+            .collect::<Vec<_>>();
+        let output = py
+            .detach(|| {
+                self.inner
+                    .apply_geometry_batch_resident(&images, &device.inner)
+            })
+            .map_err(tensor_err_to_py)?;
+        Ok(crate::wgpu_tensor::PyWgpuTensor { inner: output })
+    }
+
     #[cfg(not(feature = "wgpu"))]
     fn apply_resident(
         &mut self,
         _image: &PyImageTensor,
+        _device: &crate::wgpu_tensor::PyWgpuTensorDevice,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "resident vision requires a wheel built with the 'wgpu' feature",
+        ))
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    fn apply_resident_batch(
+        &mut self,
+        _images: Vec<PyImageTensor>,
         _device: &crate::wgpu_tensor::PyWgpuTensorDevice,
     ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
