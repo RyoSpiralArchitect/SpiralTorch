@@ -90,6 +90,7 @@ use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 #[cfg(feature = "wgpu")]
 use st_backend_wgpu::{
     render::TemporalVolumeLike,
+    resident_tensor::{ResidentTensor, TensorDevice},
     transform::{
         CenterCropConfig, ColorJitterConfig, GeometryCommand, HorizontalFlipConfig, ImageGeometry,
         ResizeConfig, TransformDispatchError, TransformDispatcher,
@@ -3863,6 +3864,48 @@ impl TransformPipeline {
         Ok(())
     }
 
+    /// Submit a geometry-only pipeline and keep its CHW output GPU-resident.
+    /// The caller may reshape the result for resident NN inference or training.
+    #[cfg(feature = "wgpu")]
+    pub fn apply_geometry_resident(
+        &mut self,
+        image: &ImageTensor,
+        tensor_device: &TensorDevice,
+    ) -> PureResult<ResidentTensor> {
+        self.validate_geometry_run(0, image)?;
+        let dispatcher = self
+            .dispatcher
+            .clone()
+            .ok_or_else(|| TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "resident geometry pipeline requires a GPU dispatcher".into(),
+            })?;
+        let (index, commands, sampled_rng) = self.plan_geometry_sequence(0, image);
+        if index != self.ops.len() {
+            return Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: format!(
+                    "resident geometry pipeline does not support {}",
+                    self.ops[index].name()
+                ),
+            });
+        }
+        let output = dispatcher
+            .run_geometry_sequence_resident(
+                image.as_slice(),
+                ImageGeometry {
+                    channels: image.channels(),
+                    height: image.height(),
+                    width: image.width(),
+                },
+                &commands,
+                tensor_device,
+            )
+            .map_err(map_dispatch_error)?;
+        self.rng = sampled_rng;
+        Ok(output)
+    }
+
     #[cfg(feature = "wgpu")]
     fn plan_geometry_sequence(
         &self,
@@ -5762,6 +5805,52 @@ mod tests {
             for (&lhs, &rhs) in actual.as_slice().iter().zip(expected.as_slice()) {
                 assert!((lhs - rhs).abs() < 1e-5, "frame={frame}: {lhs} != {rhs}");
             }
+        }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn geometry_resident_output_matches_cpu_and_keeps_seed_on_failure() {
+        use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+
+        let Ok((runtime, _)) = ensure_default_runtime_blocking("vision.resident_handoff") else {
+            eprintln!("Skipping vision resident handoff: no adapter available");
+            return;
+        };
+        let tensor_device = TensorDevice::new(runtime).unwrap();
+        let mut cpu = TransformPipeline::with_seed(19);
+        cpu.add(TransformOperation::RandomHorizontalFlip(
+            RandomHorizontalFlip::new(0.5).unwrap(),
+        ))
+        .add(TransformOperation::CenterCrop(
+            CenterCrop::new(6, 6).unwrap(),
+        ));
+        let mut gpu = cpu
+            .clone()
+            .with_gpu_dispatcher(TransformDispatcher::new_default_gpu().unwrap());
+        let invalid = ImageTensor::new(1, 5, 7, vec![0.25; 35]).unwrap();
+        assert!(matches!(
+            gpu.apply_geometry_resident(&invalid, &tensor_device),
+            Err(TensorError::InvalidValue {
+                label: "center_crop_size"
+            })
+        ));
+        let input = ImageTensor::new(1, 8, 8, (0..64).map(|i| i as f32 / 63.).collect()).unwrap();
+        let mut expected = input.clone();
+        cpu.apply(&mut expected).unwrap();
+        let output = gpu.apply_geometry_resident(&input, &tensor_device).unwrap();
+        assert_eq!(output.layout().shape(), &[1, 6, 6]);
+        let actual = output
+            .reshape(&[1, 36])
+            .unwrap()
+            .relu()
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        for (left, right) in actual.iter().zip(expected.as_slice()) {
+            assert!((left - right).abs() <= 1e-6);
         }
     }
 

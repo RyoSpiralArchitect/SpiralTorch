@@ -4,7 +4,7 @@
 <title>SpiralTorch Vision CPU/WebGPU parity</title>
 <pre id="result" data-status="running">Checking vision transforms</pre>
 <script type="module">
-import init, {VisionTransformPipeline} from "./module/spiraltorch_wasm.js";
+import init, {VisionTransformPipeline, Sequential, WgpuTensorDevice} from "./module/spiraltorch_wasm.js";
 
 const result = document.querySelector("#result");
 try {
@@ -107,6 +107,78 @@ try {
   }
   if (retryCpuError !== 0 || retryGpuError > 1e-5) throw Error("Retry changed seeded flip decision");
 
+  const residentCpu = VisionTransformPipeline.createCpu(31);
+  const residentGpu = await VisionTransformPipeline.createGpu(31);
+  for (const pipeline of [residentCpu, residentGpu]) {
+    pipeline.addRandomHorizontalFlip(0.5);
+    pipeline.addCenterCrop(6, 6);
+  }
+  let rejectedResidentCrop = false;
+  try { residentGpu.applyResident(1, 5, 7, new Float32Array(35)); }
+  catch (error) { rejectedResidentCrop = /center_crop_size/.test(String(error)); }
+  if (!rejectedResidentCrop) throw Error("Resident invalid crop did not fail before consuming RNG");
+  const residentPixels = Float32Array.from({length: 64}, (_, i) => i / 63);
+  const residentExpected = (await residentCpu.apply(1, 8, 8, residentPixels)).values;
+  const residentImage = residentGpu.applyResident(1, 8, 8, residentPixels);
+  if (Array.from(residentImage.shape).join(",") !== "1,6,6") throw Error("Resident image shape mismatch");
+  const flatImage = residentImage.reshape([1, 36]);
+  if (!flatImage.sharesStorageWith(residentImage)) throw Error("Reshape lost resident storage");
+  const model = new Sequential();
+  model.addScaler("vision_gain", new Float32Array(36).fill(2));
+  const modelOutput = model.forward(flatImage);
+  const modelValues = await modelOutput.snapshot().readValues();
+  let residentForwardError = 0;
+  for (let i = 0; i < residentExpected.length; i++) {
+    residentForwardError = Math.max(residentForwardError, Math.abs(modelValues[i] - residentExpected[i] * 2));
+  }
+  if (residentForwardError > 1e-5) throw Error(`Resident vision-to-NN forward mismatch: ${residentForwardError}`);
+  let rejectedNonfinite = false;
+  try { residentGpu.applyResident(1, 8, 8, new Float32Array(64).fill(NaN)); }
+  catch (error) { rejectedNonfinite = /non-finite/.test(String(error)); }
+  if (!rejectedNonfinite) throw Error("Resident input accepted non-finite values");
+
+  const roundTrip = await VisionTransformPipeline.createGpu(23);
+  const resident = await VisionTransformPipeline.createGpu(23);
+  for (const pipeline of [roundTrip, resident]) {
+    pipeline.addResize(80, 96);
+    pipeline.addRandomHorizontalFlip(0.5);
+    pipeline.addCenterCrop(64, 64);
+  }
+  const tensorDevice = await WgpuTensorDevice.create();
+  const gain = new Sequential();
+  gain.addScaler("vision_bench_gain", new Float32Array(3 * 64 * 64).fill(1.1));
+  const roundTripMs = [], residentMs = [];
+  let handoffMaxAbsError = 0;
+  const measureRoundTrip = async () => {
+    const start = performance.now();
+    const image = await roundTrip.apply(3, 128, 128, benchPixels);
+    const input = tensorDevice.upload([1, 3 * 64 * 64], image.values);
+    const values = await gain.forwardSnapshot(input).readValues();
+    return {values, elapsed: performance.now() - start};
+  };
+  const measureResident = async () => {
+    const start = performance.now();
+    const image = resident.applyResident(3, 128, 128, benchPixels);
+    const values = await gain.forwardSnapshot(image.reshape([1, 3 * 64 * 64])).readValues();
+    return {values, elapsed: performance.now() - start};
+  };
+  for (let repeat = 0; repeat < 25; repeat++) {
+    let oldRun, newRun;
+    if (repeat % 2 === 0) {
+      oldRun = await measureRoundTrip();
+      newRun = await measureResident();
+    } else {
+      newRun = await measureResident();
+      oldRun = await measureRoundTrip();
+    }
+    if (oldRun.values.length !== newRun.values.length) throw Error("Handoff benchmark shape mismatch");
+    for (let i = 0; i < oldRun.values.length; i++) {
+      handoffMaxAbsError = Math.max(handoffMaxAbsError, Math.abs(oldRun.values[i] - newRun.values[i]));
+    }
+    if (repeat >= 5) { roundTripMs.push(oldRun.elapsed); residentMs.push(newRun.elapsed); }
+  }
+  if (handoffMaxAbsError > 1e-5) throw Error(`Handoff benchmark output mismatch: ${handoffMaxAbsError}`);
+
   result.textContent = JSON.stringify({
     schema: "spiraltorch.vision.transforms.browser.v1",
     status: "passed",
@@ -119,6 +191,17 @@ try {
     rejected_invalid_crop: rejectedInvalidCrop,
     retry_matches_fresh_seed: true,
     retry_max_abs_error: retryGpuError,
+    resident_handoff: {model: "Sequential(Scaler x2)", image_shape: [1, 6, 6],
+      output_shape: Array.from(modelOutput.shape), terminal_readback_only: true,
+      max_abs_error: residentForwardError, rejected_invalid_crop: rejectedResidentCrop,
+      rejected_nonfinite_input: rejectedNonfinite},
+    handoff_benchmark: {input_shape: [3, 128, 128], transformed_shape: [3, 64, 64],
+      model: "Sequential(Scaler x1.1)", warmups: 5, samples: 20,
+      order: "alternating round-trip/resident per repeat",
+      timing: "browser wall time including initial upload and final NN output readback",
+      round_trip_ms: roundTripMs, resident_ms: residentMs,
+      round_trip_median_ms: median(roundTripMs), resident_median_ms: median(residentMs),
+      max_abs_error: handoffMaxAbsError},
     rust_runtime_adapter: runtimeAdapter,
     browser_adapter_probe: {vendor: adapter.info?.vendor, architecture: adapter.info?.architecture,
       is_fallback_adapter: fallback, boundary: "Separate probe, not attestation of the Rust runtime device"},

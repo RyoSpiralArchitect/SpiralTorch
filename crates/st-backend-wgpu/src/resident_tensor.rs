@@ -9,6 +9,7 @@ use st_kernel_contracts::{
 use thiserror::Error;
 
 pub(crate) mod capture;
+mod checked_import;
 pub mod classification;
 pub(crate) mod guard_capture;
 pub mod loss;
@@ -44,6 +45,8 @@ pub enum TensorError {
     Limit(&'static str),
     #[error("tensor view addresses outside its storage")]
     StorageBounds,
+    #[error("external tensor storage requires STORAGE and COPY_SRC usage")]
+    StorageUsage,
     #[error("invalid tensor readback")]
     Readback,
 }
@@ -56,6 +59,7 @@ struct Kernels {
     mse: std::sync::OnceLock<loss::MseKernels>,
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
+    checked_import: std::sync::OnceLock<checked_import::CheckedImportKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -195,6 +199,7 @@ impl TensorDevice {
             mse: std::sync::OnceLock::new(),
             classification: std::sync::OnceLock::new(),
             normalization: std::sync::OnceLock::new(),
+            checked_import: std::sync::OnceLock::new(),
         })))
     }
 
@@ -251,6 +256,49 @@ impl TensorDevice {
             usage,
         )?;
         let flags = runtime::upload_slice(device, "tensor.flags", &[0u32], usage)?;
+        Ok(ResidentTensor {
+            storage: Shared::new(Storage {
+                values,
+                flags: Shared::new(flags),
+            }),
+            layout,
+            device: self.clone(),
+        })
+    }
+
+    /// Take ownership of a completed GPU result on this device, checking its
+    /// values on the GPU before any consumer can treat it as a valid tensor.
+    pub(crate) fn adopt_checked_values(
+        &self,
+        source: &WgpuContext,
+        shape: &[usize],
+        values: wgpu::Buffer,
+    ) -> Result<ResidentTensor, TensorError> {
+        if !self.runtime().context().shares_handles_with(source) {
+            return Err(TensorError::DeviceMismatch);
+        }
+        let layout = NdLayout::contiguous(shape)?;
+        let context = self.runtime().context();
+        validate_view(&layout, layout.len(), &context.device().limits())?;
+        if values.size() != layout.len() as u64 * 4 {
+            return Err(TensorError::StorageBounds);
+        }
+        if !values
+            .usage()
+            .contains(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC)
+        {
+            return Err(TensorError::StorageUsage);
+        }
+        let flags = runtime::upload_slice(
+            context.device(),
+            "tensor.checked_import.flags",
+            &[0u32],
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        )?;
+        self.0
+            .checked_import
+            .get_or_init(|| checked_import::CheckedImportKernels::new(context.device()))
+            .check(context, &values, &flags, layout.len())?;
         Ok(ResidentTensor {
             storage: Shared::new(Storage {
                 values,

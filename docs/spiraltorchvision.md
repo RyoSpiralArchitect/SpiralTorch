@@ -45,10 +45,33 @@ output = pipeline.apply(st.ImageTensor(3, 128, 128, [0.5] * (3 * 128 * 128)))
 pipeline.disable_wgpu()
 ```
 
-The native WGPU route is tested against the seeded CPU route over repeated
-frames. `enable_wgpu()` is not a promise of browser support: the current
-dispatcher requires synchronous host-visible readback, so WASM needs a
-separate async resident path before the same contract can be exposed there.
+To keep the output on the GPU for a downstream NN layer, use a device from
+the same WGPU runtime and the geometry-only resident method:
+
+```python
+pipeline.enable_wgpu()
+device = st.WgpuTensorDevice.create()
+resident = pipeline.apply_resident(
+    st.ImageTensor(3, 128, 128, [0.5] * (3 * 128 * 128)), device
+)
+model = st.nn.Sequential()
+model.add(st.nn.Relu())
+prediction = model(resident.reshape([1, 3 * 64 * 64]))
+values = prediction.snapshot().read_values()  # The only GPU-to-host readback.
+```
+
+This method accepts resize, center crop, and sampled horizontal flip only.
+It rejects unsupported stages, non-finite host input, and device mismatches
+instead of silently falling back to CPU. A failed run does not consume the
+seeded flip decision.
+
+In a WebGPU-enabled browser build, the same Rust planner is available through
+`VisionTransformPipeline.createGpu(seed)`. `apply(...)` returns a host image
+after asynchronous readback, whereas `applyResident(...)` returns a
+`WgpuTensor` suitable for `Sequential.forward(...)` and an explicit terminal
+snapshot. The CPU browser constructor remains the parity reference. See the
+[bounded browser result](../benchmarks/results/2026-09-25-vision-resident-handoff/README.md)
+for the exact fixture and performance limits.
 
 ### Backbone quickstart
 
