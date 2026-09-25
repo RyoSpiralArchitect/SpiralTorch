@@ -63,14 +63,18 @@ variants now use the supplied loss gradient without another per-layer batch
 average. Mean-loss VJP and duplicated-batch tests cover this migration.
 `st-vision/wgpu` now enables `st-nn/wgpu` when the optional NN dependency is
 present. ConvNeXt blocks now use a channel-wise `DepthwiseConv2d` with compact
-weights, CPU reference forward/backward, and numerical VJP checks. This changes
-the old dense block weight shape, so old checkpoints require an explicit
-migration rather than a silent reload. A dedicated WGPU depthwise route is
-still pending; the host `Tensor` training path can dispatch other operations
-to WGPU and read them back individually. Next gates are depthwise WGPU parity
-and backend receipts, finishing the VJP migration for specialized `st-nn`
-layers and resident compatibility, resident model training, and matched
-real-dataset accuracy/throughput.
+weights, a CPU reference VJP, and numerical gradient checks. This changes the
+old dense block weight shape, so old checkpoints require an explicit migration
+rather than a silent reload. Its dedicated WGPU forward kernel has CPU parity
+on a native adapter and emits the selected backend or CPU fallback in operation
+metadata. It still uploads inputs and weights and reads back each result; the
+backward pass is CPU-only. A matched Apple M4 host CPU/WGPU timing sweep is
+recorded in `benchmarks/results/2026-09-26-vision-depthwise-m4.md`: the small
+shape is slower on WGPU, while larger shapes improve on that one host. The
+exploratory Auto threshold therefore avoids the measured small-workload range.
+Next gates are finishing the VJP migration for specialized `st-nn` layers and
+resident compatibility, resident model training, and matched real-dataset
+accuracy/throughput.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.
