@@ -269,7 +269,9 @@ jobs:
           cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_graph:: -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward -- --test-threads=1
+          cargo test --locked --release -p st-nn --features wgpu --lib conv2d_resident_matches_host_and_refreshes_parameters -- --test-threads=1
           cargo test --locked --release -p st-vision --features wgpu --lib resident_geometry_batch_feeds_depthwise_without_intermediate_readback -- --test-threads=1
+          cargo test --locked --release -p st-vision --features wgpu --lib resident_backbone_matches_host_through_stem_stages_and_final_norm -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"

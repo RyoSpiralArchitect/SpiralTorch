@@ -86,10 +86,16 @@ slice connects the original `DepthwiseConv2d` parameter owner to this
 primitive and composes one `ConvNeXtBlock` forward entirely on the resident
 device: depthwise, token layout packing, LayerNorm, MLP, and residual. The
 parameter cache refreshes after host-side updates, and native GPU tests match
-the CPU block and the vision-transform handoff. This is **not** a resident
-full backbone, Python/WASM block API, or GPU backward pass. Next gates are
-stem/downsample composition, resident training, finishing the VJP migration
-for specialized `st-nn` layers, and matched real-dataset accuracy/throughput.
+the CPU block and the vision-transform handoff. The next slice extends this
+to the Rust `ConvNeXtBackbone`: a guarded NCHW dense `Conv2d` primitive powers
+its model-owned stem and stage downsampling, and the blocks and final norm
+stay resident through the final snapshot. A tiny native GPU test checks
+whole-backbone CPU parity, non-contiguous input, and cache refresh after
+parameter updates. A Rust example connects the existing image-transform
+handoff to this full forward. This is **not** a Python/WASM ConvNeXt model,
+GPU backward, or a demonstrated full-model speedup. Next gates are resident
+training, finishing the VJP migration for specialized `st-nn` layers, and
+matched real-dataset accuracy/throughput.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

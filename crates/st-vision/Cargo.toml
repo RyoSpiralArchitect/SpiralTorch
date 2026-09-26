@@ -45,3 +45,7 @@ required-features = ["nn", "wgpu"]
 [[example]]
 name = "convnext_resident_block"
 required-features = ["nn", "wgpu"]
+
+[[example]]
+name = "convnext_resident_backbone"
+required-features = ["nn", "wgpu"]

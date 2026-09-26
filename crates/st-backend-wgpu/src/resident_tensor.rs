@@ -42,7 +42,7 @@ pub enum TensorError {
     Operands,
     #[error("loss predictions and targets must have the same logical shape")]
     LossShape,
-    #[error("invalid depthwise convolution shape: {0}")]
+    #[error("invalid convolution shape: {0}")]
     ConvolutionShape(&'static str),
     #[error("tensor exceeds portable addressing or device limits: {0}")]
     Limit(&'static str),
@@ -63,7 +63,8 @@ struct Kernels {
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
     checked_import: std::sync::OnceLock<checked_import::CheckedImportKernels>,
-    convolution: std::sync::OnceLock<convolution::DepthwiseKernels>,
+    convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
+    dense_convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -205,6 +206,7 @@ impl TensorDevice {
             normalization: std::sync::OnceLock::new(),
             checked_import: std::sync::OnceLock::new(),
             convolution: std::sync::OnceLock::new(),
+            dense_convolution: std::sync::OnceLock::new(),
         })))
     }
 
@@ -627,6 +629,19 @@ impl ResidentTensor {
         dilation: (usize, usize),
     ) -> Result<Self, TensorError> {
         convolution::forward(self, weights, bias, stride, padding, dilation)
+    }
+
+    /// NCHW convolution. Weights are [out_channels, in_channels, KH, KW], bias is [out_channels].
+    /// Every input and output remains resident until an explicit snapshot.
+    pub fn conv2d(
+        &self,
+        weights: &Self,
+        bias: &Self,
+        stride: (usize, usize),
+        padding: (usize, usize),
+        dilation: (usize, usize),
+    ) -> Result<Self, TensorError> {
+        convolution::conv2d_forward(self, weights, bias, stride, padding, dilation)
     }
 
     pub fn contiguous(&self) -> Result<Self, TensorError> {

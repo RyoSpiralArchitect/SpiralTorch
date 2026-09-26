@@ -642,7 +642,7 @@ impl Module for Conv1d {
     }
 }
 
-/// Two-dimensional convolution operating on `(batch, channels * height * width)` tensors.
+/// Two-dimensional convolution over flat host batches or resident NCHW tensors.
 #[derive(Debug)]
 pub struct Conv2d {
     weight: Parameter,
@@ -654,6 +654,56 @@ pub struct Conv2d {
     padding: (usize, usize),
     dilation: (usize, usize),
     input_hw: (usize, usize),
+    #[cfg(feature = "wgpu")]
+    resident: RefCell<Option<ResidentConvParameters>>,
+}
+
+#[cfg(feature = "wgpu")]
+#[derive(Debug)]
+struct ResidentConvParameters {
+    weight: st_backend_wgpu::resident_tensor::ResidentTensor,
+    bias: st_backend_wgpu::resident_tensor::ResidentTensor,
+    frozen_weight: Tensor,
+    frozen_bias: Tensor,
+    weight_stamp: Option<TensorContentStamp>,
+    bias_stamp: Option<TensorContentStamp>,
+}
+
+#[cfg(feature = "wgpu")]
+impl ResidentConvParameters {
+    fn matches(
+        &mut self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        weight: &Tensor,
+        bias: &Tensor,
+    ) -> bool {
+        self.weight
+            .device()
+            .runtime()
+            .context()
+            .shares_handles_with(input.device().runtime().context())
+            && crate::resident::same_parameter(&self.frozen_weight, weight, &mut self.weight_stamp)
+            && crate::resident::same_parameter(&self.frozen_bias, bias, &mut self.bias_stamp)
+    }
+
+    fn upload(
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        weight_shape: &[usize],
+        bias_shape: &[usize],
+        weight: &Tensor,
+        bias: &Tensor,
+    ) -> Result<Self, crate::resident::InferenceError> {
+        let resident_weight = input.device().upload(weight_shape, weight.data())?;
+        let resident_bias = input.device().upload(bias_shape, bias.data())?;
+        Ok(Self {
+            weight: resident_weight,
+            bias: resident_bias,
+            frozen_weight: weight.snapshot(),
+            frozen_bias: bias.snapshot(),
+            weight_stamp: weight.content_stamp(),
+            bias_stamp: bias.content_stamp(),
+        })
+    }
 }
 
 impl Conv2d {
@@ -697,6 +747,8 @@ impl Conv2d {
             padding,
             dilation,
             input_hw,
+            #[cfg(feature = "wgpu")]
+            resident: RefCell::new(None),
         };
         // Validate configuration by computing the output size once during construction.
         conv.output_hw()?;
@@ -988,6 +1040,65 @@ impl Conv2d {
 }
 
 impl Module for Conv2d {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        use st_backend_wgpu::resident_tensor::TensorError as ResidentTensorError;
+
+        crate::resident::require_uncommitted_route()?;
+        let shape = input.layout().shape();
+        if shape.len() != 4
+            || shape[1] != self.in_channels
+            || shape[2] != self.input_hw.0
+            || shape[3] != self.input_hw.1
+        {
+            return Err(ResidentTensorError::ConvolutionShape("expected NCHW input").into());
+        }
+        let mut resident = self.resident.borrow_mut();
+        if !resident
+            .as_mut()
+            .is_some_and(|cached| cached.matches(input, self.weight.value(), self.bias.value()))
+        {
+            *resident = Some(ResidentConvParameters::upload(
+                input,
+                &[
+                    self.out_channels,
+                    self.in_channels,
+                    self.kernel.0,
+                    self.kernel.1,
+                ],
+                &[self.out_channels],
+                self.weight.value(),
+                self.bias.value(),
+            )?);
+        }
+        let cached = resident.as_ref().unwrap();
+        Ok(input.conv2d(
+            &cached.weight,
+            &cached.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+        )?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        Ok(self.forward_resident(input)?.snapshot()?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        *self.resident.borrow_mut() = None;
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (batch, cols) = input.shape();
         let expected_cols = self.in_channels * self.input_hw.0 * self.input_hw.1;
@@ -1064,18 +1175,7 @@ pub struct DepthwiseConv2d {
     dilation: (usize, usize),
     input_hw: (usize, usize),
     #[cfg(feature = "wgpu")]
-    resident: RefCell<Option<ResidentDepthwiseParameters>>,
-}
-
-#[cfg(feature = "wgpu")]
-#[derive(Debug)]
-struct ResidentDepthwiseParameters {
-    weight: st_backend_wgpu::resident_tensor::ResidentTensor,
-    bias: st_backend_wgpu::resident_tensor::ResidentTensor,
-    frozen_weight: Tensor,
-    frozen_bias: Tensor,
-    weight_stamp: Option<TensorContentStamp>,
-    bias_stamp: Option<TensorContentStamp>,
+    resident: RefCell<Option<ResidentConvParameters>>,
 }
 
 impl DepthwiseConv2d {
@@ -1294,40 +1394,17 @@ impl Module for DepthwiseConv2d {
         }
 
         let mut resident = self.resident.borrow_mut();
-        let reusable = resident.as_mut().is_some_and(|cached| {
-            cached
-                .weight
-                .device()
-                .runtime()
-                .context()
-                .shares_handles_with(input.device().runtime().context())
-                && crate::resident::same_parameter(
-                    &cached.frozen_weight,
-                    self.weight.value(),
-                    &mut cached.weight_stamp,
-                )
-                && crate::resident::same_parameter(
-                    &cached.frozen_bias,
-                    self.bias.value(),
-                    &mut cached.bias_stamp,
-                )
-        });
+        let reusable = resident
+            .as_mut()
+            .is_some_and(|cached| cached.matches(input, self.weight.value(), self.bias.value()));
         if !reusable {
-            let weight = input.device().upload(
+            *resident = Some(ResidentConvParameters::upload(
+                input,
                 &[self.channels, self.kernel.0, self.kernel.1],
-                self.weight.value().data(),
-            )?;
-            let bias = input
-                .device()
-                .upload(&[self.channels], self.bias.value().data())?;
-            *resident = Some(ResidentDepthwiseParameters {
-                weight,
-                bias,
-                frozen_weight: self.weight.value().snapshot(),
-                frozen_bias: self.bias.value().snapshot(),
-                weight_stamp: self.weight.value().content_stamp(),
-                bias_stamp: self.bias.value().content_stamp(),
-            });
+                &[self.channels],
+                self.weight.value(),
+                self.bias.value(),
+            )?);
         }
         let cached = resident.as_ref().unwrap();
         Ok(input.depthwise_conv2d(
@@ -4747,6 +4824,69 @@ mod tests {
         for (&a, &b) in cpu.data().iter().zip(gpu.data().iter()) {
             assert!((a - b).abs() < 1e-4);
         }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn conv2d_resident_matches_host_and_refreshes_parameters() {
+        use st_backend_wgpu::resident_tensor::TensorDevice;
+        use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+
+        let runtime = match ensure_default_runtime_blocking("nn.conv2d_resident") {
+            Ok((runtime, _)) => runtime,
+            Err(error)
+                if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() == Ok("1") =>
+            {
+                panic!("resident Conv2d requires a live WGPU adapter: {error}");
+            }
+            Err(_) => return,
+        };
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut conv = Conv2d::new(
+            "conv.resident",
+            2,
+            3,
+            (2, 3),
+            (2, 1),
+            (1, 2),
+            (2, 1),
+            (4, 5),
+        )
+        .unwrap();
+        let host = Tensor::from_fn(2, 2 * 4 * 5, |row, col| {
+            ((row * 31 + col * 11) % 47) as f32 * 0.03 - 0.5
+        })
+        .unwrap();
+        let input = device.upload(&[2, 2, 4, 5], host.data()).unwrap();
+        let compare = |conv: &Conv2d| {
+            let (oh, ow) = conv.output_hw().unwrap();
+            let expected = conv.forward_cpu(&host, 2, oh, ow).unwrap();
+            let output = conv.forward_resident(&input).unwrap();
+            assert_eq!(output.layout().shape(), &[2, 3, oh, ow]);
+            let actual = output.snapshot().unwrap().read().unwrap();
+            for (&a, &b) in actual.iter().zip(expected.data()) {
+                assert!((a - b).abs() <= 1e-5 * (1.0 + b.abs()), "{a} != {b}");
+            }
+        };
+        compare(&conv);
+        let cached_weight = conv.resident.borrow().as_ref().unwrap().weight.clone();
+        compare(&conv);
+        assert!(cached_weight.shares_storage_with(&conv.resident.borrow().as_ref().unwrap().weight));
+        conv.weight.value_mut().data_mut()[0] += 0.25;
+        compare(&conv);
+        assert!(
+            !cached_weight.shares_storage_with(&conv.resident.borrow().as_ref().unwrap().weight)
+        );
+        let cached_weight = conv.resident.borrow().as_ref().unwrap().weight.clone();
+        conv.bias.value_mut().data_mut()[0] -= 0.1;
+        compare(&conv);
+        assert!(
+            !cached_weight.shares_storage_with(&conv.resident.borrow().as_ref().unwrap().weight)
+        );
+        conv.set_dilation((1, 1)).unwrap();
+        compare(&conv);
+        conv.clear_resident_forward_cache();
+        assert!(conv.resident.borrow().is_none());
     }
 
     #[cfg(feature = "wgpu")]
