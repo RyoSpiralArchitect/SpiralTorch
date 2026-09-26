@@ -170,6 +170,44 @@ try {
     batchForwardError = Math.max(batchForwardError, Math.abs(batchValues[i] - expectedBatch[i] * 2));
   }
   if (batchForwardError > 1e-5) throw Error(`Resident batch-to-NN mismatch: ${batchForwardError}`);
+  const depthwiseDevice = residentBatch.device();
+  const depthwiseKernel = new Float32Array(18);
+  depthwiseKernel[4] = 2;
+  depthwiseKernel[13] = -1;
+  const depthwiseWeights = depthwiseDevice.upload([2, 3, 3], depthwiseKernel);
+  const depthwiseBias = depthwiseDevice.upload([2], new Float32Array([0.1, 0.2]));
+  const depthwise = residentBatch.depthwiseConv2d(depthwiseWeights, depthwiseBias, 1, 1, 1, 1, 1, 1).relu();
+  if (Array.from(depthwise.shape).join(",") !== "5,2,6,6") throw Error("Resident depthwise shape mismatch");
+  const depthwiseValues = await depthwise.snapshot().readValues();
+  let depthwiseError = 0;
+  for (let i = 0; i < expectedBatch.length; i++) {
+    const channel = Math.floor((i % 72) / 36);
+    const expected = Math.max(expectedBatch[i] * [2, -1][channel] + [0.1, 0.2][channel], 0);
+    depthwiseError = Math.max(depthwiseError, Math.abs(depthwiseValues[i] - expected));
+  }
+  if (depthwiseError > 1e-5) throw Error(`Resident batch-to-depthwise mismatch: ${depthwiseError}`);
+  let rejectedDepthwiseShape = false;
+  try { residentBatch.depthwiseConv2d(depthwiseWeights, depthwiseDevice.upload([1], new Float32Array([0])), 1, 1, 1, 1, 1, 1); }
+  catch (error) { rejectedDepthwiseShape = /shape/.test(String(error)); }
+  if (!rejectedDepthwiseShape) throw Error("Resident depthwise accepted an invalid bias shape");
+  const sharedDepthwise = depthwiseDevice.upload([1, 1, 1, 1], new Float32Array([1]));
+  const sharedDepthwiseResult = await sharedDepthwise.depthwiseConv2d(
+    sharedDepthwise.reshape([1, 1, 1]), sharedDepthwise.reshape([1]), 1, 1, 0, 0, 1, 1)
+    .snapshot().readValues();
+  if (sharedDepthwiseResult.length !== 1 || sharedDepthwiseResult[0] !== 2) {
+    throw Error("Resident depthwise rejected aliased read-only inputs");
+  }
+  const invalidDepthwiseInput = depthwiseDevice.upload([1, 1, 2, 2],
+    new Float32Array([0, 0, 0, 3.4028234663852886e38]))
+    .mul(depthwiseDevice.upload([], new Float32Array([2])));
+  let rejectedInheritedNonfinite = false;
+  try {
+    await invalidDepthwiseInput.depthwiseConv2d(
+      depthwiseDevice.upload([1, 1, 1], new Float32Array([1])),
+      depthwiseDevice.upload([1], new Float32Array([0])), 2, 2, 0, 0, 1, 1)
+      .snapshot().readValues();
+  } catch (error) { rejectedInheritedNonfinite = /non-finite/.test(String(error)); }
+  if (!rejectedInheritedNonfinite) throw Error("Resident depthwise lost an upstream validity guard");
   let rejectedBatchNonfinite = false;
   try { batchGpu.applyResidentBatch(1, batchChannels, batchHeight, batchWidth, new Float32Array(imageLength).fill(NaN)); }
   catch (error) { rejectedBatchNonfinite = /non-finite/.test(String(error)); }
@@ -238,6 +276,47 @@ try {
     if (repeat >= 5) { roundTripMs.push(oldRun.elapsed); residentMs.push(newRun.elapsed); }
   }
   if (handoffMaxAbsError > 1e-5) throw Error(`Handoff benchmark output mismatch: ${handoffMaxAbsError}`);
+
+  const handoffKernel = new Float32Array(3 * 3 * 3);
+  for (let channel = 0; channel < 3; channel++) handoffKernel[channel * 9 + 4] = 1.1;
+  const handoffWeights = tensorDevice.upload([3, 3, 3], handoffKernel);
+  const handoffBias = tensorDevice.upload([3], new Float32Array(3));
+  const depthwiseRoundTripMs = [], depthwiseResidentMs = [];
+  let depthwiseHandoffError = 0;
+  const measureDepthwiseRoundTrip = async () => {
+    const start = performance.now();
+    const image = await roundTrip.apply(3, 128, 128, benchPixels);
+    const input = tensorDevice.upload([1, 3, 64, 64], image.values);
+    const values = await input.depthwiseConv2d(handoffWeights, handoffBias, 1, 1, 1, 1, 1, 1)
+      .relu().snapshot().readValues();
+    return {values, elapsed: performance.now() - start};
+  };
+  const measureDepthwiseResident = async () => {
+    const start = performance.now();
+    const image = resident.applyResident(3, 128, 128, benchPixels).reshape([1, 3, 64, 64]);
+    const values = await image.depthwiseConv2d(handoffWeights, handoffBias, 1, 1, 1, 1, 1, 1)
+      .relu().snapshot().readValues();
+    return {values, elapsed: performance.now() - start};
+  };
+  for (let repeat = 0; repeat < 25; repeat++) {
+    let oldRun, newRun;
+    if (repeat % 2 === 0) {
+      oldRun = await measureDepthwiseRoundTrip();
+      newRun = await measureDepthwiseResident();
+    } else {
+      newRun = await measureDepthwiseResident();
+      oldRun = await measureDepthwiseRoundTrip();
+    }
+    if (oldRun.values.length !== newRun.values.length) throw Error("Depthwise handoff shape mismatch");
+    for (let i = 0; i < oldRun.values.length; i++) {
+      depthwiseHandoffError = Math.max(depthwiseHandoffError, Math.abs(oldRun.values[i] - newRun.values[i]));
+    }
+    if (repeat >= 5) {
+      depthwiseRoundTripMs.push(oldRun.elapsed);
+      depthwiseResidentMs.push(newRun.elapsed);
+    }
+  }
+  if (depthwiseHandoffError > 1e-5) throw Error(`Depthwise handoff mismatch: ${depthwiseHandoffError}`);
 
   const batchSweep = [];
   for (const [channels, height, width] of [[1, 64, 64], [3, 128, 128]]) {
@@ -320,6 +399,12 @@ try {
       output_shape: Array.from(residentBatch.shape), model: "Sequential(Scaler x2)",
       terminal_readback_only: true, max_abs_error: batchForwardError,
       rejected_truncated_input: rejectedBatchLength, rejected_nonfinite_input: rejectedBatchNonfinite},
+    resident_batch_depthwise: {input_shape: [batchCount, batchChannels, 6, 6],
+      output_shape: Array.from(depthwise.shape), kernel_shape: [2, 3, 3],
+      terminal_readback_only: true, max_abs_error: depthwiseError,
+      rejected_invalid_bias: rejectedDepthwiseShape,
+      rejected_inherited_nonfinite: rejectedInheritedNonfinite,
+      accepted_aliased_read_only_inputs: sharedDepthwiseResult[0] === 2},
     resident_batch_training: {model: "GraphLearner(Scaler)", input_shape: [batchCount, 72],
       update_rate: 0.01, loss_before: lossBefore, loss_after: lossAfter,
       geometry_to_learner_readback: false, parameter_updates: 1},
@@ -330,6 +415,13 @@ try {
       round_trip_ms: roundTripMs, resident_ms: residentMs,
       round_trip_median_ms: median(roundTripMs), resident_median_ms: median(residentMs),
       max_abs_error: handoffMaxAbsError},
+    depthwise_handoff_benchmark: {input_shape: [3, 128, 128], transformed_shape: [1, 3, 64, 64],
+      kernel_shape: [3, 3, 3], warmups: 5, samples: 20,
+      order: "alternating round-trip/resident per repeat",
+      timing: "browser wall time including initial upload and terminal depthwise output readback",
+      round_trip_ms: depthwiseRoundTripMs, resident_ms: depthwiseResidentMs,
+      round_trip_median_ms: median(depthwiseRoundTripMs), resident_median_ms: median(depthwiseResidentMs),
+      max_abs_error: depthwiseHandoffError},
     batch_sweep: batchSweep,
     rust_runtime_adapter: runtimeAdapter,
     browser_adapter_probe: {vendor: adapter.info?.vendor, architecture: adapter.info?.architecture,

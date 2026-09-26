@@ -138,3 +138,40 @@ class VisionWgpuPipelineTests(unittest.TestCase):
 
         with self.assertRaisesRegex(Exception, "non-finite"):
             gpu.apply_resident_batch([st.ImageTensor(2, 9, 11, [float("nan")] * 198)], device)
+
+    def test_resident_batch_feeds_depthwise_without_intermediate_readback(self):
+        cpu = st.TransformPipeline(seed=77)
+        gpu = st.TransformPipeline(seed=77)
+        for pipeline in (cpu, gpu):
+            pipeline.add_horizontal_flip(0.5)
+            pipeline.add_center_crop(4, 4)
+        try:
+            gpu.enable_wgpu()
+            device = st.WgpuTensorDevice.create()
+        except (RuntimeError, NotImplementedError) as exc:
+            message = str(exc).lower()
+            if "adapter" in message or "not available" in message or "wgpu" in message:
+                self.skipTest(str(exc))
+            raise
+
+        images = [
+            st.ImageTensor(2, 6, 6, [((i * 7 + frame * 11) % 53) / 52 for i in range(72)])
+            for frame in range(2)
+        ]
+        expected = []
+        for image in images:
+            values = cpu.apply(image).flatten()
+            expected.extend(max(value * [2.0, -1.0][i // 16] + [0.1, 0.2][i // 16], 0.0)
+                            for i, value in enumerate(values))
+        transformed = gpu.apply_resident_batch(images, device)
+        kernel = [0.0] * 18
+        kernel[4], kernel[13] = 2.0, -1.0
+        weights = device.upload([2, 3, 3], kernel)
+        bias = device.upload([2], [0.1, 0.2])
+        output = transformed.depthwise_conv2d(weights, bias, [1, 1], [1, 1], [1, 1]).relu()
+        self.assertEqual(output.shape, (2, 2, 4, 4))
+        actual = output.snapshot().read_values()
+        for left, right in zip(actual, expected):
+            self.assertAlmostEqual(left, right, delta=1e-5)
+        with self.assertRaisesRegex(ValueError, "shape"):
+            transformed.depthwise_conv2d(weights, device.upload([1], [0.0]), [1, 1], [1, 1], [1, 1])

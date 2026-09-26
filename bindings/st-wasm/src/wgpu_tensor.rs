@@ -176,6 +176,38 @@ impl WasmWgpuTensor {
             inner: self.inner.gelu().map_err(js_error)?,
         })
     }
+    #[wasm_bindgen(js_name = depthwiseConv2d)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn depthwise_conv2d(
+        &self,
+        weights: &Self,
+        bias: &Self,
+        stride_h: Number,
+        stride_w: Number,
+        pad_h: Number,
+        pad_w: Number,
+        dilation_h: Number,
+        dilation_w: Number,
+    ) -> Result<WasmWgpuTensor, JsValue> {
+        let stride = (
+            js_u32(stride_h.as_ref(), "stride_h")? as usize,
+            js_u32(stride_w.as_ref(), "stride_w")? as usize,
+        );
+        let padding = (
+            js_u32(pad_h.as_ref(), "pad_h")? as usize,
+            js_u32(pad_w.as_ref(), "pad_w")? as usize,
+        );
+        let dilation = (
+            js_u32(dilation_h.as_ref(), "dilation_h")? as usize,
+            js_u32(dilation_w.as_ref(), "dilation_w")? as usize,
+        );
+        Ok(Self {
+            inner: self
+                .inner
+                .depthwise_conv2d(&weights.inner, &bias.inner, stride, padding, dilation)
+                .map_err(js_error)?,
+        })
+    }
     pub fn snapshot(&self) -> Result<WasmWgpuTensorSnapshot, JsValue> {
         let inner = self.inner.snapshot().map_err(js_error)?;
         Ok(WasmWgpuTensorSnapshot::from_readback(inner))

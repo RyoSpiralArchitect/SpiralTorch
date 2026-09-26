@@ -36,6 +36,15 @@ fn dimensions(value: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
     value.try_iter()?.map(|item| index(&item?)).collect()
 }
 
+#[cfg(feature = "wgpu")]
+fn pair(value: &Bound<'_, PyAny>) -> PyResult<(usize, usize)> {
+    let values = dimensions(value)?;
+    let [first, second] = values
+        .try_into()
+        .map_err(|_| PyValueError::new_err("expected two non-negative integer dimensions"))?;
+    Ok((first, second))
+}
+
 #[pyclass(name = "WgpuTensorDevice", module = "spiraltorch.wgpu")]
 pub(crate) struct PyWgpuTensorDevice {
     #[cfg(feature = "wgpu")]
@@ -183,6 +192,32 @@ impl PyWgpuTensor {
     fn gelu(&self, py: Python<'_>) -> PyResult<Self> {
         Ok(Self {
             inner: py.detach(|| self.inner.gelu()).map_err(error)?,
+        })
+    }
+    fn depthwise_conv2d(
+        &self,
+        py: Python<'_>,
+        weights: &Self,
+        bias: &Self,
+        stride: &Bound<'_, PyAny>,
+        padding: &Bound<'_, PyAny>,
+        dilation: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        let stride = pair(stride)?;
+        let padding = pair(padding)?;
+        let dilation = pair(dilation)?;
+        Ok(Self {
+            inner: py
+                .detach(|| {
+                    self.inner.depthwise_conv2d(
+                        &weights.inner,
+                        &bias.inner,
+                        stride,
+                        padding,
+                        dilation,
+                    )
+                })
+                .map_err(error)?,
         })
     }
     fn snapshot(&self, py: Python<'_>) -> PyResult<PyWgpuTensorSnapshot> {

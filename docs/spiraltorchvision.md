@@ -77,6 +77,30 @@ prediction = model(resident.reshape([4, 3 * 64 * 64]))
 values = prediction.snapshot().read_values()
 ```
 
+The same NCHW result can enter a GPU-resident depthwise convolution directly.
+Weights and bias are resident tensors too; only the final output is read back.
+
+```python
+kernel = [0.0] * (3 * 3 * 3)
+for channel in range(3):
+    kernel[channel * 9 + 4] = 1.1
+weights = device.upload([3, 3, 3], kernel)
+bias = device.upload([3], [0.0] * 3)
+features = resident.depthwise_conv2d(
+    weights, bias, [1, 1], [1, 1], [1, 1]
+).relu()
+values = features.snapshot().read_values()
+```
+
+Rust `ResidentTensor::depthwise_conv2d` takes the same tensors and
+stride/padding/dilation pairs. Browser `WgpuTensor.depthwiseConv2d` takes six
+integer geometry arguments and maps only through `snapshot().readValues()`.
+The operation packs non-contiguous views on the GPU, rejects shape/device
+errors before submission, and preserves deferred non-finite guards. It is a
+forward-only primitive: `ConvNeXtBackbone` still uses host `Tensor` between
+its layers, and its backward pass is not resident. See the
+[bounded browser result](../benchmarks/results/2026-09-27-vision-resident-depthwise.md).
+
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed
 `apply_packed_geometry_batch_resident(&[n, c, h, w], &values, &device)` entry
 for callers that already own contiguous NCHW data. Empty, ragged, and
@@ -137,7 +161,7 @@ cargo run -p st-vision --example convnext_image_classification --features wgpu
 
 The example trains a two-class, two-image synthetic task with cross-entropy loss and an `st-nn` linear head. The backward test checks input and trainable-parameter gradients against finite differences, including a stage downsample; the training test also verifies that backbone weights change and survive a save/reload round trip. Host `Conv2d` and `LayerNorm` now take the loss-provided reduction as-is, so the full ConvNeXt-style path is one VJP. The other convolution and affine-normalization variants follow that same contract, with mean-loss VJP and duplicated-batch checks in `st-nn/tests/training_gradient_reduction.rs`. This changes update magnitudes for these layers when batch size exceeds one; existing learning rates may need retuning. Specialized RNN, Embedding, and other layers still need a separate reduction audit.
 
-The `wgpu` feature propagates to `st-nn`, but this example uses host `Tensor` values: `Conv2d` may dispatch some operations to WGPU and read them back, while small or unsupported operations can stay on CPU. Each ConvNeXt block now uses a real channel-wise `DepthwiseConv2d` with only `channels * 7 * 7` trainable spatial weights, rather than a dense `channels * channels * 7 * 7` proxy. Its dedicated WGPU forward kernel has native CPU parity and reports the actual backend in operation metadata; a selected WGPU route returns to CPU only when fallback is allowed, while `Auto` may resolve to CPU. Backward remains a CPU reference, and the WGPU forward uploads all inputs/parameters and reads back the result on every call. On WASM, this synchronous host-Tensor WGPU route rejects before dispatch because browser readback must be async; the CPU reference remains available. The new compact weight shape rejects old dense block checkpoints, which need an explicit migration. This is not yet a GPU-resident image-training graph or proof of general GPU speedup. The native host CPU/WGPU depthwise timing sweep, including transfer and readback, is in `benchmarks/results/2026-09-26-vision-depthwise-m4.md`; async browser depthwise execution, full-model training, and real-dataset quality remain open.
+The `wgpu` feature propagates to `st-nn`, but this example uses host `Tensor` values: `Conv2d` may dispatch some operations to WGPU and read them back, while small or unsupported operations can stay on CPU. Each ConvNeXt block now uses a real channel-wise `DepthwiseConv2d` with only `channels * 7 * 7` trainable spatial weights, rather than a dense `channels * channels * 7 * 7` proxy. Its dedicated WGPU forward kernel has native CPU parity and reports the actual backend in operation metadata; a selected WGPU route returns to CPU only when fallback is allowed, while `Auto` may resolve to CPU. Backward remains a CPU reference, and the WGPU forward uploads all inputs/parameters and reads back the result on every call. On WASM, this synchronous host-Tensor WGPU route rejects before dispatch because browser readback must be async; the CPU reference remains available. The new compact weight shape rejects old dense block checkpoints, which need an explicit migration. This is not yet a GPU-resident image-training graph or proof of general GPU speedup. The native host CPU/WGPU depthwise timing sweep, including transfer and readback, is in `benchmarks/results/2026-09-26-vision-depthwise-m4.md`; the separate resident/browser forward primitive is described above. Full-model resident training and real-dataset quality remain open.
 
 Need a CIFAR-style network? `ResNetConfig::resnet56_cifar(true)` wires a 56-layer backbone with SpiralTorch's learnable skip scalers and a default **slip schedule** that eases each residual bridge in before letting it run at full strength. If you opt out of the learnable gates, the helper leaves skip slip disabled so the baseline topology stays untouched. Override the schedule to taste by swapping in your own `SkipSlipSchedule`:
 

@@ -11,6 +11,7 @@ use thiserror::Error;
 pub(crate) mod capture;
 mod checked_import;
 pub mod classification;
+mod convolution;
 pub(crate) mod guard_capture;
 pub mod loss;
 pub mod normalization;
@@ -41,6 +42,8 @@ pub enum TensorError {
     Operands,
     #[error("loss predictions and targets must have the same logical shape")]
     LossShape,
+    #[error("invalid depthwise convolution shape: {0}")]
+    ConvolutionShape(&'static str),
     #[error("tensor exceeds portable addressing or device limits: {0}")]
     Limit(&'static str),
     #[error("tensor view addresses outside its storage")]
@@ -60,6 +63,7 @@ struct Kernels {
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
     checked_import: std::sync::OnceLock<checked_import::CheckedImportKernels>,
+    convolution: std::sync::OnceLock<convolution::DepthwiseKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -200,6 +204,7 @@ impl TensorDevice {
             classification: std::sync::OnceLock::new(),
             normalization: std::sync::OnceLock::new(),
             checked_import: std::sync::OnceLock::new(),
+            convolution: std::sync::OnceLock::new(),
         })))
     }
 
@@ -609,6 +614,19 @@ impl ResidentTensor {
     }
     pub fn gelu(&self) -> Result<Self, TensorError> {
         self.apply(ElementwiseOp::Gelu, None)
+    }
+
+    /// NCHW channel-wise convolution. Weights are [C, KH, KW], bias is [C].
+    /// Inputs and output stay on the same queue until an explicit snapshot.
+    pub fn depthwise_conv2d(
+        &self,
+        weights: &Self,
+        bias: &Self,
+        stride: (usize, usize),
+        padding: (usize, usize),
+        dilation: (usize, usize),
+    ) -> Result<Self, TensorError> {
+        convolution::forward(self, weights, bias, stride, padding, dilation)
     }
 
     pub fn contiguous(&self) -> Result<Self, TensorError> {

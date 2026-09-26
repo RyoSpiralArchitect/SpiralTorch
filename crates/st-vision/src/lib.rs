@@ -6091,6 +6091,77 @@ mod tests {
 
     #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     #[test]
+    fn resident_geometry_batch_feeds_depthwise_without_intermediate_readback() {
+        use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+
+        let runtime = match ensure_default_runtime_blocking("vision.depthwise_handoff") {
+            Ok((runtime, _)) => runtime,
+            Err(error)
+                if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() == Ok("1") =>
+            {
+                panic!("vision depthwise handoff requires a live WGPU adapter: {error}");
+            }
+            Err(error) => {
+                eprintln!("Skipping vision depthwise handoff: {error}");
+                return;
+            }
+        };
+        assert_ne!(format!("{:?}", runtime.adapter_info().device_type), "Cpu");
+        let tensor_device = TensorDevice::new(runtime).unwrap();
+        let mut cpu = TransformPipeline::with_seed(77);
+        cpu.add(TransformOperation::RandomHorizontalFlip(
+            RandomHorizontalFlip::new(0.5).unwrap(),
+        ))
+        .add(TransformOperation::CenterCrop(
+            CenterCrop::new(4, 4).unwrap(),
+        ));
+        let mut gpu = cpu
+            .clone()
+            .with_gpu_dispatcher(TransformDispatcher::new_default_gpu().unwrap());
+        let images = (0..2)
+            .map(|frame| {
+                ImageTensor::new(
+                    2,
+                    6,
+                    6,
+                    (0..72)
+                        .map(|index| ((index * 7 + frame * 11) % 53) as f32 / 52.)
+                        .collect(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut expected = Vec::new();
+        for image in &images {
+            let mut transformed = image.clone();
+            cpu.apply(&mut transformed).unwrap();
+            for (index, &value) in transformed.as_slice().iter().enumerate() {
+                let channel = index / 16;
+                expected.push((value * [2.0, -1.0][channel] + [0.1, 0.2][channel]).max(0.0));
+            }
+        }
+        let transformed = gpu
+            .apply_geometry_batch_resident(&images, &tensor_device)
+            .unwrap();
+        let mut kernel = vec![0.0; 18];
+        kernel[4] = 2.0;
+        kernel[13] = -1.0;
+        let weights = tensor_device.upload(&[2, 3, 3], &kernel).unwrap();
+        let bias = tensor_device.upload(&[2], &[0.1, 0.2]).unwrap();
+        let output = transformed
+            .depthwise_conv2d(&weights, &bias, (1, 1), (1, 1), (1, 1))
+            .unwrap()
+            .relu()
+            .unwrap();
+        assert_eq!(output.layout().shape(), &[2, 2, 4, 4]);
+        let actual = output.snapshot().unwrap().read().unwrap();
+        for (left, right) in actual.iter().zip(expected) {
+            assert!((left - right).abs() <= 1e-5, "{left} != {right}");
+        }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
     fn geometry_sequence_runs_seeded_flips_on_wgpu() {
         let Ok(dispatcher) = TransformDispatcher::new_default_gpu() else {
             eprintln!("Skipping vision WGPU sequence: no adapter available");

@@ -99,6 +99,8 @@ declare module "spiraltorch-wasm" {
         mul(rhs: WgpuTensor): WgpuTensor;
         relu(): WgpuTensor;
         gelu(): WgpuTensor;
+        /** NCHW channel-wise convolution with resident [C, KH, KW] weights and [C] bias. */
+        depthwiseConv2d(weights: WgpuTensor, bias: WgpuTensor, strideH: number, strideW: number, padH: number, padW: number, dilationH: number, dilationW: number): WgpuTensor;
         snapshot(): WgpuTensorSnapshot;
         free(): void;
     }
