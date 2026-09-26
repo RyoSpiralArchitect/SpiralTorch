@@ -90,8 +90,9 @@ impl Default for ConvNeXtConfig {
     }
 }
 
+/// One ConvNeXt residual block with host training and an explicit resident forward.
 #[derive(Debug)]
-struct ConvNeXtBlock {
+pub struct ConvNeXtBlock {
     depthwise: DepthwiseConv2d,
     norm: LayerNorm,
     mlp1: Linear,
@@ -102,7 +103,8 @@ struct ConvNeXtBlock {
 }
 
 impl ConvNeXtBlock {
-    fn new(
+    /// Builds a block over NCHW features with the given spatial dimensions.
+    pub fn new(
         name: &str,
         channels: usize,
         input_hw: (usize, usize),
@@ -135,6 +137,54 @@ impl ConvNeXtBlock {
 }
 
 impl Module for ConvNeXtBlock {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, st_nn::resident::InferenceError>
+    {
+        if matches!(input.layout().shape(), [0, _, _, _]) {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "empty ConvNeXt batch",
+                )
+                .into(),
+            );
+        }
+        let dw = self.depthwise.forward_resident(input)?;
+        let shape = dw.layout().shape();
+        let (batch, height, width) = (shape[0], shape[2], shape[3]);
+        let tokens = dw
+            .permute(&[0, 2, 3, 1])?
+            .contiguous()?
+            .reshape(&[dw.layout().len() / self.channels, self.channels])?;
+        let normed = self.norm.forward_resident(&tokens)?;
+        let hidden = self.mlp1.forward_resident(&normed)?;
+        let activated = self.activation.forward_resident(&hidden)?;
+        let projected = self.mlp2.forward_resident(&activated)?;
+        let conv_layout = projected
+            .reshape(&[batch, height, width, self.channels])?
+            .permute(&[0, 3, 1, 2])?;
+        Ok(conv_layout.add(input)?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, st_nn::resident::InferenceError>
+    {
+        Ok(self.forward_resident(input)?.snapshot()?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.depthwise.clear_resident_forward_cache();
+        self.norm.clear_resident_forward_cache();
+        self.mlp1.clear_resident_forward_cache();
+        self.mlp2.clear_resident_forward_cache();
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let dw = self.depthwise.forward(input)?;
         let tokens = conv_to_tokens(&dw, self.channels, self.hw)?;
@@ -447,5 +497,95 @@ impl Module for ConvNeXtBackbone {
             stage.visit_parameters_mut(visitor)?;
         }
         self.final_norm.visit_parameters_mut(visitor)
+    }
+}
+
+#[cfg(all(test, feature = "wgpu", not(target_arch = "wasm32")))]
+mod resident_tests {
+    use super::*;
+    use st_backend_wgpu::resident_tensor::{ResidentTensor, TensorDevice};
+    use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+    use st_core::backend::device_caps::DeviceCaps;
+    use st_nn::execution::{push_backend_policy, BackendPolicy};
+
+    #[test]
+    fn resident_block_matches_host_and_refreshes_changed_parameters() {
+        let runtime = match ensure_default_runtime_blocking("vision.convnext_block_resident") {
+            Ok((runtime, _)) => runtime,
+            Err(error)
+                if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() == Ok("1") =>
+            {
+                panic!("ConvNeXt resident block requires a live WGPU adapter: {error}");
+            }
+            Err(_) => return,
+        };
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut block = ConvNeXtBlock::new("vision.test", 3, (4, 5), -1.0, 1e-6).unwrap();
+        let host_input = Tensor::from_fn(2, 3 * 4 * 5, |row, col| {
+            ((row * 37 + col * 13) % 83) as f32 / 83.0 - 0.5
+        })
+        .unwrap();
+        let input = device.upload(&[2, 3, 4, 5], host_input.data()).unwrap();
+        let compare = |block: &ConvNeXtBlock, input: &ResidentTensor| {
+            let expected = {
+                let _policy =
+                    push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+                block.forward(&host_input).unwrap()
+            };
+            let resident = block.forward_resident(input).unwrap();
+            assert_eq!(resident.layout().shape(), &[2, 3, 4, 5]);
+            let actual = resident.snapshot().unwrap().read().unwrap();
+            for (index, (&reference, &value)) in expected.data().iter().zip(&actual).enumerate() {
+                assert!(
+                    (reference - value).abs() <= 1e-3 * (1.0 + reference.abs()),
+                    "ConvNeXt block value {index}: cpu={reference}, resident={value}"
+                );
+            }
+        };
+        compare(&block, &input);
+        compare(&block, &input);
+        assert_eq!(block.norm.resident_forward_stats().unwrap().cache_hits, 1);
+        assert_eq!(block.mlp1.resident_forward_stats().unwrap().cache_hits, 1);
+
+        let mut transposed = vec![0.0; host_input.data().len()];
+        for batch in 0..2 {
+            for channel in 0..3 {
+                for y in 0..4 {
+                    for x in 0..5 {
+                        transposed[((batch * 3 + channel) * 5 + x) * 4 + y] =
+                            host_input.data()[((batch * 3 + channel) * 4 + y) * 5 + x];
+                    }
+                }
+            }
+        }
+        let strided = device
+            .upload(&[2, 3, 5, 4], &transposed)
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap();
+        assert!(!strided.layout().is_contiguous());
+        compare(&block, &strided);
+
+        block
+            .visit_parameters_mut(&mut |parameter| {
+                if parameter.name().contains(".dw::weight")
+                    || parameter.name().contains(".fc1::weight")
+                {
+                    parameter.value_mut().data_mut()[0] += 0.2;
+                }
+                Ok(())
+            })
+            .unwrap();
+        compare(&block, &input);
+        assert_eq!(block.mlp1.resident_forward_stats().unwrap().compilations, 2);
+        block.clear_resident_forward_cache();
+        compare(&block, &input);
+        let empty = device.upload(&[0, 3, 4, 5], &[]).unwrap();
+        assert!(matches!(
+            block.forward_resident(&empty),
+            Err(st_nn::resident::InferenceError::ResidentTensor(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(_)
+            ))
+        ));
     }
 }

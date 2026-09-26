@@ -6132,9 +6132,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut expected = Vec::new();
+        #[cfg(feature = "nn")]
+        let mut transformed_host = Vec::new();
         for image in &images {
             let mut transformed = image.clone();
             cpu.apply(&mut transformed).unwrap();
+            #[cfg(feature = "nn")]
+            transformed_host.extend_from_slice(transformed.as_slice());
             for (index, &value) in transformed.as_slice().iter().enumerate() {
                 let channel = index / 16;
                 expected.push((value * [2.0, -1.0][channel] + [0.1, 0.2][channel]).max(0.0));
@@ -6143,6 +6147,26 @@ mod tests {
         let transformed = gpu
             .apply_geometry_batch_resident(&images, &tensor_device)
             .unwrap();
+        #[cfg(feature = "nn")]
+        {
+            use st_core::backend::device_caps::DeviceCaps;
+            use st_nn::execution::{push_backend_policy, BackendPolicy};
+            use st_nn::module::Module;
+
+            let block =
+                models::ConvNeXtBlock::new("vision.handoff", 2, (4, 4), -1.0, 1e-6).unwrap();
+            let host_input = st_tensor::Tensor::from_vec(2, 32, transformed_host).unwrap();
+            let reference = {
+                let _policy =
+                    push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+                block.forward(&host_input).unwrap()
+            };
+            let output = block.forward_resident(&transformed).unwrap();
+            let actual = output.snapshot().unwrap().read().unwrap();
+            for (&value, &expected) in actual.iter().zip(reference.data()) {
+                assert!((value - expected).abs() <= 1e-3 * (1.0 + expected.abs()));
+            }
+        }
         let mut kernel = vec![0.0; 18];
         kernel[4] = 2.0;
         kernel[13] = -1.0;

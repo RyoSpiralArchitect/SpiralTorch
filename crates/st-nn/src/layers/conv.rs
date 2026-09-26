@@ -13,6 +13,8 @@ use crate::{PureResult, Tensor, TensorError};
 use st_core::util::math::{ramanujan_pi, LeechProjector};
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
+#[cfg(feature = "wgpu")]
+use st_tensor::TensorContentStamp;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorUtilBackend};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1061,6 +1063,19 @@ pub struct DepthwiseConv2d {
     padding: (usize, usize),
     dilation: (usize, usize),
     input_hw: (usize, usize),
+    #[cfg(feature = "wgpu")]
+    resident: RefCell<Option<ResidentDepthwiseParameters>>,
+}
+
+#[cfg(feature = "wgpu")]
+#[derive(Debug)]
+struct ResidentDepthwiseParameters {
+    weight: st_backend_wgpu::resident_tensor::ResidentTensor,
+    bias: st_backend_wgpu::resident_tensor::ResidentTensor,
+    frozen_weight: Tensor,
+    frozen_bias: Tensor,
+    weight_stamp: Option<TensorContentStamp>,
+    bias_stamp: Option<TensorContentStamp>,
 }
 
 impl DepthwiseConv2d {
@@ -1114,6 +1129,8 @@ impl DepthwiseConv2d {
             padding,
             dilation,
             input_hw,
+            #[cfg(feature = "wgpu")]
+            resident: RefCell::new(None),
         };
         let (oh, ow) = layer.output_hw()?;
         if channels
@@ -1258,6 +1275,84 @@ impl DepthwiseConv2d {
 }
 
 impl Module for DepthwiseConv2d {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        use st_backend_wgpu::resident_tensor::TensorError as ResidentTensorError;
+
+        crate::resident::require_uncommitted_route()?;
+        let shape = input.layout().shape();
+        if shape.len() != 4
+            || shape[1] != self.channels
+            || shape[2] != self.input_hw.0
+            || shape[3] != self.input_hw.1
+        {
+            return Err(ResidentTensorError::ConvolutionShape("expected NCHW input").into());
+        }
+
+        let mut resident = self.resident.borrow_mut();
+        let reusable = resident.as_mut().is_some_and(|cached| {
+            cached
+                .weight
+                .device()
+                .runtime()
+                .context()
+                .shares_handles_with(input.device().runtime().context())
+                && crate::resident::same_parameter(
+                    &cached.frozen_weight,
+                    self.weight.value(),
+                    &mut cached.weight_stamp,
+                )
+                && crate::resident::same_parameter(
+                    &cached.frozen_bias,
+                    self.bias.value(),
+                    &mut cached.bias_stamp,
+                )
+        });
+        if !reusable {
+            let weight = input.device().upload(
+                &[self.channels, self.kernel.0, self.kernel.1],
+                self.weight.value().data(),
+            )?;
+            let bias = input
+                .device()
+                .upload(&[self.channels], self.bias.value().data())?;
+            *resident = Some(ResidentDepthwiseParameters {
+                weight,
+                bias,
+                frozen_weight: self.weight.value().snapshot(),
+                frozen_bias: self.bias.value().snapshot(),
+                weight_stamp: self.weight.value().content_stamp(),
+                bias_stamp: self.bias.value().content_stamp(),
+            });
+        }
+        let cached = resident.as_ref().unwrap();
+        Ok(input.depthwise_conv2d(
+            &cached.weight,
+            &cached.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+        )?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        Ok(self.forward_resident(input)?.snapshot()?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        *self.resident.borrow_mut() = None;
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (batch, oh, ow) = self.validate_input(input)?;
         let output_values = batch
@@ -4062,6 +4157,91 @@ mod tests {
                 "cpu={expected}, wgpu={actual}"
             );
         }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn depthwise_resident_forward_reuses_and_refreshes_parameter_uploads() {
+        use st_backend_wgpu::resident_tensor::{TensorDevice, TensorError as ResidentTensorError};
+        use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+
+        let runtime = match ensure_default_runtime_blocking("nn.depthwise_resident") {
+            Ok((runtime, _)) => runtime,
+            Err(error)
+                if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() == Ok("1") =>
+            {
+                panic!("depthwise resident test requires a live WGPU adapter: {error}");
+            }
+            Err(_) => return,
+        };
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut layer =
+            DepthwiseConv2d::new("resident.dw", 2, (3, 3), (1, 1), (1, 1), (1, 1), (3, 3)).unwrap();
+        let input = Tensor::from_fn(2, 18, |row, col| {
+            ((row * 17 + col * 7) % 23) as f32 * 0.04 - 0.3
+        })
+        .unwrap();
+        let resident_input = device.upload(&[2, 2, 3, 3], input.data()).unwrap();
+        let first = layer
+            .forward_resident(&resident_input)
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        let cached_weight = layer.resident.borrow().as_ref().unwrap().weight.clone();
+        let repeated = layer
+            .forward_resident(&resident_input)
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        assert_eq!(first, repeated);
+        assert!(
+            cached_weight.shares_storage_with(&layer.resident.borrow().as_ref().unwrap().weight)
+        );
+
+        layer.weight.value_mut().data_mut()[0] += 0.25;
+        let expected = layer.forward(&input).unwrap();
+        let updated = layer
+            .forward_resident(&resident_input)
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        assert!(
+            !cached_weight.shares_storage_with(&layer.resident.borrow().as_ref().unwrap().weight)
+        );
+        for (&actual, &reference) in updated.iter().zip(expected.data()) {
+            assert!((actual - reference).abs() <= 1e-5);
+        }
+        let cached_weight = layer.resident.borrow().as_ref().unwrap().weight.clone();
+        layer.bias.value_mut().data_mut()[0] += 0.1;
+        let expected = layer.forward(&input).unwrap();
+        let updated = layer
+            .forward_resident(&resident_input)
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        assert!(
+            !cached_weight.shares_storage_with(&layer.resident.borrow().as_ref().unwrap().weight)
+        );
+        for (&actual, &reference) in updated.iter().zip(expected.data()) {
+            assert!((actual - reference).abs() <= 1e-5);
+        }
+        layer.clear_resident_forward_cache();
+        assert!(layer.resident.borrow().is_none());
+        let bad = device.upload(&[2, 2, 9], input.data()).unwrap();
+        assert!(matches!(
+            layer.forward_resident(&bad),
+            Err(crate::resident::InferenceError::ResidentTensor(
+                ResidentTensorError::ConvolutionShape(_)
+            ))
+        ));
     }
 
     #[test]

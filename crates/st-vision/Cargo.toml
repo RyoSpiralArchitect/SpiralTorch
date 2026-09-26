@@ -41,3 +41,7 @@ required-features = ["nn"]
 [[example]]
 name = "depthwise_conv2d_bench"
 required-features = ["nn", "wgpu"]
+
+[[example]]
+name = "convnext_resident_block"
+required-features = ["nn", "wgpu"]
