@@ -105,11 +105,19 @@ layers. For example, a resident NCHW batch can be passed directly to
 `block.forward_resident(&images)` and read only at the final snapshot. This
 is currently a Rust `Module` entry, not a Python/WASM ConvNeXt API.
 
-`ConvNeXtBackbone` still uses host `Tensor` for its stem, downsampling, and
-full-model forward, while backward remains host-only. No full-model resident
-training or general performance claim follows from the block forward. Run
-`cargo run -p st-vision --example convnext_resident_block --features wgpu` to
-exercise the Rust handoff on a live adapter. See the
+Rust `ConvNeXtBackbone::forward_resident` now keeps its stem, every stage and
+downsample, and final normalization on the same resident device. Its dense
+`Conv2d` weights are owned by the existing model and uploaded again only when
+their values or device change. The low-level `ResidentTensor::conv2d` takes
+NCHW input, `[O, I, KH, KW]` weights, `[O]` bias, and stride/padding/dilation
+pairs; it packs non-contiguous views on the GPU and preserves deferred
+non-finite guards. This is a Rust inference path: backward and host `Tensor`
+training remain separate, and Python/WASM do not yet expose a full ConvNeXt
+model. No general performance or training claim follows from CPU parity.
+Run `cargo run -p st-vision --example convnext_resident_backbone --features wgpu`
+for the image-transform-to-backbone handoff, or
+`cargo run -p st-vision --example convnext_resident_block --features wgpu`
+for the isolated block. See the
 [bounded browser result](../benchmarks/results/2026-09-27-vision-resident-depthwise.md).
 
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed

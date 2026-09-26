@@ -287,6 +287,41 @@ impl ConvNeXtStage {
 }
 
 impl Module for ConvNeXtStage {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, st_nn::resident::InferenceError>
+    {
+        let mut activ = input.clone();
+        for block in &self.blocks {
+            activ = block.forward_resident(&activ)?;
+        }
+        if let Some(down) = &self.downsample {
+            activ = down.forward_resident(&activ)?;
+        }
+        Ok(activ)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, st_nn::resident::InferenceError>
+    {
+        Ok(self.forward_resident(input)?.snapshot()?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        for block in &self.blocks {
+            block.clear_resident_forward_cache();
+        }
+        if let Some(down) = &self.downsample {
+            down.clear_resident_forward_cache();
+        }
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let mut activ = input.clone();
         for block in &self.blocks {
@@ -449,6 +484,65 @@ impl ConvNeXtBackbone {
 }
 
 impl Module for ConvNeXtBackbone {
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, st_nn::resident::InferenceError>
+    {
+        if matches!(input.layout().shape(), [0, _, _, _]) {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "empty ConvNeXt batch",
+                )
+                .into(),
+            );
+        }
+        let mut activ = self.stem.forward_resident(input)?;
+        for stage in &self.stages {
+            activ = stage.forward_resident(&activ)?;
+        }
+        let [batch, channels, height, width] = activ.layout().shape() else {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "unexpected ConvNeXt stage output",
+                )
+                .into(),
+            );
+        };
+        if (*channels, *height, *width)
+            != (self.output_channels, self.output_hw.0, self.output_hw.1)
+        {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "unexpected ConvNeXt stage output",
+                )
+                .into(),
+            );
+        }
+        let flattened = self.output_channels * self.output_hw.0 * self.output_hw.1;
+        let features = activ.contiguous()?.reshape(&[*batch, flattened])?;
+        self.final_norm.forward_resident(&features)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, st_nn::resident::InferenceError>
+    {
+        Ok(self.forward_resident(input)?.snapshot()?)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.stem.clear_resident_forward_cache();
+        for stage in &self.stages {
+            stage.clear_resident_forward_cache();
+        }
+        self.final_norm.clear_resident_forward_cache();
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let mut activ = self.stem.forward(input)?;
         for stage in &self.stages {
@@ -583,6 +677,118 @@ mod resident_tests {
         let empty = device.upload(&[0, 3, 4, 5], &[]).unwrap();
         assert!(matches!(
             block.forward_resident(&empty),
+            Err(st_nn::resident::InferenceError::ResidentTensor(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn resident_backbone_matches_host_through_stem_stages_and_final_norm() {
+        let runtime = match ensure_default_runtime_blocking("vision.convnext_backbone_resident") {
+            Ok((runtime, _)) => runtime,
+            Err(error)
+                if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() == Ok("1") =>
+            {
+                panic!("ConvNeXt resident backbone requires a live WGPU adapter: {error}");
+            }
+            Err(_) => return,
+        };
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut backbone = ConvNeXtBackbone::new(ConvNeXtConfig {
+            input_channels: 2,
+            input_hw: (8, 8),
+            stage_dims: vec![3, 4],
+            stage_depths: vec![1, 1],
+            patch_size: (2, 2),
+            curvature: -1.0,
+            epsilon: 1e-6,
+        })
+        .unwrap();
+        let host_input = Tensor::from_fn(2, 2 * 8 * 8, |row, col| {
+            ((row * 41 + col * 17) % 101) as f32 / 101.0 - 0.5
+        })
+        .unwrap();
+        let input = device.upload(&[2, 2, 8, 8], host_input.data()).unwrap();
+        let compare = |backbone: &ConvNeXtBackbone, input: &ResidentTensor| {
+            let expected = {
+                let _policy =
+                    push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+                backbone.forward(&host_input).unwrap()
+            };
+            let resident = backbone.forward_resident(input).unwrap();
+            assert_eq!(resident.layout().shape(), &[2, 4 * 2 * 2]);
+            let actual = resident.snapshot().unwrap().read().unwrap();
+            for (index, (&reference, &value)) in expected.data().iter().zip(&actual).enumerate() {
+                assert!(
+                    (reference - value).abs() <= 2e-3 * (1.0 + reference.abs()),
+                    "ConvNeXt backbone value {index}: cpu={reference}, resident={value}"
+                );
+            }
+            actual
+        };
+        let baseline = compare(&backbone, &input);
+        compare(&backbone, &input);
+        assert_eq!(
+            backbone
+                .final_norm
+                .resident_forward_stats()
+                .unwrap()
+                .cache_hits,
+            1
+        );
+        assert_eq!(
+            backbone.stages[0].blocks[0]
+                .norm
+                .resident_forward_stats()
+                .unwrap()
+                .cache_hits,
+            1
+        );
+
+        let mut transposed = vec![0.0; host_input.data().len()];
+        for batch in 0..2 {
+            for channel in 0..2 {
+                for y in 0..8 {
+                    for x in 0..8 {
+                        transposed[((batch * 2 + channel) * 8 + x) * 8 + y] =
+                            host_input.data()[((batch * 2 + channel) * 8 + y) * 8 + x];
+                    }
+                }
+            }
+        }
+        let strided = device
+            .upload(&[2, 2, 8, 8], &transposed)
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap();
+        assert!(!strided.layout().is_contiguous());
+        compare(&backbone, &strided);
+
+        backbone
+            .visit_parameters_mut(&mut |parameter| {
+                if parameter.name().contains("stem::weight")
+                    || parameter.name().contains("downsample::weight")
+                    || parameter.name().contains("fc1::weight")
+                {
+                    parameter.value_mut().data_mut()[0] += 0.25;
+                }
+                if parameter.name().contains("final_norm::bias") {
+                    parameter.value_mut().data_mut()[0] += 0.1;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let changed = compare(&backbone, &input);
+        assert!(baseline
+            .iter()
+            .zip(&changed)
+            .any(|(a, b)| (a - b).abs() > 1e-4));
+        backbone.clear_resident_forward_cache();
+        compare(&backbone, &input);
+        let empty = device.upload(&[0, 2, 8, 8], &[]).unwrap();
+        assert!(matches!(
+            backbone.forward_resident(&empty),
             Err(st_nn::resident::InferenceError::ResidentTensor(
                 st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(_)
             ))

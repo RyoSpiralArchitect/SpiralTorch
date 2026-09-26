@@ -24,15 +24,15 @@ struct Params {
 }
 
 #[derive(Debug)]
-pub(super) struct DepthwiseKernels {
+pub(super) struct ConvolutionKernels {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
 }
 
-impl DepthwiseKernels {
-    fn new(device: &wgpu::Device) -> Self {
+impl ConvolutionKernels {
+    fn new(device: &wgpu::Device, label: &'static str, source: &'static str) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("tensor.depthwise.layout"),
+            label: Some(label),
             entries: &(0..9)
                 .map(|binding| wgpu::BindGroupLayoutEntry {
                     binding,
@@ -53,16 +53,16 @@ impl DepthwiseKernels {
                 .collect::<Vec<_>>(),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("tensor.depthwise.pipeline_layout"),
+            label: Some(label),
             bind_group_layouts: &[&layout],
             push_constant_ranges: &[],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("tensor.depthwise.shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/depthwise_conv2d.wgsl").into()),
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("tensor.depthwise"),
+            label: Some(label),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "main",
@@ -196,11 +196,13 @@ pub(super) fn forward(
         &[params],
         wgpu::BufferUsages::UNIFORM,
     )?;
-    let kernels = input
-        .device
-        .0
-        .convolution
-        .get_or_init(|| DepthwiseKernels::new(device));
+    let kernels = input.device.0.convolution.get_or_init(|| {
+        ConvolutionKernels::new(
+            device,
+            "tensor.depthwise",
+            include_str!("shaders/depthwise_conv2d.wgsl"),
+        )
+    });
     let buffers = [
         input.values(),
         weights.values(),
@@ -237,6 +239,169 @@ pub(super) fn forward(
     Ok(output)
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Conv2dParams {
+    in_channels: u32,
+    out_channels: u32,
+    input_h: u32,
+    input_w: u32,
+    kernel_h: u32,
+    kernel_w: u32,
+    stride_h: u32,
+    stride_w: u32,
+    pad_h: i32,
+    pad_w: i32,
+    dilation_h: u32,
+    dilation_w: u32,
+    output_h: u32,
+    output_w: u32,
+    output_len: u32,
+    groups_x: u32,
+}
+
+fn conv2d_preflight(
+    input: &ResidentTensor,
+    weights: &ResidentTensor,
+    bias: &ResidentTensor,
+    stride: (usize, usize),
+    padding: (usize, usize),
+    dilation: (usize, usize),
+) -> Result<([usize; 4], Conv2dParams, [u32; 2]), TensorError> {
+    let context = input.device.runtime().context();
+    input.require_context(weights.device.runtime().context())?;
+    input.require_context(bias.device.runtime().context())?;
+    let [batch, in_channels, input_h, input_w] = input.layout.shape() else {
+        return Err(TensorError::ConvolutionShape("input must be NCHW"));
+    };
+    let [out_channels, weight_channels, kernel_h, kernel_w] = weights.layout.shape() else {
+        return Err(TensorError::ConvolutionShape(
+            "weights must be [O, I, KH, KW]",
+        ));
+    };
+    if *in_channels == 0
+        || *out_channels == 0
+        || *weight_channels != *in_channels
+        || bias.layout.shape() != [*out_channels]
+    {
+        return Err(TensorError::ConvolutionShape("channel or bias mismatch"));
+    }
+    let output_h = output_extent(*input_h, *kernel_h, stride.0, padding.0, dilation.0)?;
+    let output_w = output_extent(*input_w, *kernel_w, stride.1, padding.1, dilation.1)?;
+    let shape = [*batch, *out_channels, output_h, output_w];
+    let output_len = shape
+        .iter()
+        .try_fold(1usize, |size, &dim| size.checked_mul(dim))
+        .ok_or(TensorError::ConvolutionShape("output volume overflow"))?;
+    let limits = context.device().limits();
+    if limits.max_compute_invocations_per_workgroup < 64
+        || limits.max_compute_workgroup_size_x < 64
+        || limits.max_storage_buffers_per_shader_stage < 8
+        || limits.max_uniform_buffers_per_shader_stage < 1
+        || limits.max_bindings_per_bind_group < 9
+        || limits.max_uniform_buffer_binding_size < std::mem::size_of::<Conv2dParams>() as u32
+    {
+        return Err(TensorError::Limit("convolution pipeline"));
+    }
+    storage_limit(output_len, &limits)?;
+    let groups = output_len.div_ceil(64).max(1);
+    let groups_x = groups.min(limits.max_compute_workgroups_per_dimension as usize);
+    if groups_x == 0
+        || groups.div_ceil(groups_x) > limits.max_compute_workgroups_per_dimension as usize
+    {
+        return Err(TensorError::Limit("convolution dispatch grid"));
+    }
+    let to_u32 = |value| u32::try_from(value).map_err(|_| TensorError::Limit("convolution index"));
+    let params = Conv2dParams {
+        in_channels: to_u32(*in_channels)?,
+        out_channels: to_u32(*out_channels)?,
+        input_h: to_u32(*input_h)?,
+        input_w: to_u32(*input_w)?,
+        kernel_h: to_u32(*kernel_h)?,
+        kernel_w: to_u32(*kernel_w)?,
+        stride_h: to_u32(stride.0)?,
+        stride_w: to_u32(stride.1)?,
+        pad_h: i32::try_from(padding.0).map_err(|_| TensorError::Limit("convolution padding"))?,
+        pad_w: i32::try_from(padding.1).map_err(|_| TensorError::Limit("convolution padding"))?,
+        dilation_h: to_u32(dilation.0)?,
+        dilation_w: to_u32(dilation.1)?,
+        output_h: to_u32(output_h)?,
+        output_w: to_u32(output_w)?,
+        output_len: to_u32(output_len)?,
+        groups_x: to_u32(groups_x)?,
+    };
+    Ok((
+        shape,
+        params,
+        [groups_x as u32, groups.div_ceil(groups_x) as u32],
+    ))
+}
+
+pub(super) fn conv2d_forward(
+    input: &ResidentTensor,
+    weights: &ResidentTensor,
+    bias: &ResidentTensor,
+    stride: (usize, usize),
+    padding: (usize, usize),
+    dilation: (usize, usize),
+) -> Result<ResidentTensor, TensorError> {
+    let (shape, params, grid) = conv2d_preflight(input, weights, bias, stride, padding, dilation)?;
+    let context = input.device.runtime().context();
+    let device = context.device();
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("tensor.conv2d.encoder"),
+    });
+    let input = input.contiguous_into(&mut encoder)?;
+    let weights = weights.contiguous_into(&mut encoder)?;
+    let bias = bias.contiguous_into(&mut encoder)?;
+    let output = input
+        .device
+        .allocate_output(&NdLayout::contiguous(&shape)?)?;
+    let params = runtime::upload_slice(
+        device,
+        "tensor.conv2d.params",
+        &[params],
+        wgpu::BufferUsages::UNIFORM,
+    )?;
+    let kernels = input.device.0.dense_convolution.get_or_init(|| {
+        ConvolutionKernels::new(device, "tensor.conv2d", include_str!("shaders/conv2d.wgsl"))
+    });
+    let buffers = [
+        input.values(),
+        weights.values(),
+        bias.values(),
+        output.values(),
+        input.flags(),
+        weights.flags(),
+        bias.flags(),
+        output.flags(),
+        &params,
+    ];
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("tensor.conv2d.bind_group"),
+        layout: &kernels.layout,
+        entries: &buffers
+            .iter()
+            .enumerate()
+            .map(|(index, buffer)| wgpu::BindGroupEntry {
+                binding: index as u32,
+                resource: buffer.as_entire_binding(),
+            })
+            .collect::<Vec<_>>(),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("tensor.conv2d.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&kernels.pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(grid[0], grid[1], 1);
+    }
+    context.queue().submit(Some(encoder.finish()));
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +410,13 @@ mod tests {
     fn shader_is_valid_wgsl() {
         let module =
             naga::front::wgsl::parse_str(include_str!("shaders/depthwise_conv2d.wgsl")).unwrap();
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+        let module = naga::front::wgsl::parse_str(include_str!("shaders/conv2d.wgsl")).unwrap();
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
@@ -391,6 +563,123 @@ mod tests {
             .unwrap();
         assert!(matches!(
             overflow.snapshot().unwrap().read(),
+            Err(TensorError::NonFinite)
+        ));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resident_conv2d_matches_reference_and_preserves_guards_on_real_gpu() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = runtime::ensure_default_runtime_blocking("tensor.conv2d.test").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = TensorDevice::new(runtime).unwrap();
+        let input_values: Vec<f32> = (0..2 * 2 * 4 * 5)
+            .map(|index| (index as f32 - 35.0) / 41.0)
+            .collect();
+        let mut transposed = vec![0.0; input_values.len()];
+        for batch in 0..2 {
+            for channel in 0..2 {
+                for y in 0..4 {
+                    for x in 0..5 {
+                        transposed[((batch * 2 + channel) * 5 + x) * 4 + y] =
+                            input_values[((batch * 2 + channel) * 4 + y) * 5 + x];
+                    }
+                }
+            }
+        }
+        let input = device
+            .upload(&[2, 2, 5, 4], &transposed)
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap();
+        let weight_values: Vec<f32> = (0..3 * 2 * 2 * 3)
+            .map(|index| (index as f32 - 17.0) / 53.0)
+            .collect();
+        let weights = device.upload(&[3, 2, 2, 3], &weight_values).unwrap();
+        let bias = device
+            .upload(&[4], &[99.0, 0.1, -0.2, 0.3])
+            .unwrap()
+            .narrow(0, 1, 3)
+            .unwrap();
+        let output = input
+            .conv2d(&weights, &bias, (2, 1), (1, 2), (2, 1))
+            .unwrap();
+        assert_eq!(output.layout().shape(), &[2, 3, 2, 7]);
+        let actual = output.snapshot().unwrap().read().unwrap();
+        let mut expected = Vec::new();
+        for batch in 0..2 {
+            for out_channel in 0..3 {
+                for out_y in 0..2 {
+                    for out_x in 0..7 {
+                        let mut value = [0.1, -0.2, 0.3][out_channel];
+                        for in_channel in 0..2 {
+                            for ky in 0..2 {
+                                for kx in 0..3 {
+                                    let y = out_y * 2 + ky * 2;
+                                    let x = out_x + kx;
+                                    if y >= 1 && x >= 2 && y - 1 < 4 && x - 2 < 5 {
+                                        let input_index =
+                                            ((batch * 2 + in_channel) * 4 + y - 1) * 5 + x - 2;
+                                        let weight_index =
+                                            ((out_channel * 2 + in_channel) * 2 + ky) * 3 + kx;
+                                        value +=
+                                            input_values[input_index] * weight_values[weight_index];
+                                    }
+                                }
+                            }
+                        }
+                        expected.push(value);
+                    }
+                }
+            }
+        }
+        for (left, right) in actual.iter().zip(expected) {
+            assert!((left - right).abs() <= 1e-5, "{left} != {right}");
+        }
+        assert!(matches!(
+            input.conv2d(
+                &weights,
+                &device.upload(&[1], &[0.0]).unwrap(),
+                (1, 1),
+                (0, 0),
+                (1, 1)
+            ),
+            Err(TensorError::ConvolutionShape(_))
+        ));
+        let invalid = device
+            .upload(&[1, 1, 1, 1], &[f32::MAX])
+            .unwrap()
+            .mul(&device.upload(&[], &[2.0]).unwrap())
+            .unwrap();
+        let identity = device.upload(&[1, 1, 1, 1], &[1.0]).unwrap();
+        let zero_bias = device.upload(&[1], &[0.0]).unwrap();
+        assert!(matches!(
+            invalid
+                .conv2d(&identity, &zero_bias, (1, 1), (0, 0), (1, 1))
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read(),
+            Err(TensorError::NonFinite)
+        ));
+        assert!(matches!(
+            device
+                .upload(&[1, 1, 1, 1], &[f32::MAX])
+                .unwrap()
+                .conv2d(
+                    &device.upload(&[1, 1, 1, 1], &[2.0]).unwrap(),
+                    &zero_bias,
+                    (1, 1),
+                    (0, 0),
+                    (1, 1),
+                )
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read(),
             Err(TensorError::NonFinite)
         ));
     }
