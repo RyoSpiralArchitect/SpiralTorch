@@ -96,9 +96,20 @@ Rust `ResidentTensor::depthwise_conv2d` takes the same tensors and
 stride/padding/dilation pairs. Browser `WgpuTensor.depthwiseConv2d` takes six
 integer geometry arguments and maps only through `snapshot().readValues()`.
 The operation packs non-contiguous views on the GPU, rejects shape/device
-errors before submission, and preserves deferred non-finite guards. It is a
-forward-only primitive: `ConvNeXtBackbone` still uses host `Tensor` between
-its layers, and its backward pass is not resident. See the
+errors before submission, and preserves deferred non-finite guards. Rust also
+exposes `models::ConvNeXtBlock` as a model-owned resident forward: it keeps
+depthwise, token layout conversion, LayerNorm, Linear/GELU/Linear, and residual
+addition on the GPU. The depthwise parameters are reused until their values
+or device change; the existing NN resident caches do the same for affine
+layers. For example, a resident NCHW batch can be passed directly to
+`block.forward_resident(&images)` and read only at the final snapshot. This
+is currently a Rust `Module` entry, not a Python/WASM ConvNeXt API.
+
+`ConvNeXtBackbone` still uses host `Tensor` for its stem, downsampling, and
+full-model forward, while backward remains host-only. No full-model resident
+training or general performance claim follows from the block forward. Run
+`cargo run -p st-vision --example convnext_resident_block --features wgpu` to
+exercise the Rust handoff on a live adapter. See the
 [bounded browser result](../benchmarks/results/2026-09-27-vision-resident-depthwise.md).
 
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed

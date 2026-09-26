@@ -117,7 +117,7 @@ fn same_tensor(a: &Tensor, b: &Tensor) -> bool {
                 .all(|(a, b)| a.to_bits() == b.to_bits()))
 }
 
-fn same_parameter(
+pub(crate) fn same_parameter(
     frozen: &Tensor,
     current: &Tensor,
     stamp: &mut Option<TensorContentStamp>,

@@ -2,7 +2,7 @@ pub mod convnext;
 pub mod resnet;
 pub mod vit;
 
-pub use convnext::{ConvNeXtBackbone, ConvNeXtConfig};
+pub use convnext::{ConvNeXtBackbone, ConvNeXtBlock, ConvNeXtConfig};
 pub use resnet::{
     ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone, ResNetConfig, ResNetPreset,
     SkipSlipSchedule,

@@ -81,11 +81,15 @@ use the same GPU operation and deferred validity guard. It connects the
 existing image-transform resident handoff to depthwise and an activation
 without an intermediate readback; browser snapshot mapping remains async.
 The bounded browser parity and paired handoff timings are in
-`benchmarks/results/2026-09-27-vision-resident-depthwise.md`. This is a
-forward primitive, **not** an automatically resident ConvNeXt graph or GPU
-backward pass. Next gates are resident model composition and training,
-finishing the VJP migration for specialized `st-nn` layers, and matched
-real-dataset accuracy/throughput.
+`benchmarks/results/2026-09-27-vision-resident-depthwise.md`. The next Rust
+slice connects the original `DepthwiseConv2d` parameter owner to this
+primitive and composes one `ConvNeXtBlock` forward entirely on the resident
+device: depthwise, token layout packing, LayerNorm, MLP, and residual. The
+parameter cache refreshes after host-side updates, and native GPU tests match
+the CPU block and the vision-transform handoff. This is **not** a resident
+full backbone, Python/WASM block API, or GPU backward pass. Next gates are
+stem/downsample composition, resident training, finishing the VJP migration
+for specialized `st-nn` layers, and matched real-dataset accuracy/throughput.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.
