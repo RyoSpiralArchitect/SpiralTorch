@@ -300,6 +300,7 @@ jobs:
           cargo clippy --locked -p st-core --target wasm32-unknown-unknown --all-targets --no-default-features --features cpu,wgpu-rt -- -D warnings
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --all-targets
           cargo check --locked -p st-vision --target wasm32-unknown-unknown --features nerf
+          cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --lib
           cargo check --locked -p st-backend-wgpu --target wasm32-unknown-unknown --example resident_nerf_browser
           cargo check --locked -p st-backend-wgpu --target wasm32-unknown-unknown --example resident_nerf_bench_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser
