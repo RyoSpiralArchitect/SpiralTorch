@@ -74,10 +74,18 @@ shape is slower on WGPU, while larger shapes improve on that one host. The
 exploratory Auto threshold therefore avoids the measured small-workload range.
 WASM compilation is checked; the synchronous host-Tensor WGPU route explicitly
 rejects browser execution before dispatch because browser readback is async.
-The browser CPU reference remains available. Next gates are an async browser
-depthwise route, finishing the VJP migration for specialized `st-nn` layers
-and resident compatibility, resident model training, and matched real-dataset
-accuracy/throughput.
+The browser CPU reference remains available. A separate `ResidentTensor`
+depthwise route now accepts NCHW images with resident `[C, KH, KW]` weights
+and `[C]` bias. Native Rust, Python `WgpuTensor`, and browser `WgpuTensor`
+use the same GPU operation and deferred validity guard. It connects the
+existing image-transform resident handoff to depthwise and an activation
+without an intermediate readback; browser snapshot mapping remains async.
+The bounded browser parity and paired handoff timings are in
+`benchmarks/results/2026-09-27-vision-resident-depthwise.md`. This is a
+forward primitive, **not** an automatically resident ConvNeXt graph or GPU
+backward pass. Next gates are resident model composition and training,
+finishing the VJP migration for specialized `st-nn` layers, and matched
+real-dataset accuracy/throughput.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.
