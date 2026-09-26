@@ -21,9 +21,9 @@ struct Params {
 @group(0) @binding(1) var<storage, read> weight_values: array<f32>;
 @group(0) @binding(2) var<storage, read> bias_values: array<f32>;
 @group(0) @binding(3) var<storage, read_write> output_values: array<f32>;
-@group(0) @binding(4) var<storage, read_write> input_flags: array<atomic<u32>>;
-@group(0) @binding(5) var<storage, read_write> weight_flags: array<atomic<u32>>;
-@group(0) @binding(6) var<storage, read_write> bias_flags: array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read> input_flags: array<u32>;
+@group(0) @binding(5) var<storage, read> weight_flags: array<u32>;
+@group(0) @binding(6) var<storage, read> bias_flags: array<u32>;
 @group(0) @binding(7) var<storage, read_write> output_flags: array<atomic<u32>>;
 @group(0) @binding(8) var<uniform> params: Params;
 
@@ -31,8 +31,7 @@ struct Params {
 fn main(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let index = (group.y * params.groups_x + group.x) * 64u + lane;
     if (index == 0u) {
-        let inherited = atomicLoad(&input_flags[0])
-            | atomicLoad(&weight_flags[0]) | atomicLoad(&bias_flags[0]);
+        let inherited = input_flags[0] | weight_flags[0] | bias_flags[0];
         atomicOr(&output_flags[0], inherited);
     }
     if (index >= params.output_len) { return; }

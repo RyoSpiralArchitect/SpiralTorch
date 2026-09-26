@@ -42,7 +42,7 @@ impl DepthwiseKernels {
                             wgpu::BufferBindingType::Uniform
                         } else {
                             wgpu::BufferBindingType::Storage {
-                                read_only: binding < 3,
+                                read_only: binding < 3 || (4..7).contains(&binding),
                             }
                         },
                         has_dynamic_offset: false,
@@ -323,6 +323,17 @@ mod tests {
         for (left, right) in actual.iter().zip(expected) {
             assert!((left - right).abs() <= 1e-6, "{left} != {right}");
         }
+        let shared = device.upload(&[1, 1, 1, 1], &[1.]).unwrap();
+        let shared_output = shared
+            .depthwise_conv2d(
+                &shared.reshape(&[1, 1, 1]).unwrap(),
+                &shared.reshape(&[1]).unwrap(),
+                (1, 1),
+                (0, 0),
+                (1, 1),
+            )
+            .unwrap();
+        assert_eq!(shared_output.snapshot().unwrap().read().unwrap(), [2.]);
         assert!(matches!(
             input.depthwise_conv2d(&weights, &bias, (0, 1), (0, 0), (1, 1)),
             Err(TensorError::ConvolutionShape(_))
