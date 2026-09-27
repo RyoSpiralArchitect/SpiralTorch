@@ -21,7 +21,7 @@ struct Cached {
     graph: ResidentGraph,
 }
 
-enum OperationStamp {
+pub(super) enum OperationStamp {
     Linear {
         weight: Option<TensorContentStamp>,
         bias: Option<TensorContentStamp>,
@@ -37,7 +37,7 @@ enum OperationStamp {
 }
 
 impl OperationStamp {
-    fn capture(operation: &InferenceOp) -> Self {
+    pub(super) fn capture(operation: &InferenceOp) -> Self {
         match operation {
             InferenceOp::Linear { weight, bias } => Self::Linear {
                 weight: weight.content_stamp(),
@@ -134,7 +134,11 @@ pub(crate) fn same_parameter(
     true
 }
 
-fn same_operations(a: &[InferenceOp], b: &[InferenceOp], stamps: &mut [OperationStamp]) -> bool {
+pub(super) fn same_operations(
+    a: &[InferenceOp],
+    b: &[InferenceOp],
+    stamps: &mut [OperationStamp],
+) -> bool {
     a.len() == b.len()
         && a.len() == stamps.len()
         && a.iter()

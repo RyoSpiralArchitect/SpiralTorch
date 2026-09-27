@@ -3450,6 +3450,8 @@ dependencies = [
  "st-nn",
  "st-tensor",
  "tempfile",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wgpu",
 ]
 
