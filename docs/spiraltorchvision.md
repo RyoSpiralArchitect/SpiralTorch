@@ -131,6 +131,10 @@ final readback over the same model and input. Each case prints raw samples,
 medians, adapter identity, and CPU parity. The benchmark source alone is not
 a measured speedup; report host, build, adapter, and competing workloads with
 any result. None of these routes measures backward or training throughput.
+The [Apple M4 bounded result](../benchmarks/results/2026-09-27-vision-resident-convnext-m4.md)
+includes block-depth ablations and a narrow LayerNorm WGPU optimization. It
+still finds CPU faster on the tested full-model shapes; browser and real-data
+performance remain unmeasured.
 
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed
 `apply_packed_geometry_batch_resident(&[n, c, h, w], &values, &device)` entry
