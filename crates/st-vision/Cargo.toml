@@ -54,3 +54,7 @@ required-features = ["nn", "wgpu"]
 [[example]]
 name = "convnext_resident_bench"
 required-features = ["nn", "wgpu"]
+
+[[example]]
+name = "depthwise_resident_vjp_bench"
+required-features = ["nn", "wgpu"]

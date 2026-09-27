@@ -1246,6 +1246,67 @@ impl DepthwiseConv2d {
         Ok(layer)
     }
 
+    #[cfg(feature = "wgpu")]
+    fn resident_parameters_for(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<
+        (
+            st_backend_wgpu::resident_tensor::ResidentTensor,
+            st_backend_wgpu::resident_tensor::ResidentTensor,
+        ),
+        crate::resident::InferenceError,
+    > {
+        use st_backend_wgpu::resident_tensor::TensorError as ResidentTensorError;
+
+        crate::resident::require_uncommitted_route()?;
+        let shape = input.layout().shape();
+        if shape.len() != 4
+            || shape[1] != self.channels
+            || shape[2] != self.input_hw.0
+            || shape[3] != self.input_hw.1
+        {
+            return Err(ResidentTensorError::ConvolutionShape("expected NCHW input").into());
+        }
+
+        let mut resident = self.resident.borrow_mut();
+        let reusable = resident
+            .as_mut()
+            .is_some_and(|cached| cached.matches(input, self.weight.value(), self.bias.value()));
+        if !reusable {
+            *resident = Some(ResidentConvParameters::upload(
+                input,
+                &[self.channels, self.kernel.0, self.kernel.1],
+                &[self.channels],
+                self.weight.value(),
+                self.bias.value(),
+            )?);
+        }
+        let cached = resident.as_ref().unwrap();
+        Ok((cached.weight.clone(), cached.bias.clone()))
+    }
+
+    /// Return resident `(input, weight, bias)` VJPs without mutating the host
+    /// parameters or reading the gradients back. The caller owns the update.
+    #[cfg(feature = "wgpu")]
+    pub fn vjp_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        upstream: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<
+        [st_backend_wgpu::resident_tensor::ResidentTensor; 3],
+        crate::resident::InferenceError,
+    > {
+        let (weight, _) = self.resident_parameters_for(input)?;
+        Ok(input.depthwise_conv2d_vjp(
+            &weight,
+            upstream,
+            self.stride,
+            self.padding,
+            self.dilation,
+        )?)
+    }
+
     fn output_hw(&self) -> PureResult<(usize, usize)> {
         let padded_h = self
             .padding
@@ -1381,39 +1442,8 @@ impl Module for DepthwiseConv2d {
         input: &st_backend_wgpu::resident_tensor::ResidentTensor,
     ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
     {
-        use st_backend_wgpu::resident_tensor::TensorError as ResidentTensorError;
-
-        crate::resident::require_uncommitted_route()?;
-        let shape = input.layout().shape();
-        if shape.len() != 4
-            || shape[1] != self.channels
-            || shape[2] != self.input_hw.0
-            || shape[3] != self.input_hw.1
-        {
-            return Err(ResidentTensorError::ConvolutionShape("expected NCHW input").into());
-        }
-
-        let mut resident = self.resident.borrow_mut();
-        let reusable = resident
-            .as_mut()
-            .is_some_and(|cached| cached.matches(input, self.weight.value(), self.bias.value()));
-        if !reusable {
-            *resident = Some(ResidentConvParameters::upload(
-                input,
-                &[self.channels, self.kernel.0, self.kernel.1],
-                &[self.channels],
-                self.weight.value(),
-                self.bias.value(),
-            )?);
-        }
-        let cached = resident.as_ref().unwrap();
-        Ok(input.depthwise_conv2d(
-            &cached.weight,
-            &cached.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-        )?)
+        let (weight, bias) = self.resident_parameters_for(input)?;
+        Ok(input.depthwise_conv2d(&weight, &bias, self.stride, self.padding, self.dilation)?)
     }
 
     #[cfg(feature = "wgpu")]
@@ -4233,6 +4263,52 @@ mod tests {
                 (expected - actual).abs() <= 1e-5,
                 "cpu={expected}, wgpu={actual}"
             );
+        }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn depthwise_resident_vjp_matches_module_backward_without_host_accumulation() {
+        use st_backend_wgpu::resident_tensor::TensorDevice;
+        use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = ensure_default_runtime_blocking("nn.depthwise_vjp.test").unwrap();
+        assert_ne!(format!("{:?}", runtime.adapter_info().device_type), "Cpu");
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut layer =
+            DepthwiseConv2d::new("resident.dw.vjp", 2, (3, 3), (1, 1), (1, 1), (1, 1), (3, 3))
+                .unwrap();
+        let input = Tensor::from_fn(2, 18, |row, col| {
+            ((row * 13 + col * 7) % 29) as f32 / 23.0 - 0.5
+        })
+        .unwrap();
+        let seed = Tensor::from_fn(2, 18, |row, col| {
+            ((row * 11 + col * 3) % 17) as f32 / 19.0 - 0.4
+        })
+        .unwrap();
+        let resident_input = device.upload(&[2, 2, 3, 3], input.data()).unwrap();
+        let resident_seed = device.upload(&[2, 2, 3, 3], seed.data()).unwrap();
+        let gradients = layer.vjp_resident(&resident_input, &resident_seed).unwrap();
+        assert!(layer.weight.gradient().is_none());
+        assert!(layer.bias.gradient().is_none());
+        let reference_input = layer.backward(&input, &seed).unwrap();
+        let references = [
+            reference_input.data(),
+            layer.weight.gradient().unwrap().data(),
+            layer.bias.gradient().unwrap().data(),
+        ];
+        for (gradient, reference) in gradients.iter().zip(references) {
+            let actual = gradient.snapshot().unwrap().read().unwrap();
+            assert_eq!(actual.len(), reference.len());
+            for (&value, &expected) in actual.iter().zip(reference) {
+                assert!(
+                    (value - expected).abs() <= 2e-5 * (1.0 + expected.abs()),
+                    "gpu={value} cpu={expected}"
+                );
+            }
         }
     }
 

@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(crate) mod vjp;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
@@ -104,16 +106,30 @@ fn preflight(
     padding: (usize, usize),
     dilation: (usize, usize),
 ) -> Result<([usize; 4], Params, [u32; 2]), TensorError> {
+    input.require_context(bias.device.runtime().context())?;
+    let result = preflight_geometry(input, weights, stride, padding, dilation)?;
+    if bias.layout.shape() != [result.0[1]] {
+        return Err(TensorError::ConvolutionShape("channel or bias mismatch"));
+    }
+    Ok(result)
+}
+
+fn preflight_geometry(
+    input: &ResidentTensor,
+    weights: &ResidentTensor,
+    stride: (usize, usize),
+    padding: (usize, usize),
+    dilation: (usize, usize),
+) -> Result<([usize; 4], Params, [u32; 2]), TensorError> {
     let context = input.device.runtime().context();
     input.require_context(weights.device.runtime().context())?;
-    input.require_context(bias.device.runtime().context())?;
     let [batch, channels, input_h, input_w] = input.layout.shape() else {
         return Err(TensorError::ConvolutionShape("input must be NCHW"));
     };
     let [weight_channels, kernel_h, kernel_w] = weights.layout.shape() else {
         return Err(TensorError::ConvolutionShape("weights must be [C, KH, KW]"));
     };
-    if bias.layout.shape() != [*channels] || *channels == 0 || *weight_channels != *channels {
+    if *channels == 0 || *weight_channels != *channels {
         return Err(TensorError::ConvolutionShape("channel or bias mismatch"));
     }
     let output_h = output_extent(*input_h, *kernel_h, stride.0, padding.0, dilation.0)?;

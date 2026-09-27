@@ -1,0 +1,33 @@
+{
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "empty_batch_checks": 3,
+  "gradient_cases": 3,
+  "intermediate_readbacks": 0,
+  "schema": "spiraltorch.resident_depthwise_vjp.browser.v1",
+  "shared_guard_checks": 3,
+  "status": "passed",
+  "browser_adapter_probe": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "is_fallback_adapter": false,
+    "boundary": "Separate probe, not attestation of the Rust runtime device"
+  },
+  "wasm_sha256": "904b86b157a7721b1457cbe983003d755d8a75f8afdc82a38ed617b56916faa6",
+  "page_sha256": "d4e9a9cf7d71f72ce4b283cc29515f438156f616afcb39b4a58d51123cdae109",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "depthwise-vjp-resident",
+  "asset_sha256": {
+    "/": "d4e9a9cf7d71f72ce4b283cc29515f438156f616afcb39b4a58d51123cdae109",
+    "/module/spiraltorch_wasm.js": "375f0ec52a350ea3d822c1909a3edb55e2bf6a2db9c549f98a451822738b74e9",
+    "/module/spiraltorch_wasm_bg.wasm": "904b86b157a7721b1457cbe983003d755d8a75f8afdc82a38ed617b56916faa6"
+  },
+  "browser_version": "153.0.8010.54",
+  "page_errors": [],
+  "console_messages": []
+}

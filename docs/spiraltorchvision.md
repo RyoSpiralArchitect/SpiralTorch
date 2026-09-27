@@ -137,6 +137,14 @@ includes block-depth ablations and a narrow LayerNorm WGPU optimization. It
 still finds CPU faster on the tested full-model shapes; browser and real-data
 performance remain unmeasured.
 
+For a backward diagnostic, run
+`cargo run --release -p st-vision --features wgpu --example depthwise_resident_vjp_bench`.
+`DepthwiseConv2d::vjp_resident` returns GPU-resident input, weight, and bias
+gradients without silently updating host parameters. The
+[bounded Apple M4 result](../benchmarks/results/2026-09-28-vision-depthwise-vjp-m4.md)
+includes CPU parity, three-process timings, and Chrome WebGPU correctness.
+This is not yet resident ConvNeXt training or a matched optimizer step.
+
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed
 `apply_packed_geometry_batch_resident(&[n, c, h, w], &values, &device)` entry
 for callers that already own contiguous NCHW data. Empty, ragged, and
