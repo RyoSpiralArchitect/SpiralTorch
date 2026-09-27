@@ -175,3 +175,60 @@ class VisionWgpuPipelineTests(unittest.TestCase):
             self.assertAlmostEqual(left, right, delta=1e-5)
         with self.assertRaisesRegex(ValueError, "shape"):
             transformed.depthwise_conv2d(weights, device.upload([1], [0.0]), [1, 1], [1, 1], [1, 1])
+
+    def test_resident_batch_feeds_dense_conv2d_without_intermediate_readback(self):
+        cpu = st.TransformPipeline(seed=91)
+        gpu = st.TransformPipeline(seed=91)
+        for pipeline in (cpu, gpu):
+            pipeline.add_center_crop(4, 4)
+        try:
+            gpu.enable_wgpu()
+            device = st.WgpuTensorDevice.create()
+        except (RuntimeError, NotImplementedError) as exc:
+            message = str(exc).lower()
+            if "adapter" in message or "not available" in message or "wgpu" in message:
+                self.skipTest(str(exc))
+            raise
+
+        images = [
+            st.ImageTensor(2, 6, 6, [((i * 7 + frame * 11) % 53) / 52 for i in range(72)])
+            for frame in range(2)
+        ]
+        transformed = gpu.apply_resident_batch(images, device)
+        weight_values = [1.0, 0.0, 0.0, 1.0, 0.5, -0.25]
+        bias_values = [0.1, -0.1, 0.2]
+        weights = device.upload([3, 2, 1, 1], weight_values)
+        bias = device.upload([3], bias_values)
+        output = transformed.conv2d(weights, bias, [1, 1], [0, 0], [1, 1]).relu()
+        self.assertEqual(output.shape, (2, 3, 4, 4))
+
+        expected = []
+        for image in images:
+            values = cpu.apply(image).flatten()
+            for output_channel in range(3):
+                for pixel in range(16):
+                    result = bias_values[output_channel]
+                    for input_channel in range(2):
+                        result += values[input_channel * 16 + pixel] * weight_values[
+                            output_channel * 2 + input_channel
+                        ]
+                    expected.append(max(result, 0.0))
+        actual_values = output.snapshot().read_values()
+        self.assertEqual(len(actual_values), len(expected))
+        for actual, reference in zip(actual_values, expected):
+            self.assertAlmostEqual(actual, reference, delta=1e-5)
+
+        with self.assertRaisesRegex(ValueError, "weights must be"):
+            transformed.conv2d(device.upload([2, 1, 1], [1.0, 1.0]), bias, [1, 1], [0, 0], [1, 1])
+        with self.assertRaisesRegex(ValueError, "bias mismatch"):
+            transformed.conv2d(weights, device.upload([1], [0.0]), [1, 1], [0, 0], [1, 1])
+        with self.assertRaises(TypeError):
+            transformed.conv2d(weights, bias, [True, 1], [0, 0], [1, 1])
+
+        invalid = device.upload([1, 1, 2, 2], [0.0, 0.0, 0.0, 3.4028234663852886e38])
+        invalid = invalid.mul(device.upload([], [2.0]))
+        with self.assertRaisesRegex(Exception, "non-finite"):
+            invalid.conv2d(
+                device.upload([1, 1, 1, 1], [1.0]),
+                device.upload([1], [0.0]), [2, 2], [0, 0], [1, 1]
+            ).snapshot().read_values()

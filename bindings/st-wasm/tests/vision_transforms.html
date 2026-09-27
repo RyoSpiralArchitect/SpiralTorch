@@ -186,6 +186,31 @@ try {
     depthwiseError = Math.max(depthwiseError, Math.abs(depthwiseValues[i] - expected));
   }
   if (depthwiseError > 1e-5) throw Error(`Resident batch-to-depthwise mismatch: ${depthwiseError}`);
+  const convKernel = Float32Array.from({length: 36}, (_, i) => ((i % 7) - 3) / 8);
+  const convWeights = depthwiseDevice.upload([3, 2, 2, 3], convKernel);
+  const convBias = depthwiseDevice.upload([3], new Float32Array([0.1, -0.2, 0.3]));
+  const conv = residentBatch.conv2d(convWeights, convBias, 2, 1, 1, 0, 1, 2).relu();
+  if (Array.from(conv.shape).join(",") !== "5,3,4,2") throw Error("Resident dense conv2d shape mismatch");
+  const convValues = await conv.snapshot().readValues();
+  let convError = 0;
+  for (let n = 0; n < 5; n++) for (let o = 0; o < 3; o++) {
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 2; x++) {
+      let value = [0.1, -0.2, 0.3][o];
+      for (let c = 0; c < 2; c++) for (let ky = 0; ky < 2; ky++) for (let kx = 0; kx < 3; kx++) {
+        const inputY = y * 2 + ky - 1, inputX = x + kx * 2;
+        if (inputY < 0 || inputY >= 6 || inputX >= 6) continue;
+        value += expectedBatch[((n * 2 + c) * 6 + inputY) * 6 + inputX] *
+          convKernel[(((o * 2 + c) * 2 + ky) * 3 + kx)];
+      }
+      const index = ((n * 3 + o) * 4 + y) * 2 + x;
+      convError = Math.max(convError, Math.abs(convValues[index] - Math.max(value, 0)));
+    }
+  }
+  if (convError > 1e-5) throw Error(`Resident batch-to-dense-conv2d mismatch: ${convError}`);
+  let rejectedConvShape = false;
+  try { residentBatch.conv2d(depthwiseWeights, convBias, 2, 1, 1, 0, 1, 2); }
+  catch (error) { rejectedConvShape = /weights must be/.test(String(error)); }
+  if (!rejectedConvShape) throw Error("Resident dense conv2d accepted rank-3 weights");
   let rejectedDepthwiseShape = false;
   try { residentBatch.depthwiseConv2d(depthwiseWeights, depthwiseDevice.upload([1], new Float32Array([0])), 1, 1, 1, 1, 1, 1); }
   catch (error) { rejectedDepthwiseShape = /shape/.test(String(error)); }
@@ -208,6 +233,14 @@ try {
       .snapshot().readValues();
   } catch (error) { rejectedInheritedNonfinite = /non-finite/.test(String(error)); }
   if (!rejectedInheritedNonfinite) throw Error("Resident depthwise lost an upstream validity guard");
+  let rejectedConvNonfinite = false;
+  try {
+    await invalidDepthwiseInput.conv2d(
+      depthwiseDevice.upload([1, 1, 1, 1], new Float32Array([1])),
+      depthwiseDevice.upload([1], new Float32Array([0])), 2, 2, 0, 0, 1, 1)
+      .snapshot().readValues();
+  } catch (error) { rejectedConvNonfinite = /non-finite/.test(String(error)); }
+  if (!rejectedConvNonfinite) throw Error("Resident dense conv2d lost an upstream validity guard");
   let rejectedBatchNonfinite = false;
   try { batchGpu.applyResidentBatch(1, batchChannels, batchHeight, batchWidth, new Float32Array(imageLength).fill(NaN)); }
   catch (error) { rejectedBatchNonfinite = /non-finite/.test(String(error)); }

@@ -220,6 +220,27 @@ impl PyWgpuTensor {
                 .map_err(error)?,
         })
     }
+    fn conv2d(
+        &self,
+        py: Python<'_>,
+        weights: &Self,
+        bias: &Self,
+        stride: &Bound<'_, PyAny>,
+        padding: &Bound<'_, PyAny>,
+        dilation: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        let stride = pair(stride)?;
+        let padding = pair(padding)?;
+        let dilation = pair(dilation)?;
+        Ok(Self {
+            inner: py
+                .detach(|| {
+                    self.inner
+                        .conv2d(&weights.inner, &bias.inner, stride, padding, dilation)
+                })
+                .map_err(error)?,
+        })
+    }
     fn snapshot(&self, py: Python<'_>) -> PyResult<PyWgpuTensorSnapshot> {
         let inner = py.detach(|| self.inner.snapshot()).map_err(error)?;
         Ok(PyWgpuTensorSnapshot::from_readback(inner))

@@ -194,6 +194,7 @@ function checkNnContract(types, label) {
   assert.match(get("WgpuPointwisePlan"), /run\(inputs: WgpuPointwiseInputs, execution: string\): WgpuTensor/);
   assert.match(tensor, /readonly strides: Uint32Array/);
   assert.match(tensor, /narrow\(axis: number, start: number, length: number\): WgpuTensor/);
+  assert.match(tensor, /conv2d\(weights: WgpuTensor, bias: WgpuTensor, [^\n]*\): WgpuTensor/);
   assert.match(tensor, /snapshot\(\): WgpuTensorSnapshot/);
   assert.match(gpu, /setInputTensor\(input: WgpuTensor\): void/);
   assert.match(gpu, /tensorSnapshot\(device: WgpuTensorDevice\): WgpuTensor/);
