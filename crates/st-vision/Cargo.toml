@@ -8,7 +8,7 @@ license = "AGPL-3.0-or-later"
 
 [features]
 default = ["nn"]
-wgpu = ["dep:st-backend-wgpu", "st-tensor/wgpu", "st-nn?/wgpu"]
+wgpu = ["dep:st-backend-wgpu", "dep:wgpu", "st-tensor/wgpu", "st-nn?/wgpu"]
 nerf = ["nn"]
 nn = ["dep:st-nn"]
 
@@ -20,6 +20,7 @@ st-nn = { path = "../st-nn", optional = true }
 spiral-config = { path = "../spiral-config" }
 rand = "0.8"
 st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
+wgpu = { version = "0.20", features = ["wgsl"], optional = true }
 st-frac = { path = "../st-frac" }
 ndarray = "0.15"
 ordered-float = "4.2"
@@ -30,7 +31,6 @@ st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"
 
 [dev-dependencies]
 tempfile = "3"
-wgpu = { version = "0.20", features = ["wgsl"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
