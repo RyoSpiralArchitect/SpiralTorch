@@ -364,7 +364,7 @@ fn layer_norm_resident_extreme_finite_cases() {
 #[test]
 fn layer_norm_resident_widths_and_offsets() {
     let Some(device) = device() else { return };
-    for cols in [1, 3, 255, 256, 257, 513, 1025, 8193] {
+    for cols in [1, 3, 16, 32, 33, 255, 256, 257, 513, 1025, 8193] {
         for offset in [0., 10000., 1e7, -1e7] {
             let x: Vec<_> = (0..2 * cols).map(|i| offset + (i % 7) as f32).collect();
             let g: Vec<_> = (0..cols).map(|i| 0.5 + (i % 13) as f32 / 16.).collect();

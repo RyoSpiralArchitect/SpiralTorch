@@ -66,6 +66,7 @@ struct LayerNormNode {
     row_stats: wgpu::Buffer,
     params: wgpu::Buffer,
     grid: [u32; 2],
+    cols: usize,
 }
 
 enum BoundaryBinding {
@@ -299,6 +300,7 @@ impl ResidentGraph {
                         row_stats,
                         params,
                         grid,
+                        cols: shape.cols,
                     }))
                 }
             });
@@ -566,7 +568,12 @@ impl ResidentGraph {
                         plan.encode_in_pass(&mut pass, binding)
                     }
                     (Node::LayerNorm(node), Some(BoundaryBinding::LayerNorm(binding))) => {
-                        pass.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        pass.set_pipeline(
+                            self.layer_norm
+                                .as_ref()
+                                .unwrap()
+                                .forward_for_cols(node.cols),
+                        );
                         pass.set_bind_group(0, binding, &[]);
                         pass.dispatch_workgroups(node.grid[0], node.grid[1], 1);
                     }
@@ -583,7 +590,12 @@ impl ResidentGraph {
                         plan.encode_in_pass(&mut pass, binding)
                     }
                     (Node::LayerNorm(node), None) => {
-                        pass.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        pass.set_pipeline(
+                            self.layer_norm
+                                .as_ref()
+                                .unwrap()
+                                .forward_for_cols(node.cols),
+                        );
                         pass.set_bind_group(0, &node.binding, &[]);
                         pass.dispatch_workgroups(node.grid[0], node.grid[1], 1);
                     }

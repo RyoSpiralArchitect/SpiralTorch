@@ -27,29 +27,29 @@ fn checked(value: f32) -> f32 {
     return value;
 }
 
-fn reduce(lane: u32) {
+fn reduce(lane: u32, lanes: u32) {
     workgroupBarrier();
-    for (var stride = 128u; stride > 0u; stride >>= 1u) {
+    for (var stride = lanes >> 1u; stride > 0u; stride >>= 1u) {
         if (lane < stride) { sums[lane] = wide_add(sums[lane], sums[lane + stride]); }
         workgroupBarrier();
     }
 }
 
-fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
+fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool, lanes: u32) {
     let row = group.y * params.groups_x + group.x;
     if (row >= params.rows) { return; }
     let base = row * params.cols;
     let origin = parts(input[base]);
     var sum = parts(0.0);
-    for (var col = lane; col < params.cols; col += 256u) {
+    for (var col = lane; col < params.cols; col += lanes) {
         sum = wide_add(sum, wide_sub(parts(input[base + col]), origin));
     }
     sums[lane] = sum;
-    reduce(lane);
+    reduce(lane, lanes);
     if (lane == 0u) { row_mean = wide_div(sums[0], parts(f32(params.cols))); }
     workgroupBarrier();
     sum = parts(0.0);
-    for (var col = lane; col < params.cols; col += 256u) {
+    for (var col = lane; col < params.cols; col += lanes) {
         let centered = wide_sub(wide_sub(parts(input[base + col]), origin), row_mean);
         sum = wide_add(sum, wide_mul(centered, centered));
         centered_values[base + col] = centered;
@@ -57,7 +57,7 @@ fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
     // All lanes consumed the first reduction before reusing its scratch.
     workgroupBarrier();
     sums[lane] = sum;
-    reduce(lane);
+    reduce(lane, lanes);
     if (lane == 0u) {
         let square_sum = wide_add(sums[0], wide_mul(parts(params.epsilon), parts(f32(params.cols))));
         let denominator = wide_sqrt(wide_div(square_sum, parts(f32(params.cols))));
@@ -69,7 +69,7 @@ fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
     workgroupBarrier();
     if (emit_value) {
         storageBarrier();
-        for (var col = lane; col < params.cols; col += 256u) {
+        for (var col = lane; col < params.cols; col += lanes) {
             let centered = centered_values[base + col];
             // Forward retains the existing f32 affine contract. Backward
             // consumes the unrounded, extended-range centered tape instead.
@@ -85,10 +85,21 @@ fn compute_row(group: vec3<u32>, lane: u32, emit_value: bool) {
 
 @compute @workgroup_size(256)
 fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
-    compute_row(group, lane, true);
+    compute_row(group, lane, true, 256u);
 }
 
 @compute @workgroup_size(256)
 fn statistics(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
-    compute_row(group, lane, false);
+    compute_row(group, lane, false, 256u);
+}
+
+// Narrow rows keep the Wide math and reduction order while avoiding 224 idle lanes.
+@compute @workgroup_size(32)
+fn forward_narrow(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    compute_row(group, lane, true, 32u);
+}
+
+@compute @workgroup_size(32)
+fn statistics_narrow(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    compute_row(group, lane, false, 32u);
 }
