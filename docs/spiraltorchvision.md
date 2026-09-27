@@ -120,6 +120,15 @@ for the image-transform-to-backbone handoff, or
 for the isolated block. See the
 [bounded browser result](../benchmarks/results/2026-09-27-vision-resident-depthwise.md).
 
+For a matched full-backbone timing probe, run
+`cargo run --release -p st-vision --features wgpu --example convnext_resident_bench`
+when the GPU is otherwise idle. It alternates CPU forward, resident-input
+WGPU forward through final readback, and fresh-upload WGPU forward through
+final readback over the same model and input. Each case prints raw samples,
+medians, adapter identity, and CPU parity. The benchmark source alone is not
+a measured speedup; report host, build, adapter, and competing workloads with
+any result. None of these routes measures backward or training throughput.
+
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed
 `apply_packed_geometry_batch_resident(&[n, c, h, w], &values, &device)` entry
 for callers that already own contiguous NCHW data. Empty, ragged, and
