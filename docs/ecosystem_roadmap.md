@@ -107,9 +107,15 @@ The first backward slice now provides GPU-resident depthwise input, weight,
 and bias VJPs with one shared validity guard. The model-owned `DepthwiseConv2d`
 exposes them without an implicit host update; native CPU parity and a
 [Chrome WebGPU check](../benchmarks/results/2026-09-28-vision-depthwise-vjp-m4.md)
-cover the bounded contract. It does **not** yet make `ConvNeXtBlock` or the
-backbone trainable on GPU. The next integration must carry the remaining block
-gradients and optimizer state without intermediate readback.
+cover the bounded contract. A second slice composes that primitive with the
+existing Rust graph-autograd VJPs for LayerNorm, Linear, and GELU, plus the
+residual branch. `ConvNeXtBlock::vjp_resident` now returns resident input and
+eight parameter gradients in `Module` order, rebuilding its frozen tail graph
+when host parameters change. Native GPU and
+[Chrome WebGPU parity](../benchmarks/results/2026-09-28-vision-convnext-vjp-contract.md)
+cover a bounded block. There is still no model-owned GPU optimizer update,
+full-backbone VJP, or measured real-dataset training advantage. Those are the
+next gates, not inferred from isolated backward correctness.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

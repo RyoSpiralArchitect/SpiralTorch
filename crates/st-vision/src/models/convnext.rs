@@ -14,6 +14,11 @@ use st_nn::module::{Module, Parameter};
 use st_nn::PureResult;
 use st_tensor::{Tensor, TensorError};
 
+#[cfg(feature = "wgpu")]
+use st_backend_wgpu::resident_tensor::ResidentTensor;
+#[cfg(feature = "wgpu")]
+use st_nn::resident::{InferenceError, ResidentAutogradStats, ResidentModuleAutogradCache};
+
 use crate::models::resnet::conv_output_hw;
 
 fn conv_to_tokens(input: &Tensor, channels: usize, hw: (usize, usize)) -> PureResult<Tensor> {
@@ -90,7 +95,27 @@ impl Default for ConvNeXtConfig {
     }
 }
 
-/// One ConvNeXt residual block with host training and an explicit resident forward.
+/// Exact resident VJP in the same parameter order and shapes as `Module`.
+/// The caller owns gradient validation, accumulation, and parameter updates.
+#[cfg(feature = "wgpu")]
+#[derive(Clone, Debug)]
+pub struct ConvNeXtBlockVjp {
+    input_gradient: ResidentTensor,
+    parameter_gradients: Vec<ResidentTensor>,
+}
+
+#[cfg(feature = "wgpu")]
+impl ConvNeXtBlockVjp {
+    pub fn input_gradient(&self) -> &ResidentTensor {
+        &self.input_gradient
+    }
+
+    pub fn parameter_gradients(&self) -> &[ResidentTensor] {
+        &self.parameter_gradients
+    }
+}
+
+/// One ConvNeXt residual block with host training and explicit resident paths.
 #[derive(Debug)]
 pub struct ConvNeXtBlock {
     depthwise: DepthwiseConv2d,
@@ -100,6 +125,8 @@ pub struct ConvNeXtBlock {
     mlp2: Linear,
     channels: usize,
     hw: (usize, usize),
+    #[cfg(feature = "wgpu")]
+    resident_autograd: ResidentModuleAutogradCache,
 }
 
 impl ConvNeXtBlock {
@@ -132,7 +159,91 @@ impl ConvNeXtBlock {
             mlp2,
             channels,
             hw: input_hw,
+            #[cfg(feature = "wgpu")]
+            resident_autograd: Default::default(),
         })
+    }
+
+    /// Exact block VJP without an intermediate host readback. Parameters are
+    /// frozen for each GPU subgraph compilation and refreshed after host edits.
+    /// The forward activations are recomputed; no optimizer is applied.
+    #[cfg(feature = "wgpu")]
+    pub fn vjp_resident(
+        &self,
+        input: &ResidentTensor,
+        cotangent: &ResidentTensor,
+    ) -> Result<ConvNeXtBlockVjp, InferenceError> {
+        if matches!(input.layout().shape(), [0, _, _, _]) {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "empty ConvNeXt batch",
+                )
+                .into(),
+            );
+        }
+        if cotangent.layout().shape() != input.layout().shape() {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "cotangent shape mismatch",
+                )
+                .into(),
+            );
+        }
+        let dw = self.depthwise.forward_resident(input)?;
+        let [batch, _, height, width] = dw.layout().shape() else {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "expected NCHW depthwise output",
+                )
+                .into(),
+            );
+        };
+        let (batch, height, width) = (*batch, *height, *width);
+        let tokens = dw
+            .permute(&[0, 2, 3, 1])?
+            .contiguous()?
+            .reshape(&[dw.layout().len() / self.channels, self.channels])?;
+        let seed = cotangent
+            .permute(&[0, 2, 3, 1])?
+            .contiguous()?
+            .reshape(tokens.layout().shape())?;
+        let mut operations = Vec::with_capacity(4);
+        self.norm.append_inference_ops(&mut operations)?;
+        self.mlp1.append_inference_ops(&mut operations)?;
+        self.activation.append_inference_ops(&mut operations)?;
+        self.mlp2.append_inference_ops(&mut operations)?;
+        let tail = self.resident_autograd.vjp(operations, &tokens, &seed)?;
+        let grad_dw = tail
+            .input_gradient()
+            .reshape(&[batch, height, width, self.channels])?
+            .permute(&[0, 3, 1, 2])?;
+        let depthwise = self.depthwise.vjp_resident(input, &grad_dw)?;
+        let input_gradient = depthwise[0].add(cotangent)?;
+
+        let mut shapes = Vec::with_capacity(8);
+        self.visit_parameters(&mut |parameter| {
+            let (rows, cols) = parameter.value().shape();
+            shapes.push([rows, cols]);
+            Ok(())
+        })?;
+        if shapes.len() != 8 || tail.parameter_gradients().len() != 6 {
+            return Err(InferenceError::Shape(shapes.len()));
+        }
+        let mut parameter_gradients = Vec::with_capacity(8);
+        parameter_gradients.push(depthwise[1].reshape(&shapes[0])?);
+        parameter_gradients.push(depthwise[2].reshape(&shapes[1])?);
+        for (gradient, shape) in tail.parameter_gradients().iter().zip(&shapes[2..]) {
+            parameter_gradients.push(gradient.reshape(shape)?);
+        }
+        Ok(ConvNeXtBlockVjp {
+            input_gradient,
+            parameter_gradients,
+        })
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn resident_vjp_stats(&self) -> ResidentAutogradStats {
+        self.resident_autograd.stats()
     }
 }
 
@@ -183,6 +294,7 @@ impl Module for ConvNeXtBlock {
         self.norm.clear_resident_forward_cache();
         self.mlp1.clear_resident_forward_cache();
         self.mlp2.clear_resident_forward_cache();
+        self.resident_autograd.clear();
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
@@ -793,6 +905,188 @@ mod resident_tests {
                 st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(_)
             ))
         ));
+    }
+
+    #[test]
+    fn resident_block_vjp_matches_host_and_refreshes_changed_parameters() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = ensure_default_runtime_blocking("vision.convnext_block_vjp").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut block = ConvNeXtBlock::new("vision.vjp", 2, (3, 4), -1.0, 1e-6).unwrap();
+        let host_input = Tensor::from_fn(2, 24, |row, col| {
+            ((row * 17 + col * 11) % 47) as f32 / 47.0 - 0.5
+        })
+        .unwrap();
+        let host_seed = Tensor::from_fn(2, 24, |row, col| {
+            ((row * 13 + col * 7) % 31) as f32 / 31.0 - 0.4
+        })
+        .unwrap();
+        let input = device.upload(&[2, 2, 3, 4], host_input.data()).unwrap();
+        let seed = device.upload(&[2, 2, 3, 4], host_seed.data()).unwrap();
+        let verify = |block: &mut ConvNeXtBlock, input: &ResidentTensor, seed: &ResidentTensor| {
+            let mut before_gradients = Vec::new();
+            block
+                .visit_parameters(&mut |parameter| {
+                    before_gradients.push(parameter.gradient().map(|g| g.data().to_vec()));
+                    Ok(())
+                })
+                .unwrap();
+            let actual = block.vjp_resident(&input, &seed).unwrap();
+            assert_eq!(actual.input_gradient().layout().shape(), &[2, 2, 3, 4]);
+            let input_values = actual.input_gradient().snapshot().unwrap().read().unwrap();
+            let parameter_values: Vec<_> = actual
+                .parameter_gradients()
+                .iter()
+                .map(|gradient| gradient.snapshot().unwrap().read().unwrap())
+                .collect();
+            assert_eq!(parameter_values.len(), 8);
+            let mut slot = 0;
+            block
+                .visit_parameters(&mut |parameter| {
+                    assert_eq!(
+                        parameter.gradient().map(|g| g.data().to_vec()),
+                        before_gradients[slot]
+                    );
+                    slot += 1;
+                    Ok(())
+                })
+                .unwrap();
+            let expected_input = {
+                let _policy =
+                    push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+                block.backward(&host_input, &host_seed).unwrap()
+            };
+            let mut expected_values = Vec::new();
+            block
+                .visit_parameters(&mut |parameter| {
+                    let (rows, cols) = parameter.value().shape();
+                    let gradient = &actual.parameter_gradients()[expected_values.len()];
+                    assert_eq!(gradient.layout().shape(), &[rows, cols]);
+                    expected_values.push(parameter.gradient().unwrap().data().to_vec());
+                    Ok(())
+                })
+                .unwrap();
+            for (index, (&value, &expected)) in
+                input_values.iter().zip(expected_input.data()).enumerate()
+            {
+                assert!(
+                    (value - expected).abs() <= 5e-3 * (1.0 + expected.abs()),
+                    "block input VJP {index}: gpu={value} cpu={expected}"
+                );
+            }
+            for (slot, (values, expected)) in
+                parameter_values.iter().zip(&expected_values).enumerate()
+            {
+                for (index, (&value, &reference)) in values.iter().zip(expected).enumerate() {
+                    assert!(
+                        (value - reference).abs() <= 5e-3 * (1.0 + reference.abs()),
+                        "block parameter {slot} VJP {index}: gpu={value} cpu={reference}"
+                    );
+                }
+            }
+            (actual, input_values)
+        };
+
+        let (old, old_values) = verify(&mut block, &input, &seed);
+        assert_eq!(block.resident_vjp_stats().compilations, 1);
+        block
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.zero_gradient();
+                Ok(())
+            })
+            .unwrap();
+        verify(&mut block, &input, &seed);
+        assert_eq!(block.resident_vjp_stats().cache_hits, 1);
+        block
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.zero_gradient();
+                Ok(())
+            })
+            .unwrap();
+        let mut transposed_input = vec![0.0; host_input.data().len()];
+        let mut transposed_seed = vec![0.0; host_seed.data().len()];
+        for batch in 0..2 {
+            for channel in 0..2 {
+                for y in 0..3 {
+                    for x in 0..4 {
+                        let source = ((batch * 2 + channel) * 3 + y) * 4 + x;
+                        let target = ((batch * 2 + channel) * 4 + x) * 3 + y;
+                        transposed_input[target] = host_input.data()[source];
+                        transposed_seed[target] = host_seed.data()[source];
+                    }
+                }
+            }
+        }
+        let strided_input = device
+            .upload(&[2, 2, 4, 3], &transposed_input)
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap();
+        let strided_seed = device
+            .upload(&[2, 2, 4, 3], &transposed_seed)
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap();
+        assert!(!strided_input.layout().is_contiguous());
+        verify(&mut block, &strided_input, &strided_seed);
+        assert_eq!(block.resident_vjp_stats().cache_hits, 2);
+        block
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.zero_gradient();
+                if parameter.name().contains(".dw::weight")
+                    || parameter.name().contains(".fc1::weight")
+                    || parameter.name().contains(".ln_gamma")
+                {
+                    parameter.value_mut().data_mut()[0] += 0.15;
+                }
+                Ok(())
+            })
+            .unwrap();
+        verify(&mut block, &input, &seed);
+        assert_eq!(block.resident_vjp_stats().compilations, 2);
+        assert_eq!(
+            old.input_gradient().snapshot().unwrap().read().unwrap(),
+            old_values
+        );
+
+        let empty = device.upload(&[0, 2, 3, 4], &[]).unwrap();
+        assert!(block.vjp_resident(&empty, &empty).is_err());
+        let wrong_seed = device.upload(&[1, 2, 3, 4], &[0.0; 24]).unwrap();
+        assert!(block.vjp_resident(&input, &wrong_seed).is_err());
+
+        let invalid = device
+            .upload(
+                &[2, 2, 3, 4],
+                &(0..48)
+                    .map(|index| if index == 0 { f32::MAX } else { 0.0 })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
+            .mul(&device.upload(&[], &[2.0]).unwrap())
+            .unwrap();
+        let poisoned = block.vjp_resident(&invalid, &seed).unwrap();
+        assert!(poisoned
+            .input_gradient()
+            .snapshot()
+            .unwrap()
+            .read()
+            .is_err());
+        for gradient in poisoned.parameter_gradients() {
+            assert!(gradient.snapshot().unwrap().read().is_err());
+        }
+        let recovered = block.vjp_resident(&input, &seed).unwrap();
+        assert!(recovered
+            .input_gradient()
+            .snapshot()
+            .unwrap()
+            .read()
+            .is_ok());
+        for gradient in recovered.parameter_gradients() {
+            assert!(gradient.snapshot().unwrap().read().is_ok());
+        }
     }
 
     #[test]

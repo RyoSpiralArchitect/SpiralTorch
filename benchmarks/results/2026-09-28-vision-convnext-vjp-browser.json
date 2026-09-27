@@ -1,0 +1,30 @@
+{
+  "schema": "spiraltorch.convnext_block_vjp.browser.v1",
+  "status": "passed",
+  "gradient_tensors": 9,
+  "intermediate_readbacks": 0,
+  "browser_adapter_probe": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "is_fallback_adapter": false,
+    "boundary": "Separate probe, not attestation of the Rust runtime device"
+  },
+  "wasm_sha256": "6cdb1dec8e0a14e3f8f4b4919b25639052fba29c1cd3d353756184fa80e5553a",
+  "page_sha256": "16f007c8c4a06abfee99f335fecd0a0858ae2e97f2af1db80507436507381276",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "convnext-block-vjp-resident",
+  "asset_sha256": {
+    "/": "16f007c8c4a06abfee99f335fecd0a0858ae2e97f2af1db80507436507381276",
+    "/module/spiraltorch_wasm.js": "f69aa871b466a564b284785160f450656d9097ab713b0908a157e47523639120",
+    "/module/spiraltorch_wasm_bg.wasm": "6cdb1dec8e0a14e3f8f4b4919b25639052fba29c1cd3d353756184fa80e5553a"
+  },
+  "browser_version": "153.0.8010.54",
+  "page_errors": [],
+  "console_messages": []
+}

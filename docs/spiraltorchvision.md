@@ -145,6 +145,16 @@ gradients without silently updating host parameters. The
 includes CPU parity, three-process timings, and Chrome WebGPU correctness.
 This is not yet resident ConvNeXt training or a matched optimizer step.
 
+`ConvNeXtBlock::vjp_resident(input, cotangent)` now extends the resident path
+through LayerNorm, both Linear layers, GELU, and the residual connection.
+Its input gradient and eight parameter gradients remain on the GPU, with
+parameter shapes matching `Module::visit_parameters`. A reusable Rust graph
+cache refreshes after host parameter edits; this method neither accumulates
+host gradients nor applies an optimizer step. The
+[block VJP contract](../benchmarks/results/2026-09-28-vision-convnext-vjp-contract.md)
+records native and Chrome CPU parity, non-contiguous views, validity checks,
+and the remaining full-backbone training gap. It contains no speedup claim.
+
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed
 `apply_packed_geometry_batch_resident(&[n, c, h, w], &values, &device)` entry
 for callers that already own contiguous NCHW data. Empty, ragged, and

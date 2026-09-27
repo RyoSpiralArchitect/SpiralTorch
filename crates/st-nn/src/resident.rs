@@ -14,9 +14,13 @@ use thiserror::Error;
 
 mod graph;
 #[cfg(feature = "wgpu")]
+mod module_autograd;
+#[cfg(feature = "wgpu")]
 mod module_forward;
 mod module_update;
 mod portable;
+#[cfg(feature = "wgpu")]
+pub use module_autograd::{ResidentAutogradStats, ResidentModuleAutogradCache};
 #[cfg(feature = "wgpu")]
 pub(crate) use module_forward::{
     require_uncommitted_route, same_parameter, unary_forward, unary_snapshot,
