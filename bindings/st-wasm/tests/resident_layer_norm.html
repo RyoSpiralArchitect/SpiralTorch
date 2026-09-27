@@ -14,6 +14,7 @@ try {
   const report = JSON.parse(await run_layer_norm_checks());
   if (report.schema !== "spiraltorch.resident_layer_norm.browser.v5" || report.status !== "passed" ||
       report.cases !== 7 || report.masks_per_case !== 8 || report.training_steps !== 400 ||
+      report.narrow_width_boundary_cases !== 3 ||
       report.adaptive_workgroup_cases !== 2 || report.adaptive_workgroup_masks !== 3 ||
       report.scale_nullspace_cases !== 5 || report.epsilon_cancellation_cases !== 2 ||
       report.subnormal_cotangent_cases !== 1 ||

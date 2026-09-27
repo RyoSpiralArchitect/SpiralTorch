@@ -142,6 +142,40 @@ mod browser {
             }
             cases += 1;
         }
+        let mut narrow_width_boundary_cases = 0;
+        for cols in [16usize, 32, 33] {
+            let rows = 4;
+            let epsilon = 1e-5f32;
+            let values: Vec<f32> = (0..rows * cols)
+                .map(|index| ((index * 17) % 101) as f32 / 101.0 - 0.5)
+                .collect();
+            let gain: Vec<f32> = (0..cols).map(|col| 0.5 + (col % 7) as f32 / 8.0).collect();
+            let bias: Vec<f32> = (0..cols).map(|col| (col % 5) as f32 / 16.0).collect();
+            let expected: Vec<f32> = values
+                .chunks_exact(cols)
+                .flat_map(|row| {
+                    let mean = row.iter().map(|&v| f64::from(v)).sum::<f64>() / cols as f64;
+                    let variance = row
+                        .iter()
+                        .map(|&v| (f64::from(v) - mean).powi(2))
+                        .sum::<f64>()
+                        / cols as f64;
+                    let denominator = (variance + f64::from(epsilon)).sqrt();
+                    row.iter()
+                        .enumerate()
+                        .map(|(col, &v)| {
+                            ((f64::from(v) - mean) / denominator) as f32 * gain[col] + bias[col]
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            let input = device.upload(&[rows, cols], &values)?;
+            let gain = device.upload(&[cols], &gain)?;
+            let bias = device.upload(&[cols], &bias)?;
+            let normalized = input.layer_norm_affine(&gain, &bias, epsilon)?;
+            close(&read(normalized.value()).await?, &expected)?;
+            narrow_width_boundary_cases += 1;
+        }
         let mut adaptive_workgroup_cases = 0;
         for rows in [64usize, 128] {
             let x = [0., 1.].repeat(rows);
@@ -387,6 +421,7 @@ mod browser {
         Ok(serde_json::to_string(&serde_json::json!({
             "schema": "spiraltorch.resident_layer_norm.browser.v5", "status": "passed",
             "adapter": format!("{:?}", runtime.adapter_info()), "cases": cases, "masks_per_case": 8,
+            "narrow_width_boundary_cases": narrow_width_boundary_cases,
             "adaptive_workgroup_cases": adaptive_workgroup_cases, "adaptive_workgroup_masks": 3,
             "scale_nullspace_cases": scale_nullspace_cases,
             "epsilon_cancellation_cases": epsilon_cancellation_cases,

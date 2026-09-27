@@ -992,12 +992,22 @@ impl ResidentGraphTraining {
                         plan.forward().encode_in_pass(&mut compute, forward);
                     }
                     (Node::LayerNorm(node), None) => {
-                        compute.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        compute.set_pipeline(
+                            self.layer_norm
+                                .as_ref()
+                                .unwrap()
+                                .forward_for_cols(node.cols),
+                        );
                         compute.set_bind_group(0, &node.forward, &[]);
                         compute.dispatch_workgroups(node.row_grid[0], node.row_grid[1], 1);
                     }
                     (Node::LayerNorm(node), Some(ForwardBinding::LayerNorm(binding))) => {
-                        compute.set_pipeline(&self.layer_norm.as_ref().unwrap().forward);
+                        compute.set_pipeline(
+                            self.layer_norm
+                                .as_ref()
+                                .unwrap()
+                                .forward_for_cols(node.cols),
+                        );
                         compute.set_bind_group(0, binding, &[]);
                         compute.dispatch_workgroups(node.row_grid[0], node.row_grid[1], 1);
                     }

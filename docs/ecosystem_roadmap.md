@@ -95,9 +95,14 @@ checks; this does not expose the model-owned ConvNeXt API. A tiny native GPU
 test checks whole-backbone CPU parity, non-contiguous input, and cache refresh after
 parameter updates. A Rust example connects the existing image-transform
 handoff to this full forward. This is **not** a Python/WASM ConvNeXt model,
-GPU backward, or a demonstrated full-model speedup. Next gates are resident
-training, finishing the VJP migration for specialized `st-nn` layers, and
-matched real-dataset accuracy/throughput.
+GPU backward, or a demonstrated full-model speedup. A bounded Apple M4
+[synthetic backbone probe](../benchmarks/results/2026-09-27-vision-resident-convnext-m4.md)
+found a narrow LayerNorm WGPU bottleneck and improved it with a 32-lane
+dispatch, but WGPU remains slower than CPU on the tested full-model shapes.
+The browser WebGPU LayerNorm fixture passes widths 16, 32, and 33, but does
+not measure browser ConvNeXt throughput.
+Next gates are resident training, finishing the VJP migration for specialized
+`st-nn` layers, and matched real-dataset accuracy/throughput.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

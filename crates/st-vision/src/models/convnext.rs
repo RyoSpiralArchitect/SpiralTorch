@@ -601,6 +601,118 @@ mod resident_tests {
     use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
     use st_core::backend::device_caps::DeviceCaps;
     use st_nn::execution::{push_backend_policy, BackendPolicy};
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "manual GPU stage diagnostic; each stage includes a synchronizing readback"]
+    fn resident_block_stage_diagnostic() {
+        const WARMUPS: usize = 3;
+        const SAMPLES: usize = 11;
+        const STAGES: [&str; 7] = [
+            "depthwise",
+            "token_pack",
+            "layer_norm",
+            "mlp1",
+            "gelu",
+            "mlp2",
+            "layout_and_residual",
+        ];
+
+        fn timed_stage(
+            samples: &mut Vec<f64>,
+            record: bool,
+            operation: impl FnOnce() -> Result<ResidentTensor, st_nn::resident::InferenceError>,
+        ) -> ResidentTensor {
+            let start = Instant::now();
+            let output = operation().unwrap();
+            output.snapshot().unwrap().read().unwrap();
+            if record {
+                samples.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+            output
+        }
+
+        fn median(samples: &[f64]) -> f64 {
+            let mut sorted = samples.to_vec();
+            sorted.sort_by(f64::total_cmp);
+            sorted[sorted.len() / 2]
+        }
+
+        let (runtime, _) = ensure_default_runtime_blocking("vision.convnext_stage_diagnostic")
+            .expect("this ignored diagnostic requires a live WGPU adapter");
+        println!("adapter={:?}", runtime.adapter_info());
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = TensorDevice::new(runtime).unwrap();
+        let block =
+            ConvNeXtBlock::new("vision.stage_diagnostic", 16, (32, 32), -1.0, 1e-6).unwrap();
+        let shape = [2, 16, 32, 32];
+        let values: Vec<f32> = (0..shape.iter().product())
+            .map(|index| ((index * 17) % 101) as f32 / 101.0 - 0.5)
+            .collect();
+        let input = device.upload(&shape, &values).unwrap();
+        let mut full_samples = Vec::new();
+        let mut stages: [Vec<f64>; STAGES.len()] = std::array::from_fn(|_| Vec::new());
+
+        for iteration in 0..WARMUPS + SAMPLES {
+            let record = iteration >= WARMUPS;
+            let start = Instant::now();
+            let full = block
+                .forward_resident(&input)
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read()
+                .unwrap();
+            if record {
+                full_samples.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+
+            let dw = timed_stage(&mut stages[0], record, || {
+                block.depthwise.forward_resident(&input)
+            });
+            let tokens = timed_stage(&mut stages[1], record, || {
+                Ok(dw
+                    .permute(&[0, 2, 3, 1])?
+                    .contiguous()?
+                    .reshape(&[2048, 16])?)
+            });
+            let normed = timed_stage(&mut stages[2], record, || {
+                block.norm.forward_resident(&tokens)
+            });
+            let hidden = timed_stage(&mut stages[3], record, || {
+                block.mlp1.forward_resident(&normed)
+            });
+            let activated = timed_stage(&mut stages[4], record, || {
+                block.activation.forward_resident(&hidden)
+            });
+            let projected = timed_stage(&mut stages[5], record, || {
+                block.mlp2.forward_resident(&activated)
+            });
+            let output = timed_stage(&mut stages[6], record, || {
+                Ok(projected
+                    .reshape(&[2, 32, 32, 16])?
+                    .permute(&[0, 3, 1, 2])?
+                    .add(&input)?)
+            });
+            let traced = output.snapshot().unwrap().read().unwrap();
+            assert_eq!(full.len(), traced.len());
+            assert!(full
+                .iter()
+                .zip(traced)
+                .all(|(left, right)| (left - right).abs() < 2e-3));
+        }
+
+        println!(
+            "full_median_ms={:.3} samples={full_samples:?}",
+            median(&full_samples)
+        );
+        for (label, samples) in STAGES.iter().zip(stages.iter()) {
+            println!(
+                "{label}_median_ms={:.3} samples={samples:?}",
+                median(samples)
+            );
+        }
+    }
 
     #[test]
     fn resident_block_matches_host_and_refreshes_changed_parameters() {

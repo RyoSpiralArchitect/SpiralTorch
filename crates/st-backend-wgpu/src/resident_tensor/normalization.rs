@@ -60,8 +60,10 @@ fn source(template: &str) -> String {
 pub(crate) struct LayerNormKernels {
     pub(crate) forward_layout: wgpu::BindGroupLayout,
     pub(crate) backward_layout: wgpu::BindGroupLayout,
-    pub(crate) forward: wgpu::ComputePipeline,
+    forward: wgpu::ComputePipeline,
+    forward_narrow: wgpu::ComputePipeline,
     statistics: wgpu::ComputePipeline,
+    statistics_narrow: wgpu::ComputePipeline,
     pub(crate) input: wgpu::ComputePipeline,
     pub(crate) affine: [wgpu::ComputePipeline; 4],
     guard: guard_capture::GuardCapture,
@@ -128,7 +130,13 @@ impl LayerNormKernels {
         };
         Self {
             forward: pipeline(&forward_pipeline_layout, &forward_module, "forward"),
+            forward_narrow: pipeline(&forward_pipeline_layout, &forward_module, "forward_narrow"),
             statistics: pipeline(&forward_pipeline_layout, &forward_module, "statistics"),
+            statistics_narrow: pipeline(
+                &forward_pipeline_layout,
+                &forward_module,
+                "statistics_narrow",
+            ),
             input: pipeline(
                 &backward_pipeline_layout,
                 &backward_module,
@@ -144,6 +152,22 @@ impl LayerNormKernels {
             forward_layout,
             backward_layout,
             guard: guard_capture::GuardCapture::new(device),
+        }
+    }
+
+    pub(crate) fn forward_for_cols(&self, cols: usize) -> &wgpu::ComputePipeline {
+        if cols <= 32 {
+            &self.forward_narrow
+        } else {
+            &self.forward
+        }
+    }
+
+    fn statistics_for_cols(&self, cols: usize) -> &wgpu::ComputePipeline {
+        if cols <= 32 {
+            &self.statistics_narrow
+        } else {
+            &self.statistics
         }
     }
 }
@@ -375,7 +399,12 @@ impl ResidentTensor {
             ],
         );
         if shape.rows != 0 {
-            dispatch(&mut encoder, &kernels.forward, &binding, grid);
+            dispatch(
+                &mut encoder,
+                kernels.forward_for_cols(shape.cols),
+                &binding,
+                grid,
+            );
         }
         capture(kernels, gpu, &mut encoder, &flags, value.flags());
         context.queue().submit(Some(encoder.finish()));
@@ -470,7 +499,12 @@ impl ResidentTensor {
             ],
         );
         if shape.rows != 0 {
-            dispatch(&mut encoder, &kernels.statistics, &binding, grid);
+            dispatch(
+                &mut encoder,
+                kernels.statistics_for_cols(shape.cols),
+                &binding,
+                grid,
+            );
         }
         context.queue().submit(Some(encoder.finish()));
         Ok(ResidentLayerNormVjp {

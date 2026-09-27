@@ -47,6 +47,69 @@ fn assert_close(actual: &[f32], expected: &[f32], tolerance: f32) {
 }
 
 #[test]
+fn layer_norm_inference_graph_matches_standalone_at_narrow_boundary() {
+    let Some(runtime) = runtime() else { return };
+    let device = TensorDevice::new(runtime.clone()).unwrap();
+    for cols in [16, 32, 33] {
+        let rows = 4;
+        let values: Vec<f32> = (0..rows * cols)
+            .map(|index| ((index * 17) % 101) as f32 / 101.0 - 0.5)
+            .collect();
+        let gain = vec![1.0; cols];
+        let bias = vec![0.0; cols];
+        let definition = GraphDefinition::new(
+            NdLayout::contiguous(&[rows, cols]).unwrap(),
+            vec![GraphStage::LayerNorm {
+                gain: 0,
+                bias: 1,
+                epsilon: 1e-5,
+            }],
+            vec![
+                GraphParameter {
+                    role: ParameterRole::Gain,
+                    shape: vec![cols],
+                    values: gain.clone(),
+                },
+                GraphParameter {
+                    role: ParameterRole::Bias,
+                    shape: vec![cols],
+                    values: bias.clone(),
+                },
+            ],
+        )
+        .unwrap();
+        let input = device.upload(&[rows, cols], &values).unwrap();
+        let gpu_gain = device.upload(&[cols], &gain).unwrap();
+        let gpu_bias = device.upload(&[cols], &bias).unwrap();
+        let expected = input
+            .layer_norm_affine(&gpu_gain, &gpu_bias, 1e-5)
+            .unwrap()
+            .value()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        let mut inference = ResidentGraph::new(
+            runtime.clone(),
+            definition,
+            MatmulTile::default(),
+            MatmulKernel::Scalar,
+            MatmulAccumulation::Sequential,
+        )
+        .unwrap();
+        inference.upload(&values).unwrap();
+        inference.dispatch().unwrap();
+        assert_close(
+            &inference.snapshot().unwrap().read().unwrap(),
+            &expected,
+            1e-6,
+        );
+        let direct = inference.forward_tensor(&input).unwrap();
+        assert_close(&direct.snapshot().unwrap().read().unwrap(), &expected, 1e-6);
+    }
+}
+
+#[test]
 fn layer_norm_graph_matches_standalone_forward_vjp_and_sgd() {
     let Some(runtime) = runtime() else { return };
     let definition = definition(1e-5);
