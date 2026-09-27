@@ -64,6 +64,7 @@ struct Kernels {
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
     checked_import: std::sync::OnceLock<checked_import::CheckedImportKernels>,
     convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
+    depthwise_vjp: std::sync::OnceLock<convolution::vjp::DepthwiseVjpKernels>,
     dense_convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
 }
 
@@ -206,6 +207,7 @@ impl TensorDevice {
             normalization: std::sync::OnceLock::new(),
             checked_import: std::sync::OnceLock::new(),
             convolution: std::sync::OnceLock::new(),
+            depthwise_vjp: std::sync::OnceLock::new(),
             dense_convolution: std::sync::OnceLock::new(),
         })))
     }
@@ -217,10 +219,28 @@ impl TensorDevice {
     /// Private graph destination. A caller must encode all values and the guard,
     /// then submit, before exposing this immutable handle outside the backend.
     pub(crate) fn allocate_output(&self, layout: &NdLayout) -> Result<ResidentTensor, TensorError> {
+        self.allocate_output_with_guard(layout, None)
+    }
+
+    /// Multiple requested VJPs may share one whole-operation validity guard.
+    pub(crate) fn allocate_output_with_guard(
+        &self,
+        layout: &NdLayout,
+        guard: Option<Shared<wgpu::Buffer>>,
+    ) -> Result<ResidentTensor, TensorError> {
         let layout = NdLayout::contiguous(layout.shape())?;
         let gpu = self.runtime().context().device();
         validate_view(&layout, layout.len(), &gpu.limits())?;
         let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+        let flags = match guard {
+            Some(flags) => flags,
+            None => Shared::new(runtime::empty_buffer::<u32>(
+                gpu,
+                "tensor.direct_guard",
+                1,
+                usage,
+            )?),
+        };
         Ok(ResidentTensor {
             storage: Shared::new(Storage {
                 values: runtime::empty_buffer::<f32>(
@@ -229,12 +249,7 @@ impl TensorDevice {
                     layout.len().max(1),
                     usage,
                 )?,
-                flags: Shared::new(runtime::empty_buffer::<u32>(
-                    gpu,
-                    "tensor.direct_guard",
-                    1,
-                    usage,
-                )?),
+                flags,
             }),
             layout,
             device: self.clone(),
@@ -629,6 +644,20 @@ impl ResidentTensor {
         dilation: (usize, usize),
     ) -> Result<Self, TensorError> {
         convolution::forward(self, weights, bias, stride, padding, dilation)
+    }
+
+    /// Return resident `(input, weight, bias)` VJPs for a channel-wise NCHW
+    /// convolution. Gradients are sums, with no implicit batch averaging.
+    /// The bias value is unnecessary; its gradient has shape `[C]`.
+    pub fn depthwise_conv2d_vjp(
+        &self,
+        weights: &Self,
+        upstream: &Self,
+        stride: (usize, usize),
+        padding: (usize, usize),
+        dilation: (usize, usize),
+    ) -> Result<[Self; 3], TensorError> {
+        convolution::vjp::backward(self, weights, upstream, stride, padding, dilation)
     }
 
     /// NCHW convolution. Weights are [out_channels, in_channels, KH, KW], bias is [out_channels].
