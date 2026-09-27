@@ -89,8 +89,10 @@ parameter cache refreshes after host-side updates, and native GPU tests match
 the CPU block and the vision-transform handoff. The next slice extends this
 to the Rust `ConvNeXtBackbone`: a guarded NCHW dense `Conv2d` primitive powers
 its model-owned stem and stage downsampling, and the blocks and final norm
-stay resident through the final snapshot. A tiny native GPU test checks
-whole-backbone CPU parity, non-contiguous input, and cache refresh after
+stay resident through the final snapshot. The primitive is also exposed as
+Python and browser `WgpuTensor.conv2d`, with the same Rust shape and validity
+checks; this does not expose the model-owned ConvNeXt API. A tiny native GPU
+test checks whole-backbone CPU parity, non-contiguous input, and cache refresh after
 parameter updates. A Rust example connects the existing image-transform
 handoff to this full forward. This is **not** a Python/WASM ConvNeXt model,
 GPU backward, or a demonstrated full-model speedup. Next gates are resident
