@@ -110,10 +110,13 @@ downsample, and final normalization on the same resident device. Its dense
 `Conv2d` weights are owned by the existing model and uploaded again only when
 their values or device change. The low-level `ResidentTensor::conv2d` takes
 NCHW input, `[O, I, KH, KW]` weights, `[O]` bias, and stride/padding/dilation
-pairs; it packs non-contiguous views on the GPU and preserves deferred
-non-finite guards. This is a Rust inference path: backward and host `Tensor`
-training remain separate, and Python/WASM do not yet expose a full ConvNeXt
-model. No general performance or training claim follows from CPU parity.
+pairs. Python `WgpuTensor.conv2d` exposes the same resident primitive with
+three geometry pairs; browser `WgpuTensor.conv2d` takes six integer geometry
+arguments and reads back only through `snapshot().readValues()`. Both pack
+non-contiguous views on the GPU and preserve deferred non-finite guards. The
+model-owned ConvNeXt forward remains Rust-only: backward and host `Tensor`
+training are separate, and Python/WASM do not yet expose a full ConvNeXt model.
+No general performance or training claim follows from CPU parity.
 Run `cargo run -p st-vision --example convnext_resident_backbone --features wgpu`
 for the image-transform-to-backbone handoff, or
 `cargo run -p st-vision --example convnext_resident_block --features wgpu`
