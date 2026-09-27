@@ -10,15 +10,15 @@ use st_tensor::Tensor;
 use st_vision::models::{ConvNeXtBackbone, ConvNeXtConfig};
 use std::time::Instant;
 
-const WARMUPS: usize = 2;
-const SAMPLES: usize = 7;
+const WARMUPS: usize = 3;
+const SAMPLES: usize = 11;
 
 struct Case {
     name: &'static str,
     batch: usize,
     side: usize,
-    first_dim: usize,
-    second_dim: usize,
+    stage_dims: &'static [usize],
+    stage_depths: &'static [usize],
 }
 
 fn median(values: &[f64]) -> f64 {
@@ -31,8 +31,8 @@ fn bench_case(case: Case, device: &TensorDevice) -> Result<(), Box<dyn std::erro
     let model = ConvNeXtBackbone::new(ConvNeXtConfig {
         input_channels: 3,
         input_hw: (case.side, case.side),
-        stage_dims: vec![case.first_dim, case.second_dim],
-        stage_depths: vec![1, 1],
+        stage_dims: case.stage_dims.to_vec(),
+        stage_depths: case.stage_depths.to_vec(),
         patch_size: (2, 2),
         curvature: -1.0,
         epsilon: 1e-6,
@@ -115,8 +115,8 @@ fn bench_case(case: Case, device: &TensorDevice) -> Result<(), Box<dyn std::erro
         return Err(format!("{}: invalid CPU median {cpu_ms}", case.name).into());
     }
     println!(
-        "case={} shape={}x3x{}x{} dims=[{},{}] depths=[1,1] warmups={WARMUPS} samples={SAMPLES}",
-        case.name, case.batch, case.side, case.side, case.first_dim, case.second_dim
+        "case={} shape={}x3x{}x{} dims={:?} depths={:?} warmups={WARMUPS} samples={SAMPLES}",
+        case.name, case.batch, case.side, case.side, case.stage_dims, case.stage_depths
     );
     println!("cpu_ms={:?}", times[0]);
     println!("wgpu_resident_input_to_readback_ms={:?}", times[1]);
@@ -138,22 +138,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             name: "small",
             batch: 1,
             side: 16,
-            first_dim: 4,
-            second_dim: 8,
+            stage_dims: &[4, 8],
+            stage_depths: &[1, 1],
         },
         Case {
-            name: "medium",
+            name: "medium_no_blocks",
             batch: 1,
             side: 32,
-            first_dim: 8,
-            second_dim: 16,
+            stage_dims: &[8, 16],
+            stage_depths: &[0, 0],
         },
         Case {
-            name: "large",
+            name: "medium_first_block",
+            batch: 1,
+            side: 32,
+            stage_dims: &[8, 16],
+            stage_depths: &[1, 0],
+        },
+        Case {
+            name: "medium_full",
+            batch: 1,
+            side: 32,
+            stage_dims: &[8, 16],
+            stage_depths: &[1, 1],
+        },
+        Case {
+            name: "large_no_blocks",
             batch: 2,
             side: 64,
-            first_dim: 16,
-            second_dim: 32,
+            stage_dims: &[16, 32],
+            stage_depths: &[0, 0],
+        },
+        Case {
+            name: "large_first_block",
+            batch: 2,
+            side: 64,
+            stage_dims: &[16, 32],
+            stage_depths: &[1, 0],
+        },
+        Case {
+            name: "large_full",
+            batch: 2,
+            side: 64,
+            stage_dims: &[16, 32],
+            stage_depths: &[1, 1],
         },
     ] {
         bench_case(case, &device)?;
