@@ -132,6 +132,9 @@ fn bench_case(case: Case, device: &TensorDevice) -> Result<(), Box<dyn std::erro
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (runtime, _) = ensure_default_runtime_blocking("vision.convnext_resident_bench")?;
     println!("adapter={:?}", runtime.adapter_info());
+    if runtime.adapter_info().device_type == wgpu::DeviceType::Cpu {
+        return Err("ConvNeXt WGPU benchmark requires a non-CPU adapter".into());
+    }
     let device = TensorDevice::new(runtime)?;
     for case in [
         Case {

@@ -128,7 +128,8 @@ For a matched full-backbone timing probe, run
 when the GPU is otherwise idle. It alternates CPU forward, resident-input
 WGPU forward through final readback, and fresh-upload WGPU forward through
 final readback over the same model and input. Each case prints raw samples,
-medians, adapter identity, and CPU parity. The benchmark source alone is not
+medians, adapter identity, and CPU parity, and rejects a CPU WGPU adapter.
+The benchmark source alone is not
 a measured speedup; report host, build, adapter, and competing workloads with
 any result. None of these routes measures backward or training throughput.
 The [Apple M4 bounded result](../benchmarks/results/2026-09-27-vision-resident-convnext-m4.md)

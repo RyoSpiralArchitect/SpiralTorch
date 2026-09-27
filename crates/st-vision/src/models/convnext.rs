@@ -641,6 +641,7 @@ mod resident_tests {
         let (runtime, _) = ensure_default_runtime_blocking("vision.convnext_stage_diagnostic")
             .expect("this ignored diagnostic requires a live WGPU adapter");
         println!("adapter={:?}", runtime.adapter_info());
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
         let device = TensorDevice::new(runtime).unwrap();
         let block =
             ConvNeXtBlock::new("vision.stage_diagnostic", 16, (32, 32), -1.0, 1e-6).unwrap();

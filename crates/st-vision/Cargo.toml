@@ -30,6 +30,7 @@ st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"
 
 [dev-dependencies]
 tempfile = "3"
+wgpu = { version = "0.20", features = ["wgsl"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

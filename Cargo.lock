@@ -3450,6 +3450,7 @@ dependencies = [
  "st-nn",
  "st-tensor",
  "tempfile",
+ "wgpu",
 ]
 
 [[package]]

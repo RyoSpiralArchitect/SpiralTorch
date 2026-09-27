@@ -18,6 +18,7 @@ used by `forward_resident`.
   `5736425d36a7600706180618d96e7db2599370e393e7d6e2c85051592ae13b85`.
 - Build: `cargo build --release --locked -p st-vision --features wgpu --example convnext_resident_bench -j 1`.
 - Measure: `target/release/examples/convnext_resident_bench`.
+- The benchmark and manual stage diagnostic reject a CPU WGPU adapter.
 - Stage diagnostic: `cargo test --release --locked -p st-vision --features wgpu --lib resident_block_stage_diagnostic -j 1 -- --ignored --nocapture`.
 - Browser correctness replay: build `st-backend-wgpu`'s
   `layer_norm_resident_browser` example for `wasm32-unknown-unknown --release`,
