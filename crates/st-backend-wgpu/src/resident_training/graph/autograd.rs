@@ -1,5 +1,6 @@
 //! Loss-independent resident VJPs of a frozen graph. No optimizer is executed.
 use super::*;
+use crate::resident_training::parameters::ParameterVersion as ParameterState;
 mod cotangent;
 mod learner;
 mod outputs;
@@ -7,17 +8,6 @@ mod prediction;
 pub use learner::{
     GraphGradientAccumulator, GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner,
 };
-
-#[derive(Clone)]
-struct ParameterState {
-    workspace: Shared<()>,
-    revision: u64,
-}
-impl ParameterState {
-    fn matches(&self, other: &Self) -> bool {
-        self.revision == other.revision && Shared::ptr_eq(&self.workspace, &other.workspace)
-    }
-}
 
 struct ForwardIdentity {
     generation: u64,
@@ -125,10 +115,7 @@ impl ResidentGraphAutograd {
             cotangent_inherited: None,
             input_source: None,
             current: None,
-            parameters: ParameterState {
-                workspace: Shared::new(()),
-                revision: 0,
-            },
+            parameters: ParameterState::new(),
             forwards: 0,
             backwards: 0,
         })

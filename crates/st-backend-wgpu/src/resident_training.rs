@@ -14,6 +14,7 @@ use st_kernel_contracts::sgd::SgdStep;
 use thiserror::Error;
 
 pub mod graph;
+pub mod parameters;
 mod readback;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod sgd_tests;
@@ -57,6 +58,10 @@ pub enum TrainingError {
     GradientWeight,
     #[error("accumulator and gradients must belong to this learner's current parameter state")]
     AccumulatorState,
+    #[error("resident parameters and gradients must have matching nonempty shapes and counts")]
+    ParameterLayout,
+    #[error("gradients must belong to this resident parameter owner's current version")]
+    ParameterVersion,
     #[error("accumulate a gradient before observing or updating from the accumulator")]
     EmptyAccumulator,
     #[error("submit an SGD update before requesting its receipt")]
