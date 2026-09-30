@@ -11,22 +11,23 @@ Current scope of the vision execution path:
 | Seeded resident geometry batch | Public API | Public API | Public API, async snapshots |
 | Model-owned resident ConvNeXt forward | `Module` API | Not exposed | Exercised by Rust WASM VJP fixture; no model binding |
 | Full-backbone resident VJP | `ConvNeXtBackbone::vjp_resident` | Not exposed | Rust WASM parity fixture; no model binding |
-| ConvNeXt-owned resident parameter update | Open | Open | Open |
+| ConvNeXt-owned resident parameter update | `compile_resident_training`, plain SGD | Not exposed | Rust WASM learning fixture; no model binding |
+| ConvNeXt training checkpoint/resume | Open | Open | Open |
 | Matched real-image training quality and throughput | Open | Open | Open |
 
-The next rail connects the model-owned gradients to resident parameter updates,
-reusing the existing graph learner's validation and commit semantics. It needs
-parameter-version checks, rejection of stale gradients, all-parameter acceptance
-before committing an update, and explicit checkpoint/host synchronization.
-Native and browser checks must cover consecutive accepted steps, a rejected
-step that preserves every parameter, and a valid retry. Python and WASM model
-bindings can then expose this same Rust-owned contract.
+The compiled ConvNeXt training path now connects model-owned gradients to
+resident parameter updates with version checks, stale-gradient rejection and
+all-parameter acceptance. Native and browser fixtures cover consecutive steps,
+rejected steps preserving all weights, and a valid retry. The next rail is
+explicit checkpoint/host synchronization and a real-image training path, followed
+by Python and WASM model bindings exposing the same Rust-owned contract.
 
 The candidate arithmetic is now shared by the existing dense, graph, clipped,
 and EMA update routes through `st-kernel-contracts::sgd`. The Rust CPU oracle
 and generated WGSL check the gradient, multiplication, and subtraction before
 the existing all-parameter commit decision. This supplies a common update rule;
-ConvNeXt parameter ownership and versioned gradient handoff remain open.
+the compiled model connection below supplies parameter ownership and versioned
+gradient handoff.
 The bounded native and browser checks are recorded in the
 [shared SGD contract result](../benchmarks/results/2026-09-30-shared-sgd-contract.md).
 
@@ -34,11 +35,24 @@ The next ownership slice supplies model-independent
 [`ResidentParameters`](resident_parameters.md): immutable GPU parameter versions,
 explicit derivative binding, and one all-parameter SGD decision without host
 mapping. The native/browser fixture feeds its updated weights into consecutive
-Conv2d forward/loss/VJP steps. This is not yet the ConvNeXt model update in the
-table: its host-parameter caches still need to be replaced or bound to this
-owner, and checkpoint/optimizer state must not be inferred from weight snapshots.
+Conv2d forward/loss/VJP steps. That fixture alone is not a ConvNeXt model update,
+and checkpoint/optimizer state must not be inferred from weight snapshots.
 The bounded checks are recorded in the
 [resident parameter ownership result](../benchmarks/results/2026-09-30-resident-parameter-owner.md).
+
+[`ConvNeXtBackbone::compile_resident_training`](resident_convnext_training.md)
+now snapshots host weights into a separate GPU-owned model. Stem, every block,
+downsampling and final normalization consume the updated resident values on the
+next forward. Convolution geometry comes from the original Rust layers; the
+Linear/LayerNorm/GELU subgraphs reuse graph-autograd with explicit GPU weight
+rebinding. The host model remains independent rather than silently replacing
+device updates through its inference caches. The same Rust fixture executes
+eight full-backbone MSE/VJP/SGD steps in native and browser GPU runtimes without
+readbacks inside that loop. It compares every gradient, weight version and next
+prediction with CPU, including rejection/retry and retained snapshots.
+See the [bounded learning result](../benchmarks/results/2026-09-30-convnext-resident-learning.md).
+This is fresh plain SGD, not ModuleTrainer policy migration, checkpoint resume,
+a JavaScript/Python model API, or demonstrated real-image quality/throughput.
 
 The following narrative records the successive implementation and measurement
 slices; the table above describes their current combined scope.

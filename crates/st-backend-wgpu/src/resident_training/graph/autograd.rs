@@ -1,9 +1,11 @@
 //! Loss-independent resident VJPs of a frozen graph. No optimizer is executed.
 use super::*;
+use crate::resident_tensor::guard_capture::GuardCapture;
 use crate::resident_training::parameters::ParameterVersion as ParameterState;
 mod cotangent;
 mod learner;
 mod outputs;
+mod parameters;
 mod prediction;
 pub use learner::{
     GraphGradientAccumulator, GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner,
@@ -64,7 +66,8 @@ impl GraphGradients {
 }
 
 /// Separate forward and arbitrary-cotangent backward on the same GPU tape.
-/// Parameters are frozen at compilation. VJPs share only intermediate scratch;
+/// Parameters are frozen per forward; explicit resident rebinding invalidates its tape.
+/// VJPs share only intermediate scratch;
 /// returned gradients own their output version. No implicit accumulation,
 /// batch normalization, loss scaling, or optimizer is applied.
 pub struct ResidentGraphAutograd {
@@ -74,6 +77,8 @@ pub struct ResidentGraphAutograd {
     forward_validation: wgpu::Buffer,
     cotangent_inherited: Option<wgpu::Buffer>,
     input_source: Option<ResidentTensor>,
+    parameter_guard: Option<wgpu::Buffer>,
+    parameter_capture: Option<GuardCapture>,
     current: Option<Shared<ForwardIdentity>>,
     parameters: ParameterState,
     forwards: u64,
@@ -114,6 +119,8 @@ impl ResidentGraphAutograd {
             forward_validation,
             cotangent_inherited: None,
             input_source: None,
+            parameter_guard: None,
+            parameter_capture: None,
             current: None,
             parameters: ParameterState::new(),
             forwards: 0,
@@ -216,6 +223,9 @@ impl ResidentGraphAutograd {
         let mut encoder = context.device().create_command_encoder(&Default::default());
         encoder.clear_buffer(&g.validation, 0, None);
         encoder.clear_buffer(&g.pointwise_flags, 0, None);
+        if let Some(guard) = &self.parameter_guard {
+            encoder.copy_buffer_to_buffer(guard, 0, &g.validation, 0, 4);
+        }
         if let Some(input) = &self.input_source {
             encoder.copy_buffer_to_buffer(
                 input.flags(),

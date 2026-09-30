@@ -1,0 +1,82 @@
+{
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "checks": [
+    "strided_offset_input",
+    "every_step_cpu_parity",
+    "next_forward_uses_updates",
+    "all_parameter_groups_update",
+    "host_source_isolation",
+    "pending_host_gradient_rejected",
+    "shape_validation",
+    "rate_validation",
+    "foreign_model",
+    "stale_gradients",
+    "stale_forward",
+    "whole_model_rejection",
+    "invalid_zero_rate",
+    "valid_retry",
+    "retained_parameters",
+    "retained_gradients",
+    "retained_receipts"
+  ],
+  "epsilon": 0.001,
+  "final_mse": 0.22554461658000946,
+  "input_shape": [
+    2,
+    2,
+    8,
+    8
+  ],
+  "learning_rate": 0.00009999999747378752,
+  "losses": [
+    0.5028321743011475,
+    0.29741933941841125,
+    0.2614099681377411,
+    0.23198316991329193,
+    0.2071744054555893,
+    0.18820831179618835,
+    0.17787009477615356,
+    0.18504351377487183
+  ],
+  "max_absolute_error": 0.0000514984130859375,
+  "max_scaled_error": 0.000012762335245497525,
+  "parameters": 22,
+  "scaled_error_tolerance": 0.00019999999494757503,
+  "schema": "spiraltorch.convnext_learning.contract.v1",
+  "stage_depths": [
+    1,
+    1
+  ],
+  "stage_dims": [
+    3,
+    4
+  ],
+  "status": "passed",
+  "steps": 8,
+  "training_loop_readbacks": 0,
+  "updated_parameter_groups": 5,
+  "browser_adapter_probe": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "is_fallback_adapter": false,
+    "boundary": "Separate probe, not attestation of the Rust runtime device"
+  },
+  "wasm_sha256": "f27ffdc31589a692e607d35a1bd2dc69ed1f6550ecc5cdeeb9ee195bf84bb775",
+  "page_sha256": "8a01ba0d30dd3ff7c2add0ebe22d8738d41bfe7e2041387b277eaa3371fad74a",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "convnext-learning-resident",
+  "asset_sha256": {
+    "/": "8a01ba0d30dd3ff7c2add0ebe22d8738d41bfe7e2041387b277eaa3371fad74a",
+    "/module/spiraltorch_wasm.js": "422f156979a28237746d7f6b62ef1dfdffe5b4d212014a8cf1720c43030fa06d",
+    "/module/spiraltorch_wasm_bg.wasm": "f27ffdc31589a692e607d35a1bd2dc69ed1f6550ecc5cdeeb9ee195bf84bb775"
+  },
+  "browser_version": "154.0.8037.58",
+  "page_errors": [],
+  "console_messages": []
+}

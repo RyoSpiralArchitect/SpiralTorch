@@ -195,6 +195,11 @@ impl ResidentParameters {
         self.current.clone()
     }
 
+    /// Check both owner identity and attempted-update revision without reading values.
+    pub fn is_current(&self, snapshot: &ResidentParameterSnapshot) -> bool {
+        self.current.version.matches(&snapshot.version)
+    }
+
     pub fn tensor_device(&self) -> &TensorDevice {
         &self.device
     }

@@ -65,8 +65,9 @@ synchronization boundary; neither is required to submit the next step.
   optimizer policy are not inferred or silently applied.
 - A parameter snapshot is not a serialized training checkpoint. Host weight
   handoff and optimizer-state resume still require explicit ownership contracts.
-- The ConvNeXt host model still uses host-owned parameter caches. Its forward
-  and VJP must be bound to this owner before this is full-backbone resident
-  training. Merely applying these updates to its detached gradients is not enough.
+- The separate [compiled ConvNeXt training model](resident_convnext_training.md)
+  uses this owner for its forward, VJP and next-step parameters. Its source host
+  model and inference caches remain independent. This is not implicit host
+  synchronization or migration of attached optimizer state.
 - Python/WASM model bindings and matched real-image accuracy/throughput remain
   open. The browser example executes the Rust API, not a new JavaScript model API.

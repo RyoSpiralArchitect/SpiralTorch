@@ -22,6 +22,11 @@ use st_nn::resident::{InferenceError, ResidentAutogradStats, ResidentModuleAutog
 use crate::models::resnet::conv_output_hw;
 
 #[cfg(feature = "wgpu")]
+mod resident;
+#[cfg(feature = "wgpu")]
+pub use resident::{ResidentConvNeXtBackbone, ResidentConvNeXtForward, ResidentConvNeXtGradients};
+
+#[cfg(feature = "wgpu")]
 fn reshape_parameter_gradients(
     module: &impl Module,
     gradients: &[ResidentTensor],
@@ -171,6 +176,18 @@ pub struct ConvNeXtBlock {
 }
 
 impl ConvNeXtBlock {
+    #[cfg(feature = "wgpu")]
+    fn resident_tail_operations(
+        &self,
+    ) -> Result<Vec<st_nn::resident::InferenceOp>, InferenceError> {
+        let mut operations = Vec::with_capacity(4);
+        self.norm.append_inference_ops(&mut operations)?;
+        self.mlp1.append_inference_ops(&mut operations)?;
+        self.activation.append_inference_ops(&mut operations)?;
+        self.mlp2.append_inference_ops(&mut operations)?;
+        Ok(operations)
+    }
+
     /// Builds a block over NCHW features with the given spatial dimensions.
     pub fn new(
         name: &str,
@@ -248,11 +265,7 @@ impl ConvNeXtBlock {
             .permute(&[0, 2, 3, 1])?
             .contiguous()?
             .reshape(tokens.layout().shape())?;
-        let mut operations = Vec::with_capacity(4);
-        self.norm.append_inference_ops(&mut operations)?;
-        self.mlp1.append_inference_ops(&mut operations)?;
-        self.activation.append_inference_ops(&mut operations)?;
-        self.mlp2.append_inference_ops(&mut operations)?;
+        let operations = self.resident_tail_operations()?;
         let tail = self.resident_autograd.vjp(operations, &tokens, &seed)?;
         let grad_dw = tail
             .input_gradient()
