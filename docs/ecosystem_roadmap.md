@@ -30,6 +30,16 @@ ConvNeXt parameter ownership and versioned gradient handoff remain open.
 The bounded native and browser checks are recorded in the
 [shared SGD contract result](../benchmarks/results/2026-09-30-shared-sgd-contract.md).
 
+The next ownership slice supplies model-independent
+[`ResidentParameters`](resident_parameters.md): immutable GPU parameter versions,
+explicit derivative binding, and one all-parameter SGD decision without host
+mapping. The native/browser fixture feeds its updated weights into consecutive
+Conv2d forward/loss/VJP steps. This is not yet the ConvNeXt model update in the
+table: its host-parameter caches still need to be replaced or bound to this
+owner, and checkpoint/optimizer state must not be inferred from weight snapshots.
+The bounded checks are recorded in the
+[resident parameter ownership result](../benchmarks/results/2026-09-30-resident-parameter-owner.md).
+
 The following narrative records the successive implementation and measurement
 slices; the table above describes their current combined scope.
 
