@@ -404,6 +404,10 @@ jobs:
       - name: Install wheel
         run: |
           python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+      - name: Resident classifier surface and handoff verifier
+        run: |
+          python -I -m unittest discover -s bindings/st-py/tests -p test_vision_resident_training.py
+          python -I tools/test_vision_classifier_handoff.py
       - name: Sanity-check packaged stubs
         env:
           PYTHONNOUSERSITE: "1"

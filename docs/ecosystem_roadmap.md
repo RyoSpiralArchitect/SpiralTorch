@@ -9,12 +9,12 @@ Current scope of the vision execution path:
 | Milestone | Rust | Python | Browser/WASM |
 | --- | --- | --- | --- |
 | Seeded resident geometry batch | Public API | Public API | Public API, async snapshots |
-| Model-owned resident ConvNeXt forward | `Module` API | Not exposed | Exercised by Rust WASM VJP fixture; no model binding |
-| Full-backbone resident VJP | `ConvNeXtBackbone::vjp_resident` | Not exposed | Rust WASM parity fixture; no model binding |
-| ConvNeXt-owned resident parameter update | `compile_resident_training`, plain SGD | Not exposed | Rust WASM learning fixture; no model binding |
-| ConvNeXt plain-SGD model checkpoint/resume | Public API, explicit host handoff | Not exposed | Rust WASM resume fixture and portable JSON; no model binding |
-| Real ConvNeXt classifier common inference entry | `ConvNeXtClassifier`, `create_classification_model` | Ordinary factory with `nn`; inference only | Rust WASM common-entry fixture; no JS model binding |
-| Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Not exposed | Shared Rust WASM learning/resume fixture; no JS model binding |
+| Model-owned resident ConvNeXt forward | `Module` API | Via resident classifier handle | Via resident classifier handle |
+| Full-backbone resident VJP | `ConvNeXtBackbone::vjp_resident` | Via classifier gradients, including head | Via classifier gradients, including head |
+| ConvNeXt-owned resident parameter update | `compile_resident_training`, plain SGD | Via classifier, explicit receipt | Via classifier, async receipt |
+| ConvNeXt plain-SGD model checkpoint/resume | Public API, explicit host handoff | Classifier JSON, resident restart and host handoff | Classifier JSON, resident restart and async mapping |
+| Real ConvNeXt classifier common inference entry | `ConvNeXtClassifier`, `create_classification_model` | Ordinary factory with `nn`; resident handle with `nn,wgpu` | Resident handle; no ordinary host factory |
+| Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Thin Rust-owned public client | Thin Rust-owned public client |
 | Resident image normalization and DataLoader handoff | Public API, homogeneous NCHW | Public API, same Rust loader | Public normalization/batch/continuation API; caller-supplied batches, no JS DataLoader |
 | Matched real-image training quality and throughput | Open | Open | Open |
 
@@ -29,9 +29,15 @@ The common public ConvNeXt entry now owns the real backbone, channel-preserving
 global-average pooling, and Linear classification head. Classifier learning uses
 one resident parameter owner and one acceptance/revision clock for all weights.
 Its checkpoint can return the learned model to the ordinary inference interface.
-Python's `nn` feature enables this same Rust factory; the WASM fixture exercises
-the same Rust model, not a JavaScript model binding. See
+Python's `nn` feature enables this same Rust factory. See
 [the classifier contract result](../benchmarks/results/2026-10-01-convnext-classifier-contract.md).
+
+The [thin training clients](resident_vision_training_clients.md) now expose the
+Rust classifier through Python and JavaScript, including versioned forward and
+gradient handles, frozen update receipts, and portable model checkpoints. They
+do not duplicate training rules or equate a submitted update with acceptance.
+The browser-to-Python replay uses the recorded normalized input; it does not
+claim DataLoader/RNG continuation or real-data learning quality.
 
 The [resident input path](resident_vision_input.md) now connects Normalize,
 geometry and Rust/Python DataLoader batches to the existing classifier on one
@@ -46,16 +52,20 @@ not capture that input state. See the
 
 ### Next Rails And Exit Gates
 
-1. **Thin training clients.** Expose the Rust-owned classifier, explicit
-   checkpoint mapping, and restart to Python and JavaScript without duplicating
-   training rules or implying that a submitted update has been accepted. Keep
-   model snapshots distinct from data cursor, augmentation RNG and trainer state.
-2. **Matched real-data evidence.** Check numerical parity against the same
+1. **Matched real-data evidence.** Check numerical parity against the same
    architecture/weights/data/loss in PyTorch, then measure held-out quality,
    transfer-inclusive throughput, memory, and restart equivalence. Synthetic
    loss decrease and kernel timings are not substitutes for this gate. Start
-   the bounded real-image comparison alongside the thin client work rather than
-   waiting for more model families or a model hub.
+   the bounded real-image comparison rather than waiting for more model families
+   or a model hub; record native and browser execution boundaries separately.
+2. **Restartable input and trainer state.** Keep model snapshots distinct from
+   data order/cursor, augmentation RNG and schedule state, then connect their
+   restart contracts. Specify whether rejected updates retry or consume a batch.
+   Compare uninterrupted and resumed batch identities, transforms and updates.
+3. **Shared resident optimizer control.** Connect existing Rust optimizer and
+   Z-space policy to the resident parameter owner rather than reimplementing it
+   in Python/JavaScript. Preserve the plain-SGD control case and all-parameter
+   acceptance, then measure policy-on/off quality and stability on the same data.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

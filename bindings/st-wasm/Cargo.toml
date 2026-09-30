@@ -14,7 +14,7 @@ path = "src/lib.rs"
 
 [features]
 nn = ["dep:st-nn", "dep:wasm-bindgen-futures"]
-webgpu = ["dep:st-backend-wgpu", "dep:st-vision", "dep:wasm-bindgen-futures", "nn", "st-nn/wgpu"]
+webgpu = ["dep:st-backend-wgpu", "dep:st-vision", "st-vision/nn", "dep:wasm-bindgen-futures", "nn", "st-nn/wgpu"]
 
 [dependencies]
 st-nn = { path = "../../crates/st-nn", optional = true, default-features = false }

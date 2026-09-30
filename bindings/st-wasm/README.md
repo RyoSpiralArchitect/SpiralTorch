@@ -37,6 +37,11 @@ target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invokin
 
 ## Examples
 
+- [Resident vision training](../../docs/resident_vision_training_clients.md):
+  `ResidentConvNeXtClassifier` wraps the Rust backbone and classification head.
+  Forward, explicit loss VJP and SGD remain resident; update acceptance and
+  frozen model checkpoint mapping are explicit asynchronous observations.
+
 - [Resident vision input](../../docs/resident_vision_input.md):
   `VisionTransformPipeline.addNormalize` composes with geometry, and
   `applyResidentBatch`/`applyFromResident` feed NN operations without an image

@@ -62,6 +62,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 - **[Mixed forward graphs](docs/resident_graph_forward.md)** - Compile existing Scaler/ReLU/Linear/GELU modules through Rust, Python or WASM without a training tape; shared `WgpuTensor` handles connect N-D processing, inference and graph training without intermediate CPU readback.
 - **[Original model, resident inputs](docs/module_resident_forward.md)** - The same NN model now reuses that graph through Rust `forward_resident`, Python `model(WgpuTensor)`, and browser `Sequential.forward`; explicit GPU outputs, parameter-aware cache reuse, and checked training handoff.
 - **[Resident NN training](docs/resident_nn_training.md)** - The same graph supports Rust-owned mean-MSE, VJP and transactional SGD through Python/browser clients, with explicit weight-only handoff.
+- **[Resident vision training](docs/resident_vision_training_clients.md)** - Python and browser clients train the same Rust ConvNeXt classifier, with resident image inputs, explicit update receipts, and portable model checkpoints.
 - 🌌 **[Z-Space Introduction](docs/zspace_intro.md)** - Understanding hyperbolic geometry in ML
 
 **Already familiar?** Jump to [Installation](#install-pip) or explore [Latest Highlights](#-latest-spiraltorch-highlights).

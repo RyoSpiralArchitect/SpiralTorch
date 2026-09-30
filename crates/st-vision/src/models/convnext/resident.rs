@@ -557,6 +557,10 @@ impl ConvNeXtClassifier {
 }
 
 impl ResidentConvNeXtClassifier {
+    pub fn tensor_device(&self) -> &TensorDevice {
+        &self.inner.device
+    }
+
     pub fn forward(
         &mut self,
         input: &ResidentTensor,

@@ -170,7 +170,7 @@ pub struct ResidentGlobalAveragePool2d {
     bias: ResidentTensor,
     zero: ResidentTensor,
     scale: ResidentTensor,
-    backward: std::cell::RefCell<Option<PoolBackwardPlan>>,
+    backward: std::sync::Mutex<Option<PoolBackwardPlan>>,
 }
 
 #[cfg(feature = "wgpu")]
@@ -218,7 +218,10 @@ impl ResidentGlobalAveragePool2d {
         };
         let inputs = [input, &self.zero, &seed, &self.scale];
         let layouts: Vec<_> = inputs.iter().map(|v| v.layout().clone()).collect();
-        let mut plan = self.backward.borrow_mut();
+        let mut plan = self
+            .backward
+            .lock()
+            .map_err(|_| InferenceError::ModuleUpdate("resident pooling cache lock poisoned"))?;
         if plan.as_ref().is_none_or(|saved| saved.layouts != layouts) {
             // (input * 0 + cotangent) / area preserves input validity without
             // computing meaningless (and potentially overflowing) filter VJPs.
