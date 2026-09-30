@@ -82,10 +82,9 @@ fn clip_prepare(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation
     let i = index(wid, lane);
     if (i < p.len) {
         let gradient = clipped_gradient(i);
-        let change = step.rate * gradient;
-        let candidate = a[i] - change;
-        check(gradient, 4096u); check(change, 8192u); check(candidate, 16384u);
-        out[i] = candidate;
+        let candidate = sgd_candidate(a[i], gradient, step.rate, 4096u);
+        if (candidate.flags != 0u) { atomicOr(&validation[p.stage], candidate.flags); }
+        out[i] = candidate.value;
         aux[i] = gradient;
     }
 }

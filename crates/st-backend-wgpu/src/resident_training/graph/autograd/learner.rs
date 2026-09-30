@@ -250,9 +250,7 @@ impl ResidentGraphLearner {
         terms: &[(&GraphGradients, f32)],
         rate: f32,
     ) -> Result<u64, TrainingError> {
-        if !rate.is_finite() || rate < 0. {
-            return Err(TrainingError::LearningRate);
-        }
+        SgdStep::new(rate).map_err(|_| TrainingError::LearningRate)?;
         if terms.is_empty()
             || terms.len() > MAX_TERMS
             || terms.iter().any(|(_, weight)| !weight.is_finite())

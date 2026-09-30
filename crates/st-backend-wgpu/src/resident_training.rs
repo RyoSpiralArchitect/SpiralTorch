@@ -10,10 +10,13 @@ use crate::{
 };
 use bytemuck::{Pod, Zeroable};
 use st_kernel_contracts::layout::NdLayout;
+use st_kernel_contracts::sgd::SgdStep;
 use thiserror::Error;
 
 pub mod graph;
 mod readback;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod sgd_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod stage_tests;
 pub use readback::{
@@ -255,8 +258,9 @@ pub struct ResidentDenseTraining {
 
 pub(crate) fn training_scalar_source() -> String {
     [
-        crate::shader_sources::GELU_DERIVATIVE_WGSL,
-        include_str!("shaders/dense_training.wgsl"),
+        crate::shader_sources::GELU_DERIVATIVE_WGSL.to_owned(),
+        st_kernel_contracts::sgd::sgd_candidate_wgsl(),
+        include_str!("shaders/dense_training.wgsl").to_owned(),
     ]
     .concat()
 }
@@ -756,9 +760,7 @@ impl ResidentDenseTraining {
     /// Enqueue forward, mean MSE, exact VJP, candidate validation, then all-layer commit.
     /// Zero rate is allowed for derivative probes; invalid derivatives still reject.
     pub fn step(&mut self, learning_rate: f32) -> Result<u64, TrainingError> {
-        if !learning_rate.is_finite() || learning_rate < 0. {
-            return Err(TrainingError::LearningRate);
-        }
+        SgdStep::new(learning_rate).map_err(|_| TrainingError::LearningRate)?;
         if self.batch_generation == 0 {
             return Err(TrainingError::MissingBatch);
         }

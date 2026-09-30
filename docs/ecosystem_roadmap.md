@@ -22,6 +22,14 @@ Native and browser checks must cover consecutive accepted steps, a rejected
 step that preserves every parameter, and a valid retry. Python and WASM model
 bindings can then expose this same Rust-owned contract.
 
+The candidate arithmetic is now shared by the existing dense, graph, clipped,
+and EMA update routes through `st-kernel-contracts::sgd`. The Rust CPU oracle
+and generated WGSL check the gradient, multiplication, and subtraction before
+the existing all-parameter commit decision. This supplies a common update rule;
+ConvNeXt parameter ownership and versioned gradient handoff remain open.
+The bounded native and browser checks are recorded in the
+[shared SGD contract result](../benchmarks/results/2026-09-30-shared-sgd-contract.md).
+
 The following narrative records the successive implementation and measurement
 slices; the table above describes their current combined scope.
 

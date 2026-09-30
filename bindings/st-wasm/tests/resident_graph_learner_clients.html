@@ -113,7 +113,24 @@ try {
   const original=await unchanged.readPlan();same(JSON.parse(original.toJson()).parameters[0].values,[2]);
   same((await recovered.read()).toString(),"3");
   for(const h of [source,plan,seed,f,alienF,good,alien,batch,max,two,huge,poison,fresh,bad,valid,badBatch,rejected,unchanged,next,recovery,difference,recovered,later,original])h.free();
-  report.identity_limits_zero_weight_rollback_ownership="passed";report.status="passed";
+  report.identity_limits_zero_weight_rollback_ownership="passed";
+  const overflowPlan=InferencePlan.fromJson(JSON.stringify({schema:"spiraltorch.nn.inference_plan.v2",input_shape:[1,1],
+    parameters:[{role:"gain",shape:[1],values:[2]}],stages:[
+      {kind:"pointwise",parameters:[0],steps:[{op:"multiply",rhs:1}]}]}));
+  const overflowLearner=await overflowPlan.compileGraphLearnerWebGpu("exact"), overflowDevice=overflowLearner.tensorDevice();
+  overflowLearner.upload(f32([1]));
+  const overflowSeed=overflowDevice.upload([1,1],f32([2])), overflowForward=overflowLearner.forward(),
+    overflowGradient=overflowLearner.backward(overflowForward,overflowSeed);
+  overflowLearner.sgd(overflowGradient,3.4028234663852886e38);
+  const overflowReceipt=overflowLearner.updateSnapshot();
+  await reject(()=>overflowReceipt.read());same(await weight(overflowLearner),2);
+  const retryForward=overflowLearner.forward(), retryGradient=overflowLearner.backward(retryForward,overflowSeed);
+  overflowLearner.sgd(retryGradient,.1);
+  const retryReceipt=overflowLearner.updateSnapshot();same((await retryReceipt.read()).toString(),"2");
+  near(await weight(overflowLearner),1.8);
+  for(const h of [overflowPlan,overflowLearner,overflowDevice,overflowSeed,overflowForward,overflowGradient,overflowReceipt,retryForward,retryGradient,retryReceipt])h.free();
+  report.sgd_candidate_overflow_rollback_retry="passed";
+  report.status="passed";
 }catch(error){report.error=String(error.stack||error);}
 element.textContent=JSON.stringify(report);element.dataset.status=report.status;
 </script>

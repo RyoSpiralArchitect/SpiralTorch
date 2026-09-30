@@ -18,3 +18,4 @@ pub mod momentum;
 pub mod normalization;
 pub mod pointwise;
 pub mod rank;
+pub mod sgd;

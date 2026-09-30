@@ -903,9 +903,7 @@ impl ResidentGraphTraining {
     }
 
     fn next_attempt(&self, rate: f32) -> Result<u64, TrainingError> {
-        if !rate.is_finite() || rate < 0. {
-            return Err(TrainingError::LearningRate);
-        }
+        SgdStep::new(rate).map_err(|_| TrainingError::LearningRate)?;
         if self.batch_generation == 0 {
             return Err(TrainingError::MissingBatch);
         }

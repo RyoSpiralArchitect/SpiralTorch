@@ -91,16 +91,14 @@ fn mse_reduce(@builtin(local_invocation_index) lane: u32) {
 fn prepare_sgd(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let i = index(wid, lane);
     if (i < p.len) {
-        let change = step.rate * c[i];
-        let candidate = a[i] - change;
-        check(c[i], 4096u); check(change, 8192u); check(candidate, 16384u);
-        out[i] = candidate;
+        let candidate = sgd_candidate(a[i], c[i], step.rate, 4096u);
+        if (candidate.flags != 0u) { atomicOr(&validation[p.stage], candidate.flags); }
+        out[i] = candidate.value;
     }
     if (i < p.cols) {
-        let change = step.rate * d[i];
-        let candidate = b[i] - change;
-        check(d[i], 4096u); check(change, 8192u); check(candidate, 16384u);
-        aux[i] = candidate;
+        let candidate = sgd_candidate(b[i], d[i], step.rate, 4096u);
+        if (candidate.flags != 0u) { atomicOr(&validation[p.stage], candidate.flags); }
+        aux[i] = candidate.value;
     }
 }
 
