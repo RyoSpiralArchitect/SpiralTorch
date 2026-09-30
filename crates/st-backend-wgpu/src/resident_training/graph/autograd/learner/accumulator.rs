@@ -154,9 +154,7 @@ impl ResidentGraphLearner {
         accumulator: &GraphGradientAccumulator,
         rate: f32,
     ) -> Result<u64, TrainingError> {
-        if !rate.is_finite() || rate < 0. {
-            return Err(TrainingError::LearningRate);
-        }
+        SgdStep::new(rate).map_err(|_| TrainingError::LearningRate)?;
         if !self.autograd.parameters.matches(&accumulator.state) {
             return Err(TrainingError::AccumulatorState);
         }

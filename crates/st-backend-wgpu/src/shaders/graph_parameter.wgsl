@@ -7,11 +7,10 @@ fn prepare_parameter(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invoc
         var scale = 1.0;
         if (p.gelu != 0u && step._pad0 != 0.0) { scale = 1.0 / f32(p.rows); }
         let gradient = c[i] * scale;
-        let change = step.rate * gradient;
-        let candidate = a[i] - change;
-        check(c[i], 4096u); check(gradient, 4096u);
-        check(change, 8192u); check(candidate, 16384u);
-        out[i] = candidate;
+        let candidate = sgd_candidate(a[i], gradient, step.rate, 4096u);
+        check(c[i], 4096u);
+        if (candidate.flags != 0u) { atomicOr(&validation[p.stage], candidate.flags); }
+        out[i] = candidate.value;
         aux[i] = gradient;
     }
 }

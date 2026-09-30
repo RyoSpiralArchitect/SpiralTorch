@@ -10,10 +10,9 @@ fn prepare_momentum(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invoca
         else { gradient = effective(c[i]); }
         check(d[i], 32768u);
         let next = ema_momentum(gradient, d[i], step._pad1);
-        let change = step.rate * next;
-        let candidate = a[i] - change;
-        check(next, 32768u); check(change, 8192u); check(candidate, 16384u);
-        out[i] = candidate;
+        let candidate = sgd_candidate(a[i], next, step.rate, 32768u);
+        if (candidate.flags != 0u) { atomicOr(&validation[p.stage], candidate.flags); }
+        out[i] = candidate.value;
         aux[i] = next;
     }
 }
