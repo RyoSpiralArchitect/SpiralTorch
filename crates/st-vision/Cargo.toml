@@ -10,7 +10,8 @@ license = "AGPL-3.0-or-later"
 default = ["nn"]
 wgpu = ["dep:st-backend-wgpu", "dep:st-kernel-contracts", "dep:wgpu", "st-tensor/wgpu", "st-nn?/wgpu"]
 nerf = ["nn"]
-nn = ["dep:st-nn", "dep:serde", "dep:serde_json"]
+nn = ["dep:st-nn", "input-checkpoint"]
+input-checkpoint = ["dep:serde", "dep:serde_json"]
 
 [dependencies]
 st-core = { path = "../st-core", default-features = false }
@@ -19,6 +20,7 @@ st-logic = { path = "../st-logic" }
 st-nn = { path = "../st-nn", optional = true }
 spiral-config = { path = "../spiral-config" }
 rand = "0.8"
+rand_chacha = "0.3"
 st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
 st-kernel-contracts = { path = "../st-kernel-contracts", optional = true }
 wgpu = { version = "0.20", features = ["wgsl"], optional = true }

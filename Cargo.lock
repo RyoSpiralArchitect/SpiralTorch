@@ -3443,6 +3443,7 @@ dependencies = [
  "ordered-float",
  "pollster",
  "rand",
+ "rand_chacha",
  "serde",
  "serde_json",
  "spiral-config",

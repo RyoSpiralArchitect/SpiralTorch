@@ -99,7 +99,9 @@ tensor handle. Rust/browser `apply_gpu_async`/`apply` wait for validity and keep
 image/RNG unchanged on mapping/validation failure.
 
 Model checkpoints still do not capture data cursor, augmentation RNG or trainer
-policy. Callers own those restart semantics. The shared native/browser fixture
+policy. The separate [input checkpoint](vision_input_checkpoint.md) now captures
+cursor/order and augmentation RNG; callers must pair it with the model at a
+settled boundary and retain trainer policy state. The shared native/browser fixture
 checks four normalized DataLoader-to-ConvNeXt CE/VJP/SGD steps against CPU, and
 checks that invalid normalization rejects all classifier weights. This is
 synthetic correctness evidence, not real-data accuracy or throughput evidence.

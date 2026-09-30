@@ -16,6 +16,7 @@ Current scope of the vision execution path:
 | Real ConvNeXt classifier common inference entry | `ConvNeXtClassifier`, `create_classification_model` | Ordinary factory with `nn`; resident handle with `nn,wgpu` | Resident handle; no ordinary host factory |
 | Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Thin Rust-owned public client | Thin Rust-owned public client |
 | Resident image normalization and DataLoader handoff | Public API, homogeneous NCHW | Public API, same Rust loader | Public normalization/batch/continuation API; caller-supplied batches, no JS DataLoader |
+| Portable input checkpoint | Order/cursor, shuffle and transform RNG | Same Rust loader/transform state | Transform state; browser order remains caller-owned |
 | Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch CPU and MPS comparison | Open |
 | Transfer-inclusive training throughput and memory | Open | Open | Open |
 
@@ -50,6 +51,13 @@ real-image quality or a throughput claim. Resident submission advances input
 cursor/RNG before deferred GPU validity is observed; model checkpoints still do
 not capture that input state. See the
 [input contract result](../benchmarks/results/2026-10-01-resident-vision-input/README.md).
+
+The [input checkpoint](vision_input_checkpoint.md) now preserves order/cursor
+and augmentation RNG independently of the model. A native GPU fixture matches
+100 classifier update attempts against a restart after attempt 37, including
+two rejected updates. Python-to-wasm32 transform replay is exact under Node;
+browser WebGPU learning restart is not yet measured. These payloads do not
+yet form one integrity-bound model/input/trainer checkpoint.
 
 ### Next Rails And Exit Gates
 

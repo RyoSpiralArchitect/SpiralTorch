@@ -61,7 +61,13 @@
 //! streamed through [`AtlasFrame`] snapshots.
 
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use rand_chacha::ChaCha12Rng;
 use spiral_config::determinism;
+#[cfg(feature = "input-checkpoint")]
+mod input_checkpoint;
+mod input_rng;
+#[cfg(feature = "input-checkpoint")]
+pub use input_checkpoint::{DataLoaderCheckpoint, TransformPipelineCheckpoint};
 pub mod analysis;
 #[cfg(feature = "nn")]
 mod classification;
@@ -3343,7 +3349,7 @@ pub struct DataLoader<D: VisionDataset> {
     order: Vec<usize>,
     position: usize,
     shuffle: bool,
-    shuffle_rng: StdRng,
+    shuffle_rng: ChaCha12Rng,
     pipeline: Option<TransformPipeline>,
 }
 
@@ -3357,7 +3363,7 @@ impl<D: VisionDataset> DataLoader<D> {
         let len = dataset.len();
         let order: Vec<usize> = (0..len).collect();
         let label = format!("st-vision/dataloader:{}:{}", len, batch_size);
-        let shuffle_rng = determinism::rng_from_optional(seed, &label);
+        let shuffle_rng = input_rng::from_optional(seed, &label);
         Ok(Self {
             dataset,
             batch_size,
@@ -3388,7 +3394,8 @@ impl<D: VisionDataset> DataLoader<D> {
         self.order = (0..self.dataset.len()).collect();
         // Fisher-Yates shuffle
         for i in (1..self.order.len()).rev() {
-            let j = self.shuffle_rng.gen_range(0..=i);
+            // Pin integer sampling width across native and wasm32 clients.
+            let j = self.shuffle_rng.gen_range(0..=i as u64) as usize;
             self.order.swap(i, j);
         }
         self.position = 0;
@@ -3472,7 +3479,7 @@ impl TransformOperation {
     }
 
     #[allow(dead_code)]
-    fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+    fn apply<R: Rng + ?Sized>(&self, image: &mut ImageTensor, rng: &mut R) -> PureResult<()> {
         match self {
             TransformOperation::Normalize(op) => op.apply(image),
             TransformOperation::Resize(op) => op.apply(image),
@@ -3495,7 +3502,7 @@ fn map_dispatch_error(err: TransformDispatchError) -> TensorError {
 #[derive(Clone)]
 pub struct TransformPipeline {
     ops: Vec<TransformOperation>,
-    rng: StdRng,
+    rng: ChaCha12Rng,
     #[cfg(feature = "wgpu")]
     dispatcher: Option<Arc<TransformDispatcher>>,
     #[cfg(feature = "wgpu")]
@@ -3523,7 +3530,7 @@ impl TransformPipeline {
     pub fn new() -> Self {
         Self {
             ops: Vec::new(),
-            rng: determinism::rng_from_label("st-vision/transform_pipeline"),
+            rng: input_rng::from_optional(None, "st-vision/transform_pipeline"),
             #[cfg(feature = "wgpu")]
             dispatcher: None,
             #[cfg(feature = "wgpu")]
@@ -3534,7 +3541,7 @@ impl TransformPipeline {
     pub fn with_seed(seed: u64) -> Self {
         Self {
             ops: Vec::new(),
-            rng: StdRng::seed_from_u64(seed),
+            rng: ChaCha12Rng::seed_from_u64(seed),
             #[cfg(feature = "wgpu")]
             dispatcher: None,
             #[cfg(feature = "wgpu")]
@@ -4112,7 +4119,7 @@ impl TransformPipeline {
         &self,
         start_idx: usize,
         image: &ImageTensor,
-    ) -> (usize, Vec<GeometryCommand>, StdRng) {
+    ) -> (usize, Vec<GeometryCommand>, ChaCha12Rng) {
         let mut commands = Vec::new();
         let mut index = start_idx;
         let mut sampled_rng = self.rng.clone();
@@ -4367,7 +4374,7 @@ impl RandomHorizontalFlip {
         Ok(Self { probability })
     }
 
-    pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+    pub fn apply<R: Rng + ?Sized>(&self, image: &mut ImageTensor, rng: &mut R) -> PureResult<()> {
         let apply = self.should_apply(rng);
         self.apply_with_flag(image, apply)
     }
@@ -4393,7 +4400,7 @@ impl RandomHorizontalFlip {
         Ok(())
     }
 
-    pub fn should_apply(&self, rng: &mut StdRng) -> bool {
+    pub fn should_apply<R: Rng + ?Sized>(&self, rng: &mut R) -> bool {
         rng.gen::<f32>() < self.probability
     }
 }
@@ -4507,7 +4514,7 @@ impl ColorJitter {
         }
     }
 
-    pub fn apply(&self, image: &mut ImageTensor, rng: &mut StdRng) -> PureResult<()> {
+    pub fn apply<R: Rng + ?Sized>(&self, image: &mut ImageTensor, rng: &mut R) -> PureResult<()> {
         let ops = self.sample_ops(rng, image.channels());
         if ops.is_empty() {
             return Ok(());
@@ -4515,7 +4522,7 @@ impl ColorJitter {
         self.apply_ops(image, &ops)
     }
 
-    fn sample_ops(&self, rng: &mut StdRng, channels: usize) -> Vec<ColorJitterOp> {
+    fn sample_ops<R: Rng + ?Sized>(&self, rng: &mut R, channels: usize) -> Vec<ColorJitterOp> {
         let mut ops = Vec::with_capacity(4);
         if self.brightness > 0.0 {
             let delta = rng.gen_range(-self.brightness..=self.brightness);
