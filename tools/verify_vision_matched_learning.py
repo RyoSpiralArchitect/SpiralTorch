@@ -71,10 +71,17 @@ def verify(report, checkpoint_dir=None, source_ref=None, native_binary=None):
     require(seeds and len(seeds) == len(set(seeds)), "empty or duplicate seeds")
     require(all(type(seed) is int and 0 <= seed < 2 ** 64 for seed in seeds), "invalid seed")
     require(type(epochs) is int and epochs >= 0 and type(batch) is int and batch > 0, "invalid loop dimensions")
+    require(batch == 16 and report["rate"] == 0.01 and report["torch_threads"] == 1,
+            "fixed batch, learning rate or thread count differs")
+    require(report["torch_device"] in ("cpu", "mps"), "unrecorded reference device")
     phase = "learning" if epochs else "admission_only"
     require(report.get("phase", phase) == phase, "incorrect phase")
     require([r["seed"] for r in report["runs"]] == seeds, "missing or reordered seeds")
     data = report["data"]
+    require(data["name"] == "CIFAR-10" and data["official_archive_md5"] == "c58f30108f718f92721af3b95e74349a",
+            "fixed dataset differs")
+    require(data["normalization"] == dict(input_divisor=255, mean=[0.5] * 3, std=[0.25] * 3)
+            and data["augmentation"] == "none", "fixed preprocessing differs")
     counts = {}
     for split, limit in (("train", 50000), ("test", 10000)):
         count = data[f"{split}_per_class"] * 10

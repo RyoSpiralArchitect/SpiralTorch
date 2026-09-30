@@ -49,6 +49,19 @@ class EvidenceChecks(unittest.TestCase):
             with self.subTest(mutation=mutation.__name__), self.assertRaises(ValueError):
                 verifier.verify(report)
 
+    def test_rejects_changed_fixed_recipe(self):
+        original = json.loads((RESULTS / "expanded-mps-report.json").read_text())
+        for location, key, value in ((None, "rate", 1e9), (None, "batch_size", 8),
+                                     (None, "torch_threads", 8), (None, "torch_device", "cuda"),
+                                     ("data", "name", "different"), ("data", "official_archive_md5", "0" * 32),
+                                     ("data", "augmentation", "random_flip"),
+                                     ("data", "normalization", dict(input_divisor=1, mean=[0.] * 3, std=[1.] * 3))):
+            report = copy.deepcopy(original)
+            target = report if location is None else report[location]
+            target[key] = value
+            with self.subTest(field=key), self.assertRaises(ValueError):
+                verifier.verify(report)
+
 
 if __name__ == "__main__":
     unittest.main()

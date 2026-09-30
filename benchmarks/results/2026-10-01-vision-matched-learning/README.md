@@ -72,7 +72,8 @@ For the local artifact checks, add `--checkpoint-dir "$CHECKPOINT_DIR"`,
 `--source-ref 1001cbfff5d15fc4773c6c637861a0892195a885`, and
 `--native-binary "$NATIVE_BINARY"`. SHA256SUMS covers the public reports and
 verification record. Negative tests reject missing roles, samples, seeds,
-epochs, wrong update counts, non-finite metrics and admission-bound failures.
+epochs, wrong update counts, non-finite metrics, admission-bound failures and
+altered learning-rate, batch, preprocessing or dataset recipe fields.
 
 ## Remaining Gates
 
