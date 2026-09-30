@@ -62,6 +62,15 @@ class MatchedLearningChecks(unittest.TestCase):
             with self.assertRaises(ValueError):
                 runner.compare(a, b, "test")
 
+    def test_parameter_comparison_rejects_silent_zip_truncation(self):
+        self.assertEqual(list(runner.matched_parameters(["a", "b"], [1, 2], [3, 4])),
+                         [("a", 1, 3), ("b", 2, 4)])
+        for names, actual, expected in (([], [], []), (["a"], [], [1]),
+                                        (["a"], [1, 2], [1]), (["a"], [1], []),
+                                        (["a", "a"], [1, 2], [3, 4])):
+            with self.assertRaises(ValueError):
+                runner.matched_parameters(names, actual, expected)
+
     def test_balanced_subset_has_exact_counts_and_replayable_order(self):
         labels = np.repeat(np.arange(10), 5)
         indices = runner.balanced_indices(labels, 3, 17)

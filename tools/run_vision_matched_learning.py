@@ -55,6 +55,12 @@ def read(tensor):
     return np.asarray(tensor.snapshot().read_values(), dtype=np.float32)
 
 
+def matched_parameters(names, tensors, parameters):
+    if not names or len(set(names)) != len(names) or not (len(names) == len(tensors) == len(parameters)):
+        raise ValueError("parameter roles/count differ or are empty/duplicated")
+    return zip(names, tensors, parameters)
+
+
 def balanced_indices(targets, per_class, seed):
     rng = np.random.default_rng(seed)
     labels = np.asarray(targets)
@@ -115,7 +121,7 @@ def admission(owner, reference, device, pipeline, pixels, labels, rate):
     if owner.parameter_names() != reference.names or len(observed) != len(reference.values):
         raise ValueError("parameter roles/order/count differ")
     checks["parameter_gradients"] = []
-    for name, actual, parameter in zip(reference.names, observed, reference.values):
+    for name, actual, parameter in matched_parameters(reference.names, observed, reference.values):
         if parameter.grad is None:
             raise ValueError(f"unused reference parameter: {name}")
         checks["parameter_gradients"].append(dict(name=name, **compare(read(actual), parameter.grad.cpu().numpy().reshape(-1), name)))
@@ -123,7 +129,7 @@ def admission(owner, reference, device, pipeline, pixels, labels, rate):
     optimizer = torch.optim.SGD(reference.parameters(), lr=rate, foreach=False, fused=False)
     optimizer.step()
     checks["updated_weights"] = []
-    for name, actual, parameter in zip(reference.names, owner.parameter_tensors(), reference.values):
+    for name, actual, parameter in matched_parameters(reference.names, owner.parameter_tensors(), reference.values):
         checks["updated_weights"].append(dict(name=name, **compare(read(actual), parameter.detach().cpu().numpy().reshape(-1), name)))
     checks["next_logits"] = compare(read(owner.forward(x).prediction_tensor()), reference(tx.detach()).detach().cpu().numpy().reshape(-1), "next logits")
     checks["accepted_revision"] = revision

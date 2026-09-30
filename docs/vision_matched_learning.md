@@ -6,6 +6,10 @@ SpiralTorch's model, normalization, loss, VJP and updates execute in Rust/WGPU;
 the Python harness selects identical samples and orchestrates the two arms.
 This is a correctness/learning harness, **not a throughput benchmark**.
 
+The [recorded comparison](../benchmarks/results/2026-10-01-vision-matched-learning/README.md)
+includes all CPU/MPS pilots and the completed three-seed expanded run, with
+full learning curves, per-parameter admission checks and checkpoint fixity.
+
 ## Match The Architecture, Not The Name
 
 The reference in `tools/vision_convnext_torch_reference.py` is not torchvision's
