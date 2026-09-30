@@ -155,6 +155,13 @@ host gradients nor applies an optimizer step. The
 records native and Chrome CPU parity, non-contiguous views, validity checks,
 and the remaining full-backbone training gap. It contains no speedup claim.
 
+`ConvNeXtBackbone::vjp_resident(input, cotangent)` now returns input and all
+parameter VJPs through the stem, stages, downsampling, blocks, and final norm.
+The dense `Conv2d` VJP is a shared WGPU primitive with model-owned parameter
+cache refresh. A [two-stage backbone contract](../benchmarks/results/2026-09-30-vision-convnext-backbone-vjp-contract.md)
+records native and Chrome CPU parity plus guarded invalid-source handling.
+Gradients remain resident; no optimizer update or real-data speedup is implied.
+
 Rust offers `apply_geometry_batch_resident(&images, &device)` and a packed
 `apply_packed_geometry_batch_resident(&[n, c, h, w], &values, &device)` entry
 for callers that already own contiguous NCHW data. Empty, ragged, and

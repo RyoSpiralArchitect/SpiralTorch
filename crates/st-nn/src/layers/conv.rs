@@ -755,6 +755,65 @@ impl Conv2d {
         Ok(conv)
     }
 
+    #[cfg(feature = "wgpu")]
+    fn resident_parameters_for(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<
+        (
+            st_backend_wgpu::resident_tensor::ResidentTensor,
+            st_backend_wgpu::resident_tensor::ResidentTensor,
+        ),
+        crate::resident::InferenceError,
+    > {
+        use st_backend_wgpu::resident_tensor::TensorError as ResidentTensorError;
+
+        crate::resident::require_uncommitted_route()?;
+        let shape = input.layout().shape();
+        if shape.len() != 4
+            || shape[1] != self.in_channels
+            || shape[2] != self.input_hw.0
+            || shape[3] != self.input_hw.1
+        {
+            return Err(ResidentTensorError::ConvolutionShape("expected NCHW input").into());
+        }
+        let mut resident = self.resident.borrow_mut();
+        if !resident
+            .as_mut()
+            .is_some_and(|cached| cached.matches(input, self.weight.value(), self.bias.value()))
+        {
+            *resident = Some(ResidentConvParameters::upload(
+                input,
+                &[
+                    self.out_channels,
+                    self.in_channels,
+                    self.kernel.0,
+                    self.kernel.1,
+                ],
+                &[self.out_channels],
+                self.weight.value(),
+                self.bias.value(),
+            )?);
+        }
+        let cached = resident.as_ref().unwrap();
+        Ok((cached.weight.clone(), cached.bias.clone()))
+    }
+
+    /// Return resident `(input, weight, bias)` VJPs without changing host
+    /// gradients or parameters. The caller owns validation and updates.
+    #[cfg(feature = "wgpu")]
+    pub fn vjp_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        upstream: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<
+        [st_backend_wgpu::resident_tensor::ResidentTensor; 3],
+        crate::resident::InferenceError,
+    > {
+        let (weight, _) = self.resident_parameters_for(input)?;
+        Ok(input.conv2d_vjp(&weight, upstream, self.stride, self.padding, self.dilation)?)
+    }
+
     /// Overrides the dilation factors used by the convolution.
     pub fn set_dilation(&mut self, dilation: (usize, usize)) -> PureResult<()> {
         validate_positive(dilation.0, "dilation_h")?;
@@ -1046,43 +1105,8 @@ impl Module for Conv2d {
         input: &st_backend_wgpu::resident_tensor::ResidentTensor,
     ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
     {
-        use st_backend_wgpu::resident_tensor::TensorError as ResidentTensorError;
-
-        crate::resident::require_uncommitted_route()?;
-        let shape = input.layout().shape();
-        if shape.len() != 4
-            || shape[1] != self.in_channels
-            || shape[2] != self.input_hw.0
-            || shape[3] != self.input_hw.1
-        {
-            return Err(ResidentTensorError::ConvolutionShape("expected NCHW input").into());
-        }
-        let mut resident = self.resident.borrow_mut();
-        if !resident
-            .as_mut()
-            .is_some_and(|cached| cached.matches(input, self.weight.value(), self.bias.value()))
-        {
-            *resident = Some(ResidentConvParameters::upload(
-                input,
-                &[
-                    self.out_channels,
-                    self.in_channels,
-                    self.kernel.0,
-                    self.kernel.1,
-                ],
-                &[self.out_channels],
-                self.weight.value(),
-                self.bias.value(),
-            )?);
-        }
-        let cached = resident.as_ref().unwrap();
-        Ok(input.conv2d(
-            &cached.weight,
-            &cached.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-        )?)
+        let (weight, bias) = self.resident_parameters_for(input)?;
+        Ok(input.conv2d(&weight, &bias, self.stride, self.padding, self.dilation)?)
     }
 
     #[cfg(feature = "wgpu")]
@@ -4309,6 +4333,86 @@ mod tests {
                     "gpu={value} cpu={expected}"
                 );
             }
+        }
+    }
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    #[test]
+    fn conv2d_resident_vjp_matches_module_backward_and_refreshes_parameters() {
+        use st_backend_wgpu::resident_tensor::TensorDevice;
+        use st_backend_wgpu::runtime::ensure_default_runtime_blocking;
+
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = ensure_default_runtime_blocking("nn.conv2d_vjp.test").unwrap();
+        assert_ne!(format!("{:?}", runtime.adapter_info().device_type), "Cpu");
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut layer = Conv2d::new(
+            "resident.conv.vjp",
+            2,
+            3,
+            (2, 3),
+            (2, 1),
+            (1, 2),
+            (2, 1),
+            (4, 5),
+        )
+        .unwrap();
+        let input = Tensor::from_fn(2, 40, |row, col| {
+            ((row * 17 + col * 7) % 31) as f32 / 29.0 - 0.5
+        })
+        .unwrap();
+        let seed = Tensor::from_fn(2, 42, |row, col| {
+            ((row * 11 + col * 3) % 23) as f32 / 19.0 - 0.4
+        })
+        .unwrap();
+        let resident_input = device.upload(&[2, 2, 4, 5], input.data()).unwrap();
+        let resident_seed = device.upload(&[2, 3, 2, 7], seed.data()).unwrap();
+        let first = layer.vjp_resident(&resident_input, &resident_seed).unwrap();
+        assert!(layer.weight.gradient().is_none());
+        assert!(layer.bias.gradient().is_none());
+        let original_values: Vec<_> = first
+            .iter()
+            .map(|gradient| gradient.snapshot().unwrap().read().unwrap())
+            .collect();
+        let cached_weight = layer.resident.borrow().as_ref().unwrap().weight.clone();
+        layer.vjp_resident(&resident_input, &resident_seed).unwrap();
+        assert!(
+            cached_weight.shares_storage_with(&layer.resident.borrow().as_ref().unwrap().weight)
+        );
+
+        let compare =
+            |layer: &mut Conv2d,
+             gradients: &[st_backend_wgpu::resident_tensor::ResidentTensor; 3]| {
+                let expected_input = layer.backward(&input, &seed).unwrap();
+                let references = [
+                    expected_input.data(),
+                    layer.weight.gradient().unwrap().data(),
+                    layer.bias.gradient().unwrap().data(),
+                ];
+                for (gradient, reference) in gradients.iter().zip(references) {
+                    let actual = gradient.snapshot().unwrap().read().unwrap();
+                    for (&value, &expected) in actual.iter().zip(reference) {
+                        assert!(
+                            (value - expected).abs() <= 2e-5 * (1.0 + expected.abs()),
+                            "gpu={value} cpu={expected}"
+                        );
+                    }
+                }
+            };
+        compare(&mut layer, &first);
+        layer.weight.value_mut().data_mut()[0] += 0.2;
+        layer.bias.value_mut().data_mut()[0] -= 0.1;
+        layer.weight.zero_gradient();
+        layer.bias.zero_gradient();
+        let updated = layer.vjp_resident(&resident_input, &resident_seed).unwrap();
+        assert!(
+            !cached_weight.shares_storage_with(&layer.resident.borrow().as_ref().unwrap().weight)
+        );
+        compare(&mut layer, &updated);
+        for (gradient, original) in first.iter().zip(original_values) {
+            assert_eq!(gradient.snapshot().unwrap().read().unwrap(), original);
         }
     }
 
