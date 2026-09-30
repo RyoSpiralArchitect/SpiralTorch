@@ -204,8 +204,42 @@ function checkNnContract(types, label) {
   console.log(label + " resident NN TypeScript contract passed");
 }
 
+function checkVisionTrainingContract(types, label) {
+  const get = name => {
+    const declaration = types.match(new RegExp("^( *)export class " + name + " \\{[\\s\\S]*?^\\1\\}", "m"))?.[0];
+    assert.ok(declaration, label + " must export " + name);
+    assert.match(declaration, /private constructor\(\)/);
+    assert.match(declaration, /free\(\): void/);
+    return declaration;
+  };
+  const model = get("ResidentConvNeXtClassifier"), token = get("ConvNeXtForward");
+  const gradients = get("ConvNeXtGradients"), update = get("ConvNeXtUpdate");
+  const checkpoint = get("ConvNeXtCheckpointSnapshot");
+  assert.match(model, /static defaultConfigJson\(\): string/);
+  assert.match(model, /static create\(device: WgpuTensorDevice, config_json: string, num_classes: number, batch_size: number, seed: bigint\): ResidentConvNeXtClassifier/);
+  assert.match(model, /static fromCheckpointJson\(device: WgpuTensorDevice, payload: string\): ResidentConvNeXtClassifier/);
+  for (const name of ["inputShape", "outputShape"]) assert.match(model, new RegExp("readonly " + name + ": Uint32Array"));
+  assert.match(model, /readonly attemptedUpdates: bigint/);
+  assert.match(model, /tensorDevice\(\): WgpuTensorDevice/);
+  assert.match(model, /parameterNames\(\): string\[\]/);
+  assert.match(model, /parameterTensors\(\): WgpuTensor\[\]/);
+  assert.match(model, /forward\(input: WgpuTensor\): ConvNeXtForward/);
+  assert.match(model, /backward\(forward: ConvNeXtForward, cotangent: WgpuTensor\): ConvNeXtGradients/);
+  assert.match(model, /sgd\(gradients: ConvNeXtGradients, rate: number\): ConvNeXtUpdate/);
+  assert.match(model, /checkpointSnapshot\(\): ConvNeXtCheckpointSnapshot/);
+  assert.match(token, /predictionTensor\(\): WgpuTensor/);
+  assert.match(token, /readonly parameterRevision: bigint/);
+  assert.match(gradients, /inputGradientTensor\(\): WgpuTensor/);
+  assert.match(gradients, /parameterGradientTensors\(\): WgpuTensor\[\]/);
+  assert.match(update, /readonly attemptedRevision: bigint/);
+  assert.match(update, /read\(\): Promise<bigint>/);
+  assert.match(checkpoint, /readJson\(\): Promise<string>/);
+  console.log(label + " resident vision training TypeScript contract passed");
+}
+
 for (const [source, label] of [[types, "generated"], [shipped, "shipped"]]) {
   checkMatmulContract(source, label);
   checkRankContract(source, label);
   checkNnContract(source, label);
+  checkVisionTrainingContract(source, label);
 }

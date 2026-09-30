@@ -517,8 +517,11 @@ value:
    # model.forward(images): nonempty list of 3x224x224 ImageTensor values
    ```
 
-   This exposes inference, not resident classifier training or checkpoint
-   bindings. Initialization is seeded; no pretrained weights or torchvision
+   This factory exposes ordinary inference. For explicit GPU-resident training,
+   `st.vision.ResidentConvNeXtClassifier` exposes the same Rust model's
+   forward/VJP/SGD and checkpoint handles with `nn,wgpu` enabled; see
+   [Resident Vision Training Clients](../../docs/resident_vision_training_clients.md).
+   Initialization is seeded; no pretrained weights or torchvision
    checkpoint compatibility is implied. Other legacy model kinds still use
    `SimpleCnn`. The shared Rust training path is documented in
    [Resident ConvNeXt Training](../../docs/resident_convnext_training.md).

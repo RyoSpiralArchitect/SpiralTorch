@@ -1,5 +1,47 @@
 use super::*;
 
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+#[test]
+fn global_pool_resident_cache_supports_shared_threaded_layouts() {
+    fn send_sync<T: Send + Sync>() {}
+    send_sync::<ResidentGlobalAveragePool2d>();
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) =
+        st_backend_wgpu::runtime::ensure_default_runtime_blocking("global_pool.shared").unwrap();
+    let device = TensorDevice::new(runtime).unwrap();
+    let pool = GlobalAveragePool2d::new(2, (2, 3))
+        .unwrap()
+        .compile_resident(device.clone())
+        .unwrap();
+    let barrier = std::sync::Barrier::new(4);
+    std::thread::scope(|scope| {
+        for batch in 1..=4 {
+            let device = &device;
+            let pool = &pool;
+            let barrier = &barrier;
+            scope.spawn(move || {
+                let input = device
+                    .upload(&[batch, 2, 2, 3], &vec![1.; batch * 12])
+                    .unwrap();
+                let seed = device.upload(&[batch, 2], &vec![12.; batch * 2]).unwrap();
+                barrier.wait();
+                for _ in 0..3 {
+                    let values = pool
+                        .backward(&input, &seed)
+                        .unwrap()
+                        .snapshot()
+                        .unwrap()
+                        .read()
+                        .unwrap();
+                    assert_eq!(values, vec![2.; batch * 12]);
+                }
+            });
+        }
+    });
+}
+
 #[test]
 fn global_pool_keeps_channels_and_uses_exact_loss_cotangent() {
     let mut pool = GlobalAveragePool2d::new(2, (2, 3)).unwrap();

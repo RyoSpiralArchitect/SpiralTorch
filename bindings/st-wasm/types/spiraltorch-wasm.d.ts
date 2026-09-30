@@ -133,6 +133,49 @@ declare module "spiraltorch-wasm" {
         readonly adapterInfo: string | undefined;
         free(): void;
     }
+    /** Rust-owned fixed-shape classifier and plain SGD; submission is not acceptance. */
+    export class ResidentConvNeXtClassifier {
+        private constructor();
+        static defaultConfigJson(): string;
+        static create(device: WgpuTensorDevice, config_json: string, num_classes: number, batch_size: number, seed: bigint): ResidentConvNeXtClassifier;
+        static fromCheckpointJson(device: WgpuTensorDevice, payload: string): ResidentConvNeXtClassifier;
+        readonly inputShape: Uint32Array;
+        readonly outputShape: Uint32Array;
+        readonly attemptedUpdates: bigint;
+        tensorDevice(): WgpuTensorDevice;
+        parameterNames(): string[];
+        parameterTensors(): WgpuTensor[];
+        forward(input: WgpuTensor): ConvNeXtForward;
+        backward(forward: ConvNeXtForward, cotangent: WgpuTensor): ConvNeXtGradients;
+        sgd(gradients: ConvNeXtGradients, rate: number): ConvNeXtUpdate;
+        checkpointSnapshot(): ConvNeXtCheckpointSnapshot;
+        free(): void;
+    }
+    export class ConvNeXtForward {
+        private constructor();
+        readonly parameterRevision: bigint;
+        predictionTensor(): WgpuTensor;
+        free(): void;
+    }
+    export class ConvNeXtGradients {
+        private constructor();
+        inputGradientTensor(): WgpuTensor;
+        parameterGradientTensors(): WgpuTensor[];
+        free(): void;
+    }
+    export class ConvNeXtUpdate {
+        private constructor();
+        readonly attemptedRevision: bigint;
+        /** Explicit readback; rejects unless every parameter update was accepted. */
+        read(): Promise<bigint>;
+        free(): void;
+    }
+    export class ConvNeXtCheckpointSnapshot {
+        private constructor();
+        /** Consume one frozen model snapshot; does not save DataLoader/RNG state. */
+        readJson(): Promise<string>;
+        free(): void;
+    }
     export class VisionImage {
         private constructor();
         readonly shape: Uint32Array;

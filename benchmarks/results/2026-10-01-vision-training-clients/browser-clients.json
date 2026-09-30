@@ -1,0 +1,111 @@
+{
+  "schema": "spiraltorch.vision.classifier_clients.v1",
+  "status": "passed",
+  "rust_runtime_adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "config": {
+    "input_channels": 1,
+    "input_hw": [
+      8,
+      8
+    ],
+    "stage_dims": [
+      2,
+      4
+    ],
+    "stage_depths": [
+      1,
+      1
+    ],
+    "patch_size": [
+      2,
+      2
+    ],
+    "curvature": -1,
+    "epsilon": 0.001
+  },
+  "parameters": 24,
+  "losses": [
+    0.7014225125312805,
+    0.6996263265609741,
+    0.6978065967559814,
+    0.6959670186042786
+  ],
+  "within_runtime_resume": "bitwise",
+  "accepted_revisions": [
+    1,
+    2,
+    3,
+    4,
+    6
+  ],
+  "rejected_revision": 5,
+  "checks": [
+    "public_normalized_input",
+    "explicit_receipts",
+    "frozen_checkpoint",
+    "bitwise_resume",
+    "stale_and_foreign_tokens",
+    "invalid_labels_preserve_all_weights",
+    "valid_retry",
+    "retained_handles",
+    "strict_integer_arguments",
+    "invalid_config_checkpoint_and_batch"
+  ],
+  "final_logits": [
+    0.10779748857021332,
+    -0.07240017503499985,
+    -0.07882576435804367,
+    -0.24079756438732147
+  ],
+  "continuation_rate": 0.01,
+  "labels": [
+    0,
+    1
+  ],
+  "continued_revision": 7,
+  "continued_loss": 0.6922553777694702,
+  "continued_logits": [
+    0.10404916852712631,
+    -0.07258855551481247,
+    -0.09469351917505264,
+    -0.24675559997558594
+  ],
+  "wasm_sha256": "20ece280060abb41c10a414fb76e67f710605b2b8a49fb6428a0985fadcd7fae",
+  "page_sha256": "06254f1eb9fd857c4a903a866f58490bedef0ee31237ff458c201789ae0295e6",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "convnext-classifier-clients",
+  "asset_sha256": {
+    "/": "06254f1eb9fd857c4a903a866f58490bedef0ee31237ff458c201789ae0295e6",
+    "/module/spiraltorch_wasm.js": "229073a22500e869f26bfb43e0ed55c5c6f6d1f9b8a0af962c13a6eab40d703d",
+    "/module/spiraltorch_wasm_bg.wasm": "20ece280060abb41c10a414fb76e67f710605b2b8a49fb6428a0985fadcd7fae",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+  },
+  "browser_version": "154.0.8037.58",
+  "page_errors": [],
+  "console_messages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "raw_report_sha256": "6c4985a6cb6e6268e3e96c77c6eaa3b030690b31d6ae2d97827fd96e02497830",
+  "checkpoint_sha256": "63445bb86bac84d87452c227afd71a48a17e41bf5f5bcdac910a6187c91b3e1f",
+  "continued_checkpoint_sha256": "b1937c11f276f61c8b27aa152dad26dc20530bd6424bde13a3a80260cd7889ae",
+  "checkpoint_bytes": 8943,
+  "continued_checkpoint_bytes": 8930,
+  "omitted_raw_fields": [
+    "checkpoint_json",
+    "continued_checkpoint_json",
+    "normalized_input"
+  ]
+}

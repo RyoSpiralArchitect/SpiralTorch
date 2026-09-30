@@ -63,8 +63,8 @@ loader exhaustion, as in `next_batch()`.
 `apply_from_resident(x)` continues an existing NCHW tensor without uploading.
 The ordinary `apply(image)` returns a host image and still performs Normalize
 on CPU. Enabling WGPU is not a promise that this host-returning API stays resident.
-The resident ConvNeXt training model is currently a Rust API; this input slice
-does not introduce a Python classifier training wrapper.
+The [resident classifier client](resident_vision_training_clients.md) consumes
+these tensors through the same Rust model; it does not reimplement training in Python.
 
 ## Browser
 
@@ -84,7 +84,8 @@ const x = pipeline.applyResidentBatch(2, 3, 16, 16, pixels);
 `applyFromResident(x)` continues a resident batch. `apply(...)` explicitly
 returns a host `VisionImage` asynchronously; `createCpu(seed)` is the Rust CPU
 reference. Browser callers supply their data batches; there is no JS DataLoader
-binding or JS ConvNeXt model binding implied by the Rust WASM training fixture.
+binding. The separate [classifier client](resident_vision_training_clients.md)
+exposes model training and asynchronous checkpoint mapping.
 
 ## Failure And Restart Boundaries
 

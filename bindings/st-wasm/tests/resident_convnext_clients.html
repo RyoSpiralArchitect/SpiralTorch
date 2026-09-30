@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Resident ConvNeXt public clients</title></head>
+<body><pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {ResidentConvNeXtClassifier, WgpuTensorDevice,
+  VisionTransformPipeline, CrossEntropyWithLogits} from "/module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+const read = async tensor => {
+  const snapshot = tensor.snapshot();
+  try { return await snapshot.readValues(); } finally { snapshot.free(); }
+};
+const same = (a, b, label) => {
+  if (a.length !== b.length) throw Error(`${label}: length mismatch`);
+  const bitsA = new Uint32Array(a.buffer, a.byteOffset, a.length);
+  const bitsB = new Uint32Array(b.buffer, b.byteOffset, b.length);
+  if (!a.every(Number.isFinite) || !b.every(Number.isFinite) || bitsA.some((v, i) => v !== bitsB[i]))
+    throw Error(`${label}: value mismatch`);
+};
+function rejects(action, label) {
+  try { action(); } catch { return; }
+  throw Error(`${label}: expected rejection`);
+}
+async function rejectsAsync(action, label) {
+  try { await action(); } catch { return; }
+  throw Error(`${label}: expected rejection`);
+}
+async function weights(owner) {
+  const tensors = owner.parameterTensors();
+  const out = [];
+  for (const tensor of tensors) { out.push(await read(tensor)); tensor.free(); }
+  return out;
+}
+function step(owner, x, y) {
+  const forward = owner.forward(x);
+  const objective = new CrossEntropyWithLogits("mean", -100n, 0);
+  const prediction = forward.predictionTensor();
+  const loss = objective.evaluateResident(prediction, y);
+  prediction.free();
+  objective.free();
+  const cotangent = loss.predictionGradientTensor();
+  const gradients = owner.backward(forward, cotangent);
+  cotangent.free();
+  const update = owner.sgd(gradients, 0.01);
+  return {forward, loss, gradients, update};
+}
+try {
+  await init();
+  const device = await WgpuTensorDevice.create();
+  const config = JSON.parse(ResidentConvNeXtClassifier.defaultConfigJson());
+  Object.assign(config, {input_channels: 1, input_hw: [8, 8], stage_dims: [2, 4],
+    stage_depths: [1, 1], patch_size: [2, 2], epsilon: 0.001});
+  const configJson = JSON.stringify(config);
+  for (const bad of [true, -1, 1.5, 2 ** 32])
+    rejects(() => ResidentConvNeXtClassifier.create(device, configJson, bad, 2, 17n), "class integer");
+  for (const bad of [-1n, 1n << 64n])
+    rejects(() => ResidentConvNeXtClassifier.create(device, configJson, 2, 2, bad), "seed integer");
+  rejects(() => ResidentConvNeXtClassifier.create(device, "{}", 2, 2, 17n), "config");
+  rejects(() => ResidentConvNeXtClassifier.fromCheckpointJson(device, "{}"), "checkpoint");
+  const owner = ResidentConvNeXtClassifier.create(device, configJson, 2, 2, 17n);
+  if (owner.inputShape.join(",") !== "2,1,8,8" || owner.outputShape.join(",") !== "2,2" || owner.parameterNames().length !== 24)
+    throw Error("classifier metadata");
+  const pipeline = await VisionTransformPipeline.createGpu(77);
+  pipeline.addNormalize(new Float32Array([0.5]), new Float32Array([0.25]));
+  pipeline.addResize(10, 10);
+  pipeline.addRandomHorizontalFlip(0.5);
+  pipeline.addCenterCrop(8, 8);
+  const pixels = Float32Array.from({length: 336}, (_, i) => (((i % 168) * 31 + Math.floor(i / 168) * 17) % 257) / 256);
+  const x = pipeline.applyResidentBatch(2, 1, 12, 14, pixels);
+  const y = device.upload([2, 1], new Float32Array([0, 1]));
+  rejects(() => owner.forward(device.upload([1, 1, 8, 8], new Float32Array(64))), "fixed batch");
+  const first = step(owner, x, y);
+  const second = step(owner, x, y);
+  const frozen = owner.checkpointSnapshot();
+  const third = step(owner, x, y);
+  const payload = await frozen.readJson();
+  rejects(() => frozen.readJson(), "consumed checkpoint");
+  if (JSON.parse(payload).backbone.attempted_updates !== 2) throw Error("snapshot was not frozen");
+  const resumed = ResidentConvNeXtClassifier.fromCheckpointJson(device, payload);
+  const resumedThird = step(resumed, x, y);
+  same(await read(third.forward.predictionTensor()), await read(resumedThird.forward.predictionTensor()), "resumed prediction");
+  const firstWeights = await weights(owner), resumedWeights = await weights(resumed);
+  firstWeights.forEach((v, i) => same(v, resumedWeights[i], "resumed weights"));
+  const fourth = step(owner, x, y);
+  const resumedFourth = step(resumed, x, y);
+  const losses = [];
+  for (const [index, record] of [first, second, third, fourth].entries()) {
+    if (record.update.attemptedRevision !== BigInt(index + 1) || await record.update.read() !== BigInt(index + 1))
+      throw Error("update receipt");
+    const value = (await read(record.loss.lossTensor()))[0];
+    if (!Number.isFinite(value)) throw Error("non-finite loss");
+    losses.push(value);
+    if (record.gradients.parameterGradientTensors().length !== 24 || record.gradients.inputGradientTensor().shape.join(",") !== "2,1,8,8")
+      throw Error("gradient metadata");
+  }
+  if (await resumedThird.update.read() !== 3n || await resumedFourth.update.read() !== 4n) throw Error("resumed receipt");
+  const fourthWeights = await weights(owner), resumedFourthWeights = await weights(resumed);
+  fourthWeights.forEach((v, i) => same(v, resumedFourthWeights[i], "continued weights"));
+  rejects(() => owner.sgd(fourth.gradients, 0.01), "stale derivative");
+  rejects(() => resumed.sgd(fourth.gradients, 0.01), "foreign derivative");
+  const retained = owner.forward(x);
+  owner.forward(x);
+  rejects(() => owner.backward(retained, device.upload([2, 2], new Float32Array(4).fill(1))), "stale forward");
+  rejects(() => resumed.backward(retained, device.upload([2, 2], new Float32Array(4).fill(1))), "foreign forward");
+  const bad = step(owner, x, device.upload([2, 1], new Float32Array([9, 9])));
+  if (owner.attemptedUpdates !== 5n) throw Error("rejected attempt clock");
+  await rejectsAsync(() => bad.update.read(), "invalid-label receipt");
+  const rejectedWeights = await weights(owner);
+  fourthWeights.forEach((v, i) => same(v, rejectedWeights[i], "rejected weights"));
+  const retry = step(owner, x, y);
+  if (await retry.update.read() !== 6n) throw Error("valid retry");
+  const checkpoint = owner.checkpointSnapshot();
+  const finalForward = owner.forward(x);
+  const finalLogits = finalForward.predictionTensor();
+  owner.free();
+  const checkpointJson = await checkpoint.readJson();
+  const logits = await read(finalLogits);
+  if (!logits.every(Number.isFinite)) throw Error("retained prediction");
+  const continuation = ResidentConvNeXtClassifier.fromCheckpointJson(device, checkpointJson);
+  const continued = step(continuation, x, y);
+  if (await continued.update.read() !== 7n) throw Error("handoff continuation receipt");
+  const continuedCheckpoint = continuation.checkpointSnapshot();
+  const continuedCheckpointJson = await continuedCheckpoint.readJson();
+  const continuedForward = continuation.forward(x);
+  const continuedLogits = await read(continuedForward.predictionTensor());
+  const continuedLoss = (await read(continued.loss.lossTensor()))[0];
+  if (!continuedLogits.every(Number.isFinite) || !Number.isFinite(continuedLoss))
+    throw Error("non-finite continuation");
+  result.textContent = JSON.stringify({schema: "spiraltorch.vision.classifier_clients.v1", status: "passed",
+    rust_runtime_adapter: device.adapterInfo(), config, parameters: 24, losses,
+    within_runtime_resume: "bitwise", accepted_revisions: [1, 2, 3, 4, 6], rejected_revision: 5,
+    checks: ["public_normalized_input", "explicit_receipts", "frozen_checkpoint", "bitwise_resume",
+      "stale_and_foreign_tokens", "invalid_labels_preserve_all_weights", "valid_retry", "retained_handles",
+      "strict_integer_arguments", "invalid_config_checkpoint_and_batch"],
+    checkpoint_json: checkpointJson, normalized_input: Array.from(await read(x)), final_logits: Array.from(logits),
+    continuation_rate: 0.01, labels: [0, 1], continued_revision: 7,
+    continued_checkpoint_json: continuedCheckpointJson, continued_loss: continuedLoss,
+    continued_logits: Array.from(continuedLogits)}, null, 2);
+} catch (error) {
+  result.textContent = JSON.stringify({status: "failed", error: String(error), stack: error?.stack}, null, 2);
+} finally {
+  result.dataset.status = "done";
+}
+</script></body></html>

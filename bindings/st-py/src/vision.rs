@@ -31,6 +31,9 @@ use st_vision::{
     ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
 };
 
+#[cfg(all(feature = "nn", feature = "wgpu"))]
+mod resident;
+
 const MIN_SMOOTHING: f32 = 0.0;
 const MAX_SMOOTHING: f32 = 0.999;
 
@@ -2752,6 +2755,8 @@ pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
+    #[cfg(all(feature = "nn", feature = "wgpu"))]
+    resident::register(parent)?;
     parent.add_class::<PyImageTensor>()?;
     parent.add_class::<PyTransformPipeline>()?;
     parent.add_class::<PyVisionSample>()?;
