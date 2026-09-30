@@ -134,7 +134,73 @@ caller-owned varying inputs/targets and a rate schedule, and exercises saved
 versions, fresh identities, rejected attempts and valid retries.
 See [the bounded checkpoint result](../benchmarks/results/2026-09-30-convnext-resident-checkpoint.md)
 for the browser-to-native transfer, artifact hashes and replay commands.
-The next gates are a resident classification head and real-image data path,
-thin Python/WASM model bindings, and matched
+The classifier extension below adds the resident classification head. Next gates
+are the real-image data path, thin Python/WASM training bindings, and matched
 accuracy/throughput comparisons. A loss decrease on this tiny synthetic fixture
 does not prove real-image generalization or long-run optimization stability.
+
+## Classifier And Common Inference Entry
+
+`ConvNeXtClassifier::new(config, classes, seed)` combines seeded backbone
+weights, `GlobalAveragePool2d`, and a seeded Linear head. Pooling maps flattened
+`[N, C*H*W]` host features, or resident `[N, C, H, W]` features, to `[N, C]`.
+Its VJP broadcasts the supplied cotangent with `1/(H*W)` and introduces no
+extra batch average. Resident pooling preserves finite-value/inherited guards;
+it does not compute irrelevant derivatives for the fixed averaging filter.
+`ConvNeXtBackbone::new_seeded` is also available; the old backbone constructor
+retains its legacy initialization.
+
+The classifier implements the same Rust `Module` interface, including host
+backward and explicit resident forward. `compile_resident_training` snapshots
+**both** backbone and head into one `ResidentParameters` owner. There is no
+independent head optimizer or partial backbone/head commit:
+
+```rust,ignore
+use st_nn::loss::{CrossEntropyWithLogits, Loss};
+use st_vision::models::{ConvNeXtClassifier, ConvNeXtClassifierCheckpoint};
+
+let source = ConvNeXtClassifier::new(config, classes, 7)?;
+let mut model = source.compile_resident_training(device.clone(), batch)?;
+let forward = model.forward(&resident_images)?;
+let loss = CrossEntropyWithLogits::default()
+    .evaluate_resident(forward.prediction(), &resident_labels)?;
+let derivatives = model.backward(&forward, loss.prediction_gradient())?;
+let update = model.sgd(&derivatives, 0.01)?;
+// Reading an update receipt, not submission alone, proves acceptance.
+let revision = update.snapshot()?.read()?; // read_async().await? on WASM
+
+let checkpoint = model.checkpoint_snapshot()?.read()?;
+let json = checkpoint.to_json()?;
+let restored = ConvNeXtClassifierCheckpoint::from_json(&json)?;
+let resumed = restored.restore_resident(device)?;
+let common = restored.to_host()?.into_vision_model()?;
+let logits = common.forward(&images)?;
+```
+
+`spiraltorch.convnext.classifier_plain_sgd_checkpoint.v1` includes a validated
+backbone payload and the canonical head weights, class count, and the same
+single attempted-update clock. The nested payload is not a second optimizer.
+The backbone-only parser rejects this classifier schema. Host restore validates
+the entire target, including attached optimizer state, before changing any
+weight. Data cursor, RNG, rate schedule and other caller state remain external.
+
+`create_classification_model(ModelKind::ConvNeXtTiny, classes, Some(seed))` now
+constructs this actual classifier with the default configuration and transfers
+it to `VisionModel`. `Stem`, `Head`, and `Logits` select the stem map, pooled
+features, and classification logits respectively. Native cache access is
+serialized with a mutex; WASM instances remain local. Without `st-vision/nn`,
+the ConvNeXt factory returns an error instead of a toy replacement. Other legacy
+model kinds still use `SimpleCnn`. No pretrained artifact or torchvision
+architecture/checkpoint compatibility is claimed.
+
+The Python wheel's `nn` feature now enables `st-vision/nn`; its existing
+`vision_create_classification_model` factory reaches the same Rust inference
+model. `VisionModel.parameter_count()` reports owned scalar weights (`None`
+for legacy models without this introspection). This is not yet a Python
+resident training/checkpoint binding or a JavaScript model API.
+
+The two-image CPU example uses this classifier directly. The shared
+`convnext_classifier_checks.rs` fixture covers all 24 parameter tensors in a
+small two-stage classifier, ordinary trained-model inference, whole-model
+checkpoint/restart, invalid-label rejection, and a valid subsequent update.
+See [the bounded result and replay](../benchmarks/results/2026-10-01-convnext-classifier-contract.md).

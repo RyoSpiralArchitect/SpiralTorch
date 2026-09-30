@@ -977,6 +977,11 @@ impl PyVisionModel {
         model_metadata_to_dict(py, self.inner.metadata())
     }
 
+    /// Number of model-owned scalar parameters, when the implementation exposes it.
+    fn parameter_count(&self) -> Option<usize> {
+        self.inner.parameter_count()
+    }
+
     fn forward(&self, images: Vec<PyImageTensor>) -> PyResult<PyTensor> {
         let images: Vec<_> = images.into_iter().map(|image| image.inner).collect();
         self.inner

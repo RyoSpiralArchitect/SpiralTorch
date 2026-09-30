@@ -13,6 +13,9 @@ Current scope of the vision execution path:
 | Full-backbone resident VJP | `ConvNeXtBackbone::vjp_resident` | Not exposed | Rust WASM parity fixture; no model binding |
 | ConvNeXt-owned resident parameter update | `compile_resident_training`, plain SGD | Not exposed | Rust WASM learning fixture; no model binding |
 | ConvNeXt plain-SGD model checkpoint/resume | Public API, explicit host handoff | Not exposed | Rust WASM resume fixture and portable JSON; no model binding |
+| Real ConvNeXt classifier common inference entry | `ConvNeXtClassifier`, `create_classification_model` | Ordinary factory with `nn`; inference only | Rust WASM common-entry fixture; no JS model binding |
+| Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Not exposed | Shared Rust WASM learning/resume fixture; no JS model binding |
+| Resident image normalization and DataLoader handoff | Open | Open | Open |
 | Matched real-image training quality and throughput | Open | Open | Open |
 
 The compiled ConvNeXt training path now connects model-owned gradients to
@@ -22,8 +25,34 @@ rejected steps preserving all weights, and a valid retry. Portable plain-SGD
 model checkpoints now preserve weights, architecture and attempted-update
 revision, with explicit mapping and fresh restored owner identities. Data
 cursors, RNGs, rate schedules and trainer policy remain caller-owned state.
-The next rail is a real-image training path and a common public model entry,
-followed by Python and WASM bindings exposing the same Rust-owned contract.
+The common public ConvNeXt entry now owns the real backbone, channel-preserving
+global-average pooling, and Linear classification head. Classifier learning uses
+one resident parameter owner and one acceptance/revision clock for all weights.
+Its checkpoint can return the learned model to the ordinary inference interface.
+Python's `nn` feature enables this same Rust factory; the WASM fixture exercises
+the same Rust model, not a JavaScript model binding. See
+[the classifier contract result](../benchmarks/results/2026-10-01-convnext-classifier-contract.md).
+
+### Next Rails And Exit Gates
+
+1. **Resident real-image input.** Connect batching and Normalize to the existing
+   geometry/classifier/loss/update path. Preserve seed/retry semantics and avoid
+   hidden intermediate readbacks. `VisionBatch::stack()` remains a host matrix;
+   the resident geometry API still rejects non-geometry transforms.
+2. **Thin training clients.** Expose the Rust-owned classifier, explicit
+   checkpoint mapping, and restart to Python and JavaScript without duplicating
+   training rules or implying that a submitted update has been accepted.
+3. **Matched real-data evidence.** Check numerical parity against the same
+   architecture/weights/data/loss in PyTorch, then measure held-out quality,
+   transfer-inclusive throughput, memory, and restart equivalence. Synthetic
+   loss decrease and kernel timings are not substitutes for this gate.
+
+Other model kinds still route through legacy `SimpleCnn`; this slice changes
+only ConvNeXt. Model hub, more model families, and broader interop follow the
+working end-to-end path rather than multiplying disconnected entry points.
+
+<details>
+<summary>Execution history and bounded measurements</summary>
 
 The candidate arithmetic is now shared by the existing dense, graph, clipped,
 and EMA update routes through `st-kernel-contracts::sgd`. The Rust CPU oracle
@@ -63,14 +92,10 @@ bitwise uninterrupted-versus-resumed predictions and all 22 weights; a checkpoin
 actually emitted by Chrome also resumes in native Rust within the existing f32
 parity bound. See [the checkpoint result](../benchmarks/results/2026-09-30-convnext-resident-checkpoint.md).
 
-The next integration bottleneck is the ordinary public entry:
-`create_classification_model()` still constructs `SimpleCnn`, even for its
-ConvNeXt descriptor, while the real `ConvNeXtBackbone` has a separate training
-API. `VisionBatch::stack()` is a host 2-D tensor path, and browser resident
-geometry does not include Normalize. Connect a real backbone and classification
-head, batch preparation/normalization, and checkpoint through one explicit Rust
-model interface before multiplying Python/browser surfaces. Then measure
-real-image learning and matched PyTorch accuracy/throughput on that same path.
+The classifier slice closes the earlier split between the ordinary
+`create_classification_model()` ConvNeXt descriptor and the real backbone.
+Batch preparation/normalization and thin training bindings remain the next
+integration work, followed by real-image and matched PyTorch measurements.
 
 The following narrative records the successive implementation and measurement
 slices; the table above describes their current combined scope.
@@ -192,6 +217,8 @@ parameter gradient in `Module` order. Native GPU and
 cover one small two-stage backbone. There is still no GPU-owned optimizer
 state, model update, or measured real-dataset training advantage. Those remain
 the next gates, not inferred from isolated backward correctness.
+
+</details>
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

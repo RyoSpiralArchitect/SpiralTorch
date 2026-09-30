@@ -3633,12 +3633,9 @@ impl Drop for BufferMappedRange {
     fn drop(&mut self) {
         // Copy from the temporary mapping back into the array buffer that was
         // originally provided by the browser
-        let temporary_mapping_slice = self.temporary_mapping.as_slice();
-        unsafe {
-            // Note: no allocations can happen between `view` and `set`, or this
-            // will break
-            self.actual_mapping
-                .set(&js_sys::Uint8Array::view(temporary_mapping_slice), 0);
-        }
+        // Passing the slice directly creates the view inside the JS call.
+        // Returning an unsafe view to Rust first can grow linear memory while
+        // allocating its externref handle and detach that view before `set`.
+        self.actual_mapping.copy_from(&self.temporary_mapping);
     }
 }

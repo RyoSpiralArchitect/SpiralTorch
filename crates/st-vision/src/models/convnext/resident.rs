@@ -11,12 +11,13 @@ use st_backend_wgpu::{
         TrainingError,
     },
 };
+use st_nn::layers::global_average_pool::{GlobalAveragePool2d, ResidentGlobalAveragePool2d};
 use st_nn::resident::{InferenceOp, InferencePlan, ResidentConvolutionSpec};
 use st_tensor::{Layout, NdLayout};
 use std::ops::Range;
 
 mod checkpoint;
-pub use checkpoint::ConvNeXtCheckpointSnapshot;
+pub use checkpoint::{ConvNeXtCheckpointSnapshot, ConvNeXtClassifierCheckpointSnapshot};
 
 struct GraphPart {
     graph: ResidentGraphAutograd,
@@ -90,6 +91,16 @@ enum Tape {
     },
 }
 
+struct ClassifierPart {
+    pool: ResidentGlobalAveragePool2d,
+    graph: GraphPart,
+}
+
+struct ClassifierTape {
+    pool_input: ResidentTensor,
+    forward: GraphForward,
+}
+
 /// Owning prediction and same-model/version forward token. Only the latest
 /// successful forward can reuse the compiled intermediate tape for backward.
 pub struct ResidentConvNeXtForward {
@@ -98,11 +109,15 @@ pub struct ResidentConvNeXtForward {
     nodes: Vec<Tape>,
     final_norm: GraphForward,
     feature_shape: Vec<usize>,
+    classifier: Option<ClassifierTape>,
 }
 
 impl ResidentConvNeXtForward {
     pub fn prediction(&self) -> &ResidentTensor {
-        self.final_norm.prediction()
+        self.classifier.as_ref().map_or_else(
+            || self.final_norm.prediction(),
+            |head| head.forward.prediction(),
+        )
     }
     pub fn parameter_revision(&self) -> u64 {
         self.parameters.revision()
@@ -138,6 +153,7 @@ pub struct ResidentConvNeXtBackbone {
     output_shape: [usize; 2],
     nodes: Vec<Node>,
     final_norm: GraphPart,
+    classifier: Option<ClassifierPart>,
     forwards: u64,
     latest: Option<u64>,
 }
@@ -160,6 +176,16 @@ impl ConvNeXtBackbone {
         batch: usize,
         revision: u64,
     ) -> Result<ResidentConvNeXtBackbone, InferenceError> {
+        self.compile_resident_with_head(device, batch, revision, None)
+    }
+
+    fn compile_resident_with_head(
+        &self,
+        device: TensorDevice,
+        batch: usize,
+        revision: u64,
+        head: Option<&Linear>,
+    ) -> Result<ResidentConvNeXtBackbone, InferenceError> {
         if batch == 0 {
             return Err(InferenceError::InvalidLayout);
         }
@@ -167,14 +193,18 @@ impl ConvNeXtBackbone {
         let mut names = Vec::new();
         let mut shapes = Vec::new();
         let mut attached = false;
-        self.visit_parameters(&mut |p| {
+        let mut collect = |p: &Parameter| {
             attached |= p.gradient().is_some() || p.hypergrad().is_some() || p.realgrad().is_some();
             let (rows, cols) = p.value().shape();
             shapes.push([rows, cols]);
             names.push(p.name().to_owned());
             host_values.push(p.value().to_layout(Layout::RowMajor)?.into_snapshot());
             Ok(())
-        })?;
+        };
+        self.visit_parameters(&mut collect)?;
+        if let Some(head) = head {
+            head.visit_parameters(&mut collect)?;
+        }
         if attached {
             return Err(InferenceError::ModuleUpdate(
                 "resolve attached optimizer state before resident compilation",
@@ -224,11 +254,29 @@ impl ConvNeXtBackbone {
                 offset += 2;
             }
         }
-        let output_shape = [batch, self.final_norm.features()];
+        let mut output_shape = [batch, self.final_norm.features()];
         let mut operations = Vec::new();
         self.final_norm.append_inference_ops(&mut operations)?;
         let final_norm = GraphPart::compile(&device, &output_shape, operations, offset, revision)?;
-        if final_norm.parameters.end != shapes.len() {
+        let classifier = if let Some(head) = head {
+            let pool = GlobalAveragePool2d::new(self.output_channels, self.output_hw)?
+                .compile_resident(device.clone())?;
+            let graph = GraphPart::compile(
+                &device,
+                &[batch, self.output_channels],
+                head.inference_ops()?,
+                final_norm.parameters.end,
+                revision,
+            )?;
+            output_shape = [batch, head.weight().value().shape().1];
+            if graph.parameters.end != shapes.len() {
+                return Err(InferenceError::Shape(offset));
+            }
+            Some(ClassifierPart { pool, graph })
+        } else {
+            None
+        };
+        if classifier.is_none() && final_norm.parameters.end != shapes.len() {
             return Err(InferenceError::Shape(offset));
         }
         Ok(ResidentConvNeXtBackbone {
@@ -241,6 +289,7 @@ impl ConvNeXtBackbone {
             output_shape,
             nodes,
             final_norm,
+            classifier,
             forwards: 0,
             latest: None,
         })
@@ -331,8 +380,22 @@ impl ResidentConvNeXtBackbone {
             }
         }
         let feature_shape = value.layout().shape().to_vec();
-        let features = value.contiguous()?.reshape(&self.output_shape)?;
+        let features = value.contiguous()?.reshape(&[
+            self.input_shape[0],
+            value.layout().len() / self.input_shape[0],
+        ])?;
         let final_norm = self.final_norm.forward(&parameters, &features)?;
+        let classifier = if let Some(head) = &mut self.classifier {
+            let pool_input = final_norm.prediction().reshape(&feature_shape)?;
+            let pooled = head.pool.forward(&pool_input)?;
+            let forward = head.graph.forward(&parameters, &pooled)?;
+            Some(ClassifierTape {
+                pool_input,
+                forward,
+            })
+        } else {
+            None
+        };
         self.forwards = submission;
         self.latest = Some(submission);
         Ok(ResidentConvNeXtForward {
@@ -341,6 +404,7 @@ impl ResidentConvNeXtBackbone {
             nodes,
             final_norm,
             feature_shape,
+            classifier,
         })
     }
 
@@ -354,10 +418,6 @@ impl ResidentConvNeXtBackbone {
         {
             return Err(TrainingError::StaleForward.into());
         }
-        let final_vjp = self
-            .final_norm
-            .graph
-            .backward(&forward.final_norm, cotangent)?;
         let mut gradients = vec![None; self.shapes.len()];
         let assign = |destinations: &mut [Option<ResidentTensor>],
                       start: usize,
@@ -368,6 +428,29 @@ impl ResidentConvNeXtBackbone {
             }
             Ok(())
         };
+        let final_seed = match (&mut self.classifier, &forward.classifier) {
+            (Some(head), Some(tape)) => {
+                let vjp = head.graph.graph.backward(&tape.forward, cotangent)?;
+                assign(
+                    &mut gradients,
+                    head.graph.parameters.start,
+                    vjp.parameter_gradients(),
+                )?;
+                head.pool
+                    .backward(&tape.pool_input, vjp.input_gradient())?
+                    .reshape(forward.final_norm.prediction().layout().shape())?
+            }
+            (None, None) => cotangent.clone(),
+            _ => {
+                return Err(InferenceError::ModuleUpdate(
+                    "classifier tape topology differs",
+                ))
+            }
+        };
+        let final_vjp = self
+            .final_norm
+            .graph
+            .backward(&forward.final_norm, &final_seed)?;
         assign(
             &mut gradients,
             self.final_norm.parameters.start,
@@ -443,8 +526,93 @@ impl ResidentConvNeXtBackbone {
     }
 }
 
+/// Full classifier with one shared owner/SGD decision for backbone and head.
+pub struct ResidentConvNeXtClassifier {
+    inner: ResidentConvNeXtBackbone,
+}
+
+impl ConvNeXtClassifier {
+    pub fn compile_resident_training(
+        &self,
+        device: TensorDevice,
+        batch: usize,
+    ) -> Result<ResidentConvNeXtClassifier, InferenceError> {
+        self.compile_resident_at_revision(device, batch, 0)
+    }
+    fn compile_resident_at_revision(
+        &self,
+        device: TensorDevice,
+        batch: usize,
+        revision: u64,
+    ) -> Result<ResidentConvNeXtClassifier, InferenceError> {
+        Ok(ResidentConvNeXtClassifier {
+            inner: self.backbone.compile_resident_with_head(
+                device,
+                batch,
+                revision,
+                Some(&self.head),
+            )?,
+        })
+    }
+}
+
+impl ResidentConvNeXtClassifier {
+    pub fn forward(
+        &mut self,
+        input: &ResidentTensor,
+    ) -> Result<ResidentConvNeXtForward, InferenceError> {
+        self.inner.forward(input)
+    }
+    pub fn backward(
+        &mut self,
+        forward: &ResidentConvNeXtForward,
+        cotangent: &ResidentTensor,
+    ) -> Result<ResidentConvNeXtGradients, InferenceError> {
+        self.inner.backward(forward, cotangent)
+    }
+    pub fn sgd(
+        &mut self,
+        gradients: &ResidentConvNeXtGradients,
+        rate: f32,
+    ) -> Result<ResidentParameterUpdate, InferenceError> {
+        self.inner.sgd(gradients, rate)
+    }
+    pub fn parameter_snapshot(&self) -> ResidentParameterSnapshot {
+        self.inner.parameter_snapshot()
+    }
+    pub fn parameter_names(&self) -> &[String] {
+        self.inner.parameter_names()
+    }
+    pub fn input_shape(&self) -> &[usize; 4] {
+        self.inner.input_shape()
+    }
+    pub fn output_shape(&self) -> &[usize; 2] {
+        self.inner.output_shape()
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    mod classifier_checks {
+        use crate as st_vision;
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/support/convnext_classifier_checks.rs"
+        ));
+    }
+    #[test]
+    fn resident_classifier_learning_checkpoint_and_common_entry() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) =
+            st_backend_wgpu::runtime::ensure_default_runtime_blocking("vision.classifier.test")
+                .unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = st_backend_wgpu::resident_tensor::TensorDevice::new(runtime).unwrap();
+        let report = pollster::block_on(classifier_checks::run(&device)).unwrap();
+        println!("{report}");
+    }
     mod checkpoint_checks {
         use crate as st_vision;
         include!(concat!(

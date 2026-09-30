@@ -88,3 +88,8 @@ required-features = ["nn", "wgpu"]
 name = "convnext_resident_checkpoint_browser"
 crate-type = ["cdylib"]
 required-features = ["nn", "wgpu"]
+
+[[example]]
+name = "convnext_classifier_browser"
+crate-type = ["cdylib"]
+required-features = ["nn", "wgpu"]

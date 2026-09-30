@@ -506,7 +506,22 @@ value:
    helpers, now exposed as `st.ImageTensor`, `st.TransformPipeline`,
    `st.TensorVisionDataset`, `st.VisionDataLoader`,
    `st.vision_create_classification_model`, and catalog/audit helpers for
-   FT/WASM/runtime probes without dropping into Rust.
+   FT/WASM/runtime probes without dropping into Rust. With the wheel's `nn`
+   feature (included in `python-default`), the ConvNeXt factory now constructs
+   the real Rust backbone/global-pool/classifier rather than a `SimpleCnn`:
+
+   ```python
+   model = st.vision_create_classification_model("convnext_tiny", num_classes=3, seed=42)
+   print(model.parameter_count())  # 27_888_003 scalar parameters
+   print(model.metadata()["has_pretrained"])  # False
+   # model.forward(images): nonempty list of 3x224x224 ImageTensor values
+   ```
+
+   This exposes inference, not resident classifier training or checkpoint
+   bindings. Initialization is seeded; no pretrained weights or torchvision
+   checkpoint compatibility is implied. Other legacy model kinds still use
+   `SimpleCnn`. The shared Rust training path is documented in
+   [Resident ConvNeXt Training](../../docs/resident_convnext_training.md).
 6. `st-text::semantics` token helpers, now exposed as `st.token_scale_stack`
    and `st.token_coherence_levels` so local-HF embeddings can be inspected with
    the same semantic scale-stack implementation as Rust.
