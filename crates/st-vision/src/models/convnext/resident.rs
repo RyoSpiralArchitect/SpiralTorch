@@ -15,6 +15,9 @@ use st_nn::resident::{InferenceOp, InferencePlan, ResidentConvolutionSpec};
 use st_tensor::{Layout, NdLayout};
 use std::ops::Range;
 
+mod checkpoint;
+pub use checkpoint::ConvNeXtCheckpointSnapshot;
+
 struct GraphPart {
     graph: ResidentGraphAutograd,
     parameters: Range<usize>,
@@ -28,6 +31,7 @@ impl GraphPart {
         input: &[usize],
         operations: Vec<InferenceOp>,
         start: usize,
+        revision: u64,
     ) -> Result<Self, InferenceError> {
         let plan = InferencePlan::from_operations(NdLayout::contiguous(input)?, operations)?;
         let shapes: Vec<_> = plan
@@ -43,7 +47,7 @@ impl GraphPart {
             graph: plan.compile_graph_autograd_wgpu(device.runtime().clone())?,
             parameters: start..end,
             shapes,
-            bound_revision: 0,
+            bound_revision: revision,
         })
     }
 
@@ -122,8 +126,10 @@ impl ResidentConvNeXtGradients {
 }
 
 /// Model-owned resident forward, VJP and all-parameter plain SGD for a fixed batch shape.
-/// This is a fresh weight snapshot, not ModuleTrainer policy or optimizer-state resume.
+/// Compilation creates fresh state; an explicit checkpoint restores plain-SGD
+/// weights and the attempted-update clock, not ModuleTrainer policy or tapes.
 pub struct ResidentConvNeXtBackbone {
+    config: ConvNeXtConfig,
     device: TensorDevice,
     parameters: ResidentParameters,
     names: Vec<String>,
@@ -144,6 +150,15 @@ impl ConvNeXtBackbone {
         &self,
         device: TensorDevice,
         batch: usize,
+    ) -> Result<ResidentConvNeXtBackbone, InferenceError> {
+        self.compile_resident_at_revision(device, batch, 0)
+    }
+
+    fn compile_resident_at_revision(
+        &self,
+        device: TensorDevice,
+        batch: usize,
+        revision: u64,
     ) -> Result<ResidentConvNeXtBackbone, InferenceError> {
         if batch == 0 {
             return Err(InferenceError::InvalidLayout);
@@ -172,7 +187,7 @@ impl ConvNeXtBackbone {
             .zip(&shapes)
             .map(|(value, shape)| device.upload(shape, value.data()))
             .collect::<Result<Vec<_>, _>>()?;
-        let parameters = ResidentParameters::new(values)?;
+        let parameters = ResidentParameters::from_restored_values(values, revision)?;
         let mut nodes = vec![Node::Conv {
             spec: self.stem.resident_spec(),
             parameter: 0,
@@ -189,6 +204,7 @@ impl ConvNeXtBackbone {
                     &[rows, block.channels],
                     block.resident_tail_operations()?,
                     offset + 2,
+                    revision,
                 )?;
                 if tail.parameters.len() != 6 {
                     return Err(InferenceError::Shape(offset));
@@ -211,11 +227,12 @@ impl ConvNeXtBackbone {
         let output_shape = [batch, self.final_norm.features()];
         let mut operations = Vec::new();
         self.final_norm.append_inference_ops(&mut operations)?;
-        let final_norm = GraphPart::compile(&device, &output_shape, operations, offset)?;
+        let final_norm = GraphPart::compile(&device, &output_shape, operations, offset, revision)?;
         if final_norm.parameters.end != shapes.len() {
             return Err(InferenceError::Shape(offset));
         }
         Ok(ResidentConvNeXtBackbone {
+            config: self.config.clone(),
             device,
             parameters,
             names,
@@ -428,6 +445,34 @@ impl ResidentConvNeXtBackbone {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    mod checkpoint_checks {
+        use crate as st_vision;
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/support/convnext_checkpoint_checks.rs"
+        ));
+    }
+
+    #[test]
+    fn resident_convnext_checkpoint_resumes_with_fresh_identity() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = st_backend_wgpu::runtime::ensure_default_runtime_blocking(
+            "vision.convnext.checkpoint.test",
+        )
+        .unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = st_backend_wgpu::resident_tensor::TensorDevice::new(runtime).unwrap();
+        let imported = std::env::var("SPIRALTORCH_CONVNEXT_CHECKPOINT_IMPORT")
+            .ok()
+            .map(|path| std::fs::read_to_string(path).unwrap());
+        let mut report =
+            pollster::block_on(checkpoint_checks::run(&device, imported.as_deref())).unwrap();
+        report.as_object_mut().unwrap().remove("checkpoint_json");
+        println!("{report}");
+    }
+
     mod checks {
         use crate as st_vision;
         include!(concat!(

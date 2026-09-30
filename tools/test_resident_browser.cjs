@@ -11,7 +11,7 @@ async function main() {
   if (!moduleDir || !executablePath || !outputPath) {
     throw Error("usage: test_resident_browser.cjs MODULE_DIR CHROME_EXECUTABLE NEW_OUTPUT [TILES_MNK] [KERNELS] [ACCUMULATIONS] [SHAPES_MKN] [FIXTURE, e.g. convnext-block-vjp-resident] [BASELINE_MODULE_DIR]");
   }
-if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nn-graph-layer-norm", "nn-graph-layer-norm-matched", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu", "nn-fusion-clients", "nn-autograd-clients", "nn-learner-clients", "pointwise-clients", "nn-module-handoff", "nn-module-forward", "nn-module-matched", "nn-module-intervals", "nn-module-terminal-intervals", "nn-module-terminal-matched-intervals", "nn-loss-clients", "nn-classification-clients", "nn-microbatch-clients", "nerf", "nerf-bench", "nerf-submit-bench", "nerf-row-input-bench", "nerf-pointwise-input-bench", "softmax-portable-bench", "consensus-readback-bench", "gelu-backward-bench", "layer-norm-resident", "depthwise-vjp-resident", "convnext-block-vjp-resident", "convnext-backbone-vjp-resident", "convnext-learning-resident", "parameters-resident", "vision-transforms"].includes(fixture)) throw Error("unknown fixture");
+if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", "rank-pruning-matched", "rank-pair-lanes-matched", "rank-prefix-matched", "rank-count-matched", "rank-profile", "rank-adaptation", "matmul", "matmul-rank", "tensor-mean", "nn", "nn-training", "nn-graph-training", "nn-graph-training-profile", "nn-graph-forward", "nn-forward-clients", "nn-forward-bench", "nn-graph-layer-norm", "nn-graph-layer-norm-matched", "nd-tensor", "nn-clients", "nn-clients-cpu", "nn-training-clients", "nn-training-clients-cpu", "nn-graph-clients", "nn-graph-clients-cpu", "nn-fusion-clients", "nn-autograd-clients", "nn-learner-clients", "pointwise-clients", "nn-module-handoff", "nn-module-forward", "nn-module-matched", "nn-module-intervals", "nn-module-terminal-intervals", "nn-module-terminal-matched-intervals", "nn-loss-clients", "nn-classification-clients", "nn-microbatch-clients", "nerf", "nerf-bench", "nerf-submit-bench", "nerf-row-input-bench", "nerf-pointwise-input-bench", "softmax-portable-bench", "consensus-readback-bench", "gelu-backward-bench", "layer-norm-resident", "depthwise-vjp-resident", "convnext-block-vjp-resident", "convnext-backbone-vjp-resident", "convnext-learning-resident", "convnext-checkpoint-resident", "parameters-resident", "vision-transforms"].includes(fixture)) throw Error("unknown fixture");
   const nnClientFixture = fixture === "nn-clients" || fixture === "nn-clients-cpu";
   const trainingClientFixture = fixture === "nn-training-clients" || fixture === "nn-training-clients-cpu";
   const graphClientFixture = fixture === "nn-graph-clients" || fixture === "nn-graph-clients-cpu";
@@ -71,6 +71,7 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
     if(fixture === "convnext-block-vjp-resident") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_convnext_block_vjp.html"), "text/html"]);
     if(fixture === "convnext-backbone-vjp-resident") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_convnext_backbone_vjp.html"), "text/html"]);
     if(fixture === "convnext-learning-resident") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_convnext_learning.html"), "text/html"]);
+    if(fixture === "convnext-checkpoint-resident") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/resident_convnext_checkpoint.html"), "text/html"]);
     if(fixture === "vision-transforms") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/vision_transforms.html"), "text/html"]);
     if(fixture === "consensus-readback-bench") files.set("/", [path.join(__dirname, "../bindings/st-wasm/tests/consensus_readback_bench.html"), "text/html"]);
     if(fixture === "nn-forward-clients") {
@@ -193,6 +194,17 @@ if(fixture && !["rank", "rank-active-lanes", "rank-tournament", "rank-matched", 
       report.cases = fs.readFileSync(outputPath+".cases.jsonl", "utf8").trimEnd().split("\n").map(JSON.parse);
     }
     if(pageErrors.length) report.status="error";
+    if(fixture === "convnext-checkpoint-resident" && report.status === "passed") {
+      const checkpoint = await page.evaluate(()=>window.convnextCheckpoint);
+      if(typeof checkpoint !== "string" ||
+          JSON.parse(checkpoint).schema !== "spiraltorch.convnext.plain_sgd_checkpoint.v1") {
+        throw Error("missing portable ConvNeXt checkpoint");
+      }
+      const bytes = Buffer.from(checkpoint, "utf8");
+      fs.writeFileSync(outputPath+".checkpoint.json", bytes, {flag: "wx"});
+      report.checkpoint_artifact = {path: path.basename(outputPath)+".checkpoint.json",
+        bytes: bytes.length, sha256: crypto.createHash("sha256").update(bytes).digest("hex")};
+    }
     if((fixture === "rank-profile" || fixture === "nn-graph-training-profile") && consoleMessages.some(m => /Invalid QuerySet|Invalid CommandBuffer|Cannot allocate sample buffer/.test(m.text))) {
       report.status="error";
       report.error="uncaptured WebGPU timestamp validation/allocation failure";

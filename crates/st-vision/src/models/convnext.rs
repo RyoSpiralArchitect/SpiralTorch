@@ -21,10 +21,16 @@ use st_nn::resident::{InferenceError, ResidentAutogradStats, ResidentModuleAutog
 
 use crate::models::resnet::conv_output_hw;
 
+mod checkpoint;
+pub use checkpoint::ConvNeXtTrainingCheckpoint;
+
 #[cfg(feature = "wgpu")]
 mod resident;
 #[cfg(feature = "wgpu")]
-pub use resident::{ResidentConvNeXtBackbone, ResidentConvNeXtForward, ResidentConvNeXtGradients};
+pub use resident::{
+    ConvNeXtCheckpointSnapshot, ResidentConvNeXtBackbone, ResidentConvNeXtForward,
+    ResidentConvNeXtGradients,
+};
 
 #[cfg(feature = "wgpu")]
 fn reshape_parameter_gradients(
@@ -96,7 +102,8 @@ fn tokens_to_conv(
     Tensor::from_vec(batch, channels * tokens_per_batch, data)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConvNeXtConfig {
     pub input_channels: usize,
     pub input_hw: (usize, usize),
@@ -594,6 +601,7 @@ impl Module for ConvNeXtStage {
 
 #[derive(Debug)]
 pub struct ConvNeXtBackbone {
+    config: ConvNeXtConfig,
     stem: Conv2d,
     stages: Vec<ConvNeXtStage>,
     final_norm: LayerNorm,
@@ -605,28 +613,7 @@ pub struct ConvNeXtBackbone {
 
 impl ConvNeXtBackbone {
     pub fn new(config: ConvNeXtConfig) -> PureResult<Self> {
-        if config.stage_dims.is_empty() {
-            return Err(TensorError::InvalidValue {
-                label: "convnext_stage_dims",
-            });
-        }
-        if config.stage_dims.len() != config.stage_depths.len() {
-            return Err(TensorError::InvalidDimensions {
-                rows: config.stage_dims.len(),
-                cols: config.stage_depths.len(),
-            });
-        }
-        if config.curvature >= 0.0 || !config.curvature.is_finite() {
-            return Err(TensorError::NonHyperbolicCurvature {
-                curvature: config.curvature,
-            });
-        }
-        if config.epsilon <= 0.0 || !config.epsilon.is_finite() {
-            return Err(TensorError::NonFiniteValue {
-                label: "convnext_layernorm_epsilon",
-                value: config.epsilon,
-            });
-        }
+        config.parameter_budget()?;
         let stem = Conv2d::new(
             "convnext.stem",
             config.input_channels,
@@ -673,6 +660,7 @@ impl ConvNeXtBackbone {
             config.epsilon,
         )?;
         Ok(Self {
+            config,
             stem,
             stages,
             final_norm,
@@ -681,6 +669,10 @@ impl ConvNeXtBackbone {
             #[cfg(feature = "wgpu")]
             resident_autograd: Default::default(),
         })
+    }
+
+    pub fn config(&self) -> &ConvNeXtConfig {
+        &self.config
     }
 
     pub fn load_weights_json<P: AsRef<Path>>(&mut self, path: P) -> PureResult<()> {
