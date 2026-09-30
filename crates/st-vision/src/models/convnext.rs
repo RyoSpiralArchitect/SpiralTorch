@@ -23,13 +23,15 @@ use crate::models::resnet::conv_output_hw;
 
 mod checkpoint;
 pub use checkpoint::ConvNeXtTrainingCheckpoint;
+mod classifier;
+pub use classifier::{ConvNeXtClassifier, ConvNeXtClassifierCheckpoint};
 
 #[cfg(feature = "wgpu")]
 mod resident;
 #[cfg(feature = "wgpu")]
 pub use resident::{
-    ConvNeXtCheckpointSnapshot, ResidentConvNeXtBackbone, ResidentConvNeXtForward,
-    ResidentConvNeXtGradients,
+    ConvNeXtCheckpointSnapshot, ConvNeXtClassifierCheckpointSnapshot, ResidentConvNeXtBackbone,
+    ResidentConvNeXtClassifier, ResidentConvNeXtForward, ResidentConvNeXtGradients,
 };
 
 #[cfg(feature = "wgpu")]

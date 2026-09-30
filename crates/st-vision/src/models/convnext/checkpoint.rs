@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 const SCHEMA: &str = "spiraltorch.convnext.plain_sgd_checkpoint.v1";
-const MAX_JSON_BYTES: usize = 512 * 1024 * 1024;
-const MAX_PARAMETER_VALUES: usize = 64 * 1024 * 1024;
+pub(super) const MAX_JSON_BYTES: usize = 512 * 1024 * 1024;
+pub(super) const MAX_PARAMETER_VALUES: usize = 64 * 1024 * 1024;
 const MAX_PARAMETER_TENSORS: usize = 65_536;
 
 fn invalid(label: &'static str) -> TensorError {
@@ -153,7 +153,11 @@ impl ConvNeXtTrainingCheckpoint {
         self.attempted_updates
     }
 
-    fn validate(&self) -> PureResult<()> {
+    pub(super) fn parameters(&self) -> &[StoredParameter] {
+        &self.parameters
+    }
+
+    pub(super) fn validate(&self) -> PureResult<()> {
         if self.schema != SCHEMA || self.batch == 0 || self.attempted_updates == u64::MAX {
             return Err(invalid("convnext_checkpoint_header"));
         }
@@ -218,36 +222,7 @@ impl ConvNeXtTrainingCheckpoint {
         if target.config() != &self.config {
             return Err(invalid("convnext_checkpoint_config"));
         }
-        let mut index = 0usize;
-        target.visit_parameters(&mut |p| {
-            let source = self
-                .parameters
-                .get(index)
-                .ok_or_else(|| invalid("convnext_checkpoint_count"))?;
-            if source.name != p.name() || source.shape != [p.value().shape().0, p.value().shape().1]
-            {
-                return Err(invalid("convnext_checkpoint_layout"));
-            }
-            if p.gradient().is_some() || p.hypergrad().is_some() || p.realgrad().is_some() {
-                return Err(invalid("convnext_checkpoint_attached_optimizer"));
-            }
-            index += 1;
-            Ok(())
-        })?;
-        if index != self.parameters.len() {
-            return Err(invalid("convnext_checkpoint_count"));
-        }
-        let state = self
-            .parameters
-            .iter()
-            .map(|p| {
-                Ok((
-                    p.name.clone(),
-                    Tensor::from_vec(p.shape[0], p.shape[1], p.values.clone())?,
-                ))
-            })
-            .collect::<PureResult<HashMap<_, _>>>()?;
-        target.load_state_dict(&state)
+        restore_parameters(&self.parameters.iter().collect::<Vec<_>>(), target)
     }
 
     /// Reconstruct a fresh host model only after validating its allocation budget.
@@ -257,6 +232,39 @@ impl ConvNeXtTrainingCheckpoint {
         self.restore_host(&mut model)?;
         Ok(model)
     }
+}
+
+pub(super) fn restore_parameters(
+    parameters: &[&StoredParameter],
+    target: &mut impl Module,
+) -> PureResult<()> {
+    let mut index = 0usize;
+    target.visit_parameters(&mut |p| {
+        let source = parameters
+            .get(index)
+            .ok_or_else(|| invalid("convnext_checkpoint_count"))?;
+        if source.name != p.name() || source.shape != [p.value().shape().0, p.value().shape().1] {
+            return Err(invalid("convnext_checkpoint_layout"));
+        }
+        if p.gradient().is_some() || p.hypergrad().is_some() || p.realgrad().is_some() {
+            return Err(invalid("convnext_checkpoint_attached_optimizer"));
+        }
+        index += 1;
+        Ok(())
+    })?;
+    if index != parameters.len() {
+        return Err(invalid("convnext_checkpoint_count"));
+    }
+    let state = parameters
+        .iter()
+        .map(|p| {
+            Ok((
+                p.name.clone(),
+                Tensor::from_vec(p.shape[0], p.shape[1], p.values.clone())?,
+            ))
+        })
+        .collect::<PureResult<HashMap<_, _>>>()?;
+    target.load_state_dict(&state)
 }
 
 #[cfg(test)]

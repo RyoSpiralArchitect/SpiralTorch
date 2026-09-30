@@ -12,6 +12,7 @@ pub mod dropout;
 pub mod dynamic_field;
 pub mod embedding;
 pub mod gelu;
+pub mod global_average_pool;
 pub mod identity;
 pub mod linear;
 pub mod lora_linear;
@@ -44,6 +45,7 @@ pub use dynamic_field::{
 };
 pub use embedding::Embedding;
 pub use gelu::Gelu;
+pub use global_average_pool::GlobalAveragePool2d;
 pub use identity::Identity;
 pub use lora_linear::LoraLinear;
 pub use lstm::Lstm;

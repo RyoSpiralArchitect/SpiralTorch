@@ -2,13 +2,16 @@ pub mod convnext;
 pub mod resnet;
 pub mod vit;
 
-pub use convnext::{ConvNeXtBackbone, ConvNeXtBlock, ConvNeXtConfig, ConvNeXtTrainingCheckpoint};
+pub use convnext::{
+    ConvNeXtBackbone, ConvNeXtBlock, ConvNeXtClassifier, ConvNeXtClassifierCheckpoint,
+    ConvNeXtConfig, ConvNeXtTrainingCheckpoint,
+};
 #[cfg(feature = "wgpu")]
 pub use convnext::{ConvNeXtBackboneVjp, ConvNeXtBlockVjp};
 #[cfg(feature = "wgpu")]
 pub use convnext::{
-    ConvNeXtCheckpointSnapshot, ResidentConvNeXtBackbone, ResidentConvNeXtForward,
-    ResidentConvNeXtGradients,
+    ConvNeXtCheckpointSnapshot, ConvNeXtClassifierCheckpointSnapshot, ResidentConvNeXtBackbone,
+    ResidentConvNeXtClassifier, ResidentConvNeXtForward, ResidentConvNeXtGradients,
 };
 pub use resnet::{
     ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone, ResNetConfig, ResNetPreset,

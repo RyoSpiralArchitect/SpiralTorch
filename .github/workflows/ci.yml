@@ -278,6 +278,7 @@ jobs:
           cargo test --locked --release -p st-vision --features wgpu --lib resident_backbone_vjp_matches_host_across_stem_downsample_and_final_norm -- --test-threads=1
           cargo test --locked --release -p st-vision --features wgpu --lib resident_convnext_learning_matches_cpu_and_preserves_ownership -- --test-threads=1
           cargo test --locked --release -p st-vision --features wgpu --lib resident_convnext_checkpoint_resumes_with_fresh_identity -- --test-threads=1
+          cargo test --locked --release -p st-vision --features wgpu --lib resident_classifier_learning_checkpoint_and_common_entry -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
@@ -310,6 +311,7 @@ jobs:
           cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --example convnext_backbone_vjp_browser
           cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --example convnext_resident_learning_browser
           cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --example convnext_resident_checkpoint_browser
+          cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --example convnext_classifier_browser
           cargo check --locked -p st-backend-wgpu --target wasm32-unknown-unknown --example resident_nerf_browser
           cargo check --locked -p st-backend-wgpu --target wasm32-unknown-unknown --example resident_nerf_bench_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser
@@ -583,6 +585,7 @@ jobs:
           python -m pip install pytest
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_spiralk_rank_tile.py bindings/st-py/tests/test_resident_rank_adaptation.py bindings/st-py/tests/test_wgpu_rank_reports.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_zspace_complex_dynamics.py bindings/st-py/tests/test_zspace_dynamics.py bindings/st-py/tests/test_runtime_protocol_catalog.py
+          python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_vision_classifier_native.py
           python -I tools/smoke_zspace_runtime_protocols.py
       - name: NumPy 2.2 DLPack copy policy regression
         run: |

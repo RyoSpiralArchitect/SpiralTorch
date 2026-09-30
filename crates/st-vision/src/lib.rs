@@ -64,6 +64,8 @@ use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use spiral_config::determinism;
 pub mod analysis;
 #[cfg(feature = "nn")]
+mod classification;
+#[cfg(feature = "nn")]
 pub mod models;
 #[cfg(feature = "nn")]
 pub mod xai;
@@ -4583,7 +4585,7 @@ const MODEL_CATALOG: &[ModelDescriptor] = &[
         task: VisionTask::Classification,
         default_input_channels: 3,
         default_image_size: (224, 224),
-        has_pretrained: true,
+        has_pretrained: false,
     },
 ];
 
@@ -4631,9 +4633,22 @@ pub enum FeatureStage {
     Logits,
 }
 
-/// 共通インターフェース (TorchVision の `nn.Module`)。
-pub trait VisionModel: Send + Sync {
+/// Native vision models remain shareable; browser models are WASM-instance-local.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait VisionModelThreadSafety: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync + ?Sized> VisionModelThreadSafety for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait VisionModelThreadSafety {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> VisionModelThreadSafety for T {}
+
+/// Common inference interface over model-owned parameters.
+pub trait VisionModel: VisionModelThreadSafety {
     fn metadata(&self) -> &ModelMetadata;
+    fn parameter_count(&self) -> Option<usize> {
+        None
+    }
     fn forward(&self, batch: &[ImageTensor]) -> PureResult<Tensor>;
     fn extract_features(&self, stage: FeatureStage, image: &ImageTensor) -> PureResult<Tensor>;
 }
@@ -5001,12 +5016,30 @@ impl FeatureExtractor {
     }
 }
 
-/// Instantiates a simplified TorchVision モデル。
+/// ConvNeXt uses the actual trainable backbone/global-pool/Linear model.
+/// Other legacy kinds still use the explicit SimpleCnn implementation.
 pub fn create_classification_model(
     kind: ModelKind,
     num_classes: usize,
     seed: Option<u64>,
 ) -> PureResult<Arc<dyn VisionModel>> {
+    if kind == ModelKind::ConvNeXtTiny {
+        #[cfg(feature = "nn")]
+        {
+            let seed = seed
+                .unwrap_or_else(|| determinism::rng_from_label("st-vision/models/convnext").gen());
+            return models::ConvNeXtClassifier::new(
+                models::ConvNeXtConfig::default(),
+                num_classes,
+                seed,
+            )?
+            .into_vision_model();
+        }
+        #[cfg(not(feature = "nn"))]
+        return Err(TensorError::InvalidValue {
+            label: "convnext_requires_nn_feature",
+        });
+    }
     let model = SimpleCnn::with_seed(kind, num_classes, seed)?;
     Ok(Arc::new(model))
 }
