@@ -12,15 +12,18 @@ Current scope of the vision execution path:
 | Model-owned resident ConvNeXt forward | `Module` API | Not exposed | Exercised by Rust WASM VJP fixture; no model binding |
 | Full-backbone resident VJP | `ConvNeXtBackbone::vjp_resident` | Not exposed | Rust WASM parity fixture; no model binding |
 | ConvNeXt-owned resident parameter update | `compile_resident_training`, plain SGD | Not exposed | Rust WASM learning fixture; no model binding |
-| ConvNeXt training checkpoint/resume | Open | Open | Open |
+| ConvNeXt plain-SGD model checkpoint/resume | Public API, explicit host handoff | Not exposed | Rust WASM resume fixture and portable JSON; no model binding |
 | Matched real-image training quality and throughput | Open | Open | Open |
 
 The compiled ConvNeXt training path now connects model-owned gradients to
 resident parameter updates with version checks, stale-gradient rejection and
 all-parameter acceptance. Native and browser fixtures cover consecutive steps,
-rejected steps preserving all weights, and a valid retry. The next rail is
-explicit checkpoint/host synchronization and a real-image training path, followed
-by Python and WASM model bindings exposing the same Rust-owned contract.
+rejected steps preserving all weights, and a valid retry. Portable plain-SGD
+model checkpoints now preserve weights, architecture and attempted-update
+revision, with explicit mapping and fresh restored owner identities. Data
+cursors, RNGs, rate schedules and trainer policy remain caller-owned state.
+The next rail is a real-image training path and a common public model entry,
+followed by Python and WASM bindings exposing the same Rust-owned contract.
 
 The candidate arithmetic is now shared by the existing dense, graph, clipped,
 and EMA update routes through `st-kernel-contracts::sgd`. The Rust CPU oracle
@@ -51,8 +54,23 @@ eight full-backbone MSE/VJP/SGD steps in native and browser GPU runtimes without
 readbacks inside that loop. It compares every gradient, weight version and next
 prediction with CPU, including rejection/retry and retained snapshots.
 See the [bounded learning result](../benchmarks/results/2026-09-30-convnext-resident-learning.md).
-This is fresh plain SGD, not ModuleTrainer policy migration, checkpoint resume,
-a JavaScript/Python model API, or demonstrated real-image quality/throughput.
+This is plain SGD, not ModuleTrainer policy migration, a JavaScript/Python model
+API, or demonstrated real-image quality/throughput.
+
+The next completed slice adds explicit model checkpoint capture, portable JSON,
+host handoff, and resident restart. A shared native/browser fixture checks
+bitwise uninterrupted-versus-resumed predictions and all 22 weights; a checkpoint
+actually emitted by Chrome also resumes in native Rust within the existing f32
+parity bound. See [the checkpoint result](../benchmarks/results/2026-09-30-convnext-resident-checkpoint.md).
+
+The next integration bottleneck is the ordinary public entry:
+`create_classification_model()` still constructs `SimpleCnn`, even for its
+ConvNeXt descriptor, while the real `ConvNeXtBackbone` has a separate training
+API. `VisionBatch::stack()` is a host 2-D tensor path, and browser resident
+geometry does not include Normalize. Connect a real backbone and classification
+head, batch preparation/normalization, and checkpoint through one explicit Rust
+model interface before multiplying Python/browser surfaces. Then measure
+real-image learning and matched PyTorch accuracy/throughput on that same path.
 
 The following narrative records the successive implementation and measurement
 slices; the table above describes their current combined scope.

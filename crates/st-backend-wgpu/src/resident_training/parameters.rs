@@ -167,6 +167,18 @@ pub struct ResidentParameters {
 }
 
 impl ResidentParameters {
+    /// Adopt restored values with a fresh owner identity and an explicit attempted
+    /// revision. No old gradient token becomes valid. Model schema and optimizer
+    /// compatibility must be validated by the checkpoint loader before this call.
+    pub fn from_restored_values(
+        values: Vec<ResidentTensor>,
+        attempted_revision: u64,
+    ) -> Result<Self, TrainingError> {
+        let mut owner = Self::new(values)?;
+        owner.current.version.revision = attempted_revision;
+        Ok(owner)
+    }
+
     /// Adopt nonempty tensors on one device without uploading or reading values.
     pub fn new(values: Vec<ResidentTensor>) -> Result<Self, TrainingError> {
         let first = values.first().ok_or(TrainingError::ParameterLayout)?;

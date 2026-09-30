@@ -1,5 +1,54 @@
 use super::*;
 
+#[test]
+fn restored_parameter_revision_has_a_fresh_owner_identity() {
+    if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+        return;
+    }
+    let (runtime, _) = runtime::ensure_default_runtime_blocking("parameters.restore").unwrap();
+    let device = TensorDevice::new(runtime).unwrap();
+    let original = ResidentParameters::new(vec![device.upload(&[1], &[2.0]).unwrap()]).unwrap();
+    let snapshot = original.snapshot();
+    let old = snapshot
+        .bind_gradients(vec![device.upload(&[1], &[1.0]).unwrap()])
+        .unwrap();
+    let mut restored =
+        ResidentParameters::from_restored_values(snapshot.values().to_vec(), 0).unwrap();
+    assert!(!restored.is_current(&snapshot));
+    assert!(matches!(
+        restored.sgd(&old, 0.1),
+        Err(TrainingError::ParameterVersion)
+    ));
+    let mut restored =
+        ResidentParameters::from_restored_values(snapshot.values().to_vec(), 41).unwrap();
+    let gradient = restored
+        .snapshot()
+        .bind_gradients(vec![device.upload(&[1], &[1.0]).unwrap()])
+        .unwrap();
+    assert_eq!(
+        restored
+            .sgd(&gradient, 0.5)
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap(),
+        42
+    );
+    assert_eq!(
+        restored.snapshot().values()[0]
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap(),
+        vec![1.5]
+    );
+    assert_eq!(
+        snapshot.values()[0].snapshot().unwrap().read().unwrap(),
+        vec![2.0]
+    );
+}
+
 // Exercise the exact same sequence through native Metal and browser WebGPU.
 mod checks {
     use crate as st_backend_wgpu;

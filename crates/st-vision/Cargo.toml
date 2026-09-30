@@ -10,7 +10,7 @@ license = "AGPL-3.0-or-later"
 default = ["nn"]
 wgpu = ["dep:st-backend-wgpu", "dep:wgpu", "st-tensor/wgpu", "st-nn?/wgpu"]
 nerf = ["nn"]
-nn = ["dep:st-nn"]
+nn = ["dep:st-nn", "dep:serde", "dep:serde_json"]
 
 [dependencies]
 st-core = { path = "../st-core", default-features = false }
@@ -24,6 +24,8 @@ wgpu = { version = "0.20", features = ["wgsl"], optional = true }
 st-frac = { path = "../st-frac" }
 ndarray = "0.15"
 ordered-float = "4.2"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Keep native Faer acceleration without pulling its threadpool into WASM.
@@ -79,5 +81,10 @@ required-features = ["nn", "wgpu"]
 
 [[example]]
 name = "convnext_resident_learning_browser"
+crate-type = ["cdylib"]
+required-features = ["nn", "wgpu"]
+
+[[example]]
+name = "convnext_resident_checkpoint_browser"
 crate-type = ["cdylib"]
 required-features = ["nn", "wgpu"]

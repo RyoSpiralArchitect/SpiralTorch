@@ -277,6 +277,7 @@ jobs:
           cargo test --locked --release -p st-vision --features wgpu --lib resident_block_vjp_matches_host_and_refreshes_changed_parameters -- --test-threads=1
           cargo test --locked --release -p st-vision --features wgpu --lib resident_backbone_vjp_matches_host_across_stem_downsample_and_final_norm -- --test-threads=1
           cargo test --locked --release -p st-vision --features wgpu --lib resident_convnext_learning_matches_cpu_and_preserves_ownership -- --test-threads=1
+          cargo test --locked --release -p st-vision --features wgpu --lib resident_convnext_checkpoint_resumes_with_fresh_identity -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
@@ -308,6 +309,7 @@ jobs:
           cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --lib
           cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --example convnext_backbone_vjp_browser
           cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --example convnext_resident_learning_browser
+          cargo check --locked -p st-vision --target wasm32-unknown-unknown --features wgpu --example convnext_resident_checkpoint_browser
           cargo check --locked -p st-backend-wgpu --target wasm32-unknown-unknown --example resident_nerf_browser
           cargo check --locked -p st-backend-wgpu --target wasm32-unknown-unknown --example resident_nerf_bench_browser
           cargo check --locked -p st-nn --target wasm32-unknown-unknown --no-default-features --features wgpu --example resident_training_browser

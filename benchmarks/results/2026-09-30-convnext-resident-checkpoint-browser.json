@@ -1,0 +1,66 @@
+{
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "caller_state": {
+    "data_cursor": 4,
+    "fixture": "deterministic_modular_inputs_and_targets",
+    "loss": "mean_squared_error",
+    "schedule": "0.0001 / (1 + cursor * 0.1)"
+  },
+  "checks": [
+    "metadata",
+    "snapshot_after_later_updates",
+    "snapshot_after_owner_drop",
+    "all_parameter_bits",
+    "host_source_isolation",
+    "explicit_host_handoff",
+    "host_forward_parity",
+    "fresh_owner_identity",
+    "old_forward_rejected",
+    "every_resumed_prediction",
+    "every_resumed_weight",
+    "receipts",
+    "rejected_attempt_clock",
+    "rejected_weights_unchanged",
+    "resumed_retry"
+  ],
+  "imported_steps": 0,
+  "max_scaled_error": 4.151296195686882e-7,
+  "parameters": 22,
+  "resume_cursor": 4,
+  "resumed_steps": 4,
+  "same_runtime_resume": "bitwise",
+  "scaled_error_tolerance": 0.00019999999494757503,
+  "schema": "spiraltorch.convnext_checkpoint.contract.v1",
+  "status": "passed",
+  "steps": 8,
+  "training_loop_readbacks": 0,
+  "browser_adapter_probe": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "is_fallback_adapter": false,
+    "boundary": "Separate probe, not attestation of the Rust runtime device"
+  },
+  "checkpoint_artifact": {
+    "path": "spiraltorch-convnext-checkpoint-browser-20260930.json.checkpoint.json",
+    "bytes": 9948,
+    "sha256": "64d782162b2e5cac48289270b7aed4b6c0f4203f7cd857697245e26a88f22c8a"
+  },
+  "wasm_sha256": "967afc3678570cf2bab2528a190cd6613a58a43b0545e41ba8b92d505533d742",
+  "page_sha256": "0ed80b36722e7421a32d9e0ab478562062498c4bb7293faa9455b2040d9b0be8",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "convnext-checkpoint-resident",
+  "asset_sha256": {
+    "/": "0ed80b36722e7421a32d9e0ab478562062498c4bb7293faa9455b2040d9b0be8",
+    "/module/spiraltorch_wasm.js": "7999ace41c12216651d8f4bce4583ef4070e6352d52b19e5b90c31c25757a1f3",
+    "/module/spiraltorch_wasm_bg.wasm": "967afc3678570cf2bab2528a190cd6613a58a43b0545e41ba8b92d505533d742"
+  },
+  "browser_version": "154.0.8037.58",
+  "page_errors": [],
+  "console_messages": []
+}
