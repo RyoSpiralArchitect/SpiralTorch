@@ -176,6 +176,53 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
                     )
                     .unwrap();
                 }
+                ElementwiseOp::Subtract => {
+                    let slot = step.rhs.unwrap();
+                    writeln!(
+                        code,
+                        "    let contribution{j} = checked_apply(OP_MULTIPLY, delta, -1.0);"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    grad{slot} = checked_apply(OP_ADD, grad{slot}, contribution{j});"
+                    )
+                    .unwrap();
+                }
+                ElementwiseOp::Divide => {
+                    let slot = step.rhs.unwrap();
+                    // Keep the same ordered local partials as the Rust contract.
+                    writeln!(
+                        code,
+                        "    let quotient{j} = checked_apply(OP_DIVIDE, before{j}, value{slot});"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    let left{j} = checked_apply(OP_DIVIDE, 1.0, value{slot});"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    let right{j} = checked_apply(OP_DIVIDE, -quotient{j}, value{slot});"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    let contribution{j} = checked_apply(OP_MULTIPLY, delta, right{j});"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    grad{slot} = checked_apply(OP_ADD, grad{slot}, contribution{j});"
+                    )
+                    .unwrap();
+                    writeln!(
+                        code,
+                        "    delta = checked_apply(OP_MULTIPLY, delta, left{j});"
+                    )
+                    .unwrap();
+                }
                 ElementwiseOp::Relu => {
                     writeln!(code,"    delta = checked_apply(OP_MULTIPLY, delta, select(0.0,1.0,before{j}>0.0));").unwrap();
                 }
@@ -483,6 +530,147 @@ impl PointwisePlan {
 mod tests {
     use super::*;
     use st_kernel_contracts::pointwise::PointwiseStep;
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn extreme_division_matches_cpu_bits_including_subnormal_rounding() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) =
+            runtime::ensure_default_runtime_blocking("pointwise.divide_extremes").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        let mut expected = Vec::new();
+        for ea in [0u32, 1, 2, 20, 127, 200, 254] {
+            for eb in [0u32, 1, 2, 20, 127, 200, 254] {
+                for fa in [0, 1, 0x3fffff, 0x7fffff] {
+                    for fb in [0, 1, 0x3fffff, 0x7fffff] {
+                        for signs in [0u32, 1, 2, 3] {
+                            let a = f32::from_bits((ea << 23) | fa | ((signs & 1) << 31));
+                            let b = f32::from_bits((eb << 23) | fb | ((signs >> 1) << 31));
+                            let ex = ea as i32 - 127;
+                            let ey = eb as i32 - 127;
+                            if ex.abs() < 100 && ey.abs() < 100 && (ex - ey).abs() < 100 {
+                                continue;
+                            }
+                            if let Some(value) = ElementwiseOp::Divide.apply(a, b) {
+                                left.push(a);
+                                right.push(b);
+                                expected.push(value.to_bits());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(expected.len() > 1000);
+        let a = device.upload(&[left.len()], &left).unwrap();
+        let b = device.upload(&[right.len()], &right).unwrap();
+        let actual = a
+            .apply(ElementwiseOp::Divide, Some(&b))
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .read()
+            .unwrap();
+        for (i, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            assert_eq!(actual.to_bits(), expected, "{}/{}", left[i], right[i]);
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn normalize_forward_and_broadcast_vjp_match_checked_cpu_on_gpu() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = runtime::ensure_default_runtime_blocking("pointwise.normalize").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = TensorDevice::new(runtime).unwrap();
+        for (a, b) in [
+            (1e-40, 1e-40),
+            (f32::MAX, f32::MAX),
+            (1e-20, 1e20),
+            (-0.0, 2.0),
+        ] {
+            let lhs = device.upload(&[], &[a]).unwrap();
+            let rhs = device.upload(&[], &[b]).unwrap();
+            let actual = lhs
+                .apply(ElementwiseOp::Divide, Some(&rhs))
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read()
+                .unwrap()[0];
+            let expected = ElementwiseOp::Divide.apply(a, b).unwrap();
+            assert!(
+                (actual - expected).abs() <= 1e-6 * expected.abs().max(1e-38),
+                "{a}/{b}: {actual} != {expected}"
+            );
+        }
+        let x = device.upload(&[2, 2], &[2., 4., 6., 8.]).unwrap();
+        let mean = device.upload(&[2], &[1., 2.]).unwrap();
+        let std = device.upload(&[2], &[2., 4.]).unwrap();
+        let chain = PointwiseChain::new(
+            3,
+            vec![
+                PointwiseStep::named("subtract", Some(1)).unwrap(),
+                PointwiseStep::named("divide", Some(2)).unwrap(),
+            ],
+        )
+        .unwrap();
+        let plan = PointwisePlan::new(
+            device.clone(),
+            chain,
+            vec![
+                x.layout().clone(),
+                mean.layout().clone(),
+                std.layout().clone(),
+            ],
+        )
+        .unwrap();
+        for policy in [
+            PointwiseExecution::Sequential,
+            PointwiseExecution::Batched,
+            PointwiseExecution::Fused,
+        ] {
+            assert_eq!(
+                plan.run(&[&x, &mean, &std], policy)
+                    .unwrap()
+                    .snapshot()
+                    .unwrap()
+                    .read()
+                    .unwrap(),
+                vec![0.5, 0.5, 2.5, 1.5]
+            );
+            let zero = device.upload(&[2], &[0., -0.]).unwrap();
+            assert!(plan
+                .run(&[&x, &mean, &zero], policy)
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read()
+                .is_err());
+        }
+        let vjp = vjp::PointwiseVjpPlan::new(plan).unwrap();
+        let seed = device.upload(&[2, 2], &[1.; 4]).unwrap();
+        let gradients = vjp.run(&[&x, &mean, &std], &seed).unwrap();
+        for (gradient, expected) in gradients.iter().zip([
+            vec![0.5, 0.25, 0.5, 0.25],
+            vec![-1., -0.5],
+            vec![-1.5, -0.5],
+        ]) {
+            assert_eq!(gradient.snapshot().unwrap().read().unwrap(), expected);
+        }
+        let zero_std = device.upload(&[2], &[0., 0.]).unwrap();
+        let zero_seed = device.upload(&[2, 2], &[0.; 4]).unwrap();
+        for gradient in vjp.run(&[&x, &mean, &zero_std], &zero_seed).unwrap() {
+            assert!(gradient.snapshot().unwrap().read().is_err());
+        }
+    }
+
     #[test]
     fn generated_fusion_validates_at_program_bounds() {
         for count in [1, 3, 16] {

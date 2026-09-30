@@ -22,6 +22,8 @@ impl PointwiseStep {
             "identity" => ElementwiseOp::Identity,
             "add" => ElementwiseOp::Add,
             "multiply" => ElementwiseOp::Multiply,
+            "subtract" => ElementwiseOp::Subtract,
+            "divide" => ElementwiseOp::Divide,
             "relu" => ElementwiseOp::Relu,
             "gelu" => ElementwiseOp::Gelu,
             _ => return Err(PointwiseError::Operation),
@@ -52,7 +54,7 @@ impl std::str::FromStr for PointwiseExecution {
 
 #[derive(Debug, Error)]
 pub enum PointwiseError {
-    #[error("pointwise operation must be identity, add, multiply, relu or gelu")]
+    #[error("pointwise operation must be identity, add, multiply, subtract, divide, relu or gelu")]
     Operation,
     #[error("pointwise execution must be sequential, batched or fused")]
     Execution,
@@ -268,6 +270,8 @@ mod tests {
             ("identity", ElementwiseOp::Identity),
             ("add", ElementwiseOp::Add),
             ("multiply", ElementwiseOp::Multiply),
+            ("subtract", ElementwiseOp::Subtract),
+            ("divide", ElementwiseOp::Divide),
             ("relu", ElementwiseOp::Relu),
             ("gelu", ElementwiseOp::Gelu),
         ] {
@@ -343,6 +347,26 @@ mod tests {
         assert!(chain.vjp_scalar(&[f32::MAX, 2.], 0.).is_err());
         assert_eq!(chain.vjp_scalar(&[0., 2.], f32::MAX).unwrap(), vec![0., 0.]);
         assert!(chain.vjp_scalar(&[1., 2.], f32::MAX).is_err());
+    }
+
+    #[test]
+    fn normalization_vjp_checks_invalid_forward_even_with_zero_seed() {
+        let chain = PointwiseChain::new(
+            3,
+            vec![
+                PointwiseStep::named("subtract", Some(1)).unwrap(),
+                PointwiseStep::named("divide", Some(2)).unwrap(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            chain.vjp_scalar(&[6., 2., 4.], 2.).unwrap(),
+            vec![0.5, -0.5, -0.5]
+        );
+        assert!(chain.vjp_scalar(&[1., 1., 0.], 0.).is_err());
+        assert!(chain
+            .vjp_scalar(&[f32::MAX, -f32::MAX, f32::MAX], 0.)
+            .is_err());
     }
 
     #[test]

@@ -38,11 +38,16 @@ not the original values. Run them against any matching input collection.
 ## Operations and Scheduling
 
 Each step is `(operation, rhs)`. Operations are `identity`, `add`, `multiply`,
-`relu`, and `gelu`. Unary steps require `None`/`null`; binary steps require an
+`subtract`, `divide`, `relu`, and `gelu`. Unary steps require `None`/`null`; binary steps require an
 original input slot. **Slot zero means the original first input, not the current
 intermediate.** The running left operand starts at input zero. All declared
 inputs must be used, with 1..16 inputs and 1..256 steps; actual device binding
 limits can be stricter and fail explicitly. No silent fallback occurs.
+
+Subtract/divide use the same checked CPU forward/VJP contract. Division by either
+signed zero is invalid, including a zero VJP seed; extreme finite quotients do not
+rely on a representable reciprocal. Graph plans containing these operations
+export inference-plan v4, without changing existing v2/v3 graph records.
 
 All inputs broadcast into the first input's fixed logical domain. This includes
 scalar, empty, offset and strided layouts; a program cannot change that domain

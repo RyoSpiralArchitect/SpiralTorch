@@ -598,6 +598,14 @@ mod tests {
                     rhs: Some(2),
                 },
                 PointwiseStep {
+                    op: ElementwiseOp::Subtract,
+                    rhs: Some(1),
+                },
+                PointwiseStep {
+                    op: ElementwiseOp::Divide,
+                    rhs: Some(2),
+                },
+                PointwiseStep {
                     op: ElementwiseOp::Relu,
                     rhs: None,
                 },

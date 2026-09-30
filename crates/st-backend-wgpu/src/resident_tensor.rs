@@ -63,6 +63,7 @@ struct Kernels {
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
     checked_import: std::sync::OnceLock<checked_import::CheckedImportKernels>,
+    guard_capture: std::sync::OnceLock<guard_capture::GuardCapture>,
     convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
     depthwise_vjp: std::sync::OnceLock<convolution::vjp::DepthwiseVjpKernels>,
     dense_convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
@@ -85,11 +86,21 @@ pub(crate) fn substitute_ops(source: String) -> String {
     // Standalone kernels own one flag word. Graph pointwise kernels substitute
     // their metadata-selected stage slot before this shared expansion.
     let mut source = source
+        .replace(
+            "CHECKED_ROUNDED_ADD",
+            include_str!("shaders/rounded_add.wgsl"),
+        )
+        .replace(
+            "CHECKED_DIVIDE",
+            include_str!("shaders/checked_divide.wgsl"),
+        )
         .replace("CHECKED_FLAG_INDEX", "0u")
         .replace("INVALID_TENSOR_FLAG", &format!("{INVALID_TENSOR_FLAG}u"));
     for (name, op) in [
         ("OP_ADD", ElementwiseOp::Add),
         ("OP_MULTIPLY", ElementwiseOp::Multiply),
+        ("OP_SUBTRACT", ElementwiseOp::Subtract),
+        ("OP_DIVIDE", ElementwiseOp::Divide),
         ("OP_RELU", ElementwiseOp::Relu),
         ("OP_GELU", ElementwiseOp::Gelu),
     ] {
@@ -207,6 +218,7 @@ impl TensorDevice {
             classification: std::sync::OnceLock::new(),
             normalization: std::sync::OnceLock::new(),
             checked_import: std::sync::OnceLock::new(),
+            guard_capture: std::sync::OnceLock::new(),
             convolution: std::sync::OnceLock::new(),
             depthwise_vjp: std::sync::OnceLock::new(),
             dense_convolution: std::sync::OnceLock::new(),
@@ -298,8 +310,28 @@ impl TensorDevice {
         shape: &[usize],
         values: wgpu::Buffer,
     ) -> Result<ResidentTensor, TensorError> {
+        let context = self.runtime().context();
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let output = self.encode_checked_values(source, shape, values, None, &mut encoder)?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(output)
+    }
+
+    /// Import a stage in an existing encoder. A later crop or finite value must
+    /// not erase a failure elsewhere in the upstream tensor.
+    pub(crate) fn encode_checked_values(
+        &self,
+        source: &WgpuContext,
+        shape: &[usize],
+        values: wgpu::Buffer,
+        upstream: Option<&ResidentTensor>,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<ResidentTensor, TensorError> {
         if !self.runtime().context().shares_handles_with(source) {
             return Err(TensorError::DeviceMismatch);
+        }
+        if let Some(upstream) = upstream {
+            upstream.require_context(source)?;
         }
         let layout = NdLayout::contiguous(shape)?;
         let context = self.runtime().context();
@@ -319,10 +351,22 @@ impl TensorDevice {
             &[0u32],
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         )?;
+        if let Some(upstream) = upstream {
+            let capture = self
+                .0
+                .guard_capture
+                .get_or_init(|| guard_capture::GuardCapture::new(context.device()));
+            let binding = capture.bind(context.device(), upstream.flags(), &flags);
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("tensor.checked_import.inherit"),
+                timestamp_writes: None,
+            });
+            capture.encode_in_pass(&mut pass, &binding);
+        }
         self.0
             .checked_import
             .get_or_init(|| checked_import::CheckedImportKernels::new(context.device()))
-            .check(context, &values, &flags, layout.len())?;
+            .encode(context, encoder, &values, &flags, layout.len())?;
         Ok(ResidentTensor {
             storage: Shared::new(Storage {
                 values,

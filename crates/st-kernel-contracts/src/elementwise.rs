@@ -9,11 +9,16 @@ pub enum ElementwiseOp {
     Multiply = 2,
     Relu = 3,
     Gelu = 4,
+    Subtract = 5,
+    Divide = 6,
 }
 
 impl ElementwiseOp {
     pub fn is_binary(self) -> bool {
-        matches!(self, Self::Add | Self::Multiply)
+        matches!(
+            self,
+            Self::Add | Self::Multiply | Self::Subtract | Self::Divide
+        )
     }
 
     /// None means a non-finite input, intermediate or output. GELU uses the
@@ -26,6 +31,13 @@ impl ElementwiseOp {
             Self::Identity => a,
             Self::Add => a + b,
             Self::Multiply => a * b,
+            Self::Subtract => a - b,
+            Self::Divide => {
+                if b == 0.0 {
+                    return None;
+                }
+                a / b
+            }
             Self::Relu => a.max(0.0),
             Self::Gelu => {
                 let square = a * a;
@@ -50,6 +62,11 @@ impl ElementwiseOp {
             Self::Identity => (1., 0.),
             Self::Add => (1., 1.),
             Self::Multiply => (b, a),
+            Self::Subtract => (1., -1.),
+            Self::Divide => {
+                let value = Self::Divide.apply(a, b)?;
+                (Self::Divide.apply(1., b)?, Self::Divide.apply(-value, b)?)
+            }
             Self::Relu => (if a > 0. { 1. } else { 0. }, 0.),
             Self::Gelu => (gelu_derivative(a)?, 0.),
         })
@@ -75,6 +92,33 @@ pub fn gelu_derivative(x: f32) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subtract_and_divide_check_forward_and_local_partials() {
+        assert_eq!(ElementwiseOp::Subtract.apply(6., 2.), Some(4.));
+        assert_eq!(ElementwiseOp::Subtract.apply(f32::MAX, -f32::MAX), None);
+        assert_eq!(ElementwiseOp::Divide.apply(4., 2.), Some(2.));
+        for zero in [0., -0.] {
+            assert_eq!(ElementwiseOp::Divide.apply(0., zero), None);
+            assert_eq!(ElementwiseOp::Divide.partials(0., zero), None);
+        }
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(ElementwiseOp::Subtract.apply(1., invalid), None);
+            assert_eq!(ElementwiseOp::Divide.apply(invalid, 1.), None);
+            assert_eq!(ElementwiseOp::Divide.apply(1., invalid), None);
+        }
+        assert_eq!(ElementwiseOp::Divide.apply(f32::MAX, 0.5), None);
+        assert_eq!(ElementwiseOp::Subtract.partials(4., 2.), Some((1., -1.)));
+        assert_eq!(ElementwiseOp::Divide.partials(4., 2.), Some((0.5, -1.)));
+        // Squaring the denominator here would overflow even though both partials exist.
+        let (lhs, rhs) = ElementwiseOp::Divide.partials(1e20, 1e20).unwrap();
+        assert_eq!(lhs, 1e-20);
+        assert_eq!(rhs, -1e-20);
+        assert_eq!(
+            ElementwiseOp::Divide.apply(-0., 2.).unwrap().to_bits(),
+            (-0f32).to_bits()
+        );
+    }
 
     #[test]
     fn finite_policy_includes_intermediates_and_signed_zero_copy() {

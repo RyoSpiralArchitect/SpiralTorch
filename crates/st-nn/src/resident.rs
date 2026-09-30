@@ -33,7 +33,8 @@ pub(crate) use module_forward::{
 pub use module_forward::{ResidentForwardCache, ResidentForwardStats};
 pub use module_update::{ModuleOptimizerStatePolicy, ResidentParameterBinding};
 pub use portable::{
-    DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, GRAPH_PLAN_SCHEMA_V3, INFERENCE_PLAN_SCHEMA,
+    DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, GRAPH_PLAN_SCHEMA_V3, GRAPH_PLAN_SCHEMA_V4,
+    INFERENCE_PLAN_SCHEMA,
 };
 
 /// Modules must emit operations equivalent to their ordinary forward semantics.
