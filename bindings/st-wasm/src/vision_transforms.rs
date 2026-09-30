@@ -1,10 +1,11 @@
-//! Browser-facing geometry transforms backed by the same st-vision pipeline as native Rust.
+//! Browser-facing resident image transforms using the native Rust contracts.
 use crate::wgpu_tensor::WasmWgpuTensor;
 use js_sys::Float32Array;
 use st_backend_wgpu::resident_tensor::TensorDevice;
 use st_backend_wgpu::transform::TransformDispatcher;
 use st_vision::{
-    CenterCrop, ImageTensor, RandomHorizontalFlip, Resize, TransformOperation, TransformPipeline,
+    CenterCrop, ImageTensor, Normalize, RandomHorizontalFlip, Resize, TransformOperation,
+    TransformPipeline,
 };
 use wasm_bindgen::prelude::*;
 
@@ -43,12 +44,7 @@ impl WasmVisionTransformPipeline {
             "device_type": format!("{:?}", info.device_type),
         })
         .to_string();
-        let dispatcher = TransformDispatcher::with_gpu(
-            runtime.context().shared_device(),
-            runtime.context().shared_queue(),
-            "embedded-browser-shaders",
-        )
-        .map_err(error)?;
+        let dispatcher = TransformDispatcher::from_runtime(&runtime).map_err(error)?;
         Ok(Self {
             inner: TransformPipeline::with_seed(u64::from(seed)).with_gpu_dispatcher(dispatcher),
             gpu: true,
@@ -61,6 +57,20 @@ impl WasmVisionTransformPipeline {
     pub fn add_resize(&mut self, height: u32, width: u32) -> Result<(), JsValue> {
         self.inner.add(TransformOperation::Resize(
             Resize::new(height as usize, width as usize).map_err(error)?,
+        ));
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = addNormalize)]
+    pub fn add_normalize(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Float32Array")] means: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Float32Array")] stds: JsValue,
+    ) -> Result<(), JsValue> {
+        let means = crate::wgpu_tensor::values(means)?.to_vec();
+        let stds = crate::wgpu_tensor::values(stds)?.to_vec();
+        self.inner.add(TransformOperation::Normalize(
+            Normalize::new(means, stds).map_err(error)?,
         ));
         Ok(())
     }
@@ -94,7 +104,12 @@ impl WasmVisionTransformPipeline {
             .map_err(error)?;
         if self.gpu {
             self.inner
-                .apply_geometry_async(&mut image)
+                .apply_gpu_async(
+                    &mut image,
+                    self.tensor_device
+                        .as_ref()
+                        .ok_or_else(|| error("missing tensor device"))?,
+                )
                 .await
                 .map_err(error)?;
         } else {
@@ -120,10 +135,7 @@ impl WasmVisionTransformPipeline {
         let image = ImageTensor::new(channels as usize, height as usize, width as usize, data)
             .map_err(error)?;
         Ok(WasmWgpuTensor {
-            inner: self
-                .inner
-                .apply_geometry_resident(&image, device)
-                .map_err(error)?,
+            inner: self.inner.apply_resident(&image, device).map_err(error)?,
         })
     }
 
@@ -151,7 +163,20 @@ impl WasmVisionTransformPipeline {
         Ok(WasmWgpuTensor {
             inner: self
                 .inner
-                .apply_packed_geometry_batch_resident(&shape, &data, device)
+                .apply_packed_resident_batch(&shape, &data, device)
+                .map_err(error)?,
+        })
+    }
+
+    #[wasm_bindgen(js_name = applyFromResident)]
+    pub fn apply_from_resident(
+        &mut self,
+        input: &WasmWgpuTensor,
+    ) -> Result<WasmWgpuTensor, JsValue> {
+        Ok(WasmWgpuTensor {
+            inner: self
+                .inner
+                .apply_from_resident(&input.inner)
                 .map_err(error)?,
         })
     }

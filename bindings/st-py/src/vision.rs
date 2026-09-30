@@ -578,7 +578,7 @@ impl PyTransformPipeline {
         Ok(PyImageTensor::from_inner(inner))
     }
 
-    /// Keep geometry-only output on the provided WGPU tensor device.
+    /// Keep normalized/geometry output on the provided WGPU tensor device.
     #[cfg(feature = "wgpu")]
     fn apply_resident(
         &mut self,
@@ -587,10 +587,7 @@ impl PyTransformPipeline {
         device: &crate::wgpu_tensor::PyWgpuTensorDevice,
     ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
         let output = py
-            .detach(|| {
-                self.inner
-                    .apply_geometry_resident(&image.inner, &device.inner)
-            })
+            .detach(|| self.inner.apply_resident(&image.inner, &device.inner))
             .map_err(tensor_err_to_py)?;
         Ok(crate::wgpu_tensor::PyWgpuTensor { inner: output })
     }
@@ -608,10 +605,7 @@ impl PyTransformPipeline {
             .map(|image| image.inner)
             .collect::<Vec<_>>();
         let output = py
-            .detach(|| {
-                self.inner
-                    .apply_geometry_batch_resident(&images, &device.inner)
-            })
+            .detach(|| self.inner.apply_resident_batch(&images, &device.inner))
             .map_err(tensor_err_to_py)?;
         Ok(crate::wgpu_tensor::PyWgpuTensor { inner: output })
     }
@@ -635,6 +629,28 @@ impl PyTransformPipeline {
     ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "resident vision requires a wheel built with the 'wgpu' feature",
+        ))
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn apply_from_resident(
+        &mut self,
+        py: Python<'_>,
+        input: &crate::wgpu_tensor::PyWgpuTensor,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        let inner = py
+            .detach(|| self.inner.apply_from_resident(&input.inner))
+            .map_err(tensor_err_to_py)?;
+        Ok(crate::wgpu_tensor::PyWgpuTensor { inner })
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    fn apply_from_resident(
+        &mut self,
+        _input: &crate::wgpu_tensor::PyWgpuTensor,
+    ) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "resident vision requires the 'wgpu' feature",
         ))
     }
 
@@ -954,8 +970,97 @@ impl PyVisionDataLoader {
             .map_err(tensor_err_to_py)
     }
 
+    #[cfg(feature = "wgpu")]
+    fn next_resident_batch(
+        &mut self,
+        py: Python<'_>,
+        device: &crate::wgpu_tensor::PyWgpuTensorDevice,
+    ) -> PyResult<Option<PyResidentVisionBatch>> {
+        py.detach(|| self.inner.next_resident_batch(&device.inner))
+            .map(|batch| batch.map(|inner| PyResidentVisionBatch { inner }))
+            .map_err(tensor_err_to_py)
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    fn next_resident_batch(
+        &mut self,
+        _device: &crate::wgpu_tensor::PyWgpuTensorDevice,
+    ) -> PyResult<()> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "resident vision requires the 'wgpu' feature",
+        ))
+    }
+
     fn __repr__(&self) -> String {
         "VisionDataLoader(...)".to_string()
+    }
+}
+
+#[cfg(feature = "wgpu")]
+#[pyclass(
+    module = "spiraltorch.vision",
+    name = "ResidentVisionBatch",
+    from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyResidentVisionBatch {
+    inner: st_vision::ResidentVisionBatch,
+}
+
+#[cfg(feature = "wgpu")]
+#[pymethods]
+impl PyResidentVisionBatch {
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+    fn images(&self) -> crate::wgpu_tensor::PyWgpuTensor {
+        crate::wgpu_tensor::PyWgpuTensor {
+            inner: self.inner.images.clone(),
+        }
+    }
+    fn targets(&self) -> Vec<Option<PyTensor>> {
+        self.inner
+            .targets
+            .iter()
+            .map(|target| target.clone().map(PyTensor::from_tensor))
+            .collect()
+    }
+    fn labels(&self) -> Vec<Option<String>> {
+        self.inner.labels.clone()
+    }
+    fn boxes(&self) -> Vec<Option<Vec<(f32, f32, f32, f32)>>> {
+        self.inner
+            .boxes
+            .iter()
+            .map(|boxes| boxes.as_deref().map(box_arrays_to_tuples))
+            .collect()
+    }
+    fn masks(&self) -> Vec<Option<Vec<PyImageTensor>>> {
+        self.inner
+            .masks
+            .iter()
+            .map(|masks| {
+                masks.as_ref().map(|masks| {
+                    masks
+                        .iter()
+                        .cloned()
+                        .map(PyImageTensor::from_inner)
+                        .collect()
+                })
+            })
+            .collect()
+    }
+    fn upload_targets(&self, py: Python<'_>) -> PyResult<crate::wgpu_tensor::PyWgpuTensor> {
+        let inner = py
+            .detach(|| self.inner.upload_targets())
+            .map_err(tensor_err_to_py)?;
+        Ok(crate::wgpu_tensor::PyWgpuTensor { inner })
     }
 }
 
@@ -2652,6 +2757,8 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     parent.add_class::<PyVisionSample>()?;
     parent.add_class::<PyTensorVisionDataset>()?;
     parent.add_class::<PyVisionBatch>()?;
+    #[cfg(feature = "wgpu")]
+    parent.add_class::<PyResidentVisionBatch>()?;
     parent.add_class::<PyVisionDataLoader>()?;
     parent.add_class::<PyVisionModel>()?;
     parent.add_class::<PyChronoSnapshot>()?;

@@ -15,7 +15,7 @@ Current scope of the vision execution path:
 | ConvNeXt plain-SGD model checkpoint/resume | Public API, explicit host handoff | Not exposed | Rust WASM resume fixture and portable JSON; no model binding |
 | Real ConvNeXt classifier common inference entry | `ConvNeXtClassifier`, `create_classification_model` | Ordinary factory with `nn`; inference only | Rust WASM common-entry fixture; no JS model binding |
 | Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Not exposed | Shared Rust WASM learning/resume fixture; no JS model binding |
-| Resident image normalization and DataLoader handoff | Open | Open | Open |
+| Resident image normalization and DataLoader handoff | Public API, homogeneous NCHW | Public API, same Rust loader | Public normalization/batch/continuation API; caller-supplied batches, no JS DataLoader |
 | Matched real-image training quality and throughput | Open | Open | Open |
 
 The compiled ConvNeXt training path now connects model-owned gradients to
@@ -33,19 +33,29 @@ Python's `nn` feature enables this same Rust factory; the WASM fixture exercises
 the same Rust model, not a JavaScript model binding. See
 [the classifier contract result](../benchmarks/results/2026-10-01-convnext-classifier-contract.md).
 
+The [resident input path](resident_vision_input.md) now connects Normalize,
+geometry and Rust/Python DataLoader batches to the existing classifier on one
+device, without intermediate image readbacks. Browser clients expose the same
+Rust transforms and accept caller-supplied batches. A shared native/browser
+fixture checks four normalized-input classifier updates and all-weight rejection
+of invalid normalization. This remains synthetic correctness evidence, not
+real-image quality or a throughput claim. Resident submission advances input
+cursor/RNG before deferred GPU validity is observed; model checkpoints still do
+not capture that input state. See the
+[input contract result](../benchmarks/results/2026-10-01-resident-vision-input/README.md).
+
 ### Next Rails And Exit Gates
 
-1. **Resident real-image input.** Connect batching and Normalize to the existing
-   geometry/classifier/loss/update path. Preserve seed/retry semantics and avoid
-   hidden intermediate readbacks. `VisionBatch::stack()` remains a host matrix;
-   the resident geometry API still rejects non-geometry transforms.
-2. **Thin training clients.** Expose the Rust-owned classifier, explicit
+1. **Thin training clients.** Expose the Rust-owned classifier, explicit
    checkpoint mapping, and restart to Python and JavaScript without duplicating
-   training rules or implying that a submitted update has been accepted.
-3. **Matched real-data evidence.** Check numerical parity against the same
+   training rules or implying that a submitted update has been accepted. Keep
+   model snapshots distinct from data cursor, augmentation RNG and trainer state.
+2. **Matched real-data evidence.** Check numerical parity against the same
    architecture/weights/data/loss in PyTorch, then measure held-out quality,
    transfer-inclusive throughput, memory, and restart equivalence. Synthetic
-   loss decrease and kernel timings are not substitutes for this gate.
+   loss decrease and kernel timings are not substitutes for this gate. Start
+   the bounded real-image comparison alongside the thin client work rather than
+   waiting for more model families or a model hub.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

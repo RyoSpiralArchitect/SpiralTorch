@@ -93,9 +93,9 @@ pub fn audit_cpu_transforms() -> Vec<TransformAuditEntry> {
         TransformAuditEntry {
             name: "Normalize",
             category: TransformCategory::Normalisation,
-            gpu_candidate: false,
-            gpu_available: false,
-            notes: "Stateless per-channel statistics are cheap on CPU; GPU path optional.",
+            gpu_candidate: true,
+            gpu_available: true,
+            notes: "Resident image pipelines use checked fused subtraction/division; ordinary host apply retains the CPU path.",
         },
         TransformAuditEntry {
             name: "Resize",
@@ -211,7 +211,7 @@ mod tests {
                 .copied(),
             Some(1)
         );
-        assert_eq!(summary.gpu_supported, 1);
+        assert_eq!(summary.gpu_supported, 2);
         assert_eq!(summary.gpu_candidates_missing, 0);
         assert_eq!(summary.unknown_operations, 0);
     }
@@ -239,7 +239,7 @@ mod tests {
                 .copied(),
             Some(1)
         );
-        assert_eq!(summary.gpu_supported, 0);
+        assert_eq!(summary.gpu_supported, 1);
         assert_eq!(summary.gpu_candidates_missing, 0);
     }
 }

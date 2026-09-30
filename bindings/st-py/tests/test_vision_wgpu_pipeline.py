@@ -4,6 +4,67 @@ import spiraltorch as st
 
 
 class VisionWgpuPipelineTests(unittest.TestCase):
+    def test_normalized_resident_loader_and_continuation(self):
+        cpu = st.TransformPipeline(seed=271)
+        gpu = st.TransformPipeline(seed=271)
+        for pipeline in (cpu, gpu):
+            pipeline.add_normalize([0.25, 0.5], [0.5, 2.0])
+            pipeline.add_resize(8, 10)
+            pipeline.add_horizontal_flip(0.5)
+            pipeline.add_center_crop(6, 6)
+            pipeline.add_normalize([0.125], [0.75])
+        try:
+            gpu.enable_wgpu()
+            device = st.WgpuTensorDevice.create()
+        except (RuntimeError, NotImplementedError) as exc:
+            if "adapter" in str(exc).lower() or "wgpu" in str(exc).lower():
+                self.skipTest(str(exc))
+            raise
+        dataset = st.TensorVisionDataset("CIFAR10")
+        for n in range(3):
+            image = st.ImageTensor(2, 9, 11, [((i * 31 + n * 17) % 257) / 256 for i in range(198)])
+            dataset.push(image, target=st.Tensor(1, 1, [float(n)]), label=str(n))
+        host = dataset.dataloader(2, seed=19, pipeline=cpu)
+        resident = dataset.dataloader(2, seed=19, pipeline=gpu)
+        self.assertIs(st.vision.ResidentVisionBatch, st.ResidentVisionBatch)
+        for count in (2, 1):
+            reference = host.next_batch()
+            batch = resident.next_resident_batch(device)
+            self.assertIsInstance(batch, st.ResidentVisionBatch)
+            self.assertEqual(len(batch), count)
+            self.assertEqual(batch.images().shape, (count, 2, 6, 6))
+            self.assertEqual(batch.labels(), reference.labels())
+            expected = [value for image in reference.images() for value in image.flatten()]
+            actual = batch.images().snapshot().read_values()
+            for a, b in zip(actual, expected):
+                self.assertAlmostEqual(a, b, delta=1e-5)
+            self.assertEqual(batch.upload_targets().shape, (count, 1))
+        self.assertIsNone(resident.next_resident_batch(device))
+        followup = st.TransformPipeline(seed=1)
+        followup.add_normalize([0.5], [0.25])
+        followup.enable_wgpu()
+        data = device.upload([1, 1, 2, 2], [0.0, 0.25, 0.5, 1.0])
+        self.assertEqual(followup.apply_from_resident(data).snapshot().read_values(), [-2.0, -1.0, 0.0, 2.0])
+
+    def test_normalization_contract_and_inherited_guard(self):
+        for bad in (float("nan"), float("inf"), -float("inf"), 0.0, -1.0):
+            with self.assertRaises(Exception):
+                st.TransformPipeline().add_normalize([0.0], [bad])
+        pipeline = st.TransformPipeline(seed=2)
+        pipeline.add_normalize([0.0], [0.5])
+        pipeline.add_center_crop(1, 1)
+        try:
+            pipeline.enable_wgpu()
+            device = st.WgpuTensorDevice.create()
+        except (RuntimeError, NotImplementedError) as exc:
+            if "adapter" in str(exc).lower() or "wgpu" in str(exc).lower():
+                self.skipTest(str(exc))
+            raise
+        data = [3.4028234663852886e38] + [1.0] * 8
+        output = pipeline.apply_resident(st.ImageTensor(1, 3, 3, data), device)
+        with self.assertRaisesRegex(Exception, "non-finite"):
+            output.snapshot().read_values()
+
     def test_opt_in_geometry_matches_cpu_and_can_be_disabled(self):
         cpu = st.TransformPipeline(seed=17)
         gpu = st.TransformPipeline(seed=17)

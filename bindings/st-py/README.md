@@ -687,9 +687,11 @@ value:
   `vision.TransformPipeline`: resize, center-crop, deterministic horizontal
   flip, normalize, audit GPU transform coverage, and inspect canonical
   dataset/model catalogs from Python. On WGPU-enabled native builds,
-  `pipeline.enable_wgpu()` explicitly selects the resident resize/crop/flip
-  sequence; `pipeline.disable_wgpu()` restores CPU preprocessing. No GPU
-  dispatcher is attached by default.
+  `pipeline.enable_wgpu()` attaches the GPU dispatcher; no dispatcher is attached
+  by default. `apply_resident_batch` and `VisionDataLoader.next_resident_batch`
+  keep Normalize/resize/crop/flip on the GPU, while ordinary `apply` still returns
+  a host image. See [Resident Vision Input](../../docs/resident_vision_input.md)
+  for checked statistics, explicit target upload and failure/retry boundaries.
 - Vision mini-pipelines via `vision.TensorVisionDataset`,
   `vision.VisionDataLoader`, and `vision.VisionModel`: build small in-memory
   batches, apply Rust transforms during loading, stack image batches, and run

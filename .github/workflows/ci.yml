@@ -279,6 +279,7 @@ jobs:
           cargo test --locked --release -p st-vision --features wgpu --lib resident_convnext_learning_matches_cpu_and_preserves_ownership -- --test-threads=1
           cargo test --locked --release -p st-vision --features wgpu --lib resident_convnext_checkpoint_resumes_with_fresh_identity -- --test-threads=1
           cargo test --locked --release -p st-vision --features wgpu --lib resident_classifier_learning_checkpoint_and_common_entry -- --test-threads=1
+          cargo test --locked --release -p st-vision --features wgpu --lib resident_input::tests -- --test-threads=1
       - name: neural layers and losses with WGPU enabled
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"

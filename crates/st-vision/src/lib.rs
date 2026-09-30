@@ -101,6 +101,12 @@ use st_backend_wgpu::{
 };
 
 pub mod datasets;
+#[cfg(test)]
+mod input_tests;
+#[cfg(feature = "wgpu")]
+mod resident_input;
+#[cfg(feature = "wgpu")]
+pub use resident_input::ResidentVisionBatch;
 #[cfg(feature = "nerf")]
 pub mod nerf;
 mod tensor_contract;
@@ -3396,34 +3402,51 @@ impl<D: VisionDataset> DataLoader<D> {
     }
 
     pub fn next_batch(&mut self) -> PureResult<Option<VisionBatch>> {
+        let Some((end, mut batch)) = self.pending_batch()? else {
+            return Ok(None);
+        };
+        let mut candidate = self.pipeline.clone();
+        if let Some(pipeline) = &mut candidate {
+            for image in &mut batch.images {
+                pipeline.apply(image)?;
+            }
+        }
+        self.pipeline = candidate;
+        self.position = end;
+        Ok(Some(batch))
+    }
+
+    fn pending_batch(&self) -> PureResult<Option<(usize, VisionBatch)>> {
         if self.position >= self.order.len() {
             return Ok(None);
         }
-        let end = min(self.position + self.batch_size, self.order.len());
+        let end = min(
+            self.position.saturating_add(self.batch_size),
+            self.order.len(),
+        );
         let mut images = Vec::with_capacity(end - self.position);
         let mut targets = Vec::with_capacity(end - self.position);
         let mut labels = Vec::with_capacity(end - self.position);
         let mut boxes = Vec::with_capacity(end - self.position);
         let mut masks = Vec::with_capacity(end - self.position);
         for &idx in &self.order[self.position..end] {
-            let mut sample = self.dataset.get(idx)?;
-            if let Some(pipeline) = self.pipeline.as_mut() {
-                pipeline.apply(&mut sample.image)?;
-            }
-            targets.push(sample.target.clone());
-            labels.push(sample.label.clone());
-            boxes.push(sample.boxes.clone());
-            masks.push(sample.masks.clone());
+            let sample = self.dataset.get(idx)?;
+            targets.push(sample.target);
+            labels.push(sample.label);
+            boxes.push(sample.boxes);
+            masks.push(sample.masks);
             images.push(sample.image);
         }
-        self.position = end;
-        Ok(Some(VisionBatch {
-            images,
-            targets,
-            labels,
-            boxes,
-            masks,
-        }))
+        Ok(Some((
+            end,
+            VisionBatch {
+                images,
+                targets,
+                labels,
+                boxes,
+                masks,
+            },
+        )))
     }
 }
 
@@ -3475,6 +3498,8 @@ pub struct TransformPipeline {
     rng: StdRng,
     #[cfg(feature = "wgpu")]
     dispatcher: Option<Arc<TransformDispatcher>>,
+    #[cfg(feature = "wgpu")]
+    normalizers: Vec<Option<st_backend_wgpu::runtime::Shared<resident_input::PreparedNormalize>>>,
 }
 
 impl fmt::Debug for TransformPipeline {
@@ -3501,6 +3526,8 @@ impl TransformPipeline {
             rng: determinism::rng_from_label("st-vision/transform_pipeline"),
             #[cfg(feature = "wgpu")]
             dispatcher: None,
+            #[cfg(feature = "wgpu")]
+            normalizers: Vec::new(),
         }
     }
 
@@ -3510,11 +3537,15 @@ impl TransformPipeline {
             rng: StdRng::seed_from_u64(seed),
             #[cfg(feature = "wgpu")]
             dispatcher: None,
+            #[cfg(feature = "wgpu")]
+            normalizers: Vec::new(),
         }
     }
 
     pub fn add(&mut self, op: TransformOperation) -> &mut Self {
         self.ops.push(op);
+        #[cfg(feature = "wgpu")]
+        self.normalizers.push(None);
         self
     }
 
@@ -3573,6 +3604,16 @@ impl TransformPipeline {
     }
 
     pub fn apply(&mut self, image: &mut ImageTensor) -> PureResult<()> {
+        validate_image_values(image.as_slice())?;
+        let mut candidate = image.clone();
+        let mut pipeline = self.clone();
+        pipeline.apply_inner(&mut candidate)?;
+        *image = candidate;
+        self.rng = pipeline.rng;
+        Ok(())
+    }
+
+    fn apply_inner(&mut self, image: &mut ImageTensor) -> PureResult<()> {
         let mut idx = 0;
         while idx < self.ops.len() {
             let op = self.ops[idx].clone();
@@ -3591,6 +3632,7 @@ impl TransformPipeline {
                             let next_idx =
                                 self.apply_geometry_sequence(idx, image, dispatcher.as_ref())?;
                             if next_idx > idx {
+                                validate_image_values(image.as_slice())?;
                                 idx = next_idx;
                                 continue;
                             }
@@ -3615,6 +3657,7 @@ impl TransformPipeline {
                     idx += 1;
                 }
             }
+            validate_image_values(image.as_slice())?;
         }
         Ok(())
     }
@@ -4143,8 +4186,13 @@ impl Normalize {
                 got: stds.len(),
             });
         }
+        if means.iter().any(|mean| !mean.is_finite()) {
+            return Err(TensorError::InvalidValue {
+                label: "normalize_mean",
+            });
+        }
         for &std in &stds {
-            if std <= 0.0 {
+            if !std.is_finite() || std <= 0.0 {
                 return Err(TensorError::InvalidValue {
                     label: "normalize_std",
                 });
@@ -4157,23 +4205,52 @@ impl Normalize {
         if values.len() == 1 {
             values[0]
         } else {
-            values[channel.min(values.len() - 1)]
+            values[channel]
         }
     }
 
+    fn validate_channels(&self, channels: usize) -> PureResult<()> {
+        if channels == 0 || (self.means.len() != 1 && self.means.len() != channels) {
+            return Err(TensorError::InvalidValue {
+                label: "normalize_channels",
+            });
+        }
+        Ok(())
+    }
+
     pub fn apply(&self, image: &mut ImageTensor) -> PureResult<()> {
+        use st_tensor::ElementwiseOp;
         let channels = image.channels();
+        self.validate_channels(channels)?;
         let spatial = image.height() * image.width();
+        let mut output = Vec::with_capacity(image.as_slice().len());
         for c in 0..channels {
             let mean = Self::channel_value(&self.means, c);
             let std = Self::channel_value(&self.stds, c);
             for idx in 0..spatial {
                 let offset = c * spatial + idx;
-                image.as_mut_slice()[offset] = (image.as_slice()[offset] - mean) / std;
+                let value = ElementwiseOp::Subtract
+                    .apply(image.as_slice()[offset], mean)
+                    .and_then(|centered| ElementwiseOp::Divide.apply(centered, std))
+                    .ok_or(TensorError::InvalidValue {
+                        label: "normalize_arithmetic",
+                    })?;
+                output.push(value);
             }
         }
+        image.data = output;
         Ok(())
     }
+}
+
+fn validate_image_values(values: &[f32]) -> PureResult<()> {
+    if let Some(&value) = values.iter().find(|value| !value.is_finite()) {
+        return Err(TensorError::NonFiniteValue {
+            label: "vision_transform",
+            value,
+        });
+    }
+    Ok(())
 }
 
 /// Bilinear resize matching TorchVision's default interpolation.
