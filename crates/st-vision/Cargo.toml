@@ -67,3 +67,8 @@ required-features = ["nn", "wgpu"]
 name = "convnext_block_vjp_browser"
 crate-type = ["cdylib"]
 required-features = ["nn", "wgpu"]
+
+[[example]]
+name = "convnext_backbone_vjp_browser"
+crate-type = ["cdylib"]
+required-features = ["nn", "wgpu"]

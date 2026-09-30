@@ -21,6 +21,27 @@ use st_nn::resident::{InferenceError, ResidentAutogradStats, ResidentModuleAutog
 
 use crate::models::resnet::conv_output_hw;
 
+#[cfg(feature = "wgpu")]
+fn reshape_parameter_gradients(
+    module: &impl Module,
+    gradients: &[ResidentTensor],
+) -> Result<Vec<ResidentTensor>, InferenceError> {
+    let mut shapes = Vec::new();
+    module.visit_parameters(&mut |parameter| {
+        let (rows, cols) = parameter.value().shape();
+        shapes.push([rows, cols]);
+        Ok(())
+    })?;
+    if shapes.len() != gradients.len() {
+        return Err(InferenceError::Shape(gradients.len()));
+    }
+    gradients
+        .iter()
+        .zip(shapes)
+        .map(|(gradient, shape)| Ok(gradient.reshape(&shape)?))
+        .collect()
+}
+
 fn conv_to_tokens(input: &Tensor, channels: usize, hw: (usize, usize)) -> PureResult<Tensor> {
     let (batch, cols) = input.shape();
     let expected = channels * hw.0 * hw.1;
@@ -102,6 +123,26 @@ impl Default for ConvNeXtConfig {
 pub struct ConvNeXtBlockVjp {
     input_gradient: ResidentTensor,
     parameter_gradients: Vec<ResidentTensor>,
+}
+
+/// Resident backbone gradients in the same parameter order as `Module`.
+/// No optimizer update or host-gradient accumulation is implicit.
+#[cfg(feature = "wgpu")]
+#[derive(Clone, Debug)]
+pub struct ConvNeXtBackboneVjp {
+    input_gradient: ResidentTensor,
+    parameter_gradients: Vec<ResidentTensor>,
+}
+
+#[cfg(feature = "wgpu")]
+impl ConvNeXtBackboneVjp {
+    pub fn input_gradient(&self) -> &ResidentTensor {
+        &self.input_gradient
+    }
+
+    pub fn parameter_gradients(&self) -> &[ResidentTensor] {
+        &self.parameter_gradients
+    }
 }
 
 #[cfg(feature = "wgpu")]
@@ -396,6 +437,49 @@ impl ConvNeXtStage {
         };
         Ok((Self { blocks, downsample }, next_hw, next_channels))
     }
+
+    #[cfg(feature = "wgpu")]
+    fn vjp_resident(
+        &self,
+        input: &ResidentTensor,
+        upstream: &ResidentTensor,
+    ) -> Result<(ResidentTensor, Vec<ResidentTensor>), InferenceError> {
+        let mut block_inputs = Vec::with_capacity(self.blocks.len());
+        let mut activ = input.clone();
+        for block in &self.blocks {
+            block_inputs.push(activ.clone());
+            activ = block.forward_resident(&activ)?;
+        }
+        let (mut gradient, down_gradients) = if let Some(down) = &self.downsample {
+            let vjp = down.vjp_resident(&activ, upstream)?;
+            (
+                vjp[0].clone(),
+                reshape_parameter_gradients(down, &vjp[1..])?,
+            )
+        } else {
+            if activ.layout().shape() != upstream.layout().shape() {
+                return Err(
+                    st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                        "stage cotangent shape mismatch",
+                    )
+                    .into(),
+                );
+            }
+            (upstream.clone(), Vec::new())
+        };
+        let mut block_gradients = Vec::with_capacity(self.blocks.len());
+        for (block, block_input) in self.blocks.iter().rev().zip(block_inputs.iter().rev()) {
+            let vjp = block.vjp_resident(block_input, &gradient)?;
+            gradient = vjp.input_gradient().clone();
+            block_gradients.push(vjp.parameter_gradients().to_vec());
+        }
+        let mut parameter_gradients = Vec::new();
+        for gradients in block_gradients.into_iter().rev() {
+            parameter_gradients.extend(gradients);
+        }
+        parameter_gradients.extend(down_gradients);
+        Ok((gradient, parameter_gradients))
+    }
 }
 
 impl Module for ConvNeXtStage {
@@ -502,6 +586,8 @@ pub struct ConvNeXtBackbone {
     final_norm: LayerNorm,
     output_channels: usize,
     output_hw: (usize, usize),
+    #[cfg(feature = "wgpu")]
+    resident_autograd: ResidentModuleAutogradCache,
 }
 
 impl ConvNeXtBackbone {
@@ -579,6 +665,8 @@ impl ConvNeXtBackbone {
             final_norm,
             output_channels: current_channels,
             output_hw: current_hw,
+            #[cfg(feature = "wgpu")]
+            resident_autograd: Default::default(),
         })
     }
 
@@ -592,6 +680,100 @@ impl ConvNeXtBackbone {
 
     pub fn output_shape(&self) -> (usize, (usize, usize)) {
         (self.output_channels, self.output_hw)
+    }
+
+    /// Recompute resident activations and return the exact backbone VJP.
+    /// Gradients stay on the GPU; the caller validates and applies updates.
+    #[cfg(feature = "wgpu")]
+    pub fn vjp_resident(
+        &self,
+        input: &ResidentTensor,
+        cotangent: &ResidentTensor,
+    ) -> Result<ConvNeXtBackboneVjp, InferenceError> {
+        let [batch, _, _, _] = input.layout().shape() else {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "expected NCHW input",
+                )
+                .into(),
+            );
+        };
+        if *batch == 0 {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "empty ConvNeXt batch",
+                )
+                .into(),
+            );
+        }
+        let flattened = self.output_channels * self.output_hw.0 * self.output_hw.1;
+        if cotangent.layout().shape() != [*batch, flattened] {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "backbone cotangent shape mismatch",
+                )
+                .into(),
+            );
+        }
+        let mut stage_inputs = Vec::with_capacity(self.stages.len());
+        let mut activ = self.stem.forward_resident(input)?;
+        for stage in &self.stages {
+            stage_inputs.push(activ.clone());
+            activ = stage.forward_resident(&activ)?;
+        }
+        if activ.layout().shape()
+            != [
+                *batch,
+                self.output_channels,
+                self.output_hw.0,
+                self.output_hw.1,
+            ]
+        {
+            return Err(
+                st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(
+                    "unexpected ConvNeXt stage output",
+                )
+                .into(),
+            );
+        }
+        let features = activ.contiguous()?.reshape(&[*batch, flattened])?;
+        let mut operations = Vec::new();
+        self.final_norm.append_inference_ops(&mut operations)?;
+        let final_vjp = self
+            .resident_autograd
+            .vjp(operations, &features, cotangent)?;
+        let final_gradients =
+            reshape_parameter_gradients(&self.final_norm, final_vjp.parameter_gradients())?;
+        let mut gradient = final_vjp.input_gradient().reshape(&[
+            *batch,
+            self.output_channels,
+            self.output_hw.0,
+            self.output_hw.1,
+        ])?;
+        let mut stage_gradients = Vec::with_capacity(self.stages.len());
+        for (stage, stage_input) in self.stages.iter().rev().zip(stage_inputs.iter().rev()) {
+            let (input_gradient, parameters) = stage.vjp_resident(stage_input, &gradient)?;
+            gradient = input_gradient;
+            stage_gradients.push(parameters);
+        }
+        let stem_vjp = self.stem.vjp_resident(input, &gradient)?;
+        let mut parameter_gradients = reshape_parameter_gradients(&self.stem, &stem_vjp[1..])?;
+        for gradients in stage_gradients.into_iter().rev() {
+            parameter_gradients.extend(gradients);
+        }
+        parameter_gradients.extend(final_gradients);
+        let mut expected_count = 0;
+        self.visit_parameters(&mut |_| {
+            expected_count += 1;
+            Ok(())
+        })?;
+        if parameter_gradients.len() != expected_count {
+            return Err(InferenceError::Shape(parameter_gradients.len()));
+        }
+        Ok(ConvNeXtBackboneVjp {
+            input_gradient: stem_vjp[0].clone(),
+            parameter_gradients,
+        })
     }
 }
 
@@ -653,6 +835,7 @@ impl Module for ConvNeXtBackbone {
             stage.clear_resident_forward_cache();
         }
         self.final_norm.clear_resident_forward_cache();
+        self.resident_autograd.clear();
     }
 
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
@@ -1199,5 +1382,193 @@ mod resident_tests {
                 st_backend_wgpu::resident_tensor::TensorError::ConvolutionShape(_)
             ))
         ));
+    }
+
+    #[test]
+    fn resident_backbone_vjp_matches_host_across_stem_downsample_and_final_norm() {
+        if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let (runtime, _) = ensure_default_runtime_blocking("vision.convnext_backbone_vjp").unwrap();
+        assert_ne!(runtime.adapter_info().device_type, wgpu::DeviceType::Cpu);
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut backbone = ConvNeXtBackbone::new(ConvNeXtConfig {
+            input_channels: 2,
+            input_hw: (8, 8),
+            stage_dims: vec![3, 4],
+            stage_depths: vec![1, 1],
+            patch_size: (2, 2),
+            curvature: -1.0,
+            epsilon: 1e-6,
+        })
+        .unwrap();
+        let host_input = Tensor::from_fn(2, 128, |row, col| {
+            ((row * 41 + col * 17) % 101) as f32 / 101.0 - 0.5
+        })
+        .unwrap();
+        let host_seed = Tensor::from_fn(2, 16, |row, col| {
+            ((row * 13 + col * 7) % 37) as f32 / 37.0 - 0.4
+        })
+        .unwrap();
+        let input = device.upload(&[2, 2, 8, 8], host_input.data()).unwrap();
+        let seed = device.upload(&[2, 16], host_seed.data()).unwrap();
+        let verify = |backbone: &mut ConvNeXtBackbone, input: &ResidentTensor| {
+            let mut before_gradients = Vec::new();
+            backbone
+                .visit_parameters(&mut |parameter| {
+                    before_gradients.push(parameter.gradient().map(|g| g.data().to_vec()));
+                    Ok(())
+                })
+                .unwrap();
+            let actual = backbone.vjp_resident(input, &seed).unwrap();
+            assert_eq!(actual.input_gradient().layout().shape(), &[2, 2, 8, 8]);
+            assert_eq!(actual.parameter_gradients().len(), 22);
+            let input_values = actual.input_gradient().snapshot().unwrap().read().unwrap();
+            let parameter_values: Vec<_> = actual
+                .parameter_gradients()
+                .iter()
+                .map(|gradient| gradient.snapshot().unwrap().read().unwrap())
+                .collect();
+            let mut slot = 0;
+            backbone
+                .visit_parameters(&mut |parameter| {
+                    assert_eq!(
+                        parameter.gradient().map(|g| g.data().to_vec()),
+                        before_gradients[slot]
+                    );
+                    slot += 1;
+                    Ok(())
+                })
+                .unwrap();
+            let expected_input = {
+                let _policy =
+                    push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+                backbone.backward(&host_input, &host_seed).unwrap()
+            };
+            let mut expected_parameters = Vec::new();
+            backbone
+                .visit_parameters(&mut |parameter| {
+                    let (rows, cols) = parameter.value().shape();
+                    assert_eq!(
+                        actual.parameter_gradients()[expected_parameters.len()]
+                            .layout()
+                            .shape(),
+                        &[rows, cols]
+                    );
+                    expected_parameters.push(parameter.gradient().unwrap().data().to_vec());
+                    Ok(())
+                })
+                .unwrap();
+            for (index, (&value, &reference)) in
+                input_values.iter().zip(expected_input.data()).enumerate()
+            {
+                assert!(
+                    (value - reference).abs() <= 1e-2 * (1.0 + reference.abs()),
+                    "backbone input {index}: gpu={value} cpu={reference}"
+                );
+            }
+            for (slot, (values, expected)) in parameter_values
+                .iter()
+                .zip(&expected_parameters)
+                .enumerate()
+            {
+                for (index, (&value, &reference)) in values.iter().zip(expected).enumerate() {
+                    assert!(
+                        (value - reference).abs() <= 1e-2 * (1.0 + reference.abs()),
+                        "backbone parameter {slot} element {index}: gpu={value} cpu={reference}"
+                    );
+                }
+            }
+            (actual, input_values)
+        };
+        let (old, old_values) = verify(&mut backbone, &input);
+        assert_eq!(backbone.resident_autograd.stats().compilations, 1);
+        backbone
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.zero_gradient();
+                Ok(())
+            })
+            .unwrap();
+        verify(&mut backbone, &input);
+        assert_eq!(backbone.resident_autograd.stats().cache_hits, 1);
+
+        let mut transposed = vec![0.0; host_input.data().len()];
+        for batch in 0..2 {
+            for channel in 0..2 {
+                for y in 0..8 {
+                    for x in 0..8 {
+                        transposed[((batch * 2 + channel) * 8 + x) * 8 + y] =
+                            host_input.data()[((batch * 2 + channel) * 8 + y) * 8 + x];
+                    }
+                }
+            }
+        }
+        let strided = device
+            .upload(&[2, 2, 8, 8], &transposed)
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap();
+        assert!(!strided.layout().is_contiguous());
+        backbone
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.zero_gradient();
+                Ok(())
+            })
+            .unwrap();
+        verify(&mut backbone, &strided);
+
+        backbone
+            .visit_parameters_mut(&mut |parameter| {
+                parameter.zero_gradient();
+                if parameter.name().contains("stem::weight")
+                    || parameter.name().contains("downsample::weight")
+                    || parameter.name().contains("fc1::weight")
+                    || parameter.name().contains("final_norm_gamma")
+                {
+                    parameter.value_mut().data_mut()[0] += 0.15;
+                }
+                Ok(())
+            })
+            .unwrap();
+        verify(&mut backbone, &input);
+        assert_eq!(backbone.resident_autograd.stats().compilations, 2);
+        assert_eq!(
+            old.input_gradient().snapshot().unwrap().read().unwrap(),
+            old_values
+        );
+        let empty = device.upload(&[0, 2, 8, 8], &[]).unwrap();
+        assert!(backbone.vjp_resident(&empty, &seed).is_err());
+        let wrong_seed = device.upload(&[1, 16], &[0.0; 16]).unwrap();
+        assert!(backbone.vjp_resident(&input, &wrong_seed).is_err());
+        let invalid = device
+            .upload(
+                &[2, 2, 8, 8],
+                &(0..256)
+                    .map(|index| if index == 0 { f32::MAX } else { 0.0 })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
+            .mul(&device.upload(&[], &[2.0]).unwrap())
+            .unwrap();
+        let poisoned = backbone.vjp_resident(&invalid, &seed).unwrap();
+        assert!(poisoned
+            .input_gradient()
+            .snapshot()
+            .unwrap()
+            .read()
+            .is_err());
+        for gradient in poisoned.parameter_gradients() {
+            assert!(gradient.snapshot().unwrap().read().is_err());
+        }
+        let recovered = backbone.vjp_resident(&input, &seed).unwrap();
+        assert!(recovered
+            .input_gradient()
+            .snapshot()
+            .unwrap()
+            .read()
+            .is_ok());
+        for gradient in recovered.parameter_gradients() {
+            assert!(gradient.snapshot().unwrap().read().is_ok());
+        }
     }
 }

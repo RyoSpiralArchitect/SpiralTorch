@@ -2,6 +2,7 @@
 
 use super::*;
 
+pub(crate) mod dense_vjp;
 pub(crate) mod vjp;
 
 #[repr(C)]
@@ -284,9 +285,23 @@ fn conv2d_preflight(
     padding: (usize, usize),
     dilation: (usize, usize),
 ) -> Result<([usize; 4], Conv2dParams, [u32; 2]), TensorError> {
+    input.require_context(bias.device.runtime().context())?;
+    let result = conv2d_preflight_geometry(input, weights, stride, padding, dilation)?;
+    if bias.layout.shape() != [result.0[1]] {
+        return Err(TensorError::ConvolutionShape("channel or bias mismatch"));
+    }
+    Ok(result)
+}
+
+fn conv2d_preflight_geometry(
+    input: &ResidentTensor,
+    weights: &ResidentTensor,
+    stride: (usize, usize),
+    padding: (usize, usize),
+    dilation: (usize, usize),
+) -> Result<([usize; 4], Conv2dParams, [u32; 2]), TensorError> {
     let context = input.device.runtime().context();
     input.require_context(weights.device.runtime().context())?;
-    input.require_context(bias.device.runtime().context())?;
     let [batch, in_channels, input_h, input_w] = input.layout.shape() else {
         return Err(TensorError::ConvolutionShape("input must be NCHW"));
     };
@@ -295,11 +310,7 @@ fn conv2d_preflight(
             "weights must be [O, I, KH, KW]",
         ));
     };
-    if *in_channels == 0
-        || *out_channels == 0
-        || *weight_channels != *in_channels
-        || bias.layout.shape() != [*out_channels]
-    {
+    if *in_channels == 0 || *out_channels == 0 || *weight_channels != *in_channels {
         return Err(TensorError::ConvolutionShape("channel or bias mismatch"));
     }
     let output_h = output_extent(*input_h, *kernel_h, stride.0, padding.0, dilation.0)?;

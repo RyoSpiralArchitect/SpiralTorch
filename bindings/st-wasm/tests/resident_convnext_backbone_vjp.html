@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident ConvNeXt backbone VJP</title>
+<pre id="result" data-status="running">Checking resident ConvNeXt backbone VJP</pre>
+<script type="module">
+import init, {run_convnext_backbone_vjp_checks} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference: "high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  if (!adapter || fallback !== false) throw Error("Non-fallback adapter not confirmed");
+  await init();
+  const report = JSON.parse(await run_convnext_backbone_vjp_checks());
+  if (report.schema !== "spiraltorch.convnext_backbone_vjp.browser.v1" || report.status !== "passed" ||
+      report.gradient_tensors !== 23 || report.intermediate_readbacks !== 0 ||
+      !Number.isFinite(report.max_absolute_error) || report.max_absolute_error < 0 ||
+      !Number.isFinite(report.max_scaled_error) || report.max_scaled_error < 0 ||
+      report.scaled_error_tolerance !== 0.01 || report.max_scaled_error > report.scaled_error_tolerance) {
+    throw Error("Incomplete ConvNeXt backbone VJP checks");
+  }
+  report.browser_adapter_probe = {vendor: adapter.info?.vendor, architecture: adapter.info?.architecture,
+    is_fallback_adapter: fallback, boundary: "Separate probe, not attestation of the Rust runtime device"};
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

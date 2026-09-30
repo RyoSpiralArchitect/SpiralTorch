@@ -4,6 +4,27 @@ SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape fo
 
 ## Restarted execution slice: vision across Rust, Python, and browser
 
+Current scope of the vision execution path:
+
+| Milestone | Rust | Python | Browser/WASM |
+| --- | --- | --- | --- |
+| Seeded resident geometry batch | Public API | Public API | Public API, async snapshots |
+| Model-owned resident ConvNeXt forward | `Module` API | Not exposed | Exercised by Rust WASM VJP fixture; no model binding |
+| Full-backbone resident VJP | `ConvNeXtBackbone::vjp_resident` | Not exposed | Rust WASM parity fixture; no model binding |
+| ConvNeXt-owned resident parameter update | Open | Open | Open |
+| Matched real-image training quality and throughput | Open | Open | Open |
+
+The next rail connects the model-owned gradients to resident parameter updates,
+reusing the existing graph learner's validation and commit semantics. It needs
+parameter-version checks, rejection of stale gradients, all-parameter acceptance
+before committing an update, and explicit checkpoint/host synchronization.
+Native and browser checks must cover consecutive accepted steps, a rejected
+step that preserves every parameter, and a valid retry. Python and WASM model
+bindings can then expose this same Rust-owned contract.
+
+The following narrative records the successive implementation and measurement
+slices; the table above describes their current combined scope.
+
 The first concrete cross-surface milestone is the image-transform path in
 `st-vision`, not a general claim that every backend is interchangeable.
 Contiguous resize, crop, and sampled horizontal-flip stages now use one WGPU
@@ -113,9 +134,14 @@ residual branch. `ConvNeXtBlock::vjp_resident` now returns resident input and
 eight parameter gradients in `Module` order, rebuilding its frozen tail graph
 when host parameters change. Native GPU and
 [Chrome WebGPU parity](../benchmarks/results/2026-09-28-vision-convnext-vjp-contract.md)
-cover a bounded block. There is still no model-owned GPU optimizer update,
-full-backbone VJP, or measured real-dataset training advantage. Those are the
-next gates, not inferred from isolated backward correctness.
+cover a bounded block. The next slice adds a deterministic dense `Conv2d` VJP
+and composes it with the block VJPs, stem, stage downsampling, and final norm.
+`ConvNeXtBackbone::vjp_resident` now returns an input gradient and every
+parameter gradient in `Module` order. Native GPU and
+[Chrome WebGPU parity](../benchmarks/results/2026-09-30-vision-convnext-backbone-vjp-contract.md)
+cover one small two-stage backbone. There is still no GPU-owned optimizer
+state, model update, or measured real-dataset training advantage. Those remain
+the next gates, not inferred from isolated backward correctness.
 
 ## Documentation & Learning
 - **Curated entry points.** Expand the README "Quick Start" into a set of versioned walkthroughs that mirror the typical paths: Rust-only, Python wheel, and the collaborative canvas. Each walkthrough should end with a runnable example and explicit troubleshooting steps.

@@ -66,6 +66,7 @@ struct Kernels {
     convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
     depthwise_vjp: std::sync::OnceLock<convolution::vjp::DepthwiseVjpKernels>,
     dense_convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
+    dense_vjp: std::sync::OnceLock<convolution::dense_vjp::Conv2dVjpKernels>,
 }
 
 /// One reusable elementwise pipeline on an existing WGPU runtime. No device
@@ -209,6 +210,7 @@ impl TensorDevice {
             convolution: std::sync::OnceLock::new(),
             depthwise_vjp: std::sync::OnceLock::new(),
             dense_convolution: std::sync::OnceLock::new(),
+            dense_vjp: std::sync::OnceLock::new(),
         })))
     }
 
@@ -671,6 +673,19 @@ impl ResidentTensor {
         dilation: (usize, usize),
     ) -> Result<Self, TensorError> {
         convolution::conv2d_forward(self, weights, bias, stride, padding, dilation)
+    }
+
+    /// Return resident `(input, weight, bias)` VJPs for dense NCHW convolution.
+    /// Gradients are sums, with no implicit batch averaging or host readback.
+    pub fn conv2d_vjp(
+        &self,
+        weights: &Self,
+        upstream: &Self,
+        stride: (usize, usize),
+        padding: (usize, usize),
+        dilation: (usize, usize),
+    ) -> Result<[Self; 3], TensorError> {
+        convolution::dense_vjp::backward(self, weights, upstream, stride, padding, dilation)
     }
 
     pub fn contiguous(&self) -> Result<Self, TensorError> {
