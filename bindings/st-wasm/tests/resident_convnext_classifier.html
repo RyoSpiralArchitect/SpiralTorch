@@ -20,6 +20,12 @@ try {
       !(report.max_scaled_error <= report.scaled_error_tolerance)) {
     throw Error("Incomplete ConvNeXt classifier checks");
   }
+  const input = report.normalized_input;
+  if (!input || input.steps !== 4 || input.parameters !== 24 || input.input_to_model_readbacks !== 0 ||
+      input.training_loop_readbacks !== 0 || input.losses.length !== 4 ||
+      !input.invalid_normalization_rejects_all_weights || !(input.max_scaled_error <= 2e-4)) {
+    throw Error("Incomplete normalized DataLoader-to-classifier checks");
+  }
   report.browser_adapter_probe = {vendor: adapter.info?.vendor, architecture: adapter.info?.architecture,
     is_fallback_adapter: fallback, boundary: "Separate probe, not attestation of the Rust runtime device"};
   result.textContent = JSON.stringify(report);

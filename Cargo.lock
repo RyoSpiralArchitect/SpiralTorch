@@ -3449,6 +3449,7 @@ dependencies = [
  "st-backend-wgpu",
  "st-core",
  "st-frac",
+ "st-kernel-contracts",
  "st-logic",
  "st-nn",
  "st-tensor",

@@ -113,12 +113,13 @@ declare module "spiraltorch-wasm" {
         free(): void;
     }
 
-    /** CHW geometry transforms backed by the same Rust planner as native st-vision. */
+    /** Checked geometry and normalization using the same Rust contracts as native st-vision. */
     export class VisionTransformPipeline {
         private constructor();
         static createCpu(seed: number): VisionTransformPipeline;
         static createGpu(seed: number): Promise<VisionTransformPipeline>;
         addResize(height: number, width: number): void;
+        addNormalize(means: Float32Array, stds: Float32Array): void;
         addCenterCrop(height: number, width: number): void;
         addRandomHorizontalFlip(probability: number): void;
         apply(channels: number, height: number, width: number, data: Float32Array): Promise<VisionImage>;
@@ -126,6 +127,8 @@ declare module "spiraltorch-wasm" {
         applyResident(channels: number, height: number, width: number, data: Float32Array): WgpuTensor;
         /** Transform packed NCHW images with one image-data upload; returns a resident rank-4 tensor. */
         applyResidentBatch(batchSize: number, channels: number, height: number, width: number, data: Float32Array): WgpuTensor;
+        /** Continue an NCHW image pipeline with no host transfer. */
+        applyFromResident(input: WgpuTensor): WgpuTensor;
         readonly backend: "cpu" | "webgpu";
         readonly adapterInfo: string | undefined;
         free(): void;

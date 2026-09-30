@@ -1,0 +1,82 @@
+{
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "checks": [
+    "every_prediction_cpu_parity",
+    "every_input_vjp_cpu_parity",
+    "all_24_parameter_vjps",
+    "all_24_parameter_updates",
+    "all_six_groups_update",
+    "loss_decrease",
+    "all_receipts",
+    "whole_classifier_checkpoint",
+    "fresh_owner_identity",
+    "every_resumed_prediction_and_weight",
+    "trained_common_inference_entry",
+    "invalid_labels_reject_all_weights",
+    "valid_retry_after_rejection",
+    "fixed_pool_gradient_no_spurious_overflow",
+    "pool_guard_inheritance"
+  ],
+  "final_cross_entropy": 0.4883580505847931,
+  "learning_rate": 0.009999999776482582,
+  "losses": [
+    0.6629087924957275,
+    0.6297791600227356,
+    0.5756661891937256,
+    0.5578746795654297,
+    0.5648298859596252,
+    0.5372943878173828,
+    0.5121162533760071,
+    0.5121731758117676
+  ],
+  "max_scaled_error": 0.00014584777818527073,
+  "normalized_input": {
+    "input_to_model_readbacks": 0,
+    "invalid_normalization_rejects_all_weights": true,
+    "losses": [
+      0.7014225125312805,
+      0.6965476870536804,
+      0.6950385570526123,
+      0.6934881210327148
+    ],
+    "max_scaled_error": 1.586298168376743e-7,
+    "parameters": 24,
+    "pipeline": "Normalize -> Resize -> Flip -> Crop -> ConvNeXtClassifier -> CE -> SGD",
+    "source": "synthetic_12x14_images",
+    "steps": 4,
+    "training_loop_readbacks": 0
+  },
+  "parameters": 24,
+  "resume_comparison": "bitwise",
+  "resumed_steps": 4,
+  "scaled_error_tolerance": 0.0002,
+  "schema": "spiraltorch.convnext_classifier.contract.v1",
+  "status": "passed",
+  "steps": 8,
+  "training_loop_readbacks": 0,
+  "updated_groups": 6,
+  "browser_adapter_probe": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "is_fallback_adapter": false,
+    "boundary": "Separate probe, not attestation of the Rust runtime device"
+  },
+  "wasm_sha256": "6a903e0fc52a77f3b18fbdf2f5845ae00928f7a13b2f872d1c504e8280787825",
+  "page_sha256": "bc450069c34bee8c65ab2bbd9948e42a544563d2c15ed892c6bafaeeec58d626",
+  "launch_flags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "tiles_mnk_request": "",
+  "kernels_request": "",
+  "accumulations_request": "",
+  "shapes_request": "",
+  "fixture_request": "convnext-classifier-resident",
+  "asset_sha256": {
+    "/": "bc450069c34bee8c65ab2bbd9948e42a544563d2c15ed892c6bafaeeec58d626",
+    "/module/spiraltorch_wasm.js": "262018294e8427daf3f51fa0cc84379e99c1f7f56ccb283c11b006292ead16e9",
+    "/module/spiraltorch_wasm_bg.wasm": "6a903e0fc52a77f3b18fbdf2f5845ae00928f7a13b2f872d1c504e8280787825"
+  },
+  "browser_version": "154.0.8037.58",
+  "page_errors": [],
+  "console_messages": []
+}

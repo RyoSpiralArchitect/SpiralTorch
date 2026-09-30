@@ -1,4 +1,4 @@
-//! Version 2 preserves pointwise graphs; version 3 adds affine LayerNorm.
+//! Version 2 preserves pointwise graphs; v3 adds LayerNorm; v4 adds subtract/divide.
 use super::*;
 use crate::resident::{GraphDefinition, GraphParameter, GraphStage, ParameterRole};
 use st_kernel_contracts::{
@@ -9,6 +9,7 @@ use st_kernel_contracts::{
 
 pub const GRAPH_PLAN_SCHEMA: &str = "spiraltorch.nn.inference_plan.v2";
 pub const GRAPH_PLAN_SCHEMA_V3: &str = "spiraltorch.nn.inference_plan.v3";
+pub const GRAPH_PLAN_SCHEMA_V4: &str = "spiraltorch.nn.inference_plan.v4";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -61,13 +62,21 @@ enum Op {
     Identity,
     Add,
     Multiply,
+    Subtract,
+    Divide,
     Relu,
     Gelu,
 }
 
 pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError> {
     let record = Record {
-        schema: if graph
+        schema: if graph.stages().iter().any(|stage| {
+            matches!(stage,
+            GraphStage::Pointwise { chain, .. } if chain.steps().iter().any(|step|
+                matches!(step.op, ElementwiseOp::Subtract | ElementwiseOp::Divide)))
+        }) {
+            GRAPH_PLAN_SCHEMA_V4
+        } else if graph
             .stages()
             .iter()
             .any(|stage| matches!(stage, GraphStage::LayerNorm { .. }))
@@ -129,6 +138,8 @@ pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError>
                                         ElementwiseOp::Identity => Op::Identity,
                                         ElementwiseOp::Add => Op::Add,
                                         ElementwiseOp::Multiply => Op::Multiply,
+                                        ElementwiseOp::Subtract => Op::Subtract,
+                                        ElementwiseOp::Divide => Op::Divide,
                                         ElementwiseOp::Relu => Op::Relu,
                                         ElementwiseOp::Gelu => Op::Gelu,
                                     },
@@ -155,8 +166,19 @@ pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError>
 
 pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> {
     let record: Record = serde_json::from_str(payload)?;
-    if record.schema != GRAPH_PLAN_SCHEMA && record.schema != GRAPH_PLAN_SCHEMA_V3 {
+    if ![
+        GRAPH_PLAN_SCHEMA,
+        GRAPH_PLAN_SCHEMA_V3,
+        GRAPH_PLAN_SCHEMA_V4,
+    ]
+    .contains(&record.schema.as_str())
+    {
         return Err(InferenceError::Schema(record.schema));
+    }
+    if record.schema != GRAPH_PLAN_SCHEMA_V4 && record.stages.iter().any(|stage| matches!(stage,
+        Stage::Pointwise { steps, .. } if steps.iter().any(|step| matches!(step.op, Op::Subtract | Op::Divide))))
+    {
+        return Err(InferenceError::Schema(format!("{} does not admit subtract/divide", record.schema)));
     }
     if record.schema == GRAPH_PLAN_SCHEMA
         && record
@@ -207,6 +229,8 @@ pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> 
                                     Op::Identity => ElementwiseOp::Identity,
                                     Op::Add => ElementwiseOp::Add,
                                     Op::Multiply => ElementwiseOp::Multiply,
+                                    Op::Subtract => ElementwiseOp::Subtract,
+                                    Op::Divide => ElementwiseOp::Divide,
                                     Op::Relu => ElementwiseOp::Relu,
                                     Op::Gelu => ElementwiseOp::Gelu,
                                 },
@@ -244,6 +268,34 @@ mod tests {
         Linear, Sequential,
     };
     use serde_json::json;
+    #[test]
+    fn v4_normalization_roundtrip_rejects_schema_downgrade() {
+        let mut model = Sequential::new();
+        model.push(Scaler::new("stats", 2).unwrap());
+        let plan =
+            InferencePlan::from_module(&model, NdLayout::contiguous(&[2, 2]).unwrap()).unwrap();
+        let mut record: serde_json::Value = serde_json::from_str(&plan.to_json().unwrap()).unwrap();
+        record["schema"] = json!(GRAPH_PLAN_SCHEMA_V4);
+        record["stages"][0]["steps"] = json!([
+            {"op": "subtract", "rhs": 1}, {"op": "divide", "rhs": 1}
+        ]);
+        let payload = InferencePlan::from_json(&record.to_string())
+            .unwrap()
+            .to_json()
+            .unwrap();
+        assert!(payload.contains(GRAPH_PLAN_SCHEMA_V4));
+        assert_eq!(
+            InferencePlan::from_json(&payload)
+                .unwrap()
+                .to_json()
+                .unwrap(),
+            payload
+        );
+        for old in [GRAPH_PLAN_SCHEMA, GRAPH_PLAN_SCHEMA_V3] {
+            assert!(InferencePlan::from_json(&payload.replace(GRAPH_PLAN_SCHEMA_V4, old)).is_err());
+        }
+    }
+
     #[test]
     fn v2_roundtrip_and_invalid_graphs_fail_before_allocation() {
         let mut model = Sequential::new();

@@ -412,11 +412,72 @@ try {
     }
   }
 
+  const normalizeCpu = VisionTransformPipeline.createCpu(113);
+  const normalizeGpu = await VisionTransformPipeline.createGpu(113);
+  for (const pipeline of [normalizeCpu, normalizeGpu]) {
+    pipeline.addNormalize(new Float32Array([0.25, 0.5]), new Float32Array([0.5, 2]));
+    pipeline.addResize(8, 10);
+    pipeline.addRandomHorizontalFlip(0.5);
+    pipeline.addCenterCrop(6, 6);
+    pipeline.addNormalize(new Float32Array([0.125]), new Float32Array([0.75]));
+  }
+  let normalizeError = 0;
+  for (let repeat = 0; repeat < 4; repeat++) {
+    const expected = [];
+    for (let n = 0; n < batchCount; n++) {
+      expected.push(...(await normalizeCpu.apply(batchChannels, batchHeight, batchWidth,
+        batchPixels.subarray(n * imageLength, (n + 1) * imageLength))).values);
+    }
+    const input = normalizeGpu.applyResidentBatch(batchCount, batchChannels, batchHeight, batchWidth, batchPixels);
+    const values = await input.snapshot().readValues();
+    for (let i = 0; i < expected.length; i++) normalizeError = Math.max(normalizeError, Math.abs(values[i] - expected[i]));
+  }
+  if (!(normalizeError < 1e-5)) throw Error(`Resident normalization mismatch: ${normalizeError}`);
+  const continued = await VisionTransformPipeline.createGpu(113);
+  continued.addNormalize(new Float32Array([0.5]), new Float32Array([0.25]));
+  const continuedInput = depthwiseDevice.upload([1, 1, 2, 2], new Float32Array([0, 0.25, 0.5, 1]));
+  const continuedValues = await continued.applyFromResident(continuedInput).snapshot().readValues();
+  if (Array.from(continuedValues).join(",") !== "-2,-1,0,2") throw Error("Resident continuation mismatch");
+  let rejectedStats = 0;
+  for (const stats of [NaN, Infinity, -Infinity, 0, -1]) {
+    try { continued.addNormalize(new Float32Array([0]), new Float32Array([stats])); }
+    catch { rejectedStats++; }
+  }
+  if (rejectedStats !== 5) throw Error("Invalid normalization statistics accepted");
+  const guarded = await VisionTransformPipeline.createGpu(211);
+  const freshGuard = VisionTransformPipeline.createCpu(211);
+  for (const pipeline of [guarded, freshGuard]) {
+    pipeline.addRandomHorizontalFlip(0.5);
+    pipeline.addNormalize(new Float32Array([0]), new Float32Array([0.5]));
+    pipeline.addCenterCrop(2, 2);
+  }
+  const huge = new Float32Array(16).fill(1);
+  huge[0] = 3.4028234663852886e38;
+  let rejectedNormalizeOverflow = false;
+  try { await guarded.apply(1, 4, 4, huge); }
+  catch { rejectedNormalizeOverflow = true; }
+  if (!rejectedNormalizeOverflow) throw Error("Crop hid normalization overflow");
+  const retryData = Float32Array.from({length: 16}, (_, i) => i / 16);
+  const retryExpected = (await freshGuard.apply(1, 4, 4, retryData)).values;
+  const retryActual = (await guarded.apply(1, 4, 4, retryData)).values;
+  if (Array.from(retryExpected).join(",") !== Array.from(retryActual).join(",")) throw Error("Mapped normalization failure advanced RNG");
+  const tinyCpu = VisionTransformPipeline.createCpu(0);
+  const tinyGpu = await VisionTransformPipeline.createGpu(0);
+  for (const pipeline of [tinyCpu, tinyGpu]) pipeline.addNormalize(new Float32Array([0]), new Float32Array([1e-40]));
+  const tinyValues = new Float32Array([1e-40, 2e-40, -1e-40, 0]);
+  const tinyExpected = (await tinyCpu.apply(1, 2, 2, tinyValues)).values;
+  const tinyActual = await tinyGpu.applyResident(1, 2, 2, tinyValues).snapshot().readValues();
+  if (Array.from(tinyExpected).join(",") !== Array.from(tinyActual).join(",")) throw Error("Subnormal statistics changed the normalized values");
+
   result.textContent = JSON.stringify({
     schema: "spiraltorch.vision.transforms.browser.v2",
     status: "passed",
     cases,
     max_abs_error: maxAbsError,
+    normalized_input: {repeated_batches: 4, max_abs_error: normalizeError,
+      resident_continuation: true, rejected_invalid_statistics: rejectedStats,
+      crop_preserves_overflow_guard: rejectedNormalizeOverflow, mapped_retry_preserves_rng: true,
+      subnormal_statistics_cpu_parity: true},
     benchmark: {image_shape: [3, 128, 128], output_shape: [3, 64, 64], warmups: 5,
       samples: 20, order: "alternating CPU/WebGPU order per repeat", timing: "browser wall time including transfer and readback",
       cpu_ms: cpuMs, webgpu_ms: gpuMs, cpu_median_ms: median(cpuMs), webgpu_median_ms: median(gpuMs),

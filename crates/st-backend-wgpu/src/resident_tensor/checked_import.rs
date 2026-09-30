@@ -65,9 +65,10 @@ impl CheckedImportKernels {
         Self { layout, pipeline }
     }
 
-    pub(crate) fn check(
+    pub(crate) fn encode(
         &self,
         context: &WgpuContext,
+        encoder: &mut wgpu::CommandEncoder,
         values: &wgpu::Buffer,
         flags: &wgpu::Buffer,
         len: usize,
@@ -100,7 +101,6 @@ impl CheckedImportKernels {
                     },
                 ],
             });
-        let mut encoder = context.device().create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("tensor.checked_import.pass"),
@@ -110,7 +110,6 @@ impl CheckedImportKernels {
             pass.set_bind_group(0, &binding, &[]);
             pass.dispatch_workgroups(x, y, 1);
         }
-        context.queue().submit(Some(encoder.finish()));
         Ok(())
     }
 }

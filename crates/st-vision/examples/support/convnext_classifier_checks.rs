@@ -21,6 +21,14 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const STEPS: usize = 8;
 const RATE: f32 = 0.01;
 
+mod normalized_input {
+    use super::*;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/support/vision_input_classifier_checks.rs"
+    ));
+}
+
 async fn read(tensor: &ResidentTensor) -> Result<Vec<f32>> {
     let snapshot = tensor.snapshot()?;
     #[cfg(not(target_arch = "wasm32"))]
@@ -294,8 +302,10 @@ pub async fn run(device: &TensorDevice) -> Result<serde_json::Value> {
     {
         return Err("pool VJP lost inherited guard".into());
     }
+    let normalized_input = normalized_input::run(device).await?;
     Ok(
         serde_json::json!({ "schema":"spiraltorch.convnext_classifier.contract.v1", "status":"passed",
+        "normalized_input":normalized_input,
         "steps":STEPS,"parameters":24,"learning_rate":RATE,"training_loop_readbacks":0,
         "losses":losses,"final_cross_entropy":final_ce,"max_scaled_error":error,"scaled_error_tolerance":2e-4,
         "resumed_steps":4,"resume_comparison":"bitwise","updated_groups":6,

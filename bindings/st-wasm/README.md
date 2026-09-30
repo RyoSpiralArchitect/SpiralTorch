@@ -37,6 +37,11 @@ target-specific Rust flags, `LIBRARY_PATH`, and `PKG_CONFIG_PATH` before invokin
 
 ## Examples
 
+- [Resident vision input](../../docs/resident_vision_input.md):
+  `VisionTransformPipeline.addNormalize` composes with geometry, and
+  `applyResidentBatch`/`applyFromResident` feed NN operations without an image
+  readback. CPU and GPU use the same Rust validation and seeded flip ordering.
+
 - [Original NN model forwarding](../../docs/module_resident_forward.md):
   browser `Sequential` wraps the real Rust Module. `forward(WgpuTensor)` returns
   a resident output, reuses the graph, and follows checked training weight handoffs.

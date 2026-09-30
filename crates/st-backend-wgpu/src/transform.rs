@@ -11,7 +11,7 @@ use crate::{
     resident_tensor::{ResidentTensor, TensorDevice, TensorError},
     runtime::{
         empty_buffer, ensure_blocking_readback_supported, read_buffer, upload_slice, Shared,
-        WgpuContext, WgpuRuntimeError,
+        WgpuContext, WgpuRuntime, WgpuRuntimeError,
     },
     ShaderCache, ShaderLoadError,
 };
@@ -25,7 +25,7 @@ use wgpu::{
     Device, PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 const TRANSFORM_SHADER_DIR: &str = "shaders/transforms";
 
 #[derive(Debug, Error)]
@@ -142,7 +142,11 @@ struct Pipelines {
 }
 
 impl Pipelines {
-    fn new(device: &Device, shader_dir: impl AsRef<Path>) -> Result<Self, ShaderLoadError> {
+    fn new(
+        device: &Device,
+        shader_dir: impl AsRef<Path>,
+        embedded: bool,
+    ) -> Result<Self, ShaderLoadError> {
         let bind_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("st.backend.transform.bind_layout"),
             entries: &[
@@ -238,8 +242,7 @@ impl Pipelines {
 
         let shader_root = shader_dir.as_ref();
         let cache = ShaderCache::new(shader_root);
-        #[cfg(target_arch = "wasm32")]
-        {
+        if embedded {
             cache.preload_inline(
                 "resize.wgsl",
                 include_str!("../shaders/transforms/resize.wgsl"),
@@ -404,7 +407,11 @@ impl TransformDispatcher {
         queue: Shared<Queue>,
         shader_dir: impl Into<PathBuf>,
     ) -> Result<Self, TransformDispatchError> {
-        let pipelines = Pipelines::new(device.as_ref(), shader_dir.into())?;
+        let pipelines = Pipelines::new(
+            device.as_ref(),
+            shader_dir.into(),
+            cfg!(target_arch = "wasm32"),
+        )?;
         Ok(Self {
             backend: Backend::Gpu(GpuContext {
                 context: WgpuContext::new(device, queue),
@@ -413,15 +420,21 @@ impl TransformDispatcher {
         })
     }
 
+    /// Reuse the tensor runtime and compiled-in shaders on native and WASM.
+    /// Installed wheels do not need the original checkout's shader directory.
+    pub fn from_runtime(runtime: &WgpuRuntime) -> Result<Self, TransformDispatchError> {
+        Ok(Self {
+            backend: Backend::Gpu(GpuContext {
+                context: runtime.context().clone(),
+                pipelines: Pipelines::new(runtime.context().device(), "embedded-transforms", true)?,
+            }),
+        })
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new_default_gpu() -> Result<Self, TransformDispatchError> {
         let (runtime, _) = ensure_default_runtime_blocking("st.backend.transform.device")?;
-        let shader_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TRANSFORM_SHADER_DIR);
-        Self::with_gpu(
-            runtime.context().shared_device(),
-            runtime.context().shared_queue(),
-            shader_dir,
-        )
+        Self::from_runtime(&runtime)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -778,6 +791,60 @@ impl TransformDispatcher {
             .adopt_checked_values(&ctx.context, &shape, output)
             .map_err(Into::into)
     }
+    /// Continue a geometry pipeline from an existing NCHW tensor. Each stage
+    /// inherits the complete upstream guard and validates its own values, all
+    /// in one submission without a host snapshot or another image upload.
+    pub fn run_geometry_batch_from_resident(
+        &self,
+        input: &ResidentTensor,
+        commands: &[BatchGeometryCommand],
+    ) -> Result<ResidentTensor, TransformDispatchError> {
+        let &[batch, channels, height, width] = input.layout().shape() else {
+            return Err(TransformDispatchError::InvalidGeometry(
+                "resident image batch requires NCHW".into(),
+            ));
+        };
+        let mut geometry = ImageGeometry {
+            channels,
+            height,
+            width,
+        };
+        validate_batch_commands(batch, geometry, commands)?;
+        let Backend::Gpu(ctx) = &self.backend else {
+            return Err(TransformDispatchError::RequiresGpu);
+        };
+        input.require_context(&ctx.context)?;
+        if commands.is_empty() {
+            return Ok(input.clone());
+        }
+        let mut current = input.contiguous()?;
+        let mut encoder =
+            ctx.context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("st.backend.transform.resident_batch.encoder"),
+                });
+        for command in commands {
+            let (values, next) = encode_batch_geometry_command(
+                ctx,
+                &mut encoder,
+                current.values(),
+                batch,
+                geometry,
+                command,
+            )?;
+            current = input.device().encode_checked_values(
+                &ctx.context,
+                &[batch, next.channels, next.height, next.width],
+                values,
+                Some(&current),
+                &mut encoder,
+            )?;
+            geometry = next;
+        }
+        ctx.context.queue().submit(Some(encoder.finish()));
+        Ok(current)
+    }
 }
 
 fn batch_channels(batch_size: usize, channels: usize) -> Result<usize, TransformDispatchError> {
@@ -913,7 +980,6 @@ fn dispatch_geometry_batch(
     initial: ImageGeometry,
     commands: &[BatchGeometryCommand],
 ) -> Result<Buffer, TransformDispatchError> {
-    let channels = batch_channels(batch_size, initial.channels)?;
     let mut geometry = initial;
     let mut current_buffer = upload_slice(
         ctx.context.device(),
@@ -928,55 +994,70 @@ fn dispatch_geometry_batch(
                 label: Some("st.backend.transform.batch.encoder"),
             });
     for command in commands {
-        current_buffer = match command {
-            BatchGeometryCommand::Resize { height, width } => {
-                let output = encode_resize_buffer(
-                    ctx,
-                    &mut encoder,
-                    &current_buffer,
-                    ResizeConfig {
-                        channels,
-                        src_height: geometry.height,
-                        src_width: geometry.width,
-                        dst_height: *height,
-                        dst_width: *width,
-                    },
-                )?;
-                geometry.height = *height;
-                geometry.width = *width;
-                output
-            }
-            BatchGeometryCommand::CenterCrop { height, width } => {
-                let output = encode_center_crop_buffer(
-                    ctx,
-                    &mut encoder,
-                    &current_buffer,
-                    CenterCropConfig {
-                        channels,
-                        src_height: geometry.height,
-                        src_width: geometry.width,
-                        crop_height: *height,
-                        crop_width: *width,
-                    },
-                )?;
-                geometry.height = *height;
-                geometry.width = *width;
-                output
-            }
-            BatchGeometryCommand::HorizontalFlip(flags) => encode_batch_flip_buffer(
-                ctx,
-                &mut encoder,
-                &current_buffer,
-                batch_size,
-                geometry,
-                flags,
-            )?,
-        };
+        (current_buffer, geometry) = encode_batch_geometry_command(
+            ctx,
+            &mut encoder,
+            &current_buffer,
+            batch_size,
+            geometry,
+            command,
+        )?;
     }
     ctx.context
         .queue()
         .submit(std::iter::once(encoder.finish()));
     Ok(current_buffer)
+}
+
+fn encode_batch_geometry_command(
+    ctx: &GpuContext,
+    encoder: &mut wgpu::CommandEncoder,
+    current_buffer: &Buffer,
+    batch_size: usize,
+    mut geometry: ImageGeometry,
+    command: &BatchGeometryCommand,
+) -> Result<(Buffer, ImageGeometry), TransformDispatchError> {
+    let channels = batch_channels(batch_size, geometry.channels)?;
+    let output = match command {
+        BatchGeometryCommand::Resize { height, width } => {
+            let output = encode_resize_buffer(
+                ctx,
+                encoder,
+                current_buffer,
+                ResizeConfig {
+                    channels,
+                    src_height: geometry.height,
+                    src_width: geometry.width,
+                    dst_height: *height,
+                    dst_width: *width,
+                },
+            )?;
+            geometry.height = *height;
+            geometry.width = *width;
+            output
+        }
+        BatchGeometryCommand::CenterCrop { height, width } => {
+            let output = encode_center_crop_buffer(
+                ctx,
+                encoder,
+                current_buffer,
+                CenterCropConfig {
+                    channels,
+                    src_height: geometry.height,
+                    src_width: geometry.width,
+                    crop_height: *height,
+                    crop_width: *width,
+                },
+            )?;
+            geometry.height = *height;
+            geometry.width = *width;
+            output
+        }
+        BatchGeometryCommand::HorizontalFlip(flags) => {
+            encode_batch_flip_buffer(ctx, encoder, current_buffer, batch_size, geometry, flags)?
+        }
+    };
+    Ok((output, geometry))
 }
 
 fn workgroup_dims(

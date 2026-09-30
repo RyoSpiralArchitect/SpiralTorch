@@ -230,7 +230,6 @@ impl ShaderCache {
         })
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub(crate) fn preload_inline(&self, file: &str, source: &'static str) {
         let path = self.inner.shader_dir.join(file);
         let _ = self.source_with(path, |_| Ok(Arc::from(source)));
