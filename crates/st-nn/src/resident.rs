@@ -12,7 +12,11 @@ pub use st_kernel_contracts::graph::{
 use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
+#[cfg(feature = "wgpu")]
+mod convolution;
 mod graph;
+#[cfg(feature = "wgpu")]
+pub use convolution::ResidentConvolutionSpec;
 #[cfg(feature = "wgpu")]
 mod module_autograd;
 #[cfg(feature = "wgpu")]
@@ -166,7 +170,9 @@ impl InferencePlan {
         Self::from_operations(input, operations)
     }
 
-    fn from_operations(
+    /// Validate and freeze an explicit sequence of module-lowered operations.
+    /// This supports composing subgraphs without a synthetic host `Module`.
+    pub fn from_operations(
         input: NdLayout,
         operations: Vec<InferenceOp>,
     ) -> Result<Self, InferenceError> {

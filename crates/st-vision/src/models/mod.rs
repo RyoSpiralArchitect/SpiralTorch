@@ -5,6 +5,8 @@ pub mod vit;
 pub use convnext::{ConvNeXtBackbone, ConvNeXtBlock, ConvNeXtConfig};
 #[cfg(feature = "wgpu")]
 pub use convnext::{ConvNeXtBackboneVjp, ConvNeXtBlockVjp};
+#[cfg(feature = "wgpu")]
+pub use convnext::{ResidentConvNeXtBackbone, ResidentConvNeXtForward, ResidentConvNeXtGradients};
 pub use resnet::{
     ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone, ResNetConfig, ResNetPreset,
     SkipSlipSchedule,

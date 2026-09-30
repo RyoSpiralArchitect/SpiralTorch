@@ -707,6 +707,25 @@ impl ResidentConvParameters {
 }
 
 impl Conv2d {
+    /// Capture geometry only; resident model owners supply current GPU weights.
+    #[cfg(feature = "wgpu")]
+    pub fn resident_spec(&self) -> crate::resident::ResidentConvolutionSpec {
+        crate::resident::ResidentConvolutionSpec {
+            input_chw: [self.in_channels, self.input_hw.0, self.input_hw.1],
+            weight_shape: vec![
+                self.out_channels,
+                self.in_channels,
+                self.kernel.0,
+                self.kernel.1,
+            ],
+            output_channels: self.out_channels,
+            stride: self.stride,
+            padding: self.padding,
+            dilation: self.dilation,
+            depthwise: false,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
@@ -1203,6 +1222,20 @@ pub struct DepthwiseConv2d {
 }
 
 impl DepthwiseConv2d {
+    /// Capture geometry only; resident model owners supply current GPU weights.
+    #[cfg(feature = "wgpu")]
+    pub fn resident_spec(&self) -> crate::resident::ResidentConvolutionSpec {
+        crate::resident::ResidentConvolutionSpec {
+            input_chw: [self.channels, self.input_hw.0, self.input_hw.1],
+            weight_shape: vec![self.channels, self.kernel.0, self.kernel.1],
+            output_channels: self.channels,
+            stride: self.stride,
+            padding: self.padding,
+            dilation: self.dilation,
+            depthwise: true,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
