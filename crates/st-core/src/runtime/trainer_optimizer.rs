@@ -25,6 +25,18 @@ pub const TRAINER_OPTIMIZER_CHECKPOINT_RESUME_SCOPE: &str =
     "trainer_optimizer_and_builtin_update_policy;parameter_values_external_and_fingerprint_guarded;external_runtime_components_reported";
 pub const TRAINER_OPTIMIZER_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
+/// Portable inputs and clock for the shared warmup/cosine scheduler. The cached
+/// last rate is derived, not a second independently mutable source of truth.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WarmupCosineSchedulerState {
+    pub base_lr: f32,
+    pub min_lr: f32,
+    pub warmup_steps: u32,
+    pub total_steps: u32,
+    pub step: u32,
+}
+
 #[derive(Clone, Copy, Debug, Error, PartialEq)]
 pub enum TrainerOptimizerConfigError {
     #[error("curvature must be negative and finite, got {value}")]

@@ -211,7 +211,9 @@ fn validate_component_alignment(
     Ok(())
 }
 
-fn payload_sha256<T: Serialize>(payload: &T) -> Result<String, TrainerRuntimeCheckpointError> {
+/// Hash a Rust-serialized checkpoint component without adding another encoding
+/// in a client. This is integrity binding, not authentication of its producer.
+pub fn payload_sha256<T: Serialize>(payload: &T) -> Result<String, TrainerRuntimeCheckpointError> {
     let encoded = serde_json::to_vec(payload)
         .map_err(|error| TrainerRuntimeCheckpointError::Encoding(error.to_string()))?;
     let digest = Sha256::digest(encoded);
