@@ -79,6 +79,13 @@ state in real wasm32 Rust under Node. That is **WASM CPU portability**, not a
 real-browser WebGPU learning-resume result. The WASM binding builds and both
 generated/shipped TypeScript declarations are checked.
 
+CI runs the public CPU input tests against its freshly built Python wheel and
+passes the generated checkpoint to the freshly built wasm32 module in a separate
+replay job. It reuses the existing wheel/WASM builds, retains the two small
+handoff artifacts for one day, and fails if either artifact is missing. This
+Node replay does not require WebGPU or claim browser GPU coverage; native GPU
+continuation remains covered by the macOS Rust tests.
+
 ```bash
 cargo test -p st-vision --no-default-features --features input-checkpoint --lib
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test -p st-vision \

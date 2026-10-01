@@ -363,6 +363,38 @@ jobs:
             --target web --out-dir "$RUNNER_TEMP/spiraltorch-wasm-webgpu"
           node bindings/st-wasm/tests/resident_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
+          wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
+            --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
+      - name: Share freshly built WASM for native input replay
+        uses: actions/upload-artifact@v7
+        with:
+          name: vision-input-checkpoint-wasm
+          path: ${{ runner.temp }}/vision-input-checkpoint-wasm/
+          if-no-files-found: error
+          retention-days: 1
+
+  vision-input-replay:
+    name: vision input checkpoint (Python to WASM)
+    needs: [python-docs-smoke, wasm-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v7
+        with:
+          name: vision-input-checkpoint-python
+          path: ${{ runner.temp }}/vision-input-checkpoint-python
+      - uses: actions/download-artifact@v7
+        with:
+          name: vision-input-checkpoint-wasm
+          path: ${{ runner.temp }}/vision-input-checkpoint-wasm
+      - name: Replay the fresh Python checkpoint in real wasm32 Rust
+        run: |
+          node bindings/st-wasm/tests/vision_input_checkpoint.cjs \
+            "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
+            "$RUNNER_TEMP/vision-input-checkpoint-python/vision-input-checkpoint.json"
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
@@ -409,6 +441,17 @@ jobs:
         run: |
           python -I -m unittest discover -s bindings/st-py/tests -p test_vision_resident_training.py
           python -I tools/test_vision_classifier_handoff.py
+      - name: Public vision input checkpoint and native replay fixture
+        env:
+          SPIRALTORCH_INPUT_CHECKPOINT_HANDOFF: ${{ runner.temp }}/vision-input-checkpoint.json
+        run: python -I bindings/st-py/tests/test_vision_input_checkpoint.py
+      - name: Share fresh Python input checkpoint for WASM replay
+        uses: actions/upload-artifact@v7
+        with:
+          name: vision-input-checkpoint-python
+          path: ${{ runner.temp }}/vision-input-checkpoint.json
+          if-no-files-found: error
+          retention-days: 1
       - name: Sanity-check packaged stubs
         env:
           PYTHONNOUSERSITE: "1"
