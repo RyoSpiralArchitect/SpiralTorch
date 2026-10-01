@@ -233,6 +233,9 @@ impl DataLoaderCheckpoint {
     pub fn dataset_len(&self) -> usize {
         self.dataset_len
     }
+    pub fn batch_size(&self) -> usize {
+        self.batch_size
+    }
 }
 
 macro_rules! json_checkpoint {

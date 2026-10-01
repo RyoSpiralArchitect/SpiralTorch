@@ -17,6 +17,7 @@ Current scope of the vision execution path:
 | Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Thin Rust-owned public client | Thin Rust-owned public client |
 | Resident image normalization and DataLoader handoff | Public API, homogeneous NCHW | Public API, same Rust loader | Public normalization/batch/continuation API; caller-supplied batches, no JS DataLoader |
 | Portable input checkpoint | Order/cursor, shuffle and transform RNG | Same Rust loader/transform state | Transform state; browser order remains caller-owned |
+| Unified resident training boundary | Model/input/schedule owner, explicit settlement and bound checkpoint | Open | Rust async implementation; browser client and execution open |
 | Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch CPU and MPS comparison | Open |
 | Transfer-inclusive training throughput and memory | Open | Open | Open |
 
@@ -25,8 +26,9 @@ resident parameter updates with version checks, stale-gradient rejection and
 all-parameter acceptance. Native and browser fixtures cover consecutive steps,
 rejected steps preserving all weights, and a valid retry. Portable plain-SGD
 model checkpoints now preserve weights, architecture and attempted-update
-revision, with explicit mapping and fresh restored owner identities. Data
-cursors, RNGs, rate schedules and trainer policy remain caller-owned state.
+revision, with explicit mapping and fresh restored owner identities. Model-only
+checkpoints exclude data cursors, RNGs, rate schedules and trainer policy; the
+resident trainer below joins the supported components at one settled boundary.
 The common public ConvNeXt entry now owns the real backbone, channel-preserving
 global-average pooling, and Linear classification head. Classifier learning uses
 one resident parameter owner and one acceptance/revision clock for all weights.
@@ -57,7 +59,13 @@ and augmentation RNG independently of the model. A native GPU fixture matches
 100 classifier update attempts against a restart after attempt 37, including
 two rejected updates. Python-to-wasm32 transform replay is exact under Node;
 browser WebGPU learning restart is not yet measured. These payloads do not
-yet form one integrity-bound model/input/trainer checkpoint.
+form one integrity-bound model/input/trainer checkpoint by themselves.
+
+The [resident trainer](resident_vision_trainer.md) now owns those components and
+the update settlement boundary. It reuses the existing Rust warmup/cosine scheduler
+and checkpoint hashing, rather than reconstructing either in clients. Its native
+process-restart fixture exercises constant SGD and scheduled rates, including
+rejected updates. Thin Python/browser clients and real-browser restart remain open.
 
 ### Next Rails And Exit Gates
 
@@ -78,8 +86,10 @@ Z-space policy advantage. Every step observes loss/acceptance on the host.
    data order/cursor, augmentation RNG and schedule state, then connect their
    restart contracts. Specify whether rejected updates retry or consume a batch.
    Compare uninterrupted and resumed batch identities, transforms and updates.
-   This is the next implementation rail; reuse existing Rust trainer-state
-   contracts rather than duplicating policy in the Python/browser clients.
+   The Rust resident trainer now connects this boundary for full fixed-size
+   classifier batches; thin clients and real-browser restart are the remaining
+   integration gates. Reuse Rust trainer-state contracts rather than duplicating
+   policy in Python/browser clients.
 3. **Shared resident optimizer control.** Connect existing Rust optimizer and
    Z-space policy to the resident parameter owner rather than reimplementing it
    in Python/JavaScript. Preserve the plain-SGD control case and all-parameter

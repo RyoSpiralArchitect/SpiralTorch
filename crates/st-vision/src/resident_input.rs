@@ -338,6 +338,16 @@ impl<D: VisionDataset> DataLoader<D> {
         &mut self,
         device: &TensorDevice,
     ) -> PureResult<Option<ResidentVisionBatch>> {
+        let Some(prepared) = self.prepare_resident_batch(device)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.commit_resident_batch(prepared)))
+    }
+
+    pub(crate) fn prepare_resident_batch(
+        &self,
+        device: &TensorDevice,
+    ) -> PureResult<Option<PreparedResidentVisionBatch>> {
         let Some((end, batch)) = self.pending_batch()? else {
             return Ok(None);
         };
@@ -353,16 +363,33 @@ impl<D: VisionDataset> DataLoader<D> {
             }
             device.upload(&shape, &values).map_err(gpu_error)?
         };
-        self.pipeline = candidate;
-        self.position = end;
-        Ok(Some(ResidentVisionBatch {
-            images,
-            targets: batch.targets,
-            labels: batch.labels,
-            boxes: batch.boxes,
-            masks: batch.masks,
+        Ok(Some(PreparedResidentVisionBatch {
+            end,
+            pipeline: candidate,
+            batch: ResidentVisionBatch {
+                images,
+                targets: batch.targets,
+                labels: batch.labels,
+                boxes: batch.boxes,
+                masks: batch.masks,
+            },
         }))
     }
+
+    pub(crate) fn commit_resident_batch(
+        &mut self,
+        prepared: PreparedResidentVisionBatch,
+    ) -> ResidentVisionBatch {
+        self.pipeline = prepared.pipeline;
+        self.position = prepared.end;
+        prepared.batch
+    }
+}
+
+pub(crate) struct PreparedResidentVisionBatch {
+    pub batch: ResidentVisionBatch,
+    end: usize,
+    pipeline: Option<TransformPipeline>,
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@
 use crate::module::Module;
 use crate::PureResult;
 use st_core::ops::zspace_round::SpectralFeatureSample;
-pub use st_core::runtime::trainer_optimizer::SpectralLrAdapterState;
+pub use st_core::runtime::trainer_optimizer::{SpectralLrAdapterState, WarmupCosineSchedulerState};
 use st_core::runtime::zspace_optimizer::{
     zspace_parameter_control_from_report, ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
 };
@@ -705,6 +705,60 @@ pub struct WarmupCosineScheduler {
 }
 
 impl WarmupCosineScheduler {
+    pub fn state(&self) -> WarmupCosineSchedulerState {
+        WarmupCosineSchedulerState {
+            base_lr: self.base_lr,
+            min_lr: self.min_lr,
+            warmup_steps: self.warmup_steps,
+            total_steps: self.total_steps,
+            step: self.step,
+        }
+    }
+
+    /// Propose a step without changing the clock or emitting a step event.
+    /// Transactional executors may discard it when an update is rejected.
+    pub fn preview_step(&self) -> (f32, WarmupCosineSchedulerState) {
+        let state = WarmupCosineSchedulerState {
+            step: self.step.saturating_add(1),
+            ..self.state()
+        };
+        (self.rate_at(state.step), state)
+    }
+
+    /// Restore in constant time, without replaying steps or emitting telemetry.
+    pub fn from_state(state: WarmupCosineSchedulerState) -> PureResult<Self> {
+        let mut scheduler = Self::new(
+            state.base_lr,
+            state.min_lr,
+            state.warmup_steps,
+            state.total_steps,
+        )?;
+        scheduler.step = state.step;
+        scheduler.last_lr = scheduler.rate_at(state.step);
+        Ok(scheduler)
+    }
+
+    fn rate_at(&self, step: u32) -> f32 {
+        if step == 0 {
+            return if self.warmup_steps > 0 {
+                self.min_lr.min(self.base_lr)
+            } else {
+                self.base_lr
+            };
+        }
+        let lr = if self.warmup_steps > 0 && step <= self.warmup_steps {
+            let progress = step as f32 / self.warmup_steps as f32;
+            self.min_lr + (self.base_lr - self.min_lr) * progress
+        } else {
+            let decay_steps = (self.total_steps - self.warmup_steps).max(1);
+            let elapsed = (step - self.warmup_steps).min(decay_steps);
+            let progress = elapsed as f32 / decay_steps as f32;
+            let cosine = 0.5 * (1.0 + (PI * progress).cos());
+            self.min_lr + (self.base_lr - self.min_lr) * cosine
+        };
+        lr.max(self.min_lr)
+    }
+
     /// Creates a new warmup + cosine scheduler.
     pub fn new(base_lr: f32, min_lr: f32, warmup_steps: u32, total_steps: u32) -> PureResult<Self> {
         if base_lr <= 0.0 || !base_lr.is_finite() {
@@ -764,23 +818,14 @@ impl WarmupCosineScheduler {
 
 impl LrScheduler for WarmupCosineScheduler {
     fn step(&mut self) -> f32 {
-        self.step = self.step.saturating_add(1);
+        let (rate, next) = self.preview_step();
+        self.step = next.step;
         let phase = if self.warmup_steps > 0 && self.step <= self.warmup_steps {
             "warmup"
         } else {
             "cosine"
         };
-        let lr = if self.warmup_steps > 0 && self.step <= self.warmup_steps {
-            let progress = self.step as f32 / self.warmup_steps as f32;
-            self.min_lr + (self.base_lr - self.min_lr) * progress
-        } else {
-            let decay_steps = (self.total_steps - self.warmup_steps).max(1);
-            let elapsed = (self.step - self.warmup_steps).min(decay_steps);
-            let progress = elapsed as f32 / decay_steps as f32;
-            let cosine = 0.5 * (1.0 + (PI * progress).cos());
-            self.min_lr + (self.base_lr - self.min_lr) * cosine
-        };
-        self.last_lr = lr.max(self.min_lr);
+        self.last_lr = rate;
         emit_tensor_op("warmup_cosine_lr_step", &[1, 4], &[1, 1]);
         emit_tensor_op_meta("warmup_cosine_lr_step", || {
             serde_json::json!({
@@ -1164,6 +1209,56 @@ mod tests {
         assert!(lr2 >= lr3);
         scheduler.reset();
         assert!((scheduler.current_lr() - 0.01).abs() < 1e-6);
+    }
+
+    #[test]
+    fn warmup_scheduler_checkpoint_replays_boundaries() {
+        for warmup in [0, 2, 6] {
+            let mut source = WarmupCosineScheduler::new(0.1, 0.01, warmup, 6).unwrap();
+            for _ in 0..12 {
+                let state = source.state();
+                let json = serde_json::to_string(&state).unwrap();
+                let mut resumed =
+                    WarmupCosineScheduler::from_state(serde_json::from_str(&json).unwrap())
+                        .unwrap();
+                assert_eq!(
+                    source.current_lr().to_bits(),
+                    resumed.current_lr().to_bits()
+                );
+                assert_eq!(source.step().to_bits(), resumed.step().to_bits());
+            }
+            let mut state = source.state();
+            state.step = u32::MAX;
+            let mut resumed = WarmupCosineScheduler::from_state(state).unwrap();
+            assert_eq!(resumed.step(), 0.01);
+            state.base_lr = f32::NAN;
+            assert!(WarmupCosineScheduler::from_state(state).is_err());
+            state.base_lr = 0.1;
+            state.warmup_steps = 7;
+            assert!(WarmupCosineScheduler::from_state(state).is_err());
+            state.warmup_steps = 0;
+            state.total_steps = 0;
+            assert!(WarmupCosineScheduler::from_state(state).is_err());
+        }
+    }
+
+    #[test]
+    fn warmup_scheduler_preview_does_not_advance_or_emit() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured.lock().unwrap().push(event.op_name);
+        })));
+        let mut scheduler = WarmupCosineScheduler::new(0.1, 0.01, 2, 6).unwrap();
+        let before = scheduler.state();
+        let (rate, next) = scheduler.preview_step();
+        assert_eq!(scheduler.state(), before);
+        assert!(events.lock().unwrap().is_empty());
+        assert_eq!(scheduler.step().to_bits(), rate.to_bits());
+        assert_eq!(scheduler.state(), next);
+        assert_eq!(*events.lock().unwrap(), vec!["warmup_cosine_lr_step"]);
+        st_tensor::set_thread_meta_observer(previous);
     }
 
     #[test]

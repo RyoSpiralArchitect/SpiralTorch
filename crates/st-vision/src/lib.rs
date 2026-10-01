@@ -115,6 +115,8 @@ mod resident_input;
 pub use resident_input::ResidentVisionBatch;
 #[cfg(feature = "nerf")]
 pub mod nerf;
+#[cfg(all(feature = "wgpu", feature = "nn"))]
+pub mod resident_trainer;
 mod tensor_contract;
 pub mod transforms;
 /// Default number of conditioning features encoded for each Z-space slice.
