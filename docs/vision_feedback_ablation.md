@@ -15,6 +15,12 @@ The [final-implementation revalidation](../benchmarks/results/2026-10-01-vision-
 repeats every condition after the CE portability and finite-f32 admission fixes:
 native trajectories/checkpoints and the measured epoch metrics are unchanged.
 
+The [fixed-model follow-up](../benchmarks/results/2026-10-01-vision-feedback-stationarity/README.md)
+separates sampling variation from parameter changes: all six frozen models
+produce frequent gate closures under changing batches, while full-pass mean loss
+remains stable. This identifies a limitation in the observation population, not
+proof that a replacement policy improves actual training.
+
 ## Four Matched Arms
 
 | Arm | Nominal rate | Proposal | Rust loss gate |

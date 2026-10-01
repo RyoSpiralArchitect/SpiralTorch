@@ -8,6 +8,9 @@ import unittest
 spec = importlib.util.spec_from_file_location("stationarity", Path(__file__).with_name("probe_vision_feedback_stationarity.py"))
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
+spec = importlib.util.spec_from_file_location("stationarity_verify", Path(__file__).with_name("verify_vision_feedback_stationarity.py"))
+verifier = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verifier)
 
 
 class StationarityChecks(unittest.TestCase):
@@ -55,6 +58,33 @@ class StationarityChecks(unittest.TestCase):
             rows[-1]["state_after"][key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
                 probe.summarize_shadow(rows)
+
+    def frozen_rows(self):
+        rows = [dict(step=i, sample_ids=[i], input_sha256=str(i) * 64,
+                     loss=1., torch_loss=1., loss_bits=probe.runner.bits(1.),
+                     parity=dict(max_abs_error=0., max_scaled_error=0., values=1)) for i in (1, 2)]
+        return rows, copy.deepcopy(rows)
+
+    def test_saved_inputs_and_reference_metrics_are_recomputed(self):
+        rows, originals = self.frozen_rows()
+        self.assertEqual(verifier.verify_rows(rows, originals, [1, 2], 2)[0]["mean_loss"], 1.)
+
+    def test_changed_inputs_bits_or_parity_cannot_hide_in_equal_means(self):
+        for key, value in (("sample_ids", [2]), ("input_sha256", "9" * 64),
+                           ("loss_bits", probe.runner.bits(2.)),
+                           ("parity", dict(max_abs_error=0.1, max_scaled_error=0., values=1))):
+            rows, originals = self.frozen_rows()
+            rows[0][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                verifier.verify_rows(rows, originals, [1, 2], 2)
+
+    def test_missing_records_or_nonfinite_reference_fails(self):
+        rows, originals = self.frozen_rows()
+        with self.assertRaises(ValueError):
+            verifier.verify_rows(rows[:1], originals, [1, 2], 2)
+        rows[0]["torch_loss"] = float("nan")
+        with self.assertRaises(ValueError):
+            verifier.verify_rows(rows, originals, [1, 2], 2)
 
 
 if __name__ == "__main__":

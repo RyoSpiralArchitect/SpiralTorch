@@ -1,0 +1,61 @@
+{
+  "schema": "spiraltorch.vision.feedback_stationarity_verification.v1",
+  "status": "passed",
+  "scope": "Retained input/metric verification and native Rust gate replay, not a new inference measurement.",
+  "summary": {
+    "file": "summary.json",
+    "bytes": 18251,
+    "sha256": "f46646c666c311d6e0ea75eb3fdd5e474f0212148c277a4f05ccd31cba2e5dc2"
+  },
+  "probe_ref": "69709820",
+  "cases": [
+    {
+      "seed": 17,
+      "checkpoint": "initial",
+      "records": 400,
+      "shadow_streams": 3,
+      "gate_states_exact": true,
+      "retained_inputs_exact": true
+    },
+    {
+      "seed": 17,
+      "checkpoint": "final",
+      "records": 400,
+      "shadow_streams": 3,
+      "gate_states_exact": true,
+      "retained_inputs_exact": true
+    },
+    {
+      "seed": 29,
+      "checkpoint": "initial",
+      "records": 400,
+      "shadow_streams": 3,
+      "gate_states_exact": true,
+      "retained_inputs_exact": true
+    },
+    {
+      "seed": 29,
+      "checkpoint": "final",
+      "records": 400,
+      "shadow_streams": 3,
+      "gate_states_exact": true,
+      "retained_inputs_exact": true
+    },
+    {
+      "seed": 43,
+      "checkpoint": "initial",
+      "records": 400,
+      "shadow_streams": 3,
+      "gate_states_exact": true,
+      "retained_inputs_exact": true
+    },
+    {
+      "seed": 43,
+      "checkpoint": "final",
+      "records": 400,
+      "shadow_streams": 3,
+      "gate_states_exact": true,
+      "retained_inputs_exact": true
+    }
+  ]
+}
