@@ -44,6 +44,7 @@ try {
   const fixture = await (await fetch("/python.json")).json();
   check(fixture.schema === "vision_trainer_client_fixture.v1", "fixture schema");
   report.controlled = fixture.controlled === true;
+  report.feedback = fixture.feedback === true;
   const reference = fixture.cases.find(c => c.scheduled === (schedule === "cosine"));
   check(reference, "missing schedule case");
   const device = await WgpuTensorDevice.create();
@@ -120,6 +121,13 @@ try {
     if (report.controlled) equal(before.parameter_control, after.parameter_control, "update mutated control");
     report.records.push({revision: Number(receipt.attemptedRevision), epoch: Number(submitted.epoch),
       rate_bits: bits([submitted.learningRate])[0], labels, images_bits: bits(images), accepted: receipt.accepted});
+    if (report.feedback) {
+      report.records.at(-1).optimizer_feedback = after.optimizer_feedback;
+      equal(after.optimizer_feedback.state.control_step, after.accepted_updates + after.rejected_updates, "feedback clock");
+      equal(after.optimizer_feedback.state.observation_count, after.accepted_updates, "feedback observation count");
+      if (!receipt.accepted) equal(before.optimizer_feedback.state.last_loss,
+        after.optimizer_feedback.state.last_loss, "rejected loss entered feedback");
+    }
     if (i === count - 1) held = submitted.images();
     submitted.free(); receipt.free();
     if (i % 10 === 0) output.textContent = `${schedule} / ${mode}: ${i + 1} of ${count} attempts`;
@@ -134,7 +142,8 @@ try {
   equal(await checkpoint(trainer), report.checkpoint, "failed restore mutated trainer");
   report.state = JSON.parse(trainer.stateJson());
   if (report.controlled) {
-    equal(JSON.parse(report.checkpoint).schema, "spiraltorch.vision.training_checkpoint.v2", "controlled schema");
+    equal(JSON.parse(report.checkpoint).schema, report.feedback
+      ? "spiraltorch.vision.training_checkpoint.v3" : "spiraltorch.vision.training_checkpoint.v2", "controlled schema");
     reject(() => trainer.applyZSpaceMetaOptimizerReportJson(JSON.stringify(reference.control_reports["0"])), "stale control");
     equal(await checkpoint(trainer), report.checkpoint, "stale control mutated trainer");
   }
@@ -179,6 +188,7 @@ try {
 } catch (error) { report.passed = false; report.error = String(error); }
 output.textContent = JSON.stringify({passed: report.passed, mode, schedule,
   controlled: report.controlled,
+  feedback: report.feedback,
   adapter: report.adapter, attempts: report.records?.length, state: report.state,
   bitwise_resume: report.bitwise_resume, cross_runtime: report.cross_runtime, error: report.error}, null, 2);
 output.dataset.status = report.passed ? "done" : "error";

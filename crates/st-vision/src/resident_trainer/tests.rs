@@ -9,6 +9,8 @@ use std::process::Command;
 
 #[path = "control_tests.rs"]
 mod control_tests;
+#[path = "feedback_tests.rs"]
+mod feedback_tests;
 
 const DATA_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -180,6 +182,7 @@ fn shared_client_factory_matches_explicit_loader_and_restores() {
         shuffle_seed: 17,
         shuffle: true,
         learning_rate: rate(true),
+        optimizer_feedback: None,
     };
     let mut client = ResidentVisionTrainer::from_dataset(
         &config,
@@ -243,7 +246,7 @@ fn pending_settlement_errors_and_snapshot_lifetime() {
         .is_err());
     let pending_state = trainer.state().clone();
     assert!(trainer
-        .finish_settlement(Err(TrainingError::InvalidReadback))
+        .finish_settlement(Err(TrainingError::InvalidReadback), None)
         .is_err());
     assert!(trainer.has_pending_update());
     assert_eq!(trainer.state(), &pending_state);
