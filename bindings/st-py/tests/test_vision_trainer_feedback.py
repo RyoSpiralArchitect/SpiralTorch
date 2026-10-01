@@ -91,6 +91,16 @@ class Surface(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class Gpu(unittest.TestCase):
+    def test_unsafe_loss_floor_is_rejected_before_training(self):
+        device = st.WgpuTensorDevice.create()
+        self.assertNotEqual(device.adapter_info()["device_type"], "Cpu")
+        dataset, pipeline = base.inputs()
+        config = json.loads(configuration(False))
+        config["optimizer_feedback"]["loss_floor"] = 1e-310
+        with self.assertRaisesRegex(ValueError, "finite f32 loss domain"):
+            st.ResidentVisionTrainer.create(
+                device, dataset, base.dataset_id(), json.dumps(config), pipeline)
+
     @unittest.skipUnless(os.environ.get("SPIRALTORCH_VISION_FEEDBACK_BROWSER_DIR"), "browser checkpoints")
     def test_browser_feedback_checkpoints_continue_in_native(self):
         directory = Path(os.environ["SPIRALTORCH_VISION_FEEDBACK_BROWSER_DIR"])

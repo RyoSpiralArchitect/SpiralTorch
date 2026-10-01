@@ -140,3 +140,11 @@ below one, closing the gate increases the rate back toward nominal. Batch-to-
 batch loss changes also include sampling noise. No convergence, quality,
 stability or speed advantage follows from wiring correctness. Real-data
 policy-on/off and integrated-rate-matched comparisons remain necessary.
+
+The shared `ZSpaceParameterFeedbackState` adapter validates its finite f32 loss
+domain before any parameter update. A positive but extremely small f64
+`loss_floor` could otherwise overflow the relative delta after a GPU update was
+already accepted, leaving settlement pending. Such configurations, and restored
+histories outside the adapter's arithmetic domain, now fail before submission.
+This adds headroom for relative-delta/EMA arithmetic without changing ordinary
+configurations, clipping observed losses, or changing the standalone f64 core.

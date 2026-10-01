@@ -14,6 +14,10 @@ fn error(error: impl std::fmt::Display) -> TensorError {
     TensorError::Generic(error.to_string())
 }
 
+// Reserve headroom for relative-loss subtraction and its f64 EMA before an
+// f32 parameter update can commit. The standalone core still accepts f64 losses.
+const MIN_F32_LOSS_FLOOR: f64 = (f32::MAX as f64 * 8.0) / f64::MAX;
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ZSpaceParameterFeedbackState {
@@ -24,10 +28,12 @@ pub struct ZSpaceParameterFeedbackState {
 impl ZSpaceParameterFeedbackState {
     pub fn new(config: ZSpaceOptimizerFeedbackConfig) -> PureResult<Self> {
         let initialized = initialize_zspace_optimizer_feedback(config).map_err(error)?;
-        Ok(Self {
+        let owner = Self {
             config: initialized.config,
             state: initialized.state,
-        })
+        };
+        owner.validate()?;
+        Ok(owner)
     }
 
     pub fn config(&self) -> &ZSpaceOptimizerFeedbackConfig {
@@ -44,6 +50,22 @@ impl ZSpaceParameterFeedbackState {
             state: self.state.clone(),
         })
         .map_err(error)?;
+        if self.config.loss_floor < MIN_F32_LOSS_FLOOR
+            || self
+                .state
+                .last_loss
+                .is_some_and(|value| value.abs() > f64::from(f32::MAX))
+            || self
+                .state
+                .loss_ema
+                .is_some_and(|value| value.abs() > 2.0 * f64::from(f32::MAX))
+            || self
+                .state
+                .relative_loss_delta_ema
+                .is_some_and(|value| value.abs() > f64::MAX / 2.0)
+        {
+            return Err(error("feedback exceeds the finite f32 loss domain"));
+        }
         // This adapter observes completed attempts, never a synthetic step zero.
         if self.state.observation_count > self.state.control_step
             || self.state.last_observation_step == Some(0)
@@ -110,6 +132,46 @@ impl ZSpaceParameterFeedbackState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsafe_loss_floor_is_rejected_before_parameter_updates() {
+        let config = ZSpaceOptimizerFeedbackConfig {
+            loss_floor: 1e-310,
+            ..Default::default()
+        };
+        assert!(initialize_zspace_optimizer_feedback(config.clone()).is_ok());
+        assert!(ZSpaceParameterFeedbackState::new(config).is_err());
+    }
+
+    #[test]
+    fn admitted_floor_keeps_extreme_f32_loss_transitions_finite() {
+        let mut state = ZSpaceParameterFeedbackState::new(ZSpaceOptimizerFeedbackConfig {
+            loss_floor: MIN_F32_LOSS_FLOOR,
+            relative_delta_ema_alpha: 1.0,
+            ..Default::default()
+        })
+        .unwrap();
+        for loss in [0.0, f32::MAX, 0.0, -f32::MAX, 0.0, f32::MAX] {
+            let (pending, rate) = state.preview(0.01, 0.5).unwrap();
+            state = pending.observe(loss, rate, 0).unwrap();
+            state.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn restored_out_of_domain_history_is_rejected_before_preview() {
+        let mut state = ZSpaceParameterFeedbackState::new(Default::default()).unwrap();
+        let (pending, rate) = state.preview(0.01, 0.5).unwrap();
+        state = pending.observe(1.0, rate, 0).unwrap();
+        let (pending, rate) = state.preview(0.01, 0.5).unwrap();
+        state = pending.observe(0.5, rate, 0).unwrap();
+        for field in ["last_loss", "loss_ema", "relative_loss_delta_ema"] {
+            let mut value = serde_json::to_value(&state).unwrap();
+            value["state"][field] = serde_json::json!(f64::MAX);
+            let restored: ZSpaceParameterFeedbackState = serde_json::from_value(value).unwrap();
+            assert!(restored.preview(0.01, 0.5).is_err(), "{field}");
+        }
+    }
 
     #[test]
     fn core_gate_changes_rates_and_missing_observations_revert_to_identity() {
