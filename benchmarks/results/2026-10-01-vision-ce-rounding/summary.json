@@ -1,0 +1,541 @@
+{
+  "schema": "spiraltorch.vision.ce_rounding_evidence.v1",
+  "implementation_source_capture": "c24743dd922988ffddd63380dfae921ed9702afc",
+  "baseline_source_capture": "f81d51e2c9a0ac79d804e3ff0738ef0e60b19ccb",
+  "boundary": "Bounded CE accuracy and native/browser feedback replay. No universal device determinism, training quality, speed or memory claim.",
+  "arithmetic_probe": {
+    "rows": 7513,
+    "stages": [
+      {
+        "name": "gap",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      },
+      {
+        "name": "tail",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      },
+      {
+        "name": "whole",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      },
+      {
+        "name": "rounded_tail",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      },
+      {
+        "name": "log_whole",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      },
+      {
+        "name": "correction",
+        "mismatches": 491,
+        "max_ulp_difference": 1
+      },
+      {
+        "name": "production_log1p",
+        "mismatches": 963,
+        "max_ulp_difference": 1
+      },
+      {
+        "name": "reconstructed_log1p",
+        "mismatches": 229,
+        "max_ulp_difference": 2
+      },
+      {
+        "name": "protected_whole",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      },
+      {
+        "name": "protected_residual",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      },
+      {
+        "name": "additive_corrected_log1p",
+        "mismatches": 1039,
+        "max_ulp_difference": 1
+      },
+      {
+        "name": "multiplicative_corrected_log1p",
+        "mismatches": 0,
+        "max_ulp_difference": 0
+      }
+    ],
+    "selection": "Protected multiplicative correction; additive candidate retained as a rejected alternative."
+  },
+  "production_loss_domain": {
+    "rows": 7513,
+    "gap_range": [
+      0,
+      80
+    ],
+    "reductions": {
+      "none": {
+        "baseline_maximum_relative_error": 0.9999806007991547,
+        "fixed_maximum_relative_error": 0.000003718393104978901,
+        "native_browser_loss_bits_exact": true,
+        "native_browser_gradient_bits_exact": true,
+        "gradient_bits_unchanged_by_fix": true
+      },
+      "sum": {
+        "baseline_maximum_relative_error": 1.04906189291043e-8,
+        "fixed_maximum_relative_error": 1.04906189291043e-8,
+        "native_browser_loss_bits_exact": true,
+        "native_browser_gradient_bits_exact": true,
+        "gradient_bits_unchanged_by_fix": true
+      },
+      "mean": {
+        "baseline_maximum_relative_error": 9.440404014071646e-11,
+        "fixed_maximum_relative_error": 9.440404014071646e-11,
+        "native_browser_loss_bits_exact": true,
+        "native_browser_gradient_bits_exact": true,
+        "gradient_bits_unchanged_by_fix": true
+      }
+    },
+    "native_adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    },
+    "browser_adapter": {
+      "backend": "BrowserWebGpu",
+      "device_type": "Other",
+      "name": ""
+    }
+  },
+  "json_regression": {
+    "before": "Standalone core JSON roundtrip differs at step 2; resident trainer subsequently rejects its own checkpoint hash.",
+    "fix": "st-core owns serde_json float_roundtrip; equality and hash checks are not relaxed."
+  },
+  "trainer_cases": [
+    {
+      "schedule": "constant",
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "split": [
+        37,
+        63
+      ],
+      "native_adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      },
+      "browser_adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "all_native_and_browser_records_exact": true,
+      "all_final_checkpoints_exact": true,
+      "parameter_tensors": 24,
+      "parameter_values": 456,
+      "maximum_parameter_scaled_error": 0
+    },
+    {
+      "schedule": "cosine",
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "split": [
+        37,
+        63
+      ],
+      "native_adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      },
+      "browser_adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "all_native_and_browser_records_exact": true,
+      "all_final_checkpoints_exact": true,
+      "parameter_tensors": 24,
+      "parameter_values": 456,
+      "maximum_parameter_scaled_error": 0
+    }
+  ],
+  "validation": {
+    "rust": [
+      {
+        "name": "st-core",
+        "passed": 1002,
+        "failed": 0,
+        "ignored": 0,
+        "log": "logs/vision-feedback-json-core-after-20261001.log"
+      },
+      {
+        "name": "st-backend-wgpu",
+        "passed": 246,
+        "failed": 0,
+        "ignored": 0,
+        "log": "logs/spiraltorch-vision-ce-fixed-backend-all-20261001.log"
+      },
+      {
+        "name": "st-vision wgpu",
+        "passed": 112,
+        "failed": 0,
+        "ignored": 1,
+        "log": "logs/spiraltorch-vision-ce-state-fixed-vision-all-20261001.log"
+      },
+      {
+        "name": "st-vision cpu",
+        "passed": 78,
+        "failed": 0,
+        "ignored": 0,
+        "log": "logs/spiraltorch-vision-ce-state-fixed-cpu-20261001.log"
+      }
+    ],
+    "python_passed": 5,
+    "python_skipped": 0,
+    "browser_phases_passed": 8,
+    "browser_to_native_checkpoint_and_continuation_exact": true,
+    "legacy_feedback_histories_unchanged": true
+  },
+  "raw_receipts": [
+    {
+      "file": "diagnostics/native_probe/ce_observation_probe.rs",
+      "bytes": 4732,
+      "sha256": "32998428932a58f8948c8d4263149541f24c0d2089dcd807d44f30d4ac09f76c"
+    },
+    {
+      "file": "diagnostics/native_probe/ce_observation_probe.wgsl",
+      "bytes": 1151,
+      "sha256": "4d7628f5e6375d8f1f4d9dfe43263e3702b2c360b1e45482def6b93d9ecc1948"
+    },
+    {
+      "file": "diagnostics/vision-ce-candidate-browser-20261001.json",
+      "bytes": 5185,
+      "sha256": "aa24d84eaba034796fe8c6e3a88cc19357c943a41443ae52a7ce3dfd18521830"
+    },
+    {
+      "file": "diagnostics/vision-ce-candidate-native-20261001.json",
+      "bytes": 56276,
+      "sha256": "e47c073468a312ee119d24679cd7727a0dbe9f4293fdba629c1e6ee095e60fa3"
+    },
+    {
+      "file": "diagnostics/vision-ce-domain-20261001.py",
+      "bytes": 572,
+      "sha256": "95c2b4e5da9571a50517d9c4c0e7b566571676365abebda199f3e3bc30309b33"
+    },
+    {
+      "file": "diagnostics/vision-ce-domain-browser-20261001.html",
+      "bytes": 2959,
+      "sha256": "7f8b4c6ea5dca3fdc08faea168802d8e43142c8ebca2b3ebe76e24663253f91c"
+    },
+    {
+      "file": "diagnostics/vision-ce-domain-browser-20261001.json",
+      "bytes": 881112,
+      "sha256": "3d4a21105fb26b3700fa0e7b1cd06ee26540045e601dfd708afbfff18e480bec"
+    },
+    {
+      "file": "diagnostics/vision-ce-domain-input-20261001.json",
+      "bytes": 316643,
+      "sha256": "2fe9a3aabb6af0cce5033b21451f44deb0772385e48f9cf3a709f16906d26573"
+    },
+    {
+      "file": "diagnostics/vision-ce-domain-native-20261001.json",
+      "bytes": 2221473,
+      "sha256": "47438ec017cec1f3d28ed6b624d73ee9314dfbcddc83d77aa1e3a34ef20fbd9e"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-20261001.py",
+      "bytes": 1342,
+      "sha256": "60a09321ebc3782513034c0a1bfb901c56a9808d4832d9dc8ed28b5bf2b256f8"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-after-20261001.json",
+      "bytes": 603666,
+      "sha256": "567802b30681db8ceafddff1f54f46c21a3bb3a5f5f24384ea697bc1b90696d5"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-before-20261001.json",
+      "bytes": 603663,
+      "sha256": "adfee0b8681f9e238248742cca1b5a3ba8083bfbea1051b428f82bacb030b658"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-browser-20261001.html",
+      "bytes": 2246,
+      "sha256": "fa66a1cb97dda0aeac36766fee6f69540e83c4334d050a443e37e76a967fde03"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-browser-20261001.json",
+      "bytes": 551562,
+      "sha256": "c3756349e8c94894015a069f0cc26e5156486d84b75ca39df94309f0bf5a7625"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-final-20261001.json",
+      "bytes": 603666,
+      "sha256": "567802b30681db8ceafddff1f54f46c21a3bb3a5f5f24384ea697bc1b90696d5"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-final-browser-20261001.json",
+      "bytes": 551562,
+      "sha256": "aa14b2db35978c73b152a2acc360c76e13384951deed4ca3ad4b5d6f5583e4a4"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-final-handoff-20261001.json",
+      "bytes": 830205,
+      "sha256": "d6338502e268ab06c168bf9065bf38721223d8db04aea0eea90ac57274e72413"
+    },
+    {
+      "file": "diagnostics/vision-ce-loss-domain-handoff-20261001.json",
+      "bytes": 830205,
+      "sha256": "d6338502e268ab06c168bf9065bf38721223d8db04aea0eea90ac57274e72413"
+    },
+    {
+      "file": "diagnostics/vision-ce-math-browser-20261001.json",
+      "bytes": 3571,
+      "sha256": "ec6c7d71404773b5cca205c0ec6941062086f934deb57a10741b01717f087c18"
+    },
+    {
+      "file": "diagnostics/vision-ce-math-native-20261001.json",
+      "bytes": 52746,
+      "sha256": "1dfeb8448434a9a313998e73a0ade54296a295dbd6f275783df1ca15f036f4a6"
+    },
+    {
+      "file": "diagnostics/vision-ce-math-probe-20261001.html",
+      "bytes": 2716,
+      "sha256": "1fd5ba5106fde6707878296a8f88d1b25efb398148f4201ba7120918f3d60293"
+    },
+    {
+      "file": "diagnostics/vision-ce-probe-20261001.html",
+      "bytes": 2644,
+      "sha256": "0ef252dbaa6ae72180f8a9e3ec2cd3859030cc306042cfc15803ef6b3230799d"
+    },
+    {
+      "file": "diagnostics/vision-ce-probe-20261001.py",
+      "bytes": 3186,
+      "sha256": "c21e91e1ce5228535c44bf703339197b3d40da5895316e59bfa4f7f284f6171e"
+    },
+    {
+      "file": "diagnostics/vision-ce-probe-browser-20261001.json",
+      "bytes": 1572,
+      "sha256": "73c9afd15510879a17946e3dc47b87ad16a7ac99380261c2a7c92ee5c0b399d0"
+    },
+    {
+      "file": "diagnostics/vision-ce-probe-native-20261001.json",
+      "bytes": 19096,
+      "sha256": "916e7eea1f3f5bafdbff510900543936f55afcc5239874bd4f8b2634144adc8a"
+    },
+    {
+      "file": "diagnostics/vision-ce-probe-server-20261001.cjs",
+      "bytes": 1814,
+      "sha256": "fe6af01cbc08bd91cc42569cce899764576bbd7e2f26916c7c2134ec46b5b6ae"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-backend-all-20261001.log",
+      "bytes": 138626,
+      "sha256": "8f071eff753ffe92752443c20bd5a82473053640e92d03d98ff725fdb573e8a0"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-clippy-20261001.log",
+      "bytes": 114324,
+      "sha256": "88102d9e96ba4c3f5394a47bb24acf25c65427849b70f4a3c16d98050987f63c"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-python-20261001.log",
+      "bytes": 291,
+      "sha256": "9f13415c0a563f6fd18122f73cb51bd44b3e11719d01bd2a8f630ba38984937f"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-python-all-20261001.log",
+      "bytes": 768,
+      "sha256": "b295340fe6c4e2228796238fdd069a05aacbf32f37e9525f7fad1e1b1055fe78"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-python-run-20261001.log",
+      "bytes": 554,
+      "sha256": "1613d0fae77636fe3247289e00697a56f0a37a3f8085372d3e67359402b3ce9a"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-vision-all-20261001.log",
+      "bytes": 125194,
+      "sha256": "07c6d14eee97135019e6c9bc4b3407b4375a88f2b0a9b1b5dcd6611f76923b89"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-wasm-20261001.log",
+      "bytes": 112136,
+      "sha256": "514b776334ef7a518fa43f4b78d57909fb393782387a757271e055bc64abe261"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-fixed-wheel-20261001.log",
+      "bytes": 116275,
+      "sha256": "7061539b7b0d511255b860e1315cbcced079f5468c3bb796975aee13c73ad832"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-clippy-20261001.log",
+      "bytes": 115484,
+      "sha256": "2c78ed22d8c328bf4b11124a3439808bc6be5aa3133d630297edb75f2d0a3673"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-cpu-20261001.log",
+      "bytes": 6866,
+      "sha256": "29059ac7cc7188dcd3e0f06ba0305ec1de77151d3eac5fd9001f5d5f87c3ad02"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-python-final-20261001.log",
+      "bytes": 768,
+      "sha256": "7481b872247f8430cceb39e8828ce8240322aa1658b3329ab63739c10710034e"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-python-pre-browser-20261001.log",
+      "bytes": 768,
+      "sha256": "3e18843ab9d9e88d48fcb49fb0d180aa49fcd6b03a4da99ab692f5b7c6b4b048"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-types-20261001.log",
+      "bytes": 556,
+      "sha256": "d32892fc9e97bc4f111fb6165cda73b31b767454095ca6389371cdd84e5d8f61"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-vision-all-20261001.log",
+      "bytes": 124839,
+      "sha256": "1d5a2236de27824ac99ad928e6e9bf75a09dd22db11c86cb2cc709498a32ada6"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-wasm-20261001.log",
+      "bytes": 111651,
+      "sha256": "f3a716a9bf716835e3ebe93ddf84255b2333c9f1f2377d065eaf6a7194293e50"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-state-fixed-wheel-20261001.log",
+      "bytes": 116722,
+      "sha256": "c494eef30a6ece43129fc9ce285ba88c0069878af29723cec117ccc27980a6c3"
+    },
+    {
+      "file": "logs/vision-ce-candidate-native-20261001.log",
+      "bytes": 114836,
+      "sha256": "9d9f4ba5df5590c6ab485d206590e985fc9b5e5987d758bbed2b7b1b3e7382a8"
+    },
+    {
+      "file": "logs/vision-ce-domain-native-20261001.log",
+      "bytes": 879204,
+      "sha256": "da8107d5c371cfa28517abb0c5550c9063e36500c944ed31162420bdf9b5df8a"
+    },
+    {
+      "file": "logs/vision-ce-rounding-after-20261001.log",
+      "bytes": 114804,
+      "sha256": "d4e08ba621a14f7ad5359bcf1a7161c3e9f81c7be3aa516ec0c204747e7f815e"
+    },
+    {
+      "file": "logs/vision-ce-rounding-before-20261001.log",
+      "bytes": 115177,
+      "sha256": "d7f1ee8f51d002e163ac5339a65bed5d5a190cc24533b7493145cb2805d62da4"
+    },
+    {
+      "file": "logs/vision-feedback-json-before-20261001.log",
+      "bytes": 1881,
+      "sha256": "087274fc3a975a89fc697bce89a6f357c7bba46ef6252ae0917ea1fc47dd4a73"
+    },
+    {
+      "file": "logs/vision-feedback-json-core-after-20261001.log",
+      "bytes": 92268,
+      "sha256": "bb811adc0519a829b00d88f1846a70a3ee1f6b7ccb0b99fc5c0841383f947a37"
+    },
+    {
+      "file": "logs/vision-feedback-pr2157-review-20261001.log",
+      "bytes": 120,
+      "sha256": "645fa32f60146b5f6ead7a36d6893ae6f4e4ae90f501955de3e5a3a83ffe37c7"
+    },
+    {
+      "file": "fixtures/spiraltorch-vision-ce-fixed-native-20261001.json",
+      "bytes": 487503,
+      "sha256": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313"
+    },
+    {
+      "file": "fixtures/spiraltorch-vision-ce-state-fixed-native-20261001.json",
+      "bytes": 487503,
+      "sha256": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313"
+    },
+    {
+      "file": "browser-final/constant-control.json",
+      "bytes": 194528,
+      "sha256": "c51f521a70b8479fe2a79eb8d0e33ce0fed2743cf83040c417f7114620d41e89"
+    },
+    {
+      "file": "browser-final/constant-prefix.json",
+      "bytes": 84980,
+      "sha256": "8d1a7c04db542c66f66326977d2b259cb05b6318504dac40f917ed85f2f50cc7"
+    },
+    {
+      "file": "browser-final/constant-python.json",
+      "bytes": 130951,
+      "sha256": "6ab2346c9de19d7702081ec3f8c255124cce9bd636f1ed707f4fc7fdb7ef834b"
+    },
+    {
+      "file": "browser-final/constant-resume.json",
+      "bytes": 130873,
+      "sha256": "04010ea06edf3461eaa7ba8f2cd5ab0c39fd3d5e668021cbede82597e4278a70"
+    },
+    {
+      "file": "browser-final/cosine-control.json",
+      "bytes": 194792,
+      "sha256": "b14629f1e8259ca41d2a9458bfe23318ac861f719459cd879690ad5eca31eb50"
+    },
+    {
+      "file": "browser-final/cosine-prefix.json",
+      "bytes": 85217,
+      "sha256": "1d03fe322cf3d49404bfb7df510ab57ee704b98f279c987b6d6691d91e7f10c6"
+    },
+    {
+      "file": "browser-final/cosine-python.json",
+      "bytes": 131192,
+      "sha256": "7051218adc1f55acd0bba1a5a3ce046cb135edd728bfd7a4bf6956b7e1a578b4"
+    },
+    {
+      "file": "browser-final/cosine-resume.json",
+      "bytes": 131114,
+      "sha256": "5be86e65b7ece7b189669c83e861b4e4d240ac00a2caab509fbb53890bf481e7"
+    }
+  ],
+  "build_receipts": [
+    {
+      "file": "build/spiraltorch-vision-ce-state-fixed-web-20261001/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "bytes": 4526,
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "file": "build/spiraltorch-vision-ce-state-fixed-web-20261001/spiraltorch_wasm_bg.wasm",
+      "bytes": 9827048,
+      "sha256": "42622f894c04919f655e295e45e1bc2bfc5398f21fb73152189bf5ceb18a2b1e"
+    },
+    {
+      "file": "build/spiraltorch-vision-ce-state-fixed-web-20261001/spiraltorch_wasm_bg.wasm.d.ts",
+      "bytes": 81955,
+      "sha256": "5fb2a80c3d5630acd4faa0d800284af9dc27df434333c01cf77c0eb8eaf178d9"
+    },
+    {
+      "file": "build/spiraltorch-vision-ce-state-fixed-web-20261001/spiraltorch_wasm.d.ts",
+      "bytes": 145393,
+      "sha256": "7a2020ea9d9101458ccb04f336603b6b09b44ab12d8ee6bc115d7ecd74805fc7"
+    },
+    {
+      "file": "build/spiraltorch-vision-ce-state-fixed-web-20261001/spiraltorch_wasm.js",
+      "bytes": 424463,
+      "sha256": "a583c313cc2e0c966f192b690b0698fe4f310db026091c43ff58a208e0f3794d"
+    },
+    {
+      "file": "build/spiraltorch-vision-ce-state-fixed-wheel-20261001/spiraltorch-0.4.27-cp38-abi3-macosx_11_0_arm64.whl",
+      "bytes": 10480018,
+      "sha256": "9cd9f12bfb3bc12eb9b440f11620450891ffe5c323021c6ebcdb6796654bb6e7"
+    }
+  ],
+  "browser_assets": {
+    "/": "202ce0d94c69193f6055b4626038129ae49e3e640d64a3becc00cdeb95db5ad9",
+    "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+    "/module/spiraltorch_wasm.js": "a583c313cc2e0c966f192b690b0698fe4f310db026091c43ff58a208e0f3794d",
+    "/module/spiraltorch_wasm_bg.wasm": "42622f894c04919f655e295e45e1bc2bfc5398f21fb73152189bf5ceb18a2b1e"
+  }
+}
