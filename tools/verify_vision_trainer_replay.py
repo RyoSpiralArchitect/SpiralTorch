@@ -35,6 +35,15 @@ def verify_recipe_contract(runner, recipe, seed, contract):
                 dict(kind="warmup_cosine", state=dict(base_lr=recipe["rate"], min_lr=recipe["rate"] / 10,
                      warmup_steps=min(10, total), total_steps=total, step=0)))
     require(config["learning_rate"] == expected, "recipe learning rate differs from raw contract")
+    control = contract.get("intervention")
+    scale, feedback = recipe.get("control_scale"), recipe.get("optimizer_feedback", False)
+    require(type(feedback) is bool, "invalid feedback recipe")
+    if scale is None:
+        require(control is None and not feedback and "optimizer_feedback" not in config,
+                "unexpected optimizer intervention")
+    else:
+        require(0 < scale < 1 and control is not None and control["requested_scale"] == scale
+                and control["feedback_enabled"] is feedback, "recipe intervention differs from raw contract")
 
 
 def main():
@@ -84,8 +93,9 @@ def main():
         rates = {row["rate_bits"] for row in control["records"]}
         runner.require(0 < flips < samples if recipe["horizontal_flip"] else flips == 0,
                        "augmentation was absent/unexpected")
-        runner.require(len(rates) > 1 if recipe["schedule"] == "cosine"
-                       else rates == {runner.bits(recipe["rate"])}, "rate control was absent/unexpected")
+        if control["contract"].get("intervention") is None:
+            runner.require(len(rates) > 1 if recipe["schedule"] == "cosine"
+                           else rates == {runner.bits(recipe["rate"])}, "rate control was absent/unexpected")
         evaluations = [run["initial_evaluation"], *[epoch["evaluation"] for epoch in run["epochs"]]]
         reports.append(dict(seed=run["seed"], replay=replay, flipped_images=flips, observed_images=samples,
             unique_learning_rates=len(rates),

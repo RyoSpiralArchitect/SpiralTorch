@@ -53,6 +53,39 @@ def read_checkpoint(directory, record):
     return raw
 
 
+def verify_intervention(contract, records):
+    """Check observed control coverage; policy transitions remain Rust-owned."""
+    control = contract.get("intervention")
+    if control is None:
+        require(all("parameter_control" not in row and "optimizer_feedback" not in row for row in records),
+                "unconfigured optimizer intervention")
+        return
+    projection = control["projection"]
+    scale = unbits(bits(projection["absolute_learning_rate_scale"]))
+    require(scale == unbits(bits(control["requested_scale"])), "proposal scale was clamped")
+    expected = dict(absolute_learning_rate_scale=scale, source_meta_step=projection["source_step"])
+    feedback = control["feedback_enabled"]
+    require(type(feedback) is bool and feedback == ("optimizer_feedback" in contract["config"]),
+            "feedback configuration differs")
+    for row in records:
+        require(row.get("parameter_control") == expected, "parameter control differs from proposal")
+        require(("optimizer_feedback" in row) == feedback, "feedback observation missing/unexpected")
+        if feedback:
+            observed = row["optimizer_feedback"]
+            state = observed["state"]
+            require(observed["config"] == contract["config"]["optimizer_feedback"], "feedback config drift")
+            require(state["control_step"] == state["observation_count"] == row["revision"]
+                    and state["last_observation_step"] == row["revision"], "feedback observation clock differs")
+            require(state["last_loss"] == unbits(row["loss_bits"]), "feedback did not observe actual loss")
+            require(math.isfinite(state["gate"]) and 0 <= state["gate"] <= 1, "invalid observed feedback gate")
+        if contract["schedule"] == "constant":
+            nominal = unbits(bits(contract["config"]["learning_rate"]["rate"]))
+            reduced = unbits(bits(nominal * scale))
+            actual = unbits(row["rate_bits"])
+            require(reduced <= actual <= nominal if feedback else actual == reduced,
+                    "actual rate outside declared intervention")
+
+
 def verify_replay(directory, phases, total, split, train_ids, batch_size):
     require(0 < split < total and batch_size > 0, "invalid replay split/batch")
     require(train_ids and len(set(train_ids)) == len(train_ids), "empty/duplicate sample IDs")
@@ -80,6 +113,7 @@ def verify_replay(directory, phases, total, split, train_ids, batch_size):
             require(math.isfinite(unbits(row["loss_bits"])), "non-finite loss")
             require(len(row["input_sha256"]) == 64
                     and all(c in "0123456789abcdef" for c in row["input_sha256"]), "invalid input hash")
+        verify_intervention(run["contract"], run["records"])
     for start in range(0, total, per_epoch):
         ids = [i for row in control["records"][start:start + per_epoch] for i in row["sample_ids"]]
         require(sorted(ids) == sorted(train_ids), "epoch does not cover each sample once")
@@ -91,6 +125,12 @@ def verify_replay(directory, phases, total, split, train_ids, batch_size):
     require(payloads["control"]["split"] == payloads["prefix"]["final"], "prefix state differs")
     require(payloads["prefix"]["final"] == payloads["resume"]["initial"], "restored state differs")
     require(payloads["control"]["final"] == payloads["resume"]["final"], "final state differs")
+    if control["contract"].get("intervention", {}).get("feedback_enabled"):
+        for phase, run in phases.items():
+            require(json.loads(payloads[phase]["final"])["trainer"]["optimizer_feedback"]
+                    == run["records"][-1]["optimizer_feedback"], "checkpoint feedback differs from observation")
+        require(json.loads(payloads["control"]["split"])["trainer"]["optimizer_feedback"]
+                == control["records"][split - 1]["optimizer_feedback"], "split feedback differs from observation")
     native = json.loads(payloads["control"]["final"])["model"]
     reference = json.loads(read_checkpoint(directory, control["reference_checkpoint"]))
     require(reference["schema"] == "spiraltorch.vision.torch_reference_weights.v1"
@@ -171,7 +211,24 @@ def trainer_config(recipe, total):
         dict(kind="constant", rate=recipe["rate"]) if recipe["schedule"] == "constant" else
         dict(kind="warmup_cosine", state=dict(base_lr=recipe["rate"], min_lr=recipe["rate"] / 10,
                                                warmup_steps=min(10, total), total_steps=total, step=0)))
+    if recipe.get("optimizer_feedback", False):
+        config["optimizer_feedback"] = st.zspace_optimizer_feedback_init({})["config"]
     return config
+
+
+def intervention(recipe):
+    scale = recipe.get("control_scale")
+    if scale is None:
+        return None
+    # A single prescribed rate proposal isolates the loss gate, not geometric
+    # learning or a model-derived meta-optimizer producer.
+    initial = st.zspace_meta_optimizer_init({"dimension": 2, "topos_control_gain": 1.})
+    report = st.zspace_meta_optimizer_step(config=initial["config"], state=initial["state"], observation={
+        "gradient": [0.1, -0.2], "telemetry": {"topos.training_hints.learning_rate_scale": scale}})
+    projection = st.zspace_parameter_control(report)
+    require(bits(projection["absolute_learning_rate_scale"]) == bits(scale), "requested proposal was clamped")
+    return dict(requested_scale=scale, feedback_enabled=recipe.get("optimizer_feedback", False),
+                report=report, projection=projection)
 
 
 def source_hashes():
@@ -209,6 +266,9 @@ def worker(recipe, phase, directory, report):
         environment=dict(python=sys.version.split()[0], numpy=np.__version__, torch=torch.__version__,
                          torchvision=shared.torchvision.__version__, spiraltorch=st.__version__,
                          torch_device=recipe["torch_device"], startup_customization_present="sitecustomize" in sys.modules))
+    control = intervention(recipe)
+    if control is not None:
+        report["contract"]["intervention"] = control
     kind = st.ResidentVisionTrainer
     if phase == "resume":
         prefix = json.loads((directory / "prefix.json").read_text())
@@ -216,6 +276,8 @@ def worker(recipe, phase, directory, report):
         trainer = kind.from_checkpoint_json(device, dataset, data_id, payload, pipeline)
     else:
         trainer = kind.create(device, dataset, data_id, json.dumps(config), pipeline)
+        if control is not None:
+            trainer.apply_zspace_meta_optimizer_report_json(json.dumps(control["report"]))
     report["checkpoints"] = {}
 
     def capture(name):
@@ -260,6 +322,11 @@ def worker(recipe, phase, directory, report):
         report["records"].append(dict(revision=outcome.attempted_revision, epoch=submitted.epoch,
             accepted=outcome.accepted, sample_ids=[int(label) for label in labels], flips=flips,
             input_sha256=shared.digest(actual.astype("<f4")), rate_bits=bits(submitted.learning_rate), loss_bits=bits(loss)))
+        if control is not None:
+            state = json.loads(trainer.state_json())
+            report["records"][-1]["parameter_control"] = state["parameter_control"]
+            if control["feedback_enabled"]:
+                report["records"][-1]["optimizer_feedback"] = state["optimizer_feedback"]
         train_loss["spiraltorch"] += loss * len(indices)
         if reference is not None:
             for group in optimizer.param_groups:
@@ -334,7 +401,12 @@ def main():
     parser.add_argument("--schedule", choices=("constant", "cosine"), default="constant")
     parser.add_argument("--horizontal-flip", action="store_true")
     parser.add_argument("--restart-at", type=int, default=37)
+    parser.add_argument("--control-scale", type=float, help="one prescribed Rust rate proposal, in (0, 1)")
+    parser.add_argument("--optimizer-feedback", action="store_true", help="gate the proposal using Rust defaults")
     args = parser.parse_args()
+    if (args.control_scale is not None and not 0 < args.control_scale < 1
+            or args.optimizer_feedback and args.control_scale is None):
+        parser.error("feedback needs a prescribed control scale strictly between zero and one")
     try:
         rate = unbits(bits(args.rate))
     except (OverflowError, ValueError):

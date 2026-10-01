@@ -446,6 +446,7 @@ jobs:
           python -I -m unittest discover -s bindings/st-py/tests -p test_vision_trainer_feedback.py
           python -I tools/test_vision_classifier_handoff.py
           python -I tools/test_vision_trainer_matched_learning.py
+          python -I tools/test_vision_feedback_ablation.py
       - name: Public vision input checkpoint and native replay fixture
         env:
           SPIRALTORCH_INPUT_CHECKPOINT_HANDOFF: ${{ runner.temp }}/vision-input-checkpoint.json
