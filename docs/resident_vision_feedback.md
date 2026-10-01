@@ -79,18 +79,29 @@ SPIRALTORCH_VISION_FEEDBACK_HANDOFF=/tmp/vision-feedback-native.json \
 python -I bindings/st-py/tests/test_vision_trainer_feedback.py -v
 ```
 
-The resulting fixture is accepted by the existing browser trainer fixture
-server and its constant/cosine control, prefix, resume and Python-handoff modes.
+Install a fresh wheel with `nn,wgpu` enabled before the Python run. Build the
+WebGPU WASM module as in the [trainer replay guide](resident_vision_trainer_clients.md#portability-and-replay),
+then serve the feedback fixture instead of the plain-SGD fixture:
+
+```bash
+node tools/serve_vision_trainer_fixture.cjs MODULE_DIR \
+  /tmp/vision-feedback-native.json /tmp/vision-feedback-browser-new 8770
+```
+
+Run the guide's constant/cosine control, prefix, resume and Python-handoff modes
+on port 8770, closing the prefix document before opening resume. Use a new
+output directory for every run; the server refuses to replace recorded phases.
 Compilation alone does not establish browser execution or cross-runtime replay.
 
 The first actual browser probe passes uninterrupted and fresh-document restart
 for both schedules, but the strict Python-to-browser continuation probe fails:
-some GPU cross-entropy observations differ by one f32 ULP and therefore change
-the loss EMA. On these two fixtures the applied rates and all final weights
+some GPU cross-entropy observations differ by up to two f32 ULPs and therefore
+change the loss EMA. On these two fixtures the applied rates and all final weights
 still match; that does not establish bitwise feedback-state replay or behavior
 near a gate threshold. The failed receipts are retained, and the strict
 comparison is not relaxed. Replaying the browser's **observed** losses through
 native Rust separately checks whether the control math itself agrees.
+See the [measured results and retained failures](../benchmarks/results/2026-10-01-vision-feedback/README.md).
 
 The gate guards an external intervention, not the baseline SGD itself: a halted
 gate returns to the nominal rate and does not stop training. For a proposal
