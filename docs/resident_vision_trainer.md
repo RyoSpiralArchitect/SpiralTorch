@@ -30,8 +30,9 @@ let json = checkpoint.to_json()?;
 
 The loader must have explicit targets, start at its first batch and contain a
 nonempty integral number of fixed-size batches. Tail batches are rejected at
-construction, not silently dropped or padded. Configure the resident transform
-dispatcher before construction. Dataset contents, labels and ordering must be
+construction, not silently dropped or padded. With the low-level `new()` entry,
+configure the resident transform dispatcher first; `from_dataset()` attaches
+it to the supplied device for both clients. Dataset contents, labels and ordering must be
 immutable for the caller-supplied dataset SHA256; the trainer does not scan or
 authenticate this ID.
 

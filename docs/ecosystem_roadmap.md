@@ -73,6 +73,7 @@ and browser checkpoints continue in both directions. This caught and fixed a
 one-ULP platform-cosine rate difference in the shared Rust scheduler; no client
 math or relaxed rate comparison was added. The bounded synthetic replay is not
 a browser real-image or throughput measurement.
+See the [client replay result](../benchmarks/results/2026-10-01-vision-trainer-clients/README.md).
 
 ### Next Rails And Exit Gates
 

@@ -164,3 +164,6 @@ with a scaled f32 bound of `2e-4`. This is correctness/restart evidence, not
 real-image accuracy, transfer-inclusive throughput, or a Z-space-policy benefit.
 CI runs CPU-safe Python surface checks and generated/shipped TypeScript checks;
 the actual browser and Python-GPU runs require the explicit procedure above.
+
+The [bounded result and pre-fix failure](../benchmarks/results/2026-10-01-vision-trainer-clients/README.md)
+record all measured conditions without turning this fixture into a performance claim.

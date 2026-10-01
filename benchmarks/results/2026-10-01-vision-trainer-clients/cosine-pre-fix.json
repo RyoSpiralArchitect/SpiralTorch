@@ -1,0 +1,22 @@
+{
+  "passed": false,
+  "scope": "pre-fix scheduled Python-to-browser continuation",
+  "differences": [
+    {
+      "attempt": 69,
+      "key": "rate_bits",
+      "native": 978780404,
+      "browser": 978780405
+    }
+  ],
+  "original_browser_receipt_sha256": "563be2d01f89fd8944ef257d6c1f1891af35e6cae213c191f27b9ed7f85ac8c0",
+  "original_native_fixture_sha256": "9329f4594d63a36863a68982132215575daf4281228756571f2330d59fd42d10",
+  "assets": {
+    "/": "e91bdbf6a851b0d57eb25d1dd0a16a63c3d3c758076b1b97ea7d2e74cecf4385",
+    "/python.json": "9329f4594d63a36863a68982132215575daf4281228756571f2330d59fd42d10",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+    "/module/spiraltorch_wasm.js": "8fe25fb585df9464356abb89826ef7027ca8e84275ca1bee877abf05d283c977",
+    "/module/spiraltorch_wasm_bg.wasm": "972e84db463611942d33f89274883051b07be6140972c1db8118157f97e3b8e8"
+  },
+  "source_capture_commit": null
+}
