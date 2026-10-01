@@ -1,0 +1,44 @@
+{
+  "report_sha256": "f63fc25c0dbcb0fb44cba01d5c545fb314a1ff5bcc118e6387c3dc879775ebc3",
+  "status": "verified",
+  "phase": "learning",
+  "sample_counts": {
+    "train": 10000,
+    "test": 1600
+  },
+  "parameter_tensors": 24,
+  "parameter_values": 5530,
+  "runs": [
+    {
+      "seed": 17,
+      "epochs": 5,
+      "accepted_updates": 3125,
+      "max_evaluation_delta": {
+        "accuracy": 0.0,
+        "loss": 5.7220459037665705e-08
+      }
+    },
+    {
+      "seed": 29,
+      "epochs": 5,
+      "accepted_updates": 3125,
+      "max_evaluation_delta": {
+        "accuracy": 0.0,
+        "loss": 5.960464477539063e-08
+      }
+    },
+    {
+      "seed": 43,
+      "epochs": 5,
+      "accepted_updates": 3125,
+      "max_evaluation_delta": {
+        "accuracy": 0.0,
+        "loss": 2.3841857821338408e-08
+      }
+    }
+  ],
+  "checked_checkpoint_files": 6,
+  "checked_source_ref": "1001cbfff5d15fc4773c6c637861a0892195a885",
+  "checked_native_binary": true,
+  "boundary": "record coverage/fixity only; no execution replay, throughput, resume or policy-effect proof"
+}

@@ -16,7 +16,8 @@ Current scope of the vision execution path:
 | Real ConvNeXt classifier common inference entry | `ConvNeXtClassifier`, `create_classification_model` | Ordinary factory with `nn`; resident handle with `nn,wgpu` | Resident handle; no ordinary host factory |
 | Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Thin Rust-owned public client | Thin Rust-owned public client |
 | Resident image normalization and DataLoader handoff | Public API, homogeneous NCHW | Public API, same Rust loader | Public normalization/batch/continuation API; caller-supplied batches, no JS DataLoader |
-| Matched real-image training quality and throughput | Open | Open | Open |
+| Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch CPU and MPS comparison | Open |
+| Transfer-inclusive training throughput and memory | Open | Open | Open |
 
 The compiled ConvNeXt training path now connects model-owned gradients to
 resident parameter updates with version checks, stale-gradient rejection and
@@ -52,16 +53,25 @@ not capture that input state. See the
 
 ### Next Rails And Exit Gates
 
-1. **Matched real-data evidence.** Check numerical parity against the same
-   architecture/weights/data/loss in PyTorch, then measure held-out quality,
-   transfer-inclusive throughput, memory, and restart equivalence. Synthetic
-   loss decrease and kernel timings are not substitutes for this gate. Start
-   the bounded real-image comparison rather than waiting for more model families
-   or a model hub; record native and browser execution boundaries separately.
+The [matched real-image result](../benchmarks/results/2026-10-01-vision-matched-learning/README.md)
+now covers three seeds against PyTorch CPU/MPS, including 10,000 training
+images and 1,600 development-evaluation images on the expanded MPS comparison.
+All five epochs complete with matching evaluation accuracies. This is a small
+shared-architecture learning baseline, not a speed, full-dataset quality or
+Z-space policy advantage. Every step observes loss/acceptance on the host.
+
+1. **Extend matched real-data evidence.** Keep the completed numerical/learning
+   baseline as the control while measuring transfer-inclusive throughput,
+   memory, and restart equivalence. Carry the same task into the browser,
+   recording that environment separately. Neither synthetic loss decrease nor
+   kernel timings close these remaining gates; new model families or a model
+   hub are not prerequisites.
 2. **Restartable input and trainer state.** Keep model snapshots distinct from
    data order/cursor, augmentation RNG and schedule state, then connect their
    restart contracts. Specify whether rejected updates retry or consume a batch.
    Compare uninterrupted and resumed batch identities, transforms and updates.
+   This is the next implementation rail; reuse existing Rust trainer-state
+   contracts rather than duplicating policy in the Python/browser clients.
 3. **Shared resident optimizer control.** Connect existing Rust optimizer and
    Z-space policy to the resident parameter owner rather than reimplementing it
    in Python/JavaScript. Preserve the plain-SGD control case and all-parameter
