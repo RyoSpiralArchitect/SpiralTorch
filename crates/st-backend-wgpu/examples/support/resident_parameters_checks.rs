@@ -1,5 +1,5 @@
 use st_backend_wgpu::{
-    resident_tensor::{ResidentTensor, TensorDevice},
+    resident_tensor::{ResidentTensor, TensorDevice, TensorError},
     resident_training::{
         parameters::{ResidentParameterSnapshot, ResidentParameterUpdate, ResidentParameters},
         TrainingError,
@@ -27,6 +27,17 @@ async fn read_parameters(snapshot: &ResidentParameterSnapshot) -> Result<Vec<Vec
 
 async fn read_update(update: &ResidentParameterUpdate) -> std::result::Result<u64, TrainingError> {
     let snapshot = update.snapshot()?;
+    #[cfg(not(target_arch = "wasm32"))]
+    return snapshot.read();
+    #[cfg(target_arch = "wasm32")]
+    return snapshot.read_async().await;
+}
+
+async fn read_update_scalar(
+    update: &ResidentParameterUpdate,
+    scalar: &ResidentTensor,
+) -> std::result::Result<(u64, f32), TrainingError> {
+    let snapshot = update.snapshot_with_scalar(scalar)?;
     #[cfg(not(target_arch = "wasm32"))]
     return snapshot.read();
     #[cfg(target_arch = "wasm32")]
@@ -127,6 +138,31 @@ pub async fn run(device: &TensorDevice) -> Result<serde_json::Value> {
         return Err("foreign owner accepted gradient identity".into());
     }
     let accepted = owner.sgd(&derivatives, 0.25)?;
+    let scalar = device
+        .upload(&[2, 2], &[99.0, 99.0, 99.0, -3.5])?
+        .narrow(0, 1, 1)?
+        .narrow(1, 1, 1)?;
+    let captured_scalar = accepted.snapshot_with_scalar(&scalar)?;
+    if captured_scalar.staging_buffer_count() != 1 {
+        return Err("scalar receipt requires one staging map".into());
+    }
+    for shape in [0, 2] {
+        if !matches!(
+            accepted.snapshot_with_scalar(&device.upload(&[shape], &vec![0.0; shape])?),
+            Err(TrainingError::Tensor(TensorError::Length))
+        ) {
+            return Err("non-scalar receipt observation accepted".into());
+        }
+    }
+    let invalid_scalar = device
+        .upload(&[1], &[f32::MAX])?
+        .mul(&device.upload(&[1], &[2.0])?)?;
+    if !matches!(
+        read_update_scalar(&accepted, &invalid_scalar).await,
+        Err(TrainingError::Tensor(TensorError::NonFinite))
+    ) {
+        return Err("accepted receipt masked invalid scalar guard".into());
+    }
     let accepted_values = read_parameters(&owner.snapshot()).await?;
     close(&accepted_values[0], &[0.75, 2.25, 1.5, 3.0])?;
     close(&accepted_values[1], &[-0.25, 2.5])?;
@@ -149,6 +185,12 @@ pub async fn run(device: &TensorDevice) -> Result<serde_json::Value> {
         device.upload(&[2], &[f32::MAX; 2])?,
     ])?;
     let rejected = owner.sgd(&overflow, 2.0)?;
+    if !matches!(
+        read_update_scalar(&rejected, &invalid_scalar).await,
+        Err(TrainingError::Rejected { stage: 1, .. })
+    ) {
+        return Err("invalid scalar masked rejected update".into());
+    }
     if !matches!(
         read_update(&rejected).await,
         Err(TrainingError::Rejected { stage: 1, .. })
@@ -186,6 +228,13 @@ pub async fn run(device: &TensorDevice) -> Result<serde_json::Value> {
     }
     let retained = owner.snapshot();
     drop(owner);
+    #[cfg(not(target_arch = "wasm32"))]
+    let captured = captured_scalar.read()?;
+    #[cfg(target_arch = "wasm32")]
+    let captured = captured_scalar.read_async().await?;
+    if captured != (2, -3.5) {
+        return Err("retained scalar receipt changed after owner reuse/drop".into());
+    }
     same_bits(&read_parameters(&retained).await?, &accepted_values)?;
     same_bits(&read_parameters(&initial).await?, &initial_values)?;
 
@@ -254,7 +303,9 @@ pub async fn run(device: &TensorDevice) -> Result<serde_json::Value> {
         "parameter_checks": ["strided_offset_values", "strided_gradients", "signed_zero",
             "stale_gradients", "foreign_owner", "layout_validation", "rate_validation",
             "whole_update_overflow_rejection", "invalid_zero_rate", "valid_retry",
-            "retained_receipts", "retained_snapshots", "multi_workgroup"],
+            "retained_receipts", "retained_snapshots", "multi_workgroup",
+            "scalar_receipt_one_map", "scalar_offset_view", "scalar_shape_validation",
+            "scalar_finite_guard", "scalar_rejection_priority", "retained_scalar_receipt"],
         "conv2d_steps": 16,
         "conv2d_training_loop_readbacks": 0,
         "conv2d_initial_mse": initial_loss,

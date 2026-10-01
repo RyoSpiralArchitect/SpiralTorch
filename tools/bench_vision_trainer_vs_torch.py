@@ -303,8 +303,11 @@ def main():
                         record = json.loads((directory / "result.json").read_text())
                         records.append(record)
                         print(json.dumps(dict(case=directory.name, measurements=record["measurements"])), flush=True)
+    requested = dict(seeds=args.seeds, batches=args.batches, modes=args.modes,
+                     repeats=args.repeats, runtimes=list(runtimes), steps=args.steps,
+                     warmup=args.warmup, profile=args.profile)
     write_json(args.output / "summary.json", dict(schema="spiraltorch.vision.training_timing_sweep.v1",
-                                                 **summarize(records), records=records))
+        status="passed", requested=requested, **summarize(records), records=records))
     return 0
 
 

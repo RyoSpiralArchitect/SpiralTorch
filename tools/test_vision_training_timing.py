@@ -7,6 +7,9 @@ import unittest
 spec = importlib.util.spec_from_file_location("timing", Path(__file__).with_name("bench_vision_trainer_vs_torch.py"))
 timing = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(timing)
+spec = importlib.util.spec_from_file_location("verify_timing", Path(__file__).with_name("verify_vision_training_timing.py"))
+verify = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verify)
 
 
 def record(runtime="baseline"):
@@ -21,6 +24,25 @@ def record(runtime="baseline"):
 
 
 class TimingChecks(unittest.TestCase):
+    def test_retained_parameter_checks_recompute_values_and_reject_nan(self):
+        left = [dict(name="a", shape=[2], values=[1., 2.])]
+        self.assertEqual(verify.compare_parameters(left, left)[0]["max_scaled_error"], 0.)
+        for right in ([dict(name="a", shape=[2], values=[1., 3.])],
+                      [dict(name="a", shape=[2], values=[1., float("nan")])],
+                      [dict(name="b", shape=[2], values=[1., 2.])], []):
+            with self.subTest(right=right), self.assertRaises(ValueError):
+                verify.compare_parameters(left, right)
+
+    def test_missing_whole_condition_cannot_pass(self):
+        saved = dict(status="passed", schema="spiraltorch.vision.training_timing_sweep.v1",
+                     requested=dict(seeds=[17], batches=[16], modes=["feedback"], repeats=1,
+                                    runtimes=["baseline", "candidate"], steps=16, warmup=3, profile=False),
+                     records=[record(), record("candidate")])
+        verify.verify_coverage(saved)
+        saved["records"].pop()
+        with self.assertRaisesRegex(ValueError, "cases"):
+            verify.verify_coverage(saved)
+
     def test_valid_pair_requires_exact_checkpoint(self):
         result = timing.summarize([record(), record("candidate")])
         self.assertEqual(result["pairs"][0]["candidate_over_baseline"], 1.)

@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn scalar_receipt_decoding_preserves_rejection_priority_and_finite_guards() {
+    let valid = vec![vec![0; 3], vec![(-2.0f32).to_bits().to_le()], vec![0]];
+    assert_eq!(
+        ResidentParameterScalarReadback::decode(&valid, 1, 7).unwrap(),
+        (7, -2.0)
+    );
+    for scalar in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut words = valid.clone();
+        words[1][0] = scalar.to_bits().to_le();
+        assert!(matches!(
+            ResidentParameterScalarReadback::decode(&words, 1, 7),
+            Err(TrainingError::Tensor(TensorError::NonFinite))
+        ));
+    }
+    let mut rejected = valid.clone();
+    rejected[0] = vec![1u32.to_le(), 0, 1u32.to_le()];
+    rejected[1][0] = f32::NAN.to_bits().to_le();
+    rejected[2][0] = INVALID_TENSOR_FLAG.to_le();
+    assert!(matches!(
+        ResidentParameterScalarReadback::decode(&rejected, 1, 7),
+        Err(TrainingError::Rejected { stage: 0, flags: 1 })
+    ));
+    rejected[0][2] = 0;
+    assert!(matches!(
+        ResidentParameterScalarReadback::decode(&rejected, 1, 7),
+        Err(TrainingError::InvalidReadback)
+    ));
+    let mut guarded = valid.clone();
+    guarded[2][0] = INVALID_TENSOR_FLAG.to_le();
+    assert!(matches!(
+        ResidentParameterScalarReadback::decode(&guarded, 1, 7),
+        Err(TrainingError::Tensor(TensorError::NonFinite))
+    ));
+    for words in [vec![], vec![vec![0; 3]], vec![vec![0; 4], vec![0], vec![0]]] {
+        assert!(matches!(
+            ResidentParameterScalarReadback::decode(&words, 1, 7),
+            Err(TrainingError::InvalidReadback)
+        ));
+    }
+    assert!(matches!(
+        ResidentParameterScalarReadback::decode(&valid, usize::MAX, 7),
+        Err(TrainingError::InvalidReadback)
+    ));
+}
+
+#[test]
 fn restored_parameter_revision_has_a_fresh_owner_identity() {
     if std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS").as_deref() != Ok("1") {
         return;
@@ -106,9 +152,18 @@ fn resident_parameters_reject_foreign_devices_and_preserve_invalid_guards() {
         ResidentParameters::new(vec![local.clone(), foreign.clone()]),
         Err(TrainingError::Tensor(TensorError::DeviceMismatch))
     ));
-    let owner = ResidentParameters::new(vec![local]).unwrap();
+    let mut owner = ResidentParameters::new(vec![local]).unwrap();
     assert!(matches!(
-        owner.snapshot().bind_gradients(vec![foreign]),
+        owner.snapshot().bind_gradients(vec![foreign.clone()]),
+        Err(TrainingError::Tensor(TensorError::DeviceMismatch))
+    ));
+    let gradient = owner
+        .snapshot()
+        .bind_gradients(vec![device.upload(&[1], &[0.0]).unwrap()])
+        .unwrap();
+    let update = owner.sgd(&gradient, 0.0).unwrap();
+    assert!(matches!(
+        update.snapshot_with_scalar(&foreign),
         Err(TrainingError::Tensor(TensorError::DeviceMismatch))
     ));
 
