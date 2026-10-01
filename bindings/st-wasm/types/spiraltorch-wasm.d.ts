@@ -196,6 +196,7 @@ declare module "spiraltorch-wasm" {
         static fromCheckpointJsonWithPipeline(device: WgpuTensorDevice, dataset: TensorVisionDataset, dataset_sha256: string, payload: string, pipeline: VisionTransformPipeline): ResidentVisionTrainer;
         restoreCheckpointJson(payload: string): void;
         stateJson(): string;
+        applyZSpaceMetaOptimizerReportJson(report: string): string;
         readonly hasPendingUpdate: boolean;
         submitNext(): ResidentVisionSubmission;
         /** Holds a mutable owner borrow until resolved. No concurrent reuse/free. */

@@ -43,6 +43,7 @@ try {
   await init();
   const fixture = await (await fetch("/python.json")).json();
   check(fixture.schema === "vision_trainer_client_fixture.v1", "fixture schema");
+  report.controlled = fixture.controlled === true;
   const reference = fixture.cases.find(c => c.scheduled === (schedule === "cosine"));
   check(reference, "missing schedule case");
   const device = await WgpuTensorDevice.create();
@@ -88,12 +89,25 @@ try {
   report.records = [];
   let held;
   for (let i = 0; i < count; i++) {
+    if (report.controlled) {
+      const state = JSON.parse(trainer.stateJson());
+      const control = reference.control_reports[state.accepted_updates + state.rejected_updates];
+      if (control) {
+        const encoded = JSON.stringify(control);
+        trainer.applyZSpaceMetaOptimizerReportJson(encoded);
+        const saved = trainer.stateJson();
+        check(!JSON.parse(trainer.applyZSpaceMetaOptimizerReportJson(encoded)).changed, "duplicate compounded control");
+        equal(trainer.stateJson(), saved, "duplicate mutated control state");
+      }
+    }
     const before = JSON.parse(trainer.stateJson());
     const submitted = trainer.submitNext();
     check(trainer.hasPendingUpdate, "missing pending marker");
     reject(() => trainer.submitNext(), "pending submission");
     reject(() => trainer.checkpointSnapshot(), "pending checkpoint");
     reject(() => trainer.restoreCheckpointJson(report.initial), "pending restore");
+    if (report.controlled) reject(() => trainer.applyZSpaceMetaOptimizerReportJson(
+      JSON.stringify(reference.control_reports["0"])), "pending control");
     const labels = submitted.labels();
     check(!labels.includes("new"), "dataset copy was not frozen");
     const images = await read(submitted.images());
@@ -103,6 +117,7 @@ try {
     equal(receipt.accepted, !labels.includes("7"), "wrong acceptance");
     const after = JSON.parse(trainer.stateJson());
     if (!receipt.accepted) equal(before.learning_rate, after.learning_rate, "rejection advanced scheduler");
+    if (report.controlled) equal(before.parameter_control, after.parameter_control, "update mutated control");
     report.records.push({revision: Number(receipt.attemptedRevision), epoch: Number(submitted.epoch),
       rate_bits: bits([submitted.learningRate])[0], labels, images_bits: bits(images), accepted: receipt.accepted});
     if (i === count - 1) held = submitted.images();
@@ -118,6 +133,11 @@ try {
   reject(() => trainer.restoreCheckpointJson(JSON.stringify(corrupted)), "invalid checkpoint hash");
   equal(await checkpoint(trainer), report.checkpoint, "failed restore mutated trainer");
   report.state = JSON.parse(trainer.stateJson());
+  if (report.controlled) {
+    equal(JSON.parse(report.checkpoint).schema, "spiraltorch.vision.training_checkpoint.v2", "controlled schema");
+    reject(() => trainer.applyZSpaceMetaOptimizerReportJson(JSON.stringify(reference.control_reports["0"])), "stale control");
+    equal(await checkpoint(trainer), report.checkpoint, "stale control mutated trainer");
+  }
   if (mode === "resume") {
     const control = await (await fetch(`/saved/${schedule}-control.json`)).json();
     check(control.passed && control.records.length === 100, "incomplete control");
@@ -158,6 +178,7 @@ try {
   check(saved.ok, "result persistence failed");
 } catch (error) { report.passed = false; report.error = String(error); }
 output.textContent = JSON.stringify({passed: report.passed, mode, schedule,
+  controlled: report.controlled,
   adapter: report.adapter, attempts: report.records?.length, state: report.state,
   bitwise_resume: report.bitwise_resume, cross_runtime: report.cross_runtime, error: report.error}, null, 2);
 output.dataset.status = report.passed ? "done" : "error";

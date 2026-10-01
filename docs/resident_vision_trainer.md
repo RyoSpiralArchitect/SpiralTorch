@@ -106,5 +106,7 @@ cargo check --locked -p st-vision --features wgpu --target wasm32-unknown-unknow
 ```
 
 This is a restart/correctness gate, not a throughput or real-image quality claim.
-The next work is connecting Rust Z-space optimizer control while preserving the
-fixed-SGD matched baseline, and measuring transfer-inclusive learning throughput.
+The [shared Z-space control](resident_vision_zspace_control.md) now connects a
+Rust-validated absolute rate multiplier while preserving the fixed-SGD baseline.
+Producer-state integration, policy-on/off learning and transfer-inclusive
+throughput remain separate gates.

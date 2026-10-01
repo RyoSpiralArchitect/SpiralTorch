@@ -259,6 +259,7 @@ function checkVisionTrainerContract(types, label) {
   }
   assert.match(trainer, /restoreCheckpointJson\(payload: string\): void/);
   assert.match(trainer, /stateJson\(\): string/);
+  assert.match(trainer, /applyZSpaceMetaOptimizerReportJson\(report: string\): string/);
   assert.match(trainer, /readonly hasPendingUpdate: boolean/);
   assert.match(trainer, /submitNext\(\): ResidentVisionSubmission/);
   assert.match(trainer, /settle\(\): Promise<ResidentVisionStepOutcome>/);

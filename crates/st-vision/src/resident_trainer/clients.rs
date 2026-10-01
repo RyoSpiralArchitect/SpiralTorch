@@ -114,6 +114,7 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             accepted_updates: 0,
             rejected_updates: 0,
             learning_rate: config.learning_rate.clone(),
+            parameter_control: ZSpaceParameterControlState::default(),
         };
         state.validate(0, &loader.checkpoint(dataset_sha256)?)?;
         let model =

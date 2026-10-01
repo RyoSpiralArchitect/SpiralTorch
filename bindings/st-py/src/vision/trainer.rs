@@ -91,6 +91,20 @@ impl PyResidentVisionTrainer {
         serde_json::to_string(self.inner.state()).map_err(error)
     }
 
+    fn apply_zspace_meta_optimizer_report_json(
+        &mut self,
+        py: Python<'_>,
+        report: &str,
+    ) -> PyResult<String> {
+        py.detach(|| {
+            let receipt = self
+                .inner
+                .apply_zspace_meta_optimizer_report_json(report)
+                .map_err(error)?;
+            serde_json::to_string(&receipt).map_err(error)
+        })
+    }
+
     #[getter]
     fn has_pending_update(&self) -> bool {
         self.inner.has_pending_update()

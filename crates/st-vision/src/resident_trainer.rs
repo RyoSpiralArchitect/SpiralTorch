@@ -12,12 +12,20 @@ use st_backend_wgpu::{
     resident_training::{parameters::ResidentParameterUpdate, TrainingError},
 };
 use st_core::runtime::{
-    trainer_checkpoint::payload_sha256, trainer_optimizer::TRAINER_OPTIMIZER_MAX_SAFE_INTEGER,
+    trainer_checkpoint::payload_sha256,
+    trainer_optimizer::TRAINER_OPTIMIZER_MAX_SAFE_INTEGER,
+    zspace_optimizer::{
+        zspace_parameter_control_from_report, zspace_parameter_control_from_value,
+        ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
+    },
 };
 use st_kernel_contracts::sgd::SgdStep;
 use st_nn::{
     loss::{CrossEntropyWithLogits, Loss},
-    optim::{WarmupCosineScheduler, WarmupCosineSchedulerState},
+    optim::{
+        WarmupCosineScheduler, WarmupCosineSchedulerState, ZSpaceParameterControlReceipt,
+        ZSpaceParameterControlState,
+    },
     resident::InferenceError,
 };
 use std::sync::Arc;
@@ -26,7 +34,9 @@ mod clients;
 pub use clients::ResidentVisionTrainerConfig;
 
 const SCHEMA: &str = "spiraltorch.vision.training_checkpoint.v1";
+const CONTROLLED_SCHEMA: &str = "spiraltorch.vision.training_checkpoint.v2";
 const MAX_JSON_BYTES: usize = 545 * 1024 * 1024;
+const MAX_CONTROL_JSON_BYTES: usize = 16 * 1024 * 1024;
 
 fn invalid(message: &'static str) -> InferenceError {
     InferenceError::ModuleUpdate(message)
@@ -77,6 +87,11 @@ pub struct ResidentVisionTrainingState {
     accepted_updates: u64,
     rejected_updates: u64,
     learning_rate: ResidentLearningRate,
+    #[serde(
+        default,
+        skip_serializing_if = "ZSpaceParameterControlState::is_default"
+    )]
+    parameter_control: ZSpaceParameterControlState,
 }
 
 impl ResidentVisionTrainingState {
@@ -94,6 +109,18 @@ impl ResidentVisionTrainingState {
         &self.learning_rate
     }
 
+    pub fn parameter_control(&self) -> &ZSpaceParameterControlState {
+        &self.parameter_control
+    }
+
+    fn schema(&self) -> &'static str {
+        if self.parameter_control.is_default() {
+            SCHEMA
+        } else {
+            CONTROLLED_SCHEMA
+        }
+    }
+
     fn attempted(&self) -> Result<u64, InferenceError> {
         self.accepted_updates
             .checked_add(self.rejected_updates)
@@ -103,6 +130,9 @@ impl ResidentVisionTrainingState {
 
     fn validate(&self, revision: u64, input: &DataLoaderCheckpoint) -> Result<(), InferenceError> {
         self.learning_rate.validate(self.accepted_updates)?;
+        // A future rate may need retuning; never make an already settled state
+        // unsavable. Submission checks the effective rate before consuming input.
+        self.parameter_control.validate()?;
         let len = input.dataset_len();
         let batch = input.batch_size();
         if len == 0 || batch == 0 || !len.is_multiple_of(batch) {
@@ -144,7 +174,7 @@ impl VisionTrainingCheckpoint {
         trainer: ResidentVisionTrainingState,
     ) -> Result<Self, InferenceError> {
         let value = Self {
-            schema: SCHEMA.into(),
+            schema: trainer.schema().into(),
             model_sha256: digest(&model)?,
             input_sha256: digest(&input)?,
             trainer_sha256: digest(&trainer)?,
@@ -160,7 +190,7 @@ impl VisionTrainingCheckpoint {
         // Reuse component validation, including bounds, instead of approximating it.
         self.model.to_json()?;
         self.input.to_json()?;
-        if self.schema != SCHEMA
+        if self.schema != self.trainer.schema()
             || self.model.batch_size() != self.input.batch_size()
             || self.model_sha256 != digest(&self.model)?
             || self.input_sha256 != digest(&self.input)?
@@ -267,6 +297,7 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             accepted_updates: 0,
             rejected_updates: 0,
             learning_rate,
+            parameter_control: ZSpaceParameterControlState::default(),
         };
         state.validate(0, &input)?;
         let resident = model.compile_resident_training(device, loader.batch_size)?;
@@ -352,7 +383,11 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
         if self.state.attempted()? == TRAINER_OPTIMIZER_MAX_SAFE_INTEGER {
             return Err(invalid("training clock exhausted"));
         }
-        let (rate, next_rate) = self.state.learning_rate.next()?;
+        let (nominal_rate, next_rate) = self.state.learning_rate.next()?;
+        let rate = self
+            .state
+            .parameter_control
+            .effective_learning_rate(nominal_rate)?;
         // Copy the order only at epoch boundaries, not on every training step.
         let mut next_epoch = if self.loader.position == self.loader.order.len() {
             let mut next = self.copy_input();
@@ -387,6 +422,44 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
         };
         self.pending = Some(PendingStep { update, next_rate });
         Ok(submission)
+    }
+
+    /// Commit a parameter-side control at a settled boundary. This does not
+    /// advance model/input/schedule clocks or own the producer's latent state.
+    pub fn apply_zspace_parameter_control(
+        &mut self,
+        control: &ZSpaceParameterControl,
+    ) -> Result<ZSpaceParameterControlReceipt, InferenceError> {
+        self.ensure_settled()?;
+        let (next, receipt) = self.state.parameter_control.preview(control)?;
+        next.effective_learning_rate(self.state.learning_rate.next()?.0)?;
+        self.state.parameter_control = next;
+        receipt.emit("resident_vision_trainer");
+        Ok(receipt)
+    }
+
+    pub fn apply_zspace_meta_optimizer_report(
+        &mut self,
+        report: &ZSpaceMetaOptimizerStepReport,
+    ) -> Result<ZSpaceParameterControlReceipt, InferenceError> {
+        self.ensure_settled()?;
+        let control = zspace_parameter_control_from_report(report)
+            .map_err(|e| st_tensor::TensorError::Generic(e.to_string()))?;
+        self.apply_zspace_parameter_control(&control)
+    }
+
+    /// Both bindings pass the complete report to this shared validation path.
+    pub fn apply_zspace_meta_optimizer_report_json(
+        &mut self,
+        json: &str,
+    ) -> Result<ZSpaceParameterControlReceipt, InferenceError> {
+        self.ensure_settled()?;
+        if json.len() > MAX_CONTROL_JSON_BYTES {
+            return Err(invalid("Z-space parameter control report size limit"));
+        }
+        let control = zspace_parameter_control_from_value(serde_json::from_str(json)?)
+            .map_err(|e| st_tensor::TensorError::Generic(e.to_string()))?;
+        self.apply_zspace_parameter_control(&control)
     }
 
     fn finish_settlement(

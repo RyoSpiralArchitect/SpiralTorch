@@ -72,6 +72,10 @@ All failed validation leaves the live owner unchanged. Frozen snapshot handles
 remain usable after later training or owner release; `read_json()` consumes the
 snapshot once. Retained submission image/loss handles do not own training state.
 
+The [Z-space control entry](resident_vision_zspace_control.md) accepts complete
+Rust meta-optimizer reports at settled boundaries, without client-side rate math.
+Uncontrolled checkpoints stay v1; applied control and its replay clock use v2.
+
 ## Browser
 
 ```javascript

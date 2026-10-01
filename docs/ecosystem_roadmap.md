@@ -112,6 +112,10 @@ browser real-image restart, throughput or a Z-space policy advantage.
    Z-space policy to the resident parameter owner rather than reimplementing it
    in Python/JavaScript. Preserve the plain-SGD control case and all-parameter
    acceptance, then measure policy-on/off quality and stability on the same data.
+   The [first shared connection](resident_vision_zspace_control.md) now applies
+   validated absolute rate control with replay guards and checkpointed consumer
+   state. Producer latent state, geometric parameter updates and demonstrated
+   real-image policy benefit remain open; rate modulation alone is not those gates.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the
