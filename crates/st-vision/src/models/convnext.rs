@@ -1124,7 +1124,7 @@ mod resident_tests {
                     Ok(())
                 })
                 .unwrap();
-            let actual = block.vjp_resident(&input, &seed).unwrap();
+            let actual = block.vjp_resident(input, seed).unwrap();
             assert_eq!(actual.input_gradient().layout().shape(), &[2, 2, 3, 4]);
             let input_values = actual.input_gradient().snapshot().unwrap().read().unwrap();
             let parameter_values: Vec<_> = actual

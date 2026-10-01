@@ -111,3 +111,6 @@ explicit half-rate SGD control, and checks that an unscaled run differs.
 Neither this replay nor a learning-rate response demonstrates a Z-space
 quality, throughput or memory advantage. Those require matched real-data
 policy-on/off measurements, including a fixed-rate control.
+
+The [bounded native/browser result](../benchmarks/results/2026-10-01-vision-zspace-control/README.md)
+records the two schedules, all eight browser phases and both handoff directions.
