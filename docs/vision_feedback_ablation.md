@@ -21,6 +21,13 @@ produce frequent gate closures under changing batches, while full-pass mean loss
 remains stable. This identifies a limitation in the observation population, not
 proof that a replacement policy improves actual training.
 
+The [completed observation-window comparison](../benchmarks/results/2026-10-01-vision-feedback-window/README.md)
+now eliminates gate activity on those frozen losses, but does not improve
+learning over nominal SGD and delays synthetic regression detection. All 12
+window-ablation arms resume exactly from 37/400. Keep width one as the default;
+do not interpret quieter observations as a quality win or retune this development
+set until one appears.
+
 ## Four Matched Arms
 
 | Arm | Nominal rate | Proposal | Rust loss gate |

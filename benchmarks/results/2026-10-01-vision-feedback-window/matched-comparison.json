@@ -1,0 +1,269 @@
+{
+  "schema": "spiraltorch.vision.feedback_window_learning_comparison.v1",
+  "status": "passed",
+  "scope": "Matched retained runs; not statistical superiority, an untouched test or throughput",
+  "old_summary": {
+    "file": "summary.json",
+    "bytes": 54925,
+    "sha256": "86b8e477479cd31a9311786c3da21904b745e49768deec98acc3ac3ca6b8e2f4"
+  },
+  "window_summary": {
+    "file": "summary.json",
+    "bytes": 54955,
+    "sha256": "1948e51ff1bca4dd717fbb629ca25b8060fa49e8853b405af87407d6aa5af4a9"
+  },
+  "old_verification": {
+    "file": "pr2160-source-reverification.json",
+    "bytes": 488,
+    "sha256": "71e17d829db22aefd8118681059a827d49f82154996f2832be9841761af1a675"
+  },
+  "window_verification": {
+    "file": "window80-ablation-v1-verification.json",
+    "bytes": 488,
+    "sha256": "0bf65d30806ea3802bc667f81e090b9913ea9ae6724d43f8c7846da95de7d167"
+  },
+  "unchanged_control_records": 4800,
+  "unchanged_control_checkpoints": 42,
+  "rows": [
+    {
+      "seed": 17,
+      "arm": "baseline",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": true,
+      "prior_final": {
+        "loss": 2.111466121673584,
+        "accuracy": 0.215625,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.111466121673584,
+        "accuracy": 0.215625,
+        "examples": 320
+      },
+      "native_epochs_exact": true
+    },
+    {
+      "seed": 17,
+      "arm": "fixed_proposal",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": true,
+      "prior_final": {
+        "loss": 2.181283962726593,
+        "accuracy": 0.19375,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.181283962726593,
+        "accuracy": 0.19375,
+        "examples": 320
+      },
+      "native_epochs_exact": true
+    },
+    {
+      "seed": 17,
+      "arm": "loss_feedback",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": false,
+      "prior_final": {
+        "loss": 2.115373361110687,
+        "accuracy": 0.21875,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.1185977935791014,
+        "accuracy": 0.21875,
+        "examples": 320
+      }
+    },
+    {
+      "seed": 17,
+      "arm": "dose_matched",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": false,
+      "prior_final": {
+        "loss": 2.115020227432251,
+        "accuracy": 0.23125,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.1187856256961823,
+        "accuracy": 0.221875,
+        "examples": 320
+      }
+    },
+    {
+      "seed": 29,
+      "arm": "baseline",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": true,
+      "prior_final": {
+        "loss": 2.0087531983852385,
+        "accuracy": 0.240625,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.0087531983852385,
+        "accuracy": 0.240625,
+        "examples": 320
+      },
+      "native_epochs_exact": true
+    },
+    {
+      "seed": 29,
+      "arm": "fixed_proposal",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": true,
+      "prior_final": {
+        "loss": 2.073589360713959,
+        "accuracy": 0.190625,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.073589360713959,
+        "accuracy": 0.190625,
+        "examples": 320
+      },
+      "native_epochs_exact": true
+    },
+    {
+      "seed": 29,
+      "arm": "loss_feedback",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": false,
+      "prior_final": {
+        "loss": 2.0115161418914793,
+        "accuracy": 0.240625,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.016145622730255,
+        "accuracy": 0.234375,
+        "examples": 320
+      }
+    },
+    {
+      "seed": 29,
+      "arm": "dose_matched",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": false,
+      "prior_final": {
+        "loss": 2.0112342298030854,
+        "accuracy": 0.240625,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.0157138645648955,
+        "accuracy": 0.240625,
+        "examples": 320
+      }
+    },
+    {
+      "seed": 43,
+      "arm": "baseline",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": true,
+      "prior_final": {
+        "loss": 1.9832089424133301,
+        "accuracy": 0.296875,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 1.9832089424133301,
+        "accuracy": 0.296875,
+        "examples": 320
+      },
+      "native_epochs_exact": true
+    },
+    {
+      "seed": 43,
+      "arm": "fixed_proposal",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": true,
+      "prior_final": {
+        "loss": 2.0513229787349703,
+        "accuracy": 0.265625,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 2.0513229787349703,
+        "accuracy": 0.265625,
+        "examples": 320
+      },
+      "native_epochs_exact": true
+    },
+    {
+      "seed": 43,
+      "arm": "loss_feedback",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": false,
+      "prior_final": {
+        "loss": 1.9870746791362763,
+        "accuracy": 0.290625,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 1.9891015410423278,
+        "accuracy": 0.290625,
+        "examples": 320
+      }
+    },
+    {
+      "seed": 43,
+      "arm": "dose_matched",
+      "same_inputs_and_initial_model": true,
+      "unchanged_control_trajectory_and_checkpoints": false,
+      "prior_final": {
+        "loss": 1.9865345120429994,
+        "accuracy": 0.29375,
+        "examples": 320
+      },
+      "window_run_final": {
+        "loss": 1.9902778625488282,
+        "accuracy": 0.296875,
+        "examples": 320
+      }
+    }
+  ],
+  "mean_final_metrics": {
+    "baseline": {
+      "prior_final": {
+        "accuracy": 0.25104166666666666,
+        "loss": 2.0344760874907175
+      },
+      "window_run_final": {
+        "accuracy": 0.25104166666666666,
+        "loss": 2.0344760874907175
+      }
+    },
+    "fixed_proposal": {
+      "prior_final": {
+        "accuracy": 0.21666666666666667,
+        "loss": 2.1020654340585074
+      },
+      "window_run_final": {
+        "accuracy": 0.21666666666666667,
+        "loss": 2.1020654340585074
+      }
+    },
+    "loss_feedback": {
+      "prior_final": {
+        "accuracy": 0.25,
+        "loss": 2.0379880607128142
+      },
+      "window_run_final": {
+        "accuracy": 0.24791666666666667,
+        "loss": 2.0412816524505613
+      }
+    },
+    "dose_matched": {
+      "prior_final": {
+        "accuracy": 0.2552083333333333,
+        "loss": 2.0375963230927785
+      },
+      "window_run_final": {
+        "accuracy": 0.253125,
+        "loss": 2.041592450936635
+      }
+    }
+  }
+}
