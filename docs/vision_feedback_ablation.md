@@ -11,6 +11,9 @@ has 400 updates per arm and exact fresh-process continuation for all 12 arms.
 The gate is active but does not establish an advantage over nominal SGD or the
 integrated-rate-matched control. Keep this negative result as the control for
 future Rust observation/policy changes, rather than tuning until one seed wins.
+The [final-implementation revalidation](../benchmarks/results/2026-10-01-vision-feedback-ablation/final-head/README.md)
+repeats every condition after the CE portability and finite-f32 admission fixes:
+native trajectories/checkpoints and the measured epoch metrics are unchanged.
 
 ## Four Matched Arms
 

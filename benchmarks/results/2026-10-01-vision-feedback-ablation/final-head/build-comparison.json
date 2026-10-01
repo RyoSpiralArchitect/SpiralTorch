@@ -1,0 +1,1197 @@
+{
+  "schema": "spiraltorch.vision.feedback_final_build_comparison.v1",
+  "status": "passed",
+  "runs": [
+    "three-seed-mps-portable-v2",
+    "three-seed-mps-final-v3"
+  ],
+  "source_revision": "70c6f8eb6a182928ffc233cac5fa45a67108c783",
+  "parent_revision": "7e91127bae3af2449412e3a53a7ef5296e7e916d",
+  "boundary": "Exact native observed trajectories, not universal kernel or Torch cross-process determinism. Original within-run Torch bounds are unchanged; any cross-build Torch metric differences are reported.",
+  "native_binary_sha256": [
+    {
+      "spiraltorch.abi3.so": "5f2bb7adcd3fd0464677e650f35923b71496a7c9705273984f3662bdb839079d"
+    },
+    {
+      "spiraltorch.abi3.so": "b136ea2f4002fd4098c4e90846b31c8accbfb32e5ced7d07e57e9672d0c39661"
+    }
+  ],
+  "rows": [
+    {
+      "seed": 17,
+      "arm": "baseline",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 9.906772819673172e-8
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-17/baseline/summary.json",
+          "bytes": 54897,
+          "sha256": "0859f12ecbbdb800178b35d8dbc460592ecf3f16d59bc0ba3f16614d9d589b9f"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-17/baseline/summary.json",
+          "bytes": 54897,
+          "sha256": "5465f427684a574c6a1b5cfca5f092b8663d9884393fa94f1b0c553e4ed090df"
+        }
+      ]
+    },
+    {
+      "seed": 17,
+      "arm": "fixed_proposal",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 6.60527233561199e-8
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/summary.json",
+          "bytes": 61741,
+          "sha256": "73918fee6c782e374f02e49b88117bf2b2cfe67079bd7a5e26c637d8816f8f05"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/summary.json",
+          "bytes": 61741,
+          "sha256": "5c6b325fd04b8ca963fdd548487ef756abbe66dc38306c17d86fbb66895f5021"
+        }
+      ]
+    },
+    {
+      "seed": 17,
+      "arm": "loss_feedback",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 1.1447094774471031e-7
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/summary.json",
+          "bytes": 62294,
+          "sha256": "48fd7982e1aeb3d1b1c80c65bf559486b87c5d878e0e031e3959ae09e54828c4"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-17/loss_feedback/summary.json",
+          "bytes": 62294,
+          "sha256": "ccd4a34aa2466744faaa39c0ec8fc9dcde9ef3385a81fbf6da0a6d4b1ed51f71"
+        }
+      ]
+    },
+    {
+      "seed": 17,
+      "arm": "dose_matched",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 8.934041804355971e-8
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-17/dose_matched/summary.json",
+          "bytes": 54909,
+          "sha256": "9f39e0fdd979c386ca79fd559f7199ba06e46cac344c1fb58343d038602a545a"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-17/dose_matched/summary.json",
+          "bytes": 54909,
+          "sha256": "13df2d1bf97c6280aceb8f95b9f6bb708e745ad44eb7da4ca4a9f332c1be5038"
+        }
+      ]
+    },
+    {
+      "seed": 29,
+      "arm": "baseline",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 1.196624343497891e-7
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-29/baseline/summary.json",
+          "bytes": 54904,
+          "sha256": "8fe664366d96b736f1de67a41adb8c05fbd3cde9a0173211a99e87a5e0c4cc41"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-29/baseline/summary.json",
+          "bytes": 54904,
+          "sha256": "dc50593d121dcf37261d97eaebc5b18ad604578498bf1ee7ba7ca402e53fcd38"
+        }
+      ]
+    },
+    {
+      "seed": 29,
+      "arm": "fixed_proposal",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 7.498097405366107e-8
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/summary.json",
+          "bytes": 61779,
+          "sha256": "c9505bbaad1aaadf40eb8923e7a6666f90929a4dbbc90c0fb2054d36058da654"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/summary.json",
+          "bytes": 61779,
+          "sha256": "0838e2d1113a42728b55925aea2b0ad98c919457a7977d0fae2bf1733631a8ec"
+        }
+      ]
+    },
+    {
+      "seed": 29,
+      "arm": "loss_feedback",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 1.4058369149819397e-7
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/summary.json",
+          "bytes": 62308,
+          "sha256": "e0d67b2184667d501f872163b1ca431d0f6976e686d7c071769a0380f2f813e1"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-29/loss_feedback/summary.json",
+          "bytes": 62308,
+          "sha256": "a405bedde8330c2abab93130d9e9c780c6b8277625e14b20c17c67e48e29ed44"
+        }
+      ]
+    },
+    {
+      "seed": 29,
+      "arm": "dose_matched",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 1.2306223996519734e-7
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-29/dose_matched/summary.json",
+          "bytes": 54933,
+          "sha256": "c442f12eb6cd1abe0e9a3a777a3657ac546b1e6779cebc3e57cb4f87dae5604a"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-29/dose_matched/summary.json",
+          "bytes": 54933,
+          "sha256": "356905abe6d24f16b3ba3a28eaf8647ac1f34b31a8cf38d8c71a1e84775b36da"
+        }
+      ]
+    },
+    {
+      "seed": 43,
+      "arm": "baseline",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 1.6995638523070767e-7
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-43/baseline/summary.json",
+          "bytes": 54873,
+          "sha256": "61c2ec0eeb98fe05d6facf3844848b9312e6f967d7e51ff933fb9c0d32fb47c7"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-43/baseline/summary.json",
+          "bytes": 54873,
+          "sha256": "42270c1fdebc5c3ec04944e634be5726238f5f6f34de4c83b988679ead47e9b7"
+        }
+      ]
+    },
+    {
+      "seed": 43,
+      "arm": "fixed_proposal",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 9.64663725415971e-8
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/summary.json",
+          "bytes": 61754,
+          "sha256": "e195f4b4207196e460632d828a23d1ad4b60a63e9921b6afa50a03a4226ecc4c"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/summary.json",
+          "bytes": 61754,
+          "sha256": "5f23a283b9d801967824e5f73c871885f4ab29c605e0e0e198d6435d8bf2eb32"
+        }
+      ]
+    },
+    {
+      "seed": 43,
+      "arm": "loss_feedback",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 1.2092451885696134e-7
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/summary.json",
+          "bytes": 62296,
+          "sha256": "2d81850d7f0c3f99272ca062c0ad17ec4a47463c8431693b023f035e6b95993d"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-43/loss_feedback/summary.json",
+          "bytes": 62296,
+          "sha256": "9b1f710d79ed7ffe0e1ef0de232c174c9b07bc406a305919050d608bb26265a1"
+        }
+      ]
+    },
+    {
+      "seed": 43,
+      "arm": "dose_matched",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "native_metrics_exact": true,
+      "torch_evaluation_accuracies_exact": true,
+      "torch_maximum_cross_build_evaluation_ce_difference": 0,
+      "torch_maximum_cross_build_epoch_mean_loss_difference": 0,
+      "final_saved_torch_parameter_comparison": {
+        "tensors": 24,
+        "values": 5530,
+        "max_scaled_error": 1.0707350119455804e-7
+      },
+      "summaries": [
+        {
+          "file": "three-seed-mps-portable-v2/seed-43/dose_matched/summary.json",
+          "bytes": 54917,
+          "sha256": "3a2b0a5399aa8368b98220ea973ed49675d8570cf383a03775ea635183b66bfb"
+        },
+        {
+          "file": "three-seed-mps-final-v3/seed-43/dose_matched/summary.json",
+          "bytes": 54917,
+          "sha256": "06ee93c80ccf11a73dd706085bb81dd452d09d761e3c0b58c2668701162320ba"
+        }
+      ]
+    }
+  ],
+  "raw_receipts": [
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/control-final.json",
+      "bytes": 73328,
+      "sha256": "af72ab26a9c47be5873a7146f857f6fe25bc37c7fd3bfba0bde180431c5aed38"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/control-initial.json",
+      "bytes": 67234,
+      "sha256": "951e53d5caffc30bc9453a1d24de20cba1e862e88ced4751c48952340ab46843"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/control-split.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/control-torch-final.json",
+      "bytes": 166454,
+      "sha256": "b1c374a7c0a57dbe215ed4a8d2cfdcbfa4e28fbee63cef674813d91a4036a1f8"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/control.json",
+      "bytes": 347122,
+      "sha256": "38c65291f31ca2a1f5ffd80789e2779ae43b866d54d6024007a134e98aa6f98d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/prefix-final.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/prefix-initial.json",
+      "bytes": 67234,
+      "sha256": "951e53d5caffc30bc9453a1d24de20cba1e862e88ced4751c48952340ab46843"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/prefix.json",
+      "bytes": 54472,
+      "sha256": "6ba76c882923032d0a22db61ede6cf15f8563847a2127e69a8edaf95f3233489"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/recipe.json",
+      "bytes": 378,
+      "sha256": "9600b1feb47d6156d5e39542b5ac431763913cc66c4440563d76d6c201ae5f7d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/resume-final.json",
+      "bytes": 73328,
+      "sha256": "af72ab26a9c47be5873a7146f857f6fe25bc37c7fd3bfba0bde180431c5aed38"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/resume-initial.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/seed-17/resume.json",
+      "bytes": 302241,
+      "sha256": "7d89809b3d1c96ccc9fa7122bc73bfc61133527e620b1c930187fb08625bdca2"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/summary.json",
+      "bytes": 54897,
+      "sha256": "5465f427684a574c6a1b5cfca5f092b8663d9884393fa94f1b0c553e4ed090df"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/baseline/verification.json",
+      "bytes": 1213,
+      "sha256": "5e542dc26ad71a4fda64b6ce96a3c43290d9fcd9261de1e00e6dc9499ed5dd5c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/control-final.json",
+      "bytes": 73242,
+      "sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/control-initial.json",
+      "bytes": 67241,
+      "sha256": "553aca9336bb17862c6da86fb53525640e1b4da97722f601962266fa5dd0266a"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/control-split.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/control-torch-final.json",
+      "bytes": 166485,
+      "sha256": "25cfd9648a6a8a456231853cb4f0acd5b194253c13fdb9e052aa318eae1c7097"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/control.json",
+      "bytes": 347118,
+      "sha256": "c55d8536d4d58a61775d80adb954d82feba41354c6b1980e559683c8977f7151"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/prefix-final.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/prefix-initial.json",
+      "bytes": 67241,
+      "sha256": "553aca9336bb17862c6da86fb53525640e1b4da97722f601962266fa5dd0266a"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/prefix.json",
+      "bytes": 54488,
+      "sha256": "08d6257368bba15787b26986c167612c97e8a019e6a792a331a770b27068c480"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/recipe.json",
+      "bytes": 394,
+      "sha256": "b60f57806955ee120dd3425d2fcebefe775cae466ae7ff60e5c0c1d6d54b34cc"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/resume-final.json",
+      "bytes": 73242,
+      "sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/resume-initial.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/seed-17/resume.json",
+      "bytes": 302257,
+      "sha256": "29ab76970acb7ba32b55a8825f29caf1522fc2d04845f0fbc6f97859abc53736"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/summary.json",
+      "bytes": 54909,
+      "sha256": "13df2d1bf97c6280aceb8f95b9f6bb708e745ad44eb7da4ca4a9f332c1be5038"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/dose_matched/verification.json",
+      "bytes": 1213,
+      "sha256": "05b03bed90557748c7a98c4fcbaf51576a283326879df75806bfaa6be3f30d06"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/control-final.json",
+      "bytes": 73421,
+      "sha256": "c4de78bf001ac73d724dff0917d34b7a4b31d89e8ee1d1478687a24fb7ae73a5"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/control-initial.json",
+      "bytes": 67312,
+      "sha256": "45016f707df236eacf3cd6901032106295a95b1e22a53cba49eca9d80e9b2be3"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/control-split.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/control-torch-final.json",
+      "bytes": 166554,
+      "sha256": "46ebbe9638e1bdbd7be61ed87666bcc51c4f417bdcc0db3d3a8e35f7bac32704"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/control.json",
+      "bytes": 398392,
+      "sha256": "185ea6732aae1fe1134f23b0a9cd53133c49e9cbb40be4cdd9d9ad98521c7571"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/prefix-final.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/prefix-initial.json",
+      "bytes": 67312,
+      "sha256": "45016f707df236eacf3cd6901032106295a95b1e22a53cba49eca9d80e9b2be3"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/prefix.json",
+      "bytes": 64754,
+      "sha256": "650efba51e1dad38dd67653b84dbb3b6a0add764856ee28fdc81a17d9eb062fc"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/recipe.json",
+      "bytes": 377,
+      "sha256": "85cfb7a670dc352edaa274a89293d2fec6fe8f2cedb814942176214de3127c13"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/resume-final.json",
+      "bytes": 73421,
+      "sha256": "c4de78bf001ac73d724dff0917d34b7a4b31d89e8ee1d1478687a24fb7ae73a5"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/resume-initial.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/seed-17/resume.json",
+      "bytes": 349361,
+      "sha256": "aaea7eba9759d9905e2e0b2f9c1f37e02b6cd292849f1f990db5339420ad7b6e"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/summary.json",
+      "bytes": 61741,
+      "sha256": "5c6b325fd04b8ca963fdd548487ef756abbe66dc38306c17d86fbb66895f5021"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/fixed_proposal/verification.json",
+      "bytes": 1212,
+      "sha256": "3801fc85f35a24e1b14fc9d890b17381fb5841545608bd42095f35cf50f1755d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/control-final.json",
+      "bytes": 73893,
+      "sha256": "e551627b031384e3c94040f1849e9e19d1116e6c349b7bae9422c5d6a450dde9"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/control-initial.json",
+      "bytes": 67875,
+      "sha256": "12f7e1c0555083f3ee3c8af2d847b2c974ea733a80bd77b645c42f438ec23b67"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/control-split.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/control-torch-final.json",
+      "bytes": 166584,
+      "sha256": "2bf029d7589c65542c92436d06cabdc507fe5703e56d125d1ae6522b5e141f25"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/control.json",
+      "bytes": 774312,
+      "sha256": "0054fe317d302727caf6991580c049afb84c20f308b60807bc1a7a7e020a755d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/prefix-final.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/prefix-initial.json",
+      "bytes": 67875,
+      "sha256": "12f7e1c0555083f3ee3c8af2d847b2c974ea733a80bd77b645c42f438ec23b67"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/prefix.json",
+      "bytes": 99825,
+      "sha256": "94e8766eb1dbfa7534e4170d2c9330945f8fb7b033295eed76e70f57e923b9c9"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/recipe.json",
+      "bytes": 376,
+      "sha256": "e167ba2fee464d83e880369c96cd8752f153ac525589773387320df1f0e414a3"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/resume-final.json",
+      "bytes": 73893,
+      "sha256": "e551627b031384e3c94040f1849e9e19d1116e6c349b7bae9422c5d6a450dde9"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/resume-initial.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/seed-17/resume.json",
+      "bytes": 690686,
+      "sha256": "22f1adf4211667537df3fb90a9f040c8cec3e3aa5f16e4e4fd77568c1c32196c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/summary.json",
+      "bytes": 62294,
+      "sha256": "ccd4a34aa2466744faaa39c0ec8fc9dcde9ef3385a81fbf6da0a6d4b1ed51f71"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-17/loss_feedback/verification.json",
+      "bytes": 1214,
+      "sha256": "dc4bbc422b7e9ef6384e96715956d2b3c17cd043c69a94e0aa6b232d6ac5583a"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/control-final.json",
+      "bytes": 73376,
+      "sha256": "d7d633337764e657038f7f2cded18d54ff8b5f2f846c3a08102381c2bfe4ccf9"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/control-initial.json",
+      "bytes": 67302,
+      "sha256": "6f838e8fc4099b13e7ee5d7b2433a8196efe1ec927b058c008901055295b9699"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/control-split.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/control-torch-final.json",
+      "bytes": 166525,
+      "sha256": "d889f7167202cdab74bc6bc92a238cac5ececfbbd3ee6f2ffe613c1ceca0f68e"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/control.json",
+      "bytes": 347129,
+      "sha256": "0a0ae45cc4dbd578913800eb5aac34affadbbdeb77be892e0a8d076da2ae1ecd"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/prefix-final.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/prefix-initial.json",
+      "bytes": 67302,
+      "sha256": "6f838e8fc4099b13e7ee5d7b2433a8196efe1ec927b058c008901055295b9699"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/prefix.json",
+      "bytes": 54469,
+      "sha256": "637f29ad6a50bb1908a8f208f828b21361015ae19401abcd727afc4793f3caf6"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/recipe.json",
+      "bytes": 378,
+      "sha256": "ca0d284e7d34981c732b4027c9e8827208a126a4a0213aadb0d9feb0b92428ac"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/resume-final.json",
+      "bytes": 73376,
+      "sha256": "d7d633337764e657038f7f2cded18d54ff8b5f2f846c3a08102381c2bfe4ccf9"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/resume-initial.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/seed-29/resume.json",
+      "bytes": 302244,
+      "sha256": "b3c6335fff25f96818a67735b7214381e15ca3023a3a44aee1f08fc776f2dfef"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/summary.json",
+      "bytes": 54904,
+      "sha256": "dc50593d121dcf37261d97eaebc5b18ad604578498bf1ee7ba7ca402e53fcd38"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/baseline/verification.json",
+      "bytes": 1213,
+      "sha256": "85ede70df9e0819c3384a9c80decc27433b8017d249da166cd4872be4eba5563"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/control-final.json",
+      "bytes": 73376,
+      "sha256": "350d92b826d9a9bf24733cef53cbd2eca2d0c1d6ad57a98750b7cdaba76cbab3"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/control-initial.json",
+      "bytes": 67309,
+      "sha256": "4d517f4198d951683328f80a0040f21e455825c38e567acd8335afc7df1822ca"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/control-split.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/control-torch-final.json",
+      "bytes": 166578,
+      "sha256": "73ed69481b8de2b060aea568b4302cea9e0b0ca519ce26431eb641c60b7b5ff0"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/control.json",
+      "bytes": 347141,
+      "sha256": "a178ab03e715ab306d5efc89b064e3ec0b6db3501b4516fe23d3091dbc3a9637"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/prefix-final.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/prefix-initial.json",
+      "bytes": 67309,
+      "sha256": "4d517f4198d951683328f80a0040f21e455825c38e567acd8335afc7df1822ca"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/prefix.json",
+      "bytes": 54485,
+      "sha256": "b2bc7b2b370db0f1eb7adf59d0693f8c5b7d48ee14c5524dcbf1a39f25ba0ebc"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/recipe.json",
+      "bytes": 394,
+      "sha256": "abaedc6d7654025c44328f22c5e0d5815e4536d86c466b45e29dd8a1e8639d00"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/resume-final.json",
+      "bytes": 73376,
+      "sha256": "350d92b826d9a9bf24733cef53cbd2eca2d0c1d6ad57a98750b7cdaba76cbab3"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/resume-initial.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/seed-29/resume.json",
+      "bytes": 302260,
+      "sha256": "979d72e1bbe65d24a83e3ff2ba6b5439b72d79744c69c77f9012a636a0fd8d36"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/summary.json",
+      "bytes": 54933,
+      "sha256": "356905abe6d24f16b3ba3a28eaf8647ac1f34b31a8cf38d8c71a1e84775b36da"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/dose_matched/verification.json",
+      "bytes": 1214,
+      "sha256": "dd3d2edb3590743d6dcb66d266f72f33f90b88698e86bb87080847513de157fa"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/control-final.json",
+      "bytes": 73474,
+      "sha256": "52794f78241ae6fab3b023d283843100323ae3d08aa7fc831a86798f0ee18d0e"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/control-initial.json",
+      "bytes": 67380,
+      "sha256": "efc3ecdc1375c2fa212a7a7e1336e6f976d4f63ce80b4aecae702e937d61ac19"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/control-split.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/control-torch-final.json",
+      "bytes": 166574,
+      "sha256": "e336f94906d433d78f205e027538aecc27ed161c9a05152ab42c5159a3f155ad"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/control.json",
+      "bytes": 398429,
+      "sha256": "367a319f74e035387397ff61ce5b64ebcec21dd953075764d5db157cd7a12c85"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/prefix-final.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/prefix-initial.json",
+      "bytes": 67380,
+      "sha256": "efc3ecdc1375c2fa212a7a7e1336e6f976d4f63ce80b4aecae702e937d61ac19"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/prefix.json",
+      "bytes": 64751,
+      "sha256": "865ab37c92fb883483dbb91be7298219fa6248c030db5fcc468de07ad7f4526a"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/recipe.json",
+      "bytes": 377,
+      "sha256": "de7e27e1a07b6df15922eff11a141fa162304c7e1e4f2ddcee8f24928cdb1d05"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/resume-final.json",
+      "bytes": 73474,
+      "sha256": "52794f78241ae6fab3b023d283843100323ae3d08aa7fc831a86798f0ee18d0e"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/resume-initial.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/seed-29/resume.json",
+      "bytes": 349364,
+      "sha256": "fd991117d1fe6c2834ed4f077da2815fd426144a94824840b29609ab446cd975"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/summary.json",
+      "bytes": 61779,
+      "sha256": "0838e2d1113a42728b55925aea2b0ad98c919457a7977d0fae2bf1733631a8ec"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/fixed_proposal/verification.json",
+      "bytes": 1214,
+      "sha256": "88f257dce8143e1fb850baaf834b36b814fdbdb9e61a95c2f88962b560d0e738"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/control-final.json",
+      "bytes": 74111,
+      "sha256": "40829cc65b4a78ec10bf7a4cd04a497c5ab399f11a440e0bcda7d280b5965017"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/control-initial.json",
+      "bytes": 67943,
+      "sha256": "bc2c233515f3576d1fc87b90b3dde4790677812c93057a81ac3b1c7e57bf8acf"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/control-split.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/control-torch-final.json",
+      "bytes": 166598,
+      "sha256": "d43ac98c47f0985395299fde01a56be6f1f9ec42283267488fca9e0f971c50d7"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/control.json",
+      "bytes": 774213,
+      "sha256": "960099a19629b2cda8f0f6f4b6fee471faaf009fb4736a298649d08f82f27433"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/prefix-final.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/prefix-initial.json",
+      "bytes": 67943,
+      "sha256": "bc2c233515f3576d1fc87b90b3dde4790677812c93057a81ac3b1c7e57bf8acf"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/prefix.json",
+      "bytes": 99864,
+      "sha256": "6c7e3b790cfcf4833352df95c8d359578c959f1f9677fc8f10594546d721993a"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/recipe.json",
+      "bytes": 376,
+      "sha256": "c3a934d3a5cae89c083b19a73ce1dc7ca1764a6f8a451c84250e68771725bfcf"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/resume-final.json",
+      "bytes": 74111,
+      "sha256": "40829cc65b4a78ec10bf7a4cd04a497c5ab399f11a440e0bcda7d280b5965017"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/resume-initial.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/seed-29/resume.json",
+      "bytes": 690534,
+      "sha256": "a861dce1962930c637b76b493734c23462fce8361b6eada8b865f66218a4b253"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/summary.json",
+      "bytes": 62308,
+      "sha256": "a405bedde8330c2abab93130d9e9c780c6b8277625e14b20c17c67e48e29ed44"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-29/loss_feedback/verification.json",
+      "bytes": 1215,
+      "sha256": "8ca4dcb3aca731b045a78e31cf88e3d47de3c46b789f6585b94e3086cb56ae30"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/control-final.json",
+      "bytes": 73160,
+      "sha256": "3df99ec4186c4d71a767f313468747bb348cab9605e13fc41e0eeb2b3d1aaf14"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/control-initial.json",
+      "bytes": 67294,
+      "sha256": "5e0d9a7ecea6e3f679003bb8cf6ba06334048e8a95e6433a20918a2f07dce3da"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/control-split.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/control-torch-final.json",
+      "bytes": 166350,
+      "sha256": "0eea208fe7f97426247991aee5497a499d57bc8c5c243631f907e64118414842"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/control.json",
+      "bytes": 347097,
+      "sha256": "5a1500edbf7156a68282c9e03868b30a7c487ac7f0bd9dd6b22cdbceee94fb43"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/prefix-final.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/prefix-initial.json",
+      "bytes": 67294,
+      "sha256": "5e0d9a7ecea6e3f679003bb8cf6ba06334048e8a95e6433a20918a2f07dce3da"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/prefix.json",
+      "bytes": 54480,
+      "sha256": "edc711135bdea06601ddd2c17e908927f6e9df3cd7bc9aa8d93d368bb5f29494"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/recipe.json",
+      "bytes": 378,
+      "sha256": "845e730e91c48b8ca24821551b0b4e2e9bb8c7ba01dd693f9af8d79146d7ad57"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/resume-final.json",
+      "bytes": 73160,
+      "sha256": "3df99ec4186c4d71a767f313468747bb348cab9605e13fc41e0eeb2b3d1aaf14"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/resume-initial.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/seed-43/resume.json",
+      "bytes": 302233,
+      "sha256": "05d5888cc3748855cb3ec333bb622395a5b1642359215c89a222bf5e2b80c7bd"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/summary.json",
+      "bytes": 54873,
+      "sha256": "42270c1fdebc5c3ec04944e634be5726238f5f6f34de4c83b988679ead47e9b7"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/baseline/verification.json",
+      "bytes": 1214,
+      "sha256": "9b5ecf22d99d73db0aee2f7c70defcd01791318acc123442a531d7e6701a1fca"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/control-final.json",
+      "bytes": 73101,
+      "sha256": "4e31f908434c57b98170526294eea348b77866e95a967133bab1e76686b9b33d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/control-initial.json",
+      "bytes": 67301,
+      "sha256": "0123adb5cb197e9291f38baa3ef688e72e109333da2feca8f0506ecc26768fdb"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/control-split.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/control-torch-final.json",
+      "bytes": 166420,
+      "sha256": "feef1da1b119bdb28033afa6200d674a2673e793682547043a1d4601dccd14eb"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/control.json",
+      "bytes": 347125,
+      "sha256": "fe8b22a176eb81794cb767b7a17a7d6a449945dfba2ec6d06856bd62bb68efe3"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/prefix-final.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/prefix-initial.json",
+      "bytes": 67301,
+      "sha256": "0123adb5cb197e9291f38baa3ef688e72e109333da2feca8f0506ecc26768fdb"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/prefix.json",
+      "bytes": 54496,
+      "sha256": "1de1973c36163822804af79a4e665ec78ef88702556e99ad65164cb474a0a711"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/recipe.json",
+      "bytes": 394,
+      "sha256": "033e24d8b2e8db4925beba27d22fb0b818c2ecb7609a6c2b0f519878a464ad2f"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/resume-final.json",
+      "bytes": 73101,
+      "sha256": "4e31f908434c57b98170526294eea348b77866e95a967133bab1e76686b9b33d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/resume-initial.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/seed-43/resume.json",
+      "bytes": 302249,
+      "sha256": "eefaa1441a0e148653357c5716155d3bde417bc3376fb71dcd27bfb0da6dcf8c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/summary.json",
+      "bytes": 54917,
+      "sha256": "06ee93c80ccf11a73dd706085bb81dd452d09d761e3c0b58c2668701162320ba"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/dose_matched/verification.json",
+      "bytes": 1214,
+      "sha256": "a8756cf49a7b2e824d4d49bf960f2f157b29af003afa20343d14de3a486699cf"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/control-final.json",
+      "bytes": 73379,
+      "sha256": "32ee42b688642eb50069dca2cdb9c706bbe49ae68fa20b92fa98dbe789e66e2d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/control-initial.json",
+      "bytes": 67372,
+      "sha256": "345b1183288b656343866ff9ff1b8c557ecd466df1491ad4ae856b8717e1ca40"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/control-split.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/control-torch-final.json",
+      "bytes": 166525,
+      "sha256": "b8f826a2c7fb293e8e8cbd3a61751eb9a77abc0b2c04abb6023a7722fef798ce"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/control.json",
+      "bytes": 398405,
+      "sha256": "81407f5854e59d690b69413fb1ec46e33be7fe81090163fecf4a5c0a2e1d0b79"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/prefix-final.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/prefix-initial.json",
+      "bytes": 67372,
+      "sha256": "345b1183288b656343866ff9ff1b8c557ecd466df1491ad4ae856b8717e1ca40"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/prefix.json",
+      "bytes": 64762,
+      "sha256": "6cdc7dc3a61d711b729bdaef8c2d0f29511d71dd5ce74f2fd2cbcedd0e4f1663"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/recipe.json",
+      "bytes": 377,
+      "sha256": "8dbd2d145337418fd3ef65e4e8db3fd60f5794611358149b8654d374d20bd9ff"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/resume-final.json",
+      "bytes": 73379,
+      "sha256": "32ee42b688642eb50069dca2cdb9c706bbe49ae68fa20b92fa98dbe789e66e2d"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/resume-initial.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/seed-43/resume.json",
+      "bytes": 349353,
+      "sha256": "609e77fd003a99c4bba18f344bbb26261e8f91446713e8bf541e100dff5d8141"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/summary.json",
+      "bytes": 61754,
+      "sha256": "5f23a283b9d801967824e5f73c871885f4ab29c605e0e0e198d6435d8bf2eb32"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/fixed_proposal/verification.json",
+      "bytes": 1212,
+      "sha256": "974bd7bec90bec35a161ac2e57ea04bb09e3a4b2b4391d222e0780e20f44551a"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/control-final.json",
+      "bytes": 73788,
+      "sha256": "b8b33f9ef7cd3e0f298fadaee1bf3c652a72eac6ff8fd91f308337e087ed1cba"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/control-initial.json",
+      "bytes": 67935,
+      "sha256": "5a674415998e05a9de45f04eb3748dc6a500c1b90e2c77ef460ae7d7b76ae588"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/control-split.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/control-torch-final.json",
+      "bytes": 166447,
+      "sha256": "c4802561922b1afcb07fd15dda41403b7cdfbfde1a8a033fc8214853948fe73c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/control.json",
+      "bytes": 774318,
+      "sha256": "302589ce309677a7f411ea01a7f66dfc34735229d94a3aec35a368149d35558b"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/prefix-final.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/prefix-initial.json",
+      "bytes": 67935,
+      "sha256": "5a674415998e05a9de45f04eb3748dc6a500c1b90e2c77ef460ae7d7b76ae588"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/prefix.json",
+      "bytes": 99863,
+      "sha256": "b7038b0c6035c5d453a97f019ea3d00ffdd5f101d51261c2a7feea5e5203fd83"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/recipe.json",
+      "bytes": 376,
+      "sha256": "7c6ad543f003f5a41909a46b6510262896c6c1266b8a0a9784de127590767298"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/resume-final.json",
+      "bytes": 73788,
+      "sha256": "b8b33f9ef7cd3e0f298fadaee1bf3c652a72eac6ff8fd91f308337e087ed1cba"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/resume-initial.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/seed-43/resume.json",
+      "bytes": 690652,
+      "sha256": "3100051bed8be9eabe80ed3179677cbbec25d3d0e04459f768776d0ee5e19f0c"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/summary.json",
+      "bytes": 62296,
+      "sha256": "9b1f710d79ed7ffe0e1ef0de232c174c9b07bc406a305919050d608bb26265a1"
+    },
+    {
+      "file": "three-seed-mps-final-v3/seed-43/loss_feedback/verification.json",
+      "bytes": 1214,
+      "sha256": "d6619672b38023f7041f3cad59523c6971032c73cc0274f0020990a42c1d3310"
+    },
+    {
+      "file": "three-seed-mps-final-v3/summary.json",
+      "bytes": 54925,
+      "sha256": "86b8e477479cd31a9311786c3da21904b745e49768deec98acc3ac3ca6b8e2f4"
+    },
+    {
+      "file": "three-seed-mps-final-v3-verification.json",
+      "bytes": 488,
+      "sha256": "71e17d829db22aefd8118681059a827d49f82154996f2832be9841761af1a675"
+    }
+  ]
+}
