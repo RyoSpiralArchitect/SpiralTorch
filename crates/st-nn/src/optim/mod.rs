@@ -753,7 +753,9 @@ impl WarmupCosineScheduler {
             let decay_steps = (self.total_steps - self.warmup_steps).max(1);
             let elapsed = (step - self.warmup_steps).min(decay_steps);
             let progress = elapsed as f32 / decay_steps as f32;
-            let cosine = 0.5 * (1.0 + (PI * progress).cos());
+            // Platform cosf differed by one ULP across a native/browser restart.
+            // Keep the portable scheduler arithmetic in this shared Rust path.
+            let cosine = 0.5 * (1.0 + libm::cosf(PI * progress));
             self.min_lr + (self.base_lr - self.min_lr) * cosine
         };
         lr.max(self.min_lr)
@@ -1240,6 +1242,19 @@ mod tests {
             state.total_steps = 0;
             assert!(WarmupCosineScheduler::from_state(state).is_err());
         }
+    }
+
+    #[test]
+    fn warmup_scheduler_cross_runtime_cosine_regression() {
+        let mut state = WarmupCosineScheduler::new(0.002, 0.0001, 10, 100)
+            .unwrap()
+            .state();
+        state.step = 61;
+        let mut scheduler = WarmupCosineScheduler::from_state(state).unwrap();
+        // The observed native std::cos path returned 978_780_404 here, while
+        // wasm32 returned 978_780_405 for the same restored step and parameters.
+        assert_eq!(scheduler.preview_step().0.to_bits(), 978_780_405);
+        assert_eq!(scheduler.step().to_bits(), 978_780_405);
     }
 
     #[test]
