@@ -33,6 +33,8 @@ use st_vision::{
 
 #[cfg(all(feature = "nn", feature = "wgpu"))]
 mod resident;
+#[cfg(all(feature = "nn", feature = "wgpu"))]
+mod trainer;
 
 const MIN_SMOOTHING: f32 = 0.0;
 const MAX_SMOOTHING: f32 = 0.999;
@@ -2787,6 +2789,8 @@ pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     #[cfg(all(feature = "nn", feature = "wgpu"))]
     resident::register(parent)?;
+    #[cfg(all(feature = "nn", feature = "wgpu"))]
+    trainer::register(parent)?;
     parent.add_class::<PyImageTensor>()?;
     parent.add_class::<PyTransformPipeline>()?;
     parent.add_class::<PyVisionSample>()?;

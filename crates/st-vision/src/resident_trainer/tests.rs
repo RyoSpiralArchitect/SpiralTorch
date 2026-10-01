@@ -139,6 +139,86 @@ fn rate_checkpoint_clocks_are_validated_without_gpu() {
 }
 
 #[test]
+fn client_configuration_keeps_u64_seeds_lossless() {
+    let config = ResidentVisionTrainerConfig {
+        model_seed: u64::MAX,
+        shuffle_seed: (1_u64 << 53) + 1,
+        ..Default::default()
+    };
+    let json = config.to_json().unwrap();
+    let restored = ResidentVisionTrainerConfig::from_json(&json).unwrap();
+    assert_eq!(restored.model_seed, config.model_seed);
+    assert_eq!(restored.shuffle_seed, config.shuffle_seed);
+    for seed in [
+        json!(0),
+        json!("01"),
+        json!("-1"),
+        json!("18446744073709551616"),
+    ] {
+        let mut value: Value = serde_json::from_str(&json).unwrap();
+        value["model_seed"] = seed;
+        assert!(ResidentVisionTrainerConfig::from_json(&value.to_string()).is_err());
+    }
+    assert!(ResidentVisionTrainerConfig::from_json(&" ".repeat(65_537)).is_err());
+}
+
+#[test]
+fn shared_client_factory_matches_explicit_loader_and_restores() {
+    let Some(device) = device() else { return };
+    let explicit = loader(&device, 4, 20);
+    let dataset = Arc::clone(&explicit.dataset);
+    let pipeline = explicit.pipeline.clone();
+    let initial_pipeline = pipeline.as_ref().unwrap().checkpoint().unwrap();
+    let config = ResidentVisionTrainerConfig {
+        model: model().config().clone(),
+        num_classes: 2,
+        batch_size: 2,
+        model_seed: 43,
+        shuffle_seed: 17,
+        shuffle: true,
+        learning_rate: rate(true),
+    };
+    let mut client = ResidentVisionTrainer::from_dataset(
+        &config,
+        device.clone(),
+        Arc::clone(&dataset),
+        pipeline.clone(),
+        DATA_ID,
+    )
+    .unwrap();
+    let mut control =
+        ResidentVisionTrainer::new(&model(), device.clone(), explicit, DATA_ID, rate(true))
+            .unwrap();
+    assert_eq!(
+        checkpoint(&client).to_json().unwrap(),
+        checkpoint(&control).to_json().unwrap()
+    );
+    assert_eq!(steps(&mut client, 13), steps(&mut control, 13));
+    let saved = checkpoint(&client);
+    let mut restored = ResidentVisionTrainer::from_dataset_checkpoint(
+        device.clone(),
+        Arc::clone(&dataset),
+        pipeline.clone(),
+        DATA_ID,
+        &saved,
+    )
+    .unwrap();
+    assert_eq!(steps(&mut client, 11), steps(&mut restored, 11));
+    assert_eq!(
+        checkpoint(&client).to_json().unwrap(),
+        checkpoint(&restored).to_json().unwrap()
+    );
+    assert_eq!(
+        pipeline.as_ref().unwrap().checkpoint().unwrap(),
+        initial_pipeline
+    );
+    assert!(
+        ResidentVisionTrainer::from_dataset_checkpoint(device, dataset, None, DATA_ID, &saved,)
+            .is_err()
+    );
+}
+
+#[test]
 fn pending_settlement_errors_and_snapshot_lifetime() {
     let Some(device) = device() else {
         return;

@@ -22,6 +22,9 @@ use st_nn::{
 };
 use std::sync::Arc;
 
+mod clients;
+pub use clients::ResidentVisionTrainerConfig;
+
 const SCHEMA: &str = "spiraltorch.vision.training_checkpoint.v1";
 const MAX_JSON_BYTES: usize = 545 * 1024 * 1024;
 

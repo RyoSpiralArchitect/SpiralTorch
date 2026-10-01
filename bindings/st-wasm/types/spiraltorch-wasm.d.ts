@@ -179,6 +179,52 @@ declare module "spiraltorch-wasm" {
         readJson(): Promise<string>;
         free(): void;
     }
+    /** Caller-populated classification data; trainers freeze a copy at creation. */
+    export class TensorVisionDataset {
+        constructor(descriptor: string);
+        readonly length: number;
+        push(channels: number, height: number, width: number, data: Float32Array, class_id: number, label?: string | null): void;
+        free(): void;
+    }
+    /** Rust model/input/schedule owner. Seed fields in config JSON are decimal strings. */
+    export class ResidentVisionTrainer {
+        private constructor();
+        static defaultConfigJson(): string;
+        static create(device: WgpuTensorDevice, dataset: TensorVisionDataset, dataset_sha256: string, config_json: string): ResidentVisionTrainer;
+        static createWithPipeline(device: WgpuTensorDevice, dataset: TensorVisionDataset, dataset_sha256: string, config_json: string, pipeline: VisionTransformPipeline): ResidentVisionTrainer;
+        static fromCheckpointJson(device: WgpuTensorDevice, dataset: TensorVisionDataset, dataset_sha256: string, payload: string): ResidentVisionTrainer;
+        static fromCheckpointJsonWithPipeline(device: WgpuTensorDevice, dataset: TensorVisionDataset, dataset_sha256: string, payload: string, pipeline: VisionTransformPipeline): ResidentVisionTrainer;
+        restoreCheckpointJson(payload: string): void;
+        stateJson(): string;
+        readonly hasPendingUpdate: boolean;
+        submitNext(): ResidentVisionSubmission;
+        /** Holds a mutable owner borrow until resolved. No concurrent reuse/free. */
+        settle(): Promise<ResidentVisionStepOutcome>;
+        checkpointSnapshot(): VisionTrainingCheckpointSnapshot;
+        free(): void;
+    }
+    export class ResidentVisionSubmission {
+        private constructor();
+        readonly attemptedRevision: bigint;
+        readonly epoch: bigint;
+        readonly learningRate: number;
+        labels(): (string | null)[];
+        images(): WgpuTensor;
+        lossTensor(): WgpuTensor;
+        free(): void;
+    }
+    export class ResidentVisionStepOutcome {
+        private constructor();
+        readonly attemptedRevision: bigint;
+        readonly accepted: boolean;
+        free(): void;
+    }
+    export class VisionTrainingCheckpointSnapshot {
+        private constructor();
+        /** Consumes a frozen, settled model/input/schedule checkpoint. */
+        readJson(): Promise<string>;
+        free(): void;
+    }
     export class VisionImage {
         private constructor();
         readonly shape: Uint32Array;

@@ -40,6 +40,8 @@ bincode = "1"
 thiserror = "2"
 num-complex = "0.4"
 nalgebra = "0.32"
+# Scheduler restart uses the same cosine implementation on native and wasm32.
+libm = "=0.2.16"
 
 [dev-dependencies]
 sha2 = "0.10"

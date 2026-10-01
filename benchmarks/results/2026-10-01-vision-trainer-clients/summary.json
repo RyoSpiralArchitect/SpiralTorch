@@ -1,0 +1,190 @@
+{
+  "schema": "spiraltorch.vision.trainer_client_result.v1",
+  "scope": "synthetic restart correctness; no throughput, real-image quality or cross-device claim",
+  "source_capture_commit": "7cacf291c18c883f539690b9514cbbf6eaf52220",
+  "dataset_sha256": "880f39119feebc83c99764885ae945e9261b6bf8156aca26b4028309c520f820",
+  "parameter_tensors": 24,
+  "parameter_values": 456,
+  "wheel_sha256": "eca712f214e1be792159b8d6673473e1f6c94c03c6c3b016d4eb829e31ee28a3",
+  "python_fixture_sha256": "9b428eb5ae8fe9ec9dc91cd49929bd8b944d37d4545913b4c199d487be4a367c",
+  "reverse_report_sha256": "4aa6937f179eadcb08761c4ee460a5ddd949582b395e74fd52eea56dfe558d9d",
+  "assets": {
+    "/": "e91bdbf6a851b0d57eb25d1dd0a16a63c3d3c758076b1b97ea7d2e74cecf4385",
+    "/python.json": "9b428eb5ae8fe9ec9dc91cd49929bd8b944d37d4545913b4c199d487be4a367c",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+    "/module/spiraltorch_wasm.js": "279e58025316d5155d7f7cd5d6fdae833d9c80f460c1580f79e911108161414e",
+    "/module/spiraltorch_wasm_bg.wasm": "bf76bab5e5e8c6151794e8a6334981a7a2795b02baea438c7d53654f22e9321a"
+  },
+  "cases": [
+    {
+      "schedule": "constant",
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "split": [
+        37,
+        63
+      ],
+      "config": {
+        "model": {
+          "input_channels": 3,
+          "input_hw": [
+            4,
+            4
+          ],
+          "stage_dims": [
+            2,
+            3
+          ],
+          "stage_depths": [
+            1,
+            1
+          ],
+          "patch_size": [
+            2,
+            2
+          ],
+          "curvature": -1,
+          "epsilon": 0.001
+        },
+        "num_classes": 2,
+        "batch_size": 2,
+        "model_seed": "43",
+        "shuffle_seed": "17",
+        "shuffle": true,
+        "learning_rate": {
+          "kind": "constant",
+          "rate": 0.001
+        }
+      },
+      "native_final_sha256": "51cfb76e22799a3db8b9bfe10c392b310dd771b10a2d4c3e5d0e8c1b4f46b2c1",
+      "browser_final_sha256": "51cfb76e22799a3db8b9bfe10c392b310dd771b10a2d4c3e5d0e8c1b4f46b2c1",
+      "browser_restart_checkpoint_exact": true,
+      "cross_runtime_input_rate_and_clocks_exact": true,
+      "python_to_browser_max_scaled_weight_error": 0,
+      "browser_to_python": {
+        "schedule": "constant",
+        "parameter_tensors": 24,
+        "parameter_values": 456,
+        "max_scaled_error": 0,
+        "checkpoint_sha256": "51cfb76e22799a3db8b9bfe10c392b310dd771b10a2d4c3e5d0e8c1b4f46b2c1",
+        "browser_checkpoint_sha256": "51cfb76e22799a3db8b9bfe10c392b310dd771b10a2d4c3e5d0e8c1b4f46b2c1"
+      },
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+    },
+    {
+      "schedule": "cosine",
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "split": [
+        37,
+        63
+      ],
+      "config": {
+        "model": {
+          "input_channels": 3,
+          "input_hw": [
+            4,
+            4
+          ],
+          "stage_dims": [
+            2,
+            3
+          ],
+          "stage_depths": [
+            1,
+            1
+          ],
+          "patch_size": [
+            2,
+            2
+          ],
+          "curvature": -1,
+          "epsilon": 0.001
+        },
+        "num_classes": 2,
+        "batch_size": 2,
+        "model_seed": "43",
+        "shuffle_seed": "17",
+        "shuffle": true,
+        "learning_rate": {
+          "kind": "warmup_cosine",
+          "state": {
+            "base_lr": 0.002,
+            "min_lr": 0.0001,
+            "warmup_steps": 10,
+            "total_steps": 100,
+            "step": 0
+          }
+        }
+      },
+      "native_final_sha256": "35afba2869161a0283b977746a4c7c293dba1f0c310843000233c014ab173836",
+      "browser_final_sha256": "35afba2869161a0283b977746a4c7c293dba1f0c310843000233c014ab173836",
+      "browser_restart_checkpoint_exact": true,
+      "cross_runtime_input_rate_and_clocks_exact": true,
+      "python_to_browser_max_scaled_weight_error": 0,
+      "browser_to_python": {
+        "schedule": "cosine",
+        "parameter_tensors": 24,
+        "parameter_values": 456,
+        "max_scaled_error": 0,
+        "checkpoint_sha256": "35afba2869161a0283b977746a4c7c293dba1f0c310843000233c014ab173836",
+        "browser_checkpoint_sha256": "35afba2869161a0283b977746a4c7c293dba1f0c310843000233c014ab173836"
+      },
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+    }
+  ],
+  "receipts": [
+    {
+      "file": "constant-control.json",
+      "sha256": "713261216646bdd9c61a60308d0a6d431740ed7c34ae1ccd06ccb6a38a02552d",
+      "bytes": 133275
+    },
+    {
+      "file": "constant-prefix.json",
+      "sha256": "0fe8e8b9c694ceb3bbd0b16832136ddcbbb8fa3ab99dad5369cabe6b4af64c2e",
+      "bytes": 61023
+    },
+    {
+      "file": "constant-resume.json",
+      "sha256": "71185e055ff500a8bf6527c2fba61d6d42263ea0f915dd56ae70f95f741bd84f",
+      "bytes": 91371
+    },
+    {
+      "file": "constant-python.json",
+      "sha256": "5683eff3fe7a64d9cea1353253a30bfeaf9a18ac4fd85dafceda31eb36a8c134",
+      "bytes": 91449
+    },
+    {
+      "file": "cosine-control.json",
+      "sha256": "af9c3e60d4d6f7fae8b4b704e7c331561fb2c87d45312c36394aa3eb618a04da",
+      "bytes": 133525
+    },
+    {
+      "file": "cosine-prefix.json",
+      "sha256": "817632f6902f1f1536ad1ee6738c6462ccb5c19493ecd7fed9af1d1308dfab72",
+      "bytes": 61262
+    },
+    {
+      "file": "cosine-resume.json",
+      "sha256": "882b535586d7504942854f88847ab89af072270092557cf1ba73a71dfd45979c",
+      "bytes": 91604
+    },
+    {
+      "file": "cosine-python.json",
+      "sha256": "2ac449bc01437b7f80dcc48c5bbd4028b280685d1b09f182cd2eb44a6248fb8e",
+      "bytes": 91682
+    }
+  ]
+}

@@ -16,8 +16,8 @@ Current scope of the vision execution path:
 | Real ConvNeXt classifier common inference entry | `ConvNeXtClassifier`, `create_classification_model` | Ordinary factory with `nn`; resident handle with `nn,wgpu` | Resident handle; no ordinary host factory |
 | Classifier-owned resident CE/VJP/SGD/checkpoint | One owner for backbone and head | Thin Rust-owned public client | Thin Rust-owned public client |
 | Resident image normalization and DataLoader handoff | Public API, homogeneous NCHW | Public API, same Rust loader | Public normalization/batch/continuation API; caller-supplied batches, no JS DataLoader |
-| Portable input checkpoint | Order/cursor, shuffle and transform RNG | Same Rust loader/transform state | Transform state; browser order remains caller-owned |
-| Unified resident training boundary | Model/input/schedule owner, explicit settlement and bound checkpoint | Open | Rust async implementation; browser client and execution open |
+| Portable input checkpoint | Order/cursor, shuffle and transform RNG | Same Rust loader/transform state | Transform state; integrated trainer also owns order/cursor/shuffle |
+| Unified resident training boundary | Model/input/schedule owner, explicit settlement and bound checkpoint | Thin Rust-owned trainer client | Same Rust owner, async settlement; fresh-document and cross-runtime restart exercised |
 | Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch CPU and MPS comparison | Open |
 | Transfer-inclusive training throughput and memory | Open | Open | Open |
 
@@ -57,15 +57,23 @@ not capture that input state. See the
 The [input checkpoint](vision_input_checkpoint.md) now preserves order/cursor
 and augmentation RNG independently of the model. A native GPU fixture matches
 100 classifier update attempts against a restart after attempt 37, including
-two rejected updates. Python-to-wasm32 transform replay is exact under Node;
-browser WebGPU learning restart is not yet measured. These payloads do not
-form one integrity-bound model/input/trainer checkpoint by themselves.
+two rejected updates. Python-to-wasm32 transform replay is exact under Node.
+These payloads do not form one integrity-bound model/input/trainer checkpoint
+by themselves; the unified trainer below supplies that boundary.
 
 The [resident trainer](resident_vision_trainer.md) now owns those components and
 the update settlement boundary. It reuses the existing Rust warmup/cosine scheduler
 and checkpoint hashing, rather than reconstructing either in clients. Its native
 process-restart fixture exercises constant SGD and scheduled rates, including
-rejected updates. Thin Python/browser clients and real-browser restart remain open.
+rejected updates. The [integrated trainer clients](resident_vision_trainer_clients.md)
+now expose that same owner in Python/WASM. Both fixed and scheduled learning
+exercise a 100-attempt control versus a 37/63 restart, with 90 accepted and ten
+rejected updates. Actual browser documents are closed and recreated, and native
+and browser checkpoints continue in both directions. This caught and fixed a
+one-ULP platform-cosine rate difference in the shared Rust scheduler; no client
+math or relaxed rate comparison was added. The bounded synthetic replay is not
+a browser real-image or throughput measurement.
+See the [client replay result](../benchmarks/results/2026-10-01-vision-trainer-clients/README.md).
 
 ### Next Rails And Exit Gates
 
@@ -87,9 +95,9 @@ Z-space policy advantage. Every step observes loss/acceptance on the host.
    restart contracts. Specify whether rejected updates retry or consume a batch.
    Compare uninterrupted and resumed batch identities, transforms and updates.
    The Rust resident trainer now connects this boundary for full fixed-size
-   classifier batches; thin clients and real-browser restart are the remaining
-   integration gates. Reuse Rust trainer-state contracts rather than duplicating
-   policy in Python/browser clients.
+   classifier batches, with thin clients and fresh-browser-instance restart now
+   exercised on synthetic data. Carry this same boundary into the real-image
+   comparison rather than duplicating policy in Python/browser clients.
 3. **Shared resident optimizer control.** Connect existing Rust optimizer and
    Z-space policy to the resident parameter owner rather than reimplementing it
    in Python/JavaScript. Preserve the plain-SGD control case and all-parameter
