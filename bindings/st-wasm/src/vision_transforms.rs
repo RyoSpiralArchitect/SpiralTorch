@@ -23,6 +23,20 @@ pub struct WasmVisionTransformPipeline {
 
 #[wasm_bindgen(js_class = VisionTransformPipeline)]
 impl WasmVisionTransformPipeline {
+    #[wasm_bindgen(js_name = checkpointJson)]
+    pub fn checkpoint_json(&self) -> Result<String, JsValue> {
+        self.inner
+            .checkpoint()
+            .and_then(|state| state.to_json())
+            .map_err(error)
+    }
+
+    #[wasm_bindgen(js_name = restoreCheckpointJson)]
+    pub fn restore_checkpoint_json(&mut self, payload: &str) -> Result<(), JsValue> {
+        let state = st_vision::TransformPipelineCheckpoint::from_json(payload).map_err(error)?;
+        self.inner.restore_checkpoint(&state).map_err(error)
+    }
+
     #[wasm_bindgen(js_name = createCpu)]
     pub fn create_cpu(seed: u32) -> Self {
         Self {

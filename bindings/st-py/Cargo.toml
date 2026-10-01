@@ -74,7 +74,7 @@ st-kv = { path = "../../crates/st-kv", optional = true }
 st-backend-wgpu = { path = "../../crates/st-backend-wgpu", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
-st-vision = { path = "../../crates/st-vision", default-features = false }
+st-vision = { path = "../../crates/st-vision", default-features = false, features = ["input-checkpoint"] }
 st-qr-studio = { path = "../../crates/st-qr-studio" }
 julia-ffi-poc = { path = "../../crates/julia-ffi-poc" }
 spiral-selfsup = { path = "../../crates/spiral-selfsup", optional = true }

@@ -537,6 +537,21 @@ impl PyTransformPipeline {
             .collect()
     }
 
+    fn checkpoint_json(&self) -> PyResult<String> {
+        self.inner
+            .checkpoint()
+            .and_then(|state| state.to_json())
+            .map_err(tensor_err_to_py)
+    }
+
+    fn restore_checkpoint_json(&mut self, payload: &str) -> PyResult<()> {
+        let state =
+            st_vision::TransformPipelineCheckpoint::from_json(payload).map_err(tensor_err_to_py)?;
+        self.inner
+            .restore_checkpoint(&state)
+            .map_err(tensor_err_to_py)
+    }
+
     fn __len__(&self) -> usize {
         self.inner.len()
     }
@@ -958,6 +973,21 @@ pub(crate) struct PyVisionDataLoader {
 
 #[pymethods]
 impl PyVisionDataLoader {
+    fn checkpoint_json(&self, dataset_sha256: &str) -> PyResult<String> {
+        self.inner
+            .checkpoint(dataset_sha256)
+            .and_then(|state| state.to_json())
+            .map_err(tensor_err_to_py)
+    }
+
+    fn restore_checkpoint_json(&mut self, dataset_sha256: &str, payload: &str) -> PyResult<()> {
+        let state =
+            st_vision::DataLoaderCheckpoint::from_json(payload).map_err(tensor_err_to_py)?;
+        self.inner
+            .restore_checkpoint(dataset_sha256, &state)
+            .map_err(tensor_err_to_py)
+    }
+
     fn reset(&mut self) {
         self.inner.reset();
     }

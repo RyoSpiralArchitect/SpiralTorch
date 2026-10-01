@@ -116,6 +116,9 @@ declare module "spiraltorch-wasm" {
     /** Checked geometry and normalization using the same Rust contracts as native st-vision. */
     export class VisionTransformPipeline {
         private constructor();
+        checkpointJson(): string;
+        /** Restore RNG into matching transforms, retaining the local GPU device. */
+        restoreCheckpointJson(payload: string): void;
         static createCpu(seed: number): VisionTransformPipeline;
         static createGpu(seed: number): Promise<VisionTransformPipeline>;
         addResize(height: number, width: number): void;

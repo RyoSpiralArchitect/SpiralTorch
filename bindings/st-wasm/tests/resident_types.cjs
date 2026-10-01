@@ -215,6 +215,9 @@ function checkVisionTrainingContract(types, label) {
   const model = get("ResidentConvNeXtClassifier"), token = get("ConvNeXtForward");
   const gradients = get("ConvNeXtGradients"), update = get("ConvNeXtUpdate");
   const checkpoint = get("ConvNeXtCheckpointSnapshot");
+  const transforms = get("VisionTransformPipeline");
+  assert.match(transforms, /checkpointJson\(\): string/);
+  assert.match(transforms, /restoreCheckpointJson\(payload: string\): void/);
   assert.match(model, /static defaultConfigJson\(\): string/);
   assert.match(model, /static create\(device: WgpuTensorDevice, config_json: string, num_classes: number, batch_size: number, seed: bigint\): ResidentConvNeXtClassifier/);
   assert.match(model, /static fromCheckpointJson\(device: WgpuTensorDevice, payload: string\): ResidentConvNeXtClassifier/);
