@@ -17,6 +17,11 @@ use crate::telemetry::training_projection::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod window;
+pub use window::ZSpaceOptimizerFeedbackLossWindow;
+#[cfg(test)]
+mod window_tests;
+
 pub const ZSPACE_OPTIMIZER_FEEDBACK_CONTRACT_VERSION: &str =
     "spiraltorch.zspace_optimizer_feedback.v1";
 pub const ZSPACE_OPTIMIZER_FEEDBACK_KIND: &str = "spiraltorch.zspace_optimizer_feedback";
@@ -28,10 +33,18 @@ pub const ZSPACE_OPTIMIZER_FEEDBACK_CONTROL_RULE: &str =
 
 const DERIVED_TOLERANCE: f64 = 128.0 * f64::EPSILON;
 
+fn single_observation_window(value: &u64) -> bool {
+    *value == 1
+}
+
 /// Loss-guard policy for one external optimizer-control stream.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ZSpaceOptimizerFeedbackConfig {
+    /// Equal-weight observations per non-overlapping comparison window. One
+    /// preserves the original encoding and adjacent-observation behavior.
+    #[serde(skip_serializing_if = "single_observation_window")]
+    pub loss_window_observations: u64,
     /// EMA update weight for the absolute loss level.
     pub loss_ema_alpha: f64,
     /// EMA update weight for relative loss deltas.
@@ -63,6 +76,7 @@ pub struct ZSpaceOptimizerFeedbackConfig {
 impl Default for ZSpaceOptimizerFeedbackConfig {
     fn default() -> Self {
         Self {
+            loss_window_observations: 1,
             loss_ema_alpha: 0.2,
             relative_delta_ema_alpha: 0.5,
             loss_floor: 1.0e-8,
@@ -82,6 +96,10 @@ impl Default for ZSpaceOptimizerFeedbackConfig {
 
 impl ZSpaceOptimizerFeedbackConfig {
     pub fn validate(&self) -> Result<(), ZSpaceOptimizerFeedbackError> {
+        require_positive_count(
+            "config.loss_window_observations",
+            self.loss_window_observations,
+        )?;
         require_unit_interval_open_zero("config.loss_ema_alpha", self.loss_ema_alpha)?;
         require_unit_interval_open_zero(
             "config.relative_delta_ema_alpha",
@@ -125,6 +143,8 @@ pub struct ZSpaceOptimizerFeedbackState {
     pub regression_streak: u64,
     pub improvement_streak: u64,
     pub halted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loss_window: Option<ZSpaceOptimizerFeedbackLossWindow>,
 }
 
 impl Default for ZSpaceOptimizerFeedbackState {
@@ -140,6 +160,7 @@ impl Default for ZSpaceOptimizerFeedbackState {
             regression_streak: 0,
             improvement_streak: 0,
             halted: false,
+            loss_window: None,
         }
     }
 }
@@ -154,6 +175,22 @@ impl ZSpaceOptimizerFeedbackState {
         require_safe_count("state.regression_streak", self.regression_streak)?;
         require_safe_count("state.improvement_streak", self.improvement_streak)?;
         require_range("state.gate", self.gate, 0.0, config.maximum_gate)?;
+        match (&self.loss_window, config.loss_window_observations) {
+            (None, 1) => {}
+            (Some(window), size) if size > 1 => {
+                window.validate(size, self.observation_count, self.last_loss)?;
+            }
+            _ => {
+                return Err(ZSpaceOptimizerFeedbackError::InvalidState {
+                    field: "state.loss_window",
+                    message: "window state must match the configured observation window",
+                });
+            }
+        }
+        let comparisons = self
+            .loss_window
+            .as_ref()
+            .map_or(self.observation_count, |window| window.completed_windows);
         for (field, value) in [
             ("state.last_loss", self.last_loss),
             ("state.loss_ema", self.loss_ema),
@@ -200,16 +237,16 @@ impl ZSpaceOptimizerFeedbackState {
                     message: "loss and loss EMA are required after observation",
                 });
             }
-            if self.observation_count == 1 && self.relative_loss_delta_ema.is_some() {
+            if comparisons <= 1 && self.relative_loss_delta_ema.is_some() {
                 return Err(ZSpaceOptimizerFeedbackError::InvalidState {
                     field: "state.relative_loss_delta_ema",
-                    message: "the first observation has no preceding loss delta",
+                    message: "two completed comparison windows are required for a loss delta",
                 });
             }
-            if self.observation_count > 1 && self.relative_loss_delta_ema.is_none() {
+            if comparisons > 1 && self.relative_loss_delta_ema.is_none() {
                 return Err(ZSpaceOptimizerFeedbackError::InvalidState {
                     field: "state.relative_loss_delta_ema",
-                    message: "is required after the second observation",
+                    message: "is required after the second completed comparison window",
                 });
             }
             if self.relative_loss_delta_ema.is_none()
@@ -259,7 +296,7 @@ impl ZSpaceOptimizerFeedbackState {
                 message: "a halted gate must apply identity control",
             });
         }
-        if self.observation_count > config.warmup_observations {
+        if self.decision_observations() > config.warmup_observations {
             if !self.halted
                 && (self.regression_streak >= config.halt_regression_streak
                     || self
@@ -279,6 +316,14 @@ impl ZSpaceOptimizerFeedbackState {
             }
         }
         Ok(())
+    }
+
+    fn decision_observations(&self) -> u64 {
+        self.loss_window
+            .as_ref()
+            .map_or(self.observation_count, |window| {
+                window.completed_windows * window.observations_per_window
+            })
     }
 }
 
@@ -326,6 +371,7 @@ pub struct ZSpaceOptimizerFeedbackControlRequest {
 #[serde(rename_all = "snake_case")]
 pub enum ZSpaceOptimizerFeedbackObservationAction {
     Initialize,
+    AwaitWindow,
     Warmup,
     Hold,
     Recover,
@@ -448,7 +494,12 @@ pub fn initialize_zspace_optimizer_feedback(
     config: ZSpaceOptimizerFeedbackConfig,
 ) -> Result<ZSpaceOptimizerFeedbackCheckpoint, ZSpaceOptimizerFeedbackError> {
     config.validate()?;
-    Ok(checkpoint(config, ZSpaceOptimizerFeedbackState::default()))
+    let state = ZSpaceOptimizerFeedbackState {
+        loss_window: (config.loss_window_observations > 1)
+            .then(|| ZSpaceOptimizerFeedbackLossWindow::new(config.loss_window_observations)),
+        ..Default::default()
+    };
+    Ok(checkpoint(config, state))
 }
 
 pub fn restore_zspace_optimizer_feedback(
@@ -499,7 +550,15 @@ pub fn observe_zspace_optimizer_feedback(
         message: error.to_string(),
     })?;
 
-    let relative_loss_delta = match (projection.loss_delta, state_before.last_loss) {
+    let mut loss_window = state_before.loss_window.clone();
+    let (comparison_complete, loss_delta, previous_loss) = match &mut loss_window {
+        Some(window) => match window.observe(observation.loss)? {
+            Some((mean, previous)) => (true, previous.map(|value| mean - value), previous),
+            None => (false, None, None),
+        },
+        None => (true, projection.loss_delta, state_before.last_loss),
+    };
+    let relative_loss_delta = match (loss_delta, previous_loss) {
         (Some(delta), Some(previous_loss)) => {
             let denominator = previous_loss.abs().max(config.loss_floor);
             Some(checked_derived("relative_loss_delta", delta / denominator)?)
@@ -513,6 +572,7 @@ pub fn observe_zspace_optimizer_feedback(
             config.relative_delta_ema_alpha,
             "relative_loss_delta_ema",
         )?),
+        None if !comparison_complete => state_before.relative_loss_delta_ema,
         None => None,
     };
     let loss_ema = ema_update(
@@ -529,23 +589,28 @@ pub fn observe_zspace_optimizer_feedback(
     state_after.last_loss = Some(observation.loss);
     state_after.loss_ema = Some(loss_ema);
     state_after.relative_loss_delta_ema = relative_loss_delta_ema;
+    state_after.loss_window = loss_window;
     let gate_before = state_before.gate;
 
-    let action = match relative_loss_delta_ema {
-        None => {
-            state_after.gate = 0.0;
-            state_after.regression_streak = 0;
-            state_after.improvement_streak = 0;
-            ZSpaceOptimizerFeedbackObservationAction::Initialize
+    let action = if !comparison_complete {
+        ZSpaceOptimizerFeedbackObservationAction::AwaitWindow
+    } else {
+        match relative_loss_delta_ema {
+            None => {
+                state_after.gate = 0.0;
+                state_after.regression_streak = 0;
+                state_after.improvement_streak = 0;
+                ZSpaceOptimizerFeedbackObservationAction::Initialize
+            }
+            Some(_) if state_after.observation_count <= config.warmup_observations => {
+                state_after.gate = 0.0;
+                state_after.regression_streak = 0;
+                state_after.improvement_streak = 0;
+                state_after.halted = false;
+                ZSpaceOptimizerFeedbackObservationAction::Warmup
+            }
+            Some(delta_ema) => update_gate_from_delta(&config, &mut state_after, delta_ema)?,
         }
-        Some(_) if state_after.observation_count <= config.warmup_observations => {
-            state_after.gate = 0.0;
-            state_after.regression_streak = 0;
-            state_after.improvement_streak = 0;
-            state_after.halted = false;
-            ZSpaceOptimizerFeedbackObservationAction::Warmup
-        }
-        Some(delta_ema) => update_gate_from_delta(&config, &mut state_after, delta_ema)?,
     };
     state_after.validate(&config)?;
 
@@ -605,7 +670,7 @@ pub fn control_zspace_optimizer_feedback(
         .map(|step| state_before.control_step - step);
     let disposition = if state_before.observation_count == 0 {
         ZSpaceOptimizerFeedbackControlDisposition::NoFeedback
-    } else if state_before.observation_count <= config.warmup_observations {
+    } else if state_before.decision_observations() <= config.warmup_observations {
         ZSpaceOptimizerFeedbackControlDisposition::Warmup
     } else if state_before.halted {
         ZSpaceOptimizerFeedbackControlDisposition::Halted

@@ -152,6 +152,16 @@ class MatchedArms(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "recipe"):
             self.compare()
 
+    def test_window_changes_only_the_declared_feedback_arm(self):
+        self.recipe["feedback_window_observations"] = 80
+        with self.assertRaisesRegex(ValueError, "recipe"):
+            self.compare()
+        self.change("loss_feedback", "summary.json", lambda v: v["recipe"].update(feedback_window_observations=80))
+        self.compare()
+        self.change("baseline", "summary.json", lambda v: v["recipe"].update(feedback_window_observations=80))
+        with self.assertRaisesRegex(ValueError, "recipe"):
+            self.compare()
+
     def test_equal_total_but_nonconstant_dose_fails(self):
         def edit(value):
             value["records"][0]["rate_bits"] = runner.bits(0.01)

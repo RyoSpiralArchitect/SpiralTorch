@@ -49,6 +49,38 @@ receipt already observed by this trainer. It does not read all parameters,
 images or gradients. This is an explicit synchronization cost, not a claim of
 readback-free training. Disabled trainers retain their previous path.
 
+## Optional Observation Windows
+
+Set `optimizer_feedback.loss_window_observations` to a positive integer before
+training to compare non-overlapping, equal-weight means of accepted losses.
+The default is one, preserving the existing adjacent-loss rule and JSON bytes.
+For example, `{"loss_window_observations": 80}` compares 80 accepted batch means
+at a time. This is not a sample-weighted mean, a moving window, or an automatic
+epoch detector. Rejected updates consume input without joining the window, so
+80 accepted observations need not cover exactly one 80-batch input pass.
+
+Partial windows return `await_window` and preserve the gate, streaks and
+relative-delta EMA. Raw loss telemetry, absolute-loss EMA and the accepted
+observation clock still advance. Only a completed window changes the gate;
+the first complete window establishes a reference. Consequently a larger window
+delays both opening the gate and detecting real regression. Warmup is still
+specified in accepted observations, checked at completed-window boundaries;
+staleness still refers to the last accepted observation, not the last boundary.
+All accepted updates still map their scalar loss: windowing does not remove
+the trainer's existing readback cost.
+
+Window width, partial count/mean and previous completed mean are Rust-owned
+checkpoint state. They cannot be silently changed or discarded on restore.
+This opt-in additive extension retains the feedback v1 / trainer v3 identifiers;
+older strict readers reject its unknown fields. Default width-one payloads
+omit the extra fields and remain readable by existing clients.
+
+The fixed-model probe motivates a coverage-derived width of 80 for its specific
+1,280-image, batch-16 task. This is not a recommended general default or evidence
+of improved training. Evaluate real-regression latency and matched learning
+controls before adoption. Python/WASM use the same Rust aggregation, including
+partial-window restart; no client-side averaging is required.
+
 ## Restart
 
 Feedback-enabled checkpoints use `spiraltorch.vision.training_checkpoint.v3`.

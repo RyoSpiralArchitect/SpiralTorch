@@ -230,7 +230,9 @@ class ReplayChecks(unittest.TestCase):
         for key, value in (("torch_device", "cpu"), ("test_per_class", 2), ("train_per_class", 4),
                            ("batch_size", 5), ("horizontal_flip", False), ("schedule", "cosine"),
                            ("rate", 0.02), ("epochs", 3), ("restart_at", 2),
-                           ("control_scale", 0.5), ("optimizer_feedback", True)):
+                           ("control_scale", 0.5), ("optimizer_feedback", True),
+                           ("feedback_window_observations", 80), ("feedback_window_observations", 0),
+                           ("feedback_window_observations", True)):
             with self.subTest(key=key):
                 summary = copy.deepcopy(original)
                 summary["recipe"][key] = value
@@ -238,6 +240,22 @@ class ReplayChecks(unittest.TestCase):
                 result = self.call_cli(root)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertFalse((root / "verification.json").exists())
+
+    def test_recipe_window_is_bound_to_the_rust_config(self):
+        source = path.with_name("verify_vision_trainer_replay.py")
+        spec = importlib.util.spec_from_file_location("verify_recipe", source)
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        _, saved = self.cli_fixture()
+        recipe = dict(saved["recipe"], optimizer_feedback=True, control_scale=0.5,
+                      feedback_window_observations=80)
+        contract = copy.deepcopy(saved["runs"][0]["contract"])
+        contract["intervention"] = dict(requested_scale=0.5, feedback_enabled=True)
+        contract["config"]["optimizer_feedback"] = dict(loss_window_observations=80)
+        verifier.verify_recipe_contract(runner, recipe, 17, contract)
+        for changed in (1, 4, 0, True, 80.0):
+            with self.subTest(width=changed), self.assertRaises(ValueError):
+                verifier.verify_recipe_contract(runner, dict(recipe, feedback_window_observations=changed), 17, contract)
 
     def test_standalone_verifier_rejects_relabelled_seed(self):
         root, summary = self.cli_fixture()
