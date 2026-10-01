@@ -83,10 +83,11 @@ fn weight(x: f32, maximum: f32) -> f32 {
 }
 fn log_one_plus(tail: f32) -> f32 {
     // Avoid amplifying a device's absolute log error near one. For
-    // 0 <= tail <= 2^-10, omitting the cubic term costs < 3.2e-7 relative.
-    // Materialize the subtraction so it cannot fuse into the final product.
-    if (tail <= 0.0009765625) {
-        return tail * rounded_add(1.0, -0.5 * tail);
+    // 0 <= tail <= 2^-6, the cubic's truncation costs < 9.7e-7 relative.
+    // Materialize both sums so Horner evaluation cannot fuse across them.
+    if (tail <= 0.015625) {
+        let correction = rounded_add(-0.5, tail * 0.3333333333333333);
+        return tail * rounded_add(1.0, tail * correction);
     }
     // The correction needs the rounded sum, not a reassociation of
     // (1 + tail) - 1 back to tail. Reuse the compensated-sum rounding boundary.
