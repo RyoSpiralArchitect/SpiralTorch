@@ -1,0 +1,93 @@
+{
+  "schema": "spiraltorch.vision.trainer_realdata_verification.v1",
+  "status": "passed",
+  "scope": "saved records/checkpoint/reference-weight verification, not a new training run",
+  "summary": {
+    "file": "summary.json",
+    "bytes": 164064,
+    "sha256": "20b17b4bf7c08169ea71d0419433719d21f1823892e4c713083121aa6d25a13d"
+  },
+  "runs": [
+    {
+      "seed": 17,
+      "replay": {
+        "attempts": 400,
+        "accepted": 400,
+        "rejected": 0,
+        "split": [
+          37,
+          363
+        ],
+        "distinct_processes": true,
+        "all_batch_records_exact": true,
+        "all_bound_checkpoints_exact": true,
+        "trajectory_sha256": "deb99603f98df2e1791203143e820ef471532cdbf3faf2817c0656dabef60b1e",
+        "final_checkpoint_sha256": "e1cefa571d5a7ca96d3eaacdce682e00c04a4c7f06bd195282544543550a6174",
+        "saved_reference_parameters": {
+          "tensors": 24,
+          "values": 5530,
+          "max_scaled_error": 9.54328049359145e-08
+        }
+      },
+      "flipped_images": 3182,
+      "observed_images": 6400,
+      "unique_learning_rates": 400,
+      "all_evaluation_accuracies_equal": true,
+      "max_evaluation_ce_difference": 3.576278695405222e-08
+    },
+    {
+      "seed": 29,
+      "replay": {
+        "attempts": 400,
+        "accepted": 400,
+        "rejected": 0,
+        "split": [
+          37,
+          363
+        ],
+        "distinct_processes": true,
+        "all_batch_records_exact": true,
+        "all_bound_checkpoints_exact": true,
+        "trajectory_sha256": "a13dcf2337b96e1006713ea9b2115ce7f6ecd19cca39ed68e2cfd10677a602d1",
+        "final_checkpoint_sha256": "5a77104f865342fb95b1ef8f9a473921f8ab708a3489c9ab5b527bfe2b6f6209",
+        "saved_reference_parameters": {
+          "tensors": 24,
+          "values": 5530,
+          "max_scaled_error": 8.113380599627079e-08
+        }
+      },
+      "flipped_images": 3166,
+      "observed_images": 6400,
+      "unique_learning_rates": 400,
+      "all_evaluation_accuracies_equal": true,
+      "max_evaluation_ce_difference": 5.960464477539063e-08
+    },
+    {
+      "seed": 43,
+      "replay": {
+        "attempts": 400,
+        "accepted": 400,
+        "rejected": 0,
+        "split": [
+          37,
+          363
+        ],
+        "distinct_processes": true,
+        "all_batch_records_exact": true,
+        "all_bound_checkpoints_exact": true,
+        "trajectory_sha256": "ad90471f1d61916a9a55988f0aac8d28778bbc1b25f91123bd0ed03632f83b93",
+        "final_checkpoint_sha256": "46951967eda1cc0b3b50f34b93eaae83e8e69bc14aff3c7280bb6e9723655c4a",
+        "saved_reference_parameters": {
+          "tensors": 24,
+          "values": 5530,
+          "max_scaled_error": 1.1937620191609505e-07
+        }
+      },
+      "flipped_images": 3204,
+      "observed_images": 6400,
+      "unique_learning_rates": 400,
+      "all_evaluation_accuracies_equal": true,
+      "max_evaluation_ce_difference": 5.960464477539063e-08
+    }
+  ]
+}
