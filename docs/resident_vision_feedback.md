@@ -124,11 +124,15 @@ loss kernel and numerical behavior.
 The subsequent macOS CI run found that preserving the rounding correction alone
 does not guarantee small-loss accuracy on another runtime: at logit gap 12 the
 relative error was `2.65e-4`, above the unchanged `2e-5` regression bound. The
-small-tail path now uses `x * (1 - x/2)` through the same explicit subtraction
-boundary for `x <= 2^-10`. Its analytic truncation error is below `3.2e-7`
-relative; device arithmetic still requires the GPU regression. This avoids the
-near-one logarithm in that range rather than weakening the test. The earlier
-results remain tied to their recorded builds and are not proof of this follow-up.
+first small-tail correction used `x * (1 - x/2)` for `x <= 2^-10`.
+A second CI run passed that range but exposed `2.37e-5` relative error at gap
+`6.0078125`, outside it. The shared kernel now uses
+`x * (1 + x * (-1/2 + x/3))` for `x <= 2^-6`, with explicit rounding at both
+Horner sums. Its analytic truncation error is below `9.7e-7` relative; device
+arithmetic still requires the GPU regression. The unchanged `2e-5` test now
+covers gaps 0 through 22 in increments of 1/256 and neighboring f32 values at
+both old and new branch boundaries. The earlier results remain tied to their
+recorded builds and are not proof of this follow-up.
 
 The gate guards an external intervention, not the baseline SGD itself: a halted
 gate returns to the nominal rate and does not stop training. For a proposal
