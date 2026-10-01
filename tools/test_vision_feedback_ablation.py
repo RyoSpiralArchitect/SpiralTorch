@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import types
 import unittest
 
 spec = importlib.util.spec_from_file_location("ablation", Path(__file__).with_name("run_vision_feedback_ablation.py"))
@@ -73,6 +74,15 @@ class ControlChecks(unittest.TestCase):
             changed[0][key] = value
             with self.assertRaises(ValueError):
                 ablation.dose_rate(changed)
+
+    def test_saved_verification_rejects_changed_orchestrator_before_loading_arms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner.write_json(root / "summary.json", dict(schema="spiraltorch.vision.feedback_ablation.v1",
+                status="passed", orchestrator_sha256="0" * 64, boundary=ablation.BOUNDARY))
+            with self.assertRaisesRegex(ValueError, "orchestrator source"):
+                ablation.verify_saved(types.SimpleNamespace(verify=root, source_ref=None, output=root / "verify.json"))
+            self.assertFalse((root / "verify.json").exists())
 
 
 class MatchedArms(unittest.TestCase):

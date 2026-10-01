@@ -132,6 +132,10 @@ def verify_saved(args):
     saved = json.loads((directory / "summary.json").read_text())
     require(saved["schema"] == "spiraltorch.vision.feedback_ablation.v1" and saved["status"] == "passed",
             "ablation incomplete")
+    source = (subprocess.check_output(["git", "show", f"{args.source_ref}:tools/{Path(__file__).name}"],
+                                     cwd=HERE.parent) if args.source_ref else Path(__file__).read_bytes())
+    require(saved["orchestrator_sha256"] == runner.sha(source), "ablation orchestrator source differs")
+    require(saved["boundary"] == BOUNDARY, "ablation evidence boundary differs")
     recipe = saved["recipe"]
     require(recipe["seeds"] and len(set(recipe["seeds"])) == len(recipe["seeds"]), "invalid seed coverage")
     runs = []
