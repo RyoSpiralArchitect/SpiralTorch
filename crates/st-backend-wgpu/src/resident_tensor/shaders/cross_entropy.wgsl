@@ -82,6 +82,12 @@ fn weight(x: f32, maximum: f32) -> f32 {
     return exp(-ldexp(gap.fraction,gap.exponent));
 }
 fn log_one_plus(tail: f32) -> f32 {
+    // Avoid amplifying a device's absolute log error near one. For
+    // 0 <= tail <= 2^-10, omitting the cubic term costs < 3.2e-7 relative.
+    // Materialize the subtraction so it cannot fuse into the final product.
+    if (tail <= 0.0009765625) {
+        return tail * rounded_add(1.0, -0.5 * tail);
+    }
     // The correction needs the rounded sum, not a reassociation of
     // (1 + tail) - 1 back to tail. Reuse the compensated-sum rounding boundary.
     let whole = rounded_add(1.0, tail);

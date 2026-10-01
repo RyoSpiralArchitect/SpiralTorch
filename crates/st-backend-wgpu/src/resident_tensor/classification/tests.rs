@@ -181,9 +181,11 @@ fn wide_normalized_losses_tiny_smoothing_and_whole_loss_guards() {
 #[test]
 fn confident_class_loss_preserves_the_log1p_rounding_correction() {
     let Some(device) = device() else { return };
-    // Cross the rounding boundary of 1 + exp(-gap), rather than only testing
-    // tails so small that the early return bypasses the correction entirely.
-    let gaps: Vec<f32> = (0..=2048).map(|i| 12. + i as f32 / 256.).collect();
+    // Cover both the small-tail approximation boundary and the cancellation
+    // boundary of 1 + exp(-gap), including the original CI failure at gap 12.
+    let mut gaps: Vec<f32> = (0..=4096).map(|i| 6. + i as f32 / 256.).collect();
+    let boundary = 1024_f32.ln().to_bits();
+    gaps.extend((boundary - 2..=boundary + 2).map(f32::from_bits));
     let logits: Vec<_> = gaps.iter().flat_map(|&gap| [0., -gap]).collect();
     let x = device.upload(&[gaps.len(), 2], &logits).unwrap();
     let y = device.upload(&[gaps.len()], &vec![0.; gaps.len()]).unwrap();
