@@ -7,6 +7,36 @@ from pathlib import Path
 import subprocess
 
 
+def verify_recipe_contract(runner, recipe, seed, contract):
+    """Bind public execution conditions to the retained worker contract."""
+    require = runner.require
+    data, config = contract["data"], contract["config"]
+    require(contract["environment"]["torch_device"] == recipe["torch_device"],
+            "recipe torch_device differs from raw contract")
+    require(config["model_seed"] == config["shuffle_seed"] == contract["augmentation_seed"] == str(seed),
+            "recipe seed differs from raw contract")
+    require(config["batch_size"] == recipe["batch_size"], "recipe batch_size differs from raw contract")
+    for split in ("train", "test"):
+        per_class = recipe[f"{split}_per_class"]
+        ids = data[f"{split}_indices"]
+        require(type(per_class) is int and per_class > 0
+                and data[f"{split}_per_class"] == per_class
+                and len(ids) == len(set(ids)) == per_class * 10,
+                f"recipe {split}_per_class differs from raw contract")
+    require(type(recipe["horizontal_flip"]) is bool
+            and contract["horizontal_flip"] is recipe["horizontal_flip"]
+            and data["augmentation"] == ("rust_horizontal_flip_0.5" if recipe["horizontal_flip"] else "none"),
+            "recipe augmentation differs from raw contract")
+    schedule = recipe["schedule"]
+    require(schedule in ("constant", "cosine") and contract["schedule"] == schedule,
+            "recipe schedule differs from raw contract")
+    total = recipe["epochs"] * recipe["train_per_class"] * 10 // recipe["batch_size"]
+    expected = (dict(kind="constant", rate=recipe["rate"]) if schedule == "constant" else
+                dict(kind="warmup_cosine", state=dict(base_lr=recipe["rate"], min_lr=recipe["rate"] / 10,
+                     warmup_steps=min(10, total), total_steps=total, step=0)))
+    require(config["learning_rate"] == expected, "recipe learning rate differs from raw contract")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_directory", type=Path)
@@ -40,6 +70,7 @@ def main():
         control = phases["control"]
         runner.require(control["contract"] == run["contract"] and run["contract"]["source_sha256"] == hashes,
                        "source/runtime/input contract differs")
+        verify_recipe_contract(runner, recipe, run["seed"], control["contract"])
         for key in ("admission", "initial_evaluation", "epochs", "final_parameter_comparison", "reference_checkpoint"):
             runner.require(control[key] == run[key], f"published {key} differs from raw control")
         runner.require(run["checkpoints"] == {phase: p["checkpoints"] for phase, p in phases.items()},

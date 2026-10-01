@@ -163,7 +163,13 @@ class ReplayChecks(unittest.TestCase):
             row.update(sample_ids=list(range(10 * (i % 2), 10 * (i % 2) + 10)), flips=[False, True] * 5)
         self.phases["prefix"]["records"] = copy.deepcopy(records[:1])
         self.phases["resume"]["records"] = copy.deepcopy(records[1:])
-        contract = dict(source_sha256=runner.source_hashes(), data=dict(train_indices=list(range(20))))
+        contract = dict(source_sha256=runner.source_hashes(),
+            data=dict(train_indices=list(range(20)), test_indices=list(range(10)),
+                      train_per_class=2, test_per_class=1, augmentation="rust_horizontal_flip_0.5"),
+            config=dict(model_seed="17", shuffle_seed="17", batch_size=10,
+                        learning_rate=dict(kind="constant", rate=0.01)),
+            environment=dict(torch_device="mps"), augmentation_seed="17",
+            horizontal_flip=True, schedule="constant")
         evaluation = dict(spiraltorch=dict(accuracy=0.5, loss=1.), torch=dict(accuracy=0.5, loss=1.))
         control = self.phases["control"]
         control.update(admission={}, initial_evaluation=evaluation,
@@ -177,7 +183,8 @@ class ReplayChecks(unittest.TestCase):
                    phase_receipts={phase: runner.receipt(directory / f"{phase}.json") for phase in self.phases},
                    replay=runner.verify_replay(directory, self.phases, 4, 1, list(range(20)), 10))
         summary = dict(schema="spiraltorch.vision.trainer_matched_learning.v1", status="passed", runs=[run],
-                       recipe=dict(seeds=[17], epochs=2, train_per_class=2, batch_size=10,
+                       recipe=dict(seeds=[17], epochs=2, train_per_class=2, test_per_class=1,
+                                   batch_size=10, torch_device="mps",
                                    horizontal_flip=True, schedule="constant", rate=0.01, restart_at=1))
         runner.write_json(root / "summary.json", summary)
         return root, summary
@@ -216,6 +223,30 @@ class ReplayChecks(unittest.TestCase):
         result = self.call_cli(root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("augmentation was absent", result.stderr)
+        self.assertFalse((root / "verification.json").exists())
+
+    def test_standalone_verifier_rejects_edited_recipe(self):
+        root, original = self.cli_fixture()
+        for key, value in (("torch_device", "cpu"), ("test_per_class", 2), ("train_per_class", 4),
+                           ("batch_size", 5), ("horizontal_flip", False), ("schedule", "cosine"),
+                           ("rate", 0.02), ("epochs", 3), ("restart_at", 2)):
+            with self.subTest(key=key):
+                summary = copy.deepcopy(original)
+                summary["recipe"][key] = value
+                (root / "summary.json").write_text(json.dumps(summary))
+                result = self.call_cli(root)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertFalse((root / "verification.json").exists())
+
+    def test_standalone_verifier_rejects_relabelled_seed(self):
+        root, summary = self.cli_fixture()
+        summary["recipe"]["seeds"] = [29]
+        summary["runs"][0]["seed"] = 29
+        (root / "seed-17").rename(root / "seed-29")
+        (root / "summary.json").write_text(json.dumps(summary))
+        result = self.call_cli(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("recipe seed differs", result.stderr)
         self.assertFalse((root / "verification.json").exists())
 
 
