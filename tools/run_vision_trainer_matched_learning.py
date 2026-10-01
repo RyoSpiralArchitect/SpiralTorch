@@ -91,10 +91,30 @@ def verify_replay(directory, phases, total, split, train_ids, batch_size):
     require(payloads["control"]["split"] == payloads["prefix"]["final"], "prefix state differs")
     require(payloads["prefix"]["final"] == payloads["resume"]["initial"], "restored state differs")
     require(payloads["control"]["final"] == payloads["resume"]["final"], "final state differs")
+    native = json.loads(payloads["control"]["final"])["model"]
+    reference = json.loads(read_checkpoint(directory, control["reference_checkpoint"]))
+    require(reference["schema"] == "spiraltorch.vision.torch_reference_weights.v1"
+            and native["backbone"]["config"] == reference["config"] and native["classes"] == reference["classes"],
+            "reference architecture differs")
+    actual = native["backbone"]["parameters"] + native["head"]
+    expected = reference["parameters"]
+    require(actual and len(actual) == len(expected) and len({p["name"] for p in actual}) == len(actual),
+            "reference parameter coverage differs")
+    maximum, values = 0., 0
+    for left, right in zip(actual, expected, strict=True):
+        require(left["name"] == right["name"] and left["shape"] == right["shape"]
+                and len(left["values"]) == len(right["values"]) == math.prod(left["shape"]) > 0,
+                "reference parameter layout differs")
+        for value, target in zip(left["values"], right["values"], strict=True):
+            require(math.isfinite(value) and math.isfinite(target), "non-finite reference parameter")
+            error = abs(value - target) / (1 + abs(target))
+            require(error < 2e-4, "reference parameter numerical bound")
+            maximum, values = max(maximum, error), values + 1
     trace = json.dumps(control["records"], sort_keys=True, separators=(",", ":")).encode()
     return dict(attempts=total, accepted=total, rejected=0, split=[split, total - split],
                 distinct_processes=True, all_batch_records_exact=True, all_bound_checkpoints_exact=True,
-                trajectory_sha256=sha(trace), final_checkpoint_sha256=sha(payloads["control"]["final"]))
+                trajectory_sha256=sha(trace), final_checkpoint_sha256=sha(payloads["control"]["final"]),
+                saved_reference_parameters=dict(tensors=len(actual), values=values, max_scaled_error=maximum))
 
 
 def load_runtime():
@@ -276,6 +296,12 @@ def worker(recipe, phase, directory, report):
         report["final_parameter_comparison"] = [dict(name=name, **shared.compare(
             p["values"], tensor.detach().cpu().numpy().reshape(-1), name))
             for name, p, tensor in shared.matched_parameters(reference.names, parameters, reference.values)]
+        reference_path = directory / "control-torch-final.json"
+        write_json(reference_path, dict(schema="spiraltorch.vision.torch_reference_weights.v1",
+            config=reference.config, classes=reference.classes,
+            parameters=[dict(name=name, shape=list(tensor.shape), values=tensor.detach().cpu().reshape(-1).tolist())
+                        for name, tensor in zip(reference.names, reference.values, strict=True)]))
+        report["reference_checkpoint"] = receipt(reference_path)
     report["status"] = "passed"
 
 
@@ -309,9 +335,13 @@ def main():
     parser.add_argument("--horizontal-flip", action="store_true")
     parser.add_argument("--restart-at", type=int, default=37)
     args = parser.parse_args()
+    try:
+        rate = unbits(bits(args.rate))
+    except (OverflowError, ValueError):
+        parser.error("learning rate is outside the f32 domain")
     if (min(args.train_per_class, args.test_per_class, args.batch_size, args.epochs) <= 0
             or args.train_per_class * 10 % args.batch_size or args.test_per_class * 10 % args.batch_size
-            or not math.isfinite(args.rate) or not 0 < args.rate <= 1
+            or not math.isfinite(rate) or rate <= 0
             or len(set(args.seeds)) != len(args.seeds) or any(not 0 <= s < 2 ** 64 for s in args.seeds)):
         parser.error("invalid full-batch recipe, rate or seeds")
     total = args.epochs * args.train_per_class * 10 // args.batch_size
@@ -338,6 +368,7 @@ def main():
             result["runs"].append(dict(seed=seed, replay=replay, contract=control["contract"],
                 admission=control["admission"], initial_evaluation=control["initial_evaluation"],
                 epochs=control["epochs"], final_parameter_comparison=control["final_parameter_comparison"],
+                reference_checkpoint=control["reference_checkpoint"],
                 checkpoints={phase: run["checkpoints"] for phase, run in phases.items()},
                 phase_receipts={phase: receipt(directory / f"{phase}.json") for phase in phases}))
         result["status"] = "passed"

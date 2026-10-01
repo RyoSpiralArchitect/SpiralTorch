@@ -22,15 +22,21 @@ class ReplayChecks(unittest.TestCase):
         self.phases = {}
         states = dict(control=dict(initial="start", split="middle", final="end"),
                       prefix=dict(initial="start", final="middle"), resume=dict(initial="middle", final="end"))
+        parameters = [dict(name="w", shape=[1, 1], values=[0.125])]
         for pid, phase in enumerate(("control", "prefix", "resume"), 1):
             checkpoints = {}
             for key, value in states[phase].items():
                 target = self.directory / f"{phase}-{key}.json"
-                runner.write_json(target, dict(state=value))
+                runner.write_json(target, dict(state=value, model=dict(classes=2,
+                    backbone=dict(config={}, parameters=parameters), head=[])))
                 checkpoints[key] = runner.receipt(target)
             subset = records if phase == "control" else records[:1] if phase == "prefix" else records[1:]
             self.phases[phase] = dict(phase=phase, pid=pid, status="passed", contract=dict(dataset="frozen"),
                                       records=copy.deepcopy(subset), checkpoints=checkpoints)
+        reference_path = self.directory / "control-torch-final.json"
+        runner.write_json(reference_path, dict(schema="spiraltorch.vision.torch_reference_weights.v1",
+                                               classes=2, config={}, parameters=parameters))
+        self.phases["control"]["reference_checkpoint"] = runner.receipt(reference_path)
 
     def verify(self):
         return runner.verify_replay(self.directory, self.phases, 4, 1, [0, 1, 2, 3], 2)
@@ -41,6 +47,7 @@ class ReplayChecks(unittest.TestCase):
         self.assertEqual(result["split"], [1, 3])
         self.assertTrue(result["all_bound_checkpoints_exact"])
         self.assertTrue(result["all_batch_records_exact"])
+        self.assertEqual(result["saved_reference_parameters"], dict(tensors=1, values=1, max_scaled_error=0.))
 
     def test_missing_phase(self):
         del self.phases["resume"]
@@ -117,6 +124,22 @@ class ReplayChecks(unittest.TestCase):
     def test_checkpoint_path_escape_fails(self):
         self.phases["resume"]["checkpoints"]["final"]["file"] = "../outside.json"
         with self.assertRaisesRegex(ValueError, "filename"):
+            self.verify()
+
+    def test_rehashed_but_wrong_reference_weights_fail(self):
+        path = self.directory / "wrong-torch.json"
+        runner.write_json(path, dict(schema="spiraltorch.vision.torch_reference_weights.v1", classes=2, config={},
+                                    parameters=[dict(name="w", shape=[1, 1], values=[0.5])]))
+        self.phases["control"]["reference_checkpoint"] = runner.receipt(path)
+        with self.assertRaisesRegex(ValueError, "numerical bound"):
+            self.verify()
+
+    def test_missing_reference_parameter_fails(self):
+        path = self.directory / "truncated-torch.json"
+        runner.write_json(path, dict(schema="spiraltorch.vision.torch_reference_weights.v1", classes=2,
+                                    config={}, parameters=[]))
+        self.phases["control"]["reference_checkpoint"] = runner.receipt(path)
+        with self.assertRaisesRegex(ValueError, "coverage"):
             self.verify()
 
     def test_artifacts_never_overwrite(self):

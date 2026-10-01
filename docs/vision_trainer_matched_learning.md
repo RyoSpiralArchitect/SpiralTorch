@@ -43,6 +43,8 @@ All initial/prefix/restore/final checkpoint bytes are checked, including their
 local file hashes, not only final scores. Final weights from the matched control
 are compared with every independent Torch parameter at the existing scaled f32
 bound `2e-4`. The exact resumed checkpoint therefore also matches that control.
+The independent Torch final weights are retained separately, and the stdlib
+checker recomputes the numerical comparison from both saved artifacts.
 
 This is clean-process continuation on one recorded native adapter, not a
 power-loss durability, cross-version or cross-device bitwise guarantee. The
@@ -79,8 +81,8 @@ case uses rate `0.01`; cosine warms up for ten accepted updates, then decays to
 one tenth of that rate over the requested trajectory. No tail batches are
 dropped. Outputs are exclusive: reusing an existing run directory is an error.
 
-Each local seed directory retains its recipe, raw phase records and combined
-checkpoints. `summary.json` excludes machine paths and process IDs while keeping
+Each local seed directory retains its recipe, raw phase records, combined
+checkpoints and independent Torch final weights. `summary.json` excludes machine paths and process IDs while keeping
 source/native-binary hashes, environment and input identity, all epoch scores,
 parameter comparisons, raw-record/checkpoint hashes and replay results. Retain
 the local originals; publish the summary, verification and method without
