@@ -29,7 +29,6 @@
 //! fixed-size ring buffer so callers can stream long-lived sessions without unbounded
 //! memory growth.
 
-use core::f32;
 use core::f32::consts::TAU;
 use std::collections::VecDeque;
 

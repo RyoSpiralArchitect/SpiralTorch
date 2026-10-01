@@ -2,6 +2,12 @@
 use super::*;
 use st_kernel_contracts::classification::CrossEntropySpec;
 
+const SHADER_SOURCE: &str = concat!(
+    include_str!("../shaders/rounded_add.wgsl"),
+    "\n",
+    include_str!("shaders/cross_entropy.wgsl")
+);
+
 #[derive(Debug)]
 pub(super) struct ClassificationKernels {
     layout: wgpu::BindGroupLayout,
@@ -63,7 +69,7 @@ impl ClassificationKernels {
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("loss.ce.shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/cross_entropy.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
         });
         let pipeline = |entry_point| {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {

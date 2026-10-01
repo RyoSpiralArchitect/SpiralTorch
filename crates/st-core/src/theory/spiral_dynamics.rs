@@ -33,7 +33,6 @@
 //! recipes so the rest of the runtime can call them directly instead of
 //! re-deriving the algebra in ad-hoc scripts.
 
-use core::f64;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Stable logistic helper that avoids overflow for large magnitudes.

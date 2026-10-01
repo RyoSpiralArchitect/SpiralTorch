@@ -10,6 +10,11 @@ plain resident SGD. It is not resident Adam, geometric parameter updates or
 an automatic closed-loop optimizer. The meta-optimizer producer retains its
 own latent state; a trainer checkpoint does not contain that producer state.
 
+An optional [resident loss-feedback gate](resident_vision_feedback.md) now
+consumes accepted-step loss in Rust and gates the next proposal toward identity.
+Its own history is checkpointed; this does not migrate the proposal producer's
+latent state or geometric updates.
+
 ## Apply A Control
 
 Rust accepts `apply_zspace_parameter_control(&control)` or

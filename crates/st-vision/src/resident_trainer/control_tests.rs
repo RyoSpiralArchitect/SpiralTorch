@@ -5,7 +5,7 @@ use st_core::runtime::zspace_optimizer::{
 };
 use std::collections::BTreeMap;
 
-fn report(step: u64, scale: f64) -> ZSpaceMetaOptimizerStepReport {
+pub(super) fn report(step: u64, scale: f64) -> ZSpaceMetaOptimizerStepReport {
     let mut state = ZSpaceMetaOptimizerState::zeros(2);
     state.step = step - 1;
     transition_zspace_meta_optimizer(ZSpaceMetaOptimizerStepRequest {

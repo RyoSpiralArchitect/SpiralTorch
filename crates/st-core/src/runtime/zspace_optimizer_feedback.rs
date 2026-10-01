@@ -936,6 +936,22 @@ mod tests {
     }
 
     #[test]
+    fn json_checkpoint_preserves_every_feedback_float() {
+        let config = ZSpaceOptimizerFeedbackConfig::default();
+        let mut state = initialize_zspace_optimizer_feedback(config.clone())
+            .unwrap()
+            .state;
+        for step in 1..=32 {
+            state = control(&config, state, step, 0.75).state_after;
+            let loss = f64::from(0.001 + ((step * 37) % 1001) as f32 / 517.);
+            state = observe(&config, state, loss).state_after;
+            let encoded = serde_json::to_string(&state).unwrap();
+            let restored: ZSpaceOptimizerFeedbackState = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(state, restored, "feedback JSON roundtrip at step {step}");
+        }
+    }
+
+    #[test]
     fn feedback_starts_at_identity_and_only_blends_the_proposed_deviation() {
         let config = ZSpaceOptimizerFeedbackConfig::default();
         let checkpoint = initialize_zspace_optimizer_feedback(config.clone()).unwrap();

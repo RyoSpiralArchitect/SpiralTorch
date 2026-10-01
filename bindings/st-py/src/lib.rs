@@ -86,7 +86,7 @@ mod extras {
     use pyo3::wrap_pyfunction;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_895_f64;
+    pub const GOLDEN_RATIO: f64 = st_core::util::math::GOLDEN_RATIO;
     pub const GOLDEN_ANGLE: f64 = 2.0 * std::f64::consts::PI / (GOLDEN_RATIO * GOLDEN_RATIO);
 
     static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);

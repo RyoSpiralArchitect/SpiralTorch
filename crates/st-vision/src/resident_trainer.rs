@@ -18,13 +18,14 @@ use st_core::runtime::{
         zspace_parameter_control_from_report, zspace_parameter_control_from_value,
         ZSpaceMetaOptimizerStepReport, ZSpaceParameterControl,
     },
+    zspace_optimizer_feedback::ZSpaceOptimizerFeedbackConfig,
 };
 use st_kernel_contracts::sgd::SgdStep;
 use st_nn::{
     loss::{CrossEntropyWithLogits, Loss},
     optim::{
         WarmupCosineScheduler, WarmupCosineSchedulerState, ZSpaceParameterControlReceipt,
-        ZSpaceParameterControlState,
+        ZSpaceParameterControlState, ZSpaceParameterFeedbackState,
     },
     resident::InferenceError,
 };
@@ -35,6 +36,7 @@ pub use clients::ResidentVisionTrainerConfig;
 
 const SCHEMA: &str = "spiraltorch.vision.training_checkpoint.v1";
 const CONTROLLED_SCHEMA: &str = "spiraltorch.vision.training_checkpoint.v2";
+const FEEDBACK_SCHEMA: &str = "spiraltorch.vision.training_checkpoint.v3";
 const MAX_JSON_BYTES: usize = 545 * 1024 * 1024;
 const MAX_CONTROL_JSON_BYTES: usize = 16 * 1024 * 1024;
 
@@ -92,6 +94,8 @@ pub struct ResidentVisionTrainingState {
         skip_serializing_if = "ZSpaceParameterControlState::is_default"
     )]
     parameter_control: ZSpaceParameterControlState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    optimizer_feedback: Option<ZSpaceParameterFeedbackState>,
 }
 
 impl ResidentVisionTrainingState {
@@ -113,8 +117,14 @@ impl ResidentVisionTrainingState {
         &self.parameter_control
     }
 
+    pub fn optimizer_feedback(&self) -> Option<&ZSpaceParameterFeedbackState> {
+        self.optimizer_feedback.as_ref()
+    }
+
     fn schema(&self) -> &'static str {
-        if self.parameter_control.is_default() {
+        if self.optimizer_feedback.is_some() {
+            FEEDBACK_SCHEMA
+        } else if self.parameter_control.is_default() {
             SCHEMA
         } else {
             CONTROLLED_SCHEMA
@@ -133,6 +143,14 @@ impl ResidentVisionTrainingState {
         // A future rate may need retuning; never make an already settled state
         // unsavable. Submission checks the effective rate before consuming input.
         self.parameter_control.validate()?;
+        if let Some(feedback) = &self.optimizer_feedback {
+            feedback.validate()?;
+            if feedback.state().control_step != self.attempted()?
+                || feedback.state().observation_count != self.accepted_updates
+            {
+                return Err(invalid("feedback and settled trainer clocks differ"));
+            }
+        }
         let len = input.dataset_len();
         let batch = input.batch_size();
         if len == 0 || batch == 0 || !len.is_multiple_of(batch) {
@@ -267,6 +285,13 @@ pub struct ResidentVisionStepOutcome {
 struct PendingStep {
     update: ResidentParameterUpdate,
     next_rate: ResidentLearningRate,
+    feedback: Option<PendingFeedback>,
+}
+
+struct PendingFeedback {
+    state: ZSpaceParameterFeedbackState,
+    loss: ResidentTensor,
+    learning_rate: f32,
 }
 
 /// Owns one classifier, fixed-size dataset batches, RNGs and rate schedule.
@@ -298,6 +323,7 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             rejected_updates: 0,
             learning_rate,
             parameter_control: ZSpaceParameterControlState::default(),
+            optimizer_feedback: None,
         };
         state.validate(0, &input)?;
         let resident = model.compile_resident_training(device, loader.batch_size)?;
@@ -337,6 +363,20 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
     }
     pub fn has_pending_update(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// Opt in before the first submission. Reconfiguration cannot silently erase
+    /// the feedback history; continuation restores it from a bound checkpoint.
+    pub fn enable_zspace_optimizer_feedback(
+        &mut self,
+        config: ZSpaceOptimizerFeedbackConfig,
+    ) -> Result<(), InferenceError> {
+        self.ensure_settled()?;
+        if self.state.attempted()? != 0 || self.state.optimizer_feedback.is_some() {
+            return Err(invalid("configure feedback only once, before training"));
+        }
+        self.state.optimizer_feedback = Some(ZSpaceParameterFeedbackState::new(config)?);
+        Ok(())
     }
     fn ensure_settled(&self) -> Result<(), InferenceError> {
         if self.has_pending_update() {
@@ -384,10 +424,21 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             return Err(invalid("training clock exhausted"));
         }
         let (nominal_rate, next_rate) = self.state.learning_rate.next()?;
-        let rate = self
-            .state
-            .parameter_control
-            .effective_learning_rate(nominal_rate)?;
+        let (next_feedback, rate) = match &self.state.optimizer_feedback {
+            Some(feedback) => {
+                let (next, rate) = feedback.preview(
+                    nominal_rate,
+                    self.state.parameter_control.absolute_learning_rate_scale(),
+                )?;
+                (Some(next), rate)
+            }
+            None => (
+                None,
+                self.state
+                    .parameter_control
+                    .effective_learning_rate(nominal_rate)?,
+            ),
+        };
         // Copy the order only at epoch boundaries, not on every training step.
         let mut next_epoch = if self.loader.position == self.loader.order.len() {
             let mut next = self.copy_input();
@@ -420,7 +471,15 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             images: batch.images,
             loss: loss.value().clone(),
         };
-        self.pending = Some(PendingStep { update, next_rate });
+        self.pending = Some(PendingStep {
+            update,
+            next_rate,
+            feedback: next_feedback.map(|state| PendingFeedback {
+                state,
+                loss: loss.value().clone(),
+                learning_rate: rate,
+            }),
+        });
         Ok(submission)
     }
 
@@ -432,7 +491,12 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
     ) -> Result<ZSpaceParameterControlReceipt, InferenceError> {
         self.ensure_settled()?;
         let (next, receipt) = self.state.parameter_control.preview(control)?;
-        next.effective_learning_rate(self.state.learning_rate.next()?.0)?;
+        let nominal_rate = self.state.learning_rate.next()?.0;
+        if let Some(feedback) = &self.state.optimizer_feedback {
+            feedback.preview(nominal_rate, next.absolute_learning_rate_scale())?;
+        } else {
+            next.effective_learning_rate(nominal_rate)?;
+        }
         self.state.parameter_control = next;
         receipt.emit("resident_vision_trainer");
         Ok(receipt)
@@ -465,6 +529,7 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
     fn finish_settlement(
         &mut self,
         result: Result<u64, TrainingError>,
+        feedback_loss: Option<f32>,
     ) -> Result<ResidentVisionStepOutcome, InferenceError> {
         let pending = self
             .pending
@@ -477,12 +542,24 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             Err(TrainingError::Rejected { .. }) => false,
             Err(error) => return Err(error.into()),
         };
+        // Prepare every fallible feedback transition before committing any host
+        // state. Readback errors/cancellation retain the pending update for retry.
+        let feedback = match &pending.feedback {
+            Some(feedback) if accepted => Some(feedback.state.observe(
+                feedback_loss.ok_or_else(|| invalid("missing accepted-step feedback loss"))?,
+                feedback.learning_rate,
+                self.state.epoch,
+            )?),
+            Some(feedback) => Some(feedback.state.clone()),
+            None => None,
+        };
         if accepted {
             self.state.accepted_updates += 1;
             self.state.learning_rate = pending.next_rate.clone();
         } else {
             self.state.rejected_updates += 1;
         }
+        self.state.optimizer_feedback = feedback;
         self.pending = None;
         Ok(ResidentVisionStepOutcome {
             attempted_revision: revision,
@@ -497,7 +574,13 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             .as_ref()
             .ok_or_else(|| invalid("no pending update"))?;
         let result = pending.update.snapshot()?.read();
-        self.finish_settlement(result)
+        let loss = match (&result, &pending.feedback) {
+            (Ok(revision), Some(feedback)) if *revision == pending.update.revision() => {
+                Some(feedback.loss.snapshot()?.read()?[0])
+            }
+            _ => None,
+        };
+        self.finish_settlement(result, loss)
     }
 
     /// Cancellation leaves the pending update intact; a caller may settle again.
@@ -508,7 +591,13 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             .as_ref()
             .ok_or_else(|| invalid("no pending update"))?;
         let result = pending.update.snapshot()?.read_async().await;
-        self.finish_settlement(result)
+        let loss = match (&result, &pending.feedback) {
+            (Ok(revision), Some(feedback)) if *revision == pending.update.revision() => {
+                Some(feedback.loss.snapshot()?.read_async().await?[0])
+            }
+            _ => None,
+        };
+        self.finish_settlement(result, loss)
     }
 
     pub fn checkpoint_snapshot(&self) -> Result<VisionTrainingCheckpointSnapshot, InferenceError> {

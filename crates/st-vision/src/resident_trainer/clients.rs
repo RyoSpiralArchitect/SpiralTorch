@@ -19,6 +19,8 @@ pub struct ResidentVisionTrainerConfig {
     pub shuffle_seed: u64,
     pub shuffle: bool,
     pub learning_rate: ResidentLearningRate,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optimizer_feedback: Option<ZSpaceOptimizerFeedbackConfig>,
 }
 
 impl Default for ResidentVisionTrainerConfig {
@@ -31,13 +33,22 @@ impl Default for ResidentVisionTrainerConfig {
             shuffle_seed: 0,
             shuffle: true,
             learning_rate: ResidentLearningRate::Constant { rate: 0.01 },
+            optimizer_feedback: None,
         }
     }
 }
 
 impl ResidentVisionTrainerConfig {
-    pub fn to_json(&self) -> Result<String, InferenceError> {
+    fn validate(&self) -> Result<(), InferenceError> {
         self.learning_rate.validate(0)?;
+        if let Some(config) = &self.optimizer_feedback {
+            ZSpaceParameterFeedbackState::new(config.clone())?;
+        }
+        Ok(())
+    }
+
+    pub fn to_json(&self) -> Result<String, InferenceError> {
+        self.validate()?;
         let json = serde_json::to_string(self)?;
         if json.len() > MAX_CONFIG_BYTES {
             return Err(invalid("vision trainer configuration size limit"));
@@ -50,7 +61,7 @@ impl ResidentVisionTrainerConfig {
             return Err(invalid("vision trainer configuration size limit"));
         }
         let config: Self = serde_json::from_str(json)?;
-        config.learning_rate.validate(0)?;
+        config.validate()?;
         Ok(config)
     }
 }
@@ -104,7 +115,7 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
         pipeline: Option<TransformPipeline>,
         dataset_sha256: &str,
     ) -> Result<Self, InferenceError> {
-        config.learning_rate.validate(0)?;
+        config.validate()?;
         let mut loader = DataLoader::new(dataset, config.batch_size, Some(config.shuffle_seed))?;
         loader.enable_shuffle(config.shuffle);
         let loader = attach_pipeline(loader, &device, pipeline)?;
@@ -115,17 +126,22 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             rejected_updates: 0,
             learning_rate: config.learning_rate.clone(),
             parameter_control: ZSpaceParameterControlState::default(),
+            optimizer_feedback: None,
         };
         state.validate(0, &loader.checkpoint(dataset_sha256)?)?;
         let model =
             ConvNeXtClassifier::new(config.model.clone(), config.num_classes, config.model_seed)?;
-        Self::new(
+        let mut trainer = Self::new(
             &model,
             device,
             loader,
             dataset_sha256,
             config.learning_rate.clone(),
-        )
+        )?;
+        if let Some(feedback) = &config.optimizer_feedback {
+            trainer.enable_zspace_optimizer_feedback(feedback.clone())?;
+        }
+        Ok(trainer)
     }
 
     /// Recreate the input owner on a local device. The supplied transform

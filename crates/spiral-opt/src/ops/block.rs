@@ -61,8 +61,8 @@ fn sum_squares(values: &[f32]) -> f32 {
     let mut acc0 = 0.0f32;
     let mut acc1 = 0.0f32;
 
-    let mut chunks = values.chunks_exact(4);
-    for lanes in &mut chunks {
+    let (chunks, remainder) = values.as_chunks::<4>();
+    for lanes in chunks {
         acc0 = lanes[0].mul_add(lanes[0], acc0);
         acc1 = lanes[1].mul_add(lanes[1], acc1);
         acc0 = lanes[2].mul_add(lanes[2], acc0);
@@ -70,7 +70,7 @@ fn sum_squares(values: &[f32]) -> f32 {
     }
 
     let mut acc = acc0 + acc1;
-    for &value in chunks.remainder() {
+    for &value in remainder {
         acc = value.mul_add(value, acc);
     }
 

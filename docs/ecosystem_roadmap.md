@@ -116,6 +116,15 @@ browser real-image restart, throughput or a Z-space policy advantage.
    validated absolute rate control with replay guards and checkpointed consumer
    state. Producer latent state, geometric parameter updates and demonstrated
    real-image policy benefit remain open; rate modulation alone is not those gates.
+   The optional [loss-feedback connection](resident_vision_feedback.md) now
+   feeds accepted resident losses into the existing Rust gate and checkpoints
+   its history. Rejections preserve the prior observation and trigger the core
+   staleness rule. This is not a new policy, full producer-state migration, or
+   a measured policy advantage.
+   A [shared CE rounding fix](../benchmarks/results/2026-10-01-vision-ce-rounding/README.md)
+   closes the measured feedback continuation mismatch without relaxing the
+   comparison. Standalone Rust also owns exact JSON float restoration. The next
+   policy gate remains matched real-image learning, not more reporting surfaces.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

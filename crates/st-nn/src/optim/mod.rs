@@ -15,6 +15,8 @@ use std::f32::consts::PI;
 
 mod parameter_control;
 pub use parameter_control::ZSpaceParameterControlState;
+mod parameter_feedback;
+pub use parameter_feedback::ZSpaceParameterFeedbackState;
 
 /// Trait implemented by adapters that emit local learning-rate multipliers based on
 /// spectral statistics extracted from Z-space gradients.

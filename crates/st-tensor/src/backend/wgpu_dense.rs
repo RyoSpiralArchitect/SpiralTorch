@@ -100,7 +100,8 @@ const RAMANUJAN_PI_ITERATIONS: usize = 6;
 const SOFTMAX_WORKGROUP_SIZE: f32 = 256.0;
 const SOFTMAX_FLOPS_PER_ELEMENT: f64 = 5.0;
 const SOFTMAX_BYTES_PER_ELEMENT: f64 = 12.0;
-const GOLDEN_RATIO: f32 = 1.618_034;
+// Preserve the existing value on toolchains predating std's GOLDEN_RATIO.
+const GOLDEN_RATIO: f32 = f32::from_bits(0x3fcf_1bbd);
 const GOLDEN_RATIO_CONJUGATE: f32 = 0.618_034;
 const GOLDEN_RATIO_BIAS: f32 = 0.381_966;
 const GOLDEN_ANGLE_DEG: f32 = 137.507_77;

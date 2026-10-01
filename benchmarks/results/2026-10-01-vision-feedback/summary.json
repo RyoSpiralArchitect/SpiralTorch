@@ -1,0 +1,182 @@
+{
+  "schema": "spiraltorch.vision.resident_feedback_evidence.v1",
+  "implementation_source_capture": "113dc84dcc28959bca3400c9ae7d489c954e8b94",
+  "boundary": "Synthetic loss-feedback wiring and restart; strict cross-runtime feedback replay failed. No quality, stability, speed or memory advantage measured.",
+  "native_process_restart_exact": true,
+  "external_control_only_v2_fixture_unchanged": true,
+  "native_core_replay_of_browser_observations_exact": true,
+  "cases": [
+    {
+      "schedule": "constant",
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "split": [
+        37,
+        63
+      ],
+      "native_adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      },
+      "browser_adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "feedback_gate_levels": [
+        0,
+        0.25,
+        0.5,
+        0.75,
+        1
+      ],
+      "rates_changed_from_ungated_proposal": 72,
+      "browser_fresh_document_resume_exact": true,
+      "strict_cross_runtime_feedback_replay": "failed",
+      "strict_failure": "Error: Python-to-browser input/rate/acceptance continuation",
+      "cross_runtime_diagnostics": {
+        "input_rate_acceptance_records_exact": true,
+        "discrete_feedback_state_exact": true,
+        "differing_feedback_records": 56,
+        "first_differing_revision": 45,
+        "maximum_loss_ulp_difference": 2,
+        "maximum_loss_absolute_difference": 5.960464477539063e-8,
+        "maximum_loss_ema_absolute_difference": 2.7954819126208008e-8,
+        "parameter_tensors": 24,
+        "parameter_values": 456,
+        "maximum_parameter_scaled_error": 0
+      }
+    },
+    {
+      "schedule": "cosine",
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "split": [
+        37,
+        63
+      ],
+      "native_adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      },
+      "browser_adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "feedback_gate_levels": [
+        0,
+        0.25,
+        0.5,
+        0.75,
+        1
+      ],
+      "rates_changed_from_ungated_proposal": 72,
+      "browser_fresh_document_resume_exact": true,
+      "strict_cross_runtime_feedback_replay": "failed",
+      "strict_failure": "Error: Python-to-browser input/rate/acceptance continuation",
+      "cross_runtime_diagnostics": {
+        "input_rate_acceptance_records_exact": true,
+        "discrete_feedback_state_exact": true,
+        "differing_feedback_records": 62,
+        "first_differing_revision": 39,
+        "maximum_loss_ulp_difference": 1,
+        "maximum_loss_absolute_difference": 5.960464477539063e-8,
+        "maximum_loss_ema_absolute_difference": 1.8918958955005394e-8,
+        "parameter_tensors": 24,
+        "parameter_values": 456,
+        "maximum_parameter_scaled_error": 0
+      }
+    }
+  ],
+  "raw_receipts": [
+    {
+      "file": "fixtures/spiraltorch-vision-feedback-native-20261001.json",
+      "bytes": 487506,
+      "sha256": "9285339c3a783c219df8f5f67dd69ecfed51e2a2641d14be8b1de5da0912b67d"
+    },
+    {
+      "file": "fixtures/spiraltorch-vision-feedback-ungated-20261001.json",
+      "bytes": 353432,
+      "sha256": "1bb5f864a38567eea695fa2f4177af09875f06fcc97ea9ac77966a4e03441146"
+    },
+    {
+      "file": "browser/constant-control.json",
+      "bytes": 194526,
+      "sha256": "7922c9ca29c8d4e9ffdbb03efd4246048a0d4f23d892af21db8856716dfc36f0"
+    },
+    {
+      "file": "browser/constant-prefix.json",
+      "bytes": 84974,
+      "sha256": "8d9a93e7049e3f889790448827cd378766b24aaf0af90078553433e59013f43f"
+    },
+    {
+      "file": "browser/constant-resume.json",
+      "bytes": 130874,
+      "sha256": "cb151a43a655d31546c440d5359a3a49ddf5c0d120cf1d6d0fff75972c0c0f50"
+    },
+    {
+      "file": "browser/constant-python.json",
+      "bytes": 131144,
+      "sha256": "3a259fbc22fedb500578803fb395591c3e4ff17c4d7ce1b90e4e6ffbbec9e425"
+    },
+    {
+      "file": "browser/cosine-control.json",
+      "bytes": 194773,
+      "sha256": "128d0679d8326523b22b41d64252e7269623fd35fdf549a0cca9174455330f55"
+    },
+    {
+      "file": "browser/cosine-prefix.json",
+      "bytes": 85210,
+      "sha256": "d6adfca52d34c31812f0108644139ecad4a436372687338e2317384d21a22454"
+    },
+    {
+      "file": "browser/cosine-resume.json",
+      "bytes": 131102,
+      "sha256": "78092dafb0fe3918e3f61fa7a16b5c9eb59abe3c40951672b07217912a9de28d"
+    },
+    {
+      "file": "browser/cosine-python.json",
+      "bytes": 131367,
+      "sha256": "624f1d07f8d8543737649e5dddc97d9df4f71022ddf072ab44b59664ad3f4421"
+    }
+  ],
+  "build_receipts": [
+    {
+      "file": "build/spiraltorch-vision-feedback-web-20261001/spiraltorch_wasm.d.ts",
+      "bytes": 145393,
+      "sha256": "d91f57a7f79aa1535b545539da0bff493f59656fcc54036b083cf3e0133442d4"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-web-20261001/spiraltorch_wasm.js",
+      "bytes": 424465,
+      "sha256": "1e7a4dd71a8f3e3daa85a3a5e837275bfbc0bd1b1f2bf1fcd92013599b705c2f"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-web-20261001/spiraltorch_wasm_bg.wasm",
+      "bytes": 9824231,
+      "sha256": "4dbd28b0dd4a7784230f043abbe160a7b9302109a0ff715cafe162b15c1e9210"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-web-20261001/spiraltorch_wasm_bg.wasm.d.ts",
+      "bytes": 81955,
+      "sha256": "0d5ff68eaab505e7b8ec6bfebb7f6f42417d5f14e7c9a2aaf793655f8bae5f72"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-wheel-20261001/spiraltorch-0.4.27-cp38-abi3-macosx_11_0_arm64.whl",
+      "bytes": 10457594,
+      "sha256": "546716fbfe03296fffda9e94ab9c1b467d25ed08004d3b95021a75b96e7b3852"
+    }
+  ],
+  "browser_assets": {
+    "/": "202ce0d94c69193f6055b4626038129ae49e3e640d64a3becc00cdeb95db5ad9",
+    "/python.json": "9285339c3a783c219df8f5f67dd69ecfed51e2a2641d14be8b1de5da0912b67d",
+    "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+    "/module/spiraltorch_wasm.js": "1e7a4dd71a8f3e3daa85a3a5e837275bfbc0bd1b1f2bf1fcd92013599b705c2f",
+    "/module/spiraltorch_wasm_bg.wasm": "4dbd28b0dd4a7784230f043abbe160a7b9302109a0ff715cafe162b15c1e9210"
+  }
+}

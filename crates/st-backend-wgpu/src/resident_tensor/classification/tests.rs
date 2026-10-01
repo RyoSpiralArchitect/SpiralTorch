@@ -23,8 +23,7 @@ fn close(actual: &[f32], expected: &[f32]) {
 }
 #[test]
 fn shader_parses_and_validates_without_a_runtime() {
-    let module =
-        naga::front::wgsl::parse_str(include_str!("../shaders/cross_entropy.wgsl")).unwrap();
+    let module = naga::front::wgsl::parse_str(SHADER_SOURCE).unwrap();
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::empty(),
@@ -177,4 +176,32 @@ fn wide_normalized_losses_tiny_smoothing_and_whole_loss_guards() {
             .expect("retained uniform value"),
         &[f32::MAX],
     );
+}
+
+#[test]
+fn confident_class_loss_preserves_the_log1p_rounding_correction() {
+    let Some(device) = device() else { return };
+    // Cover both the small-tail approximation boundary and the cancellation
+    // boundary of 1 + exp(-gap), including CI failures at gaps 12 and 6.0078125.
+    let mut gaps: Vec<f32> = (0..=5632).map(|i| i as f32 / 256.).collect();
+    for boundary in [64_f32.ln().to_bits(), 1024_f32.ln().to_bits()] {
+        gaps.extend((boundary - 2..=boundary + 2).map(f32::from_bits));
+    }
+    let logits: Vec<_> = gaps.iter().flat_map(|&gap| [0., -gap]).collect();
+    let x = device.upload(&[gaps.len(), 2], &logits).unwrap();
+    let y = device.upload(&[gaps.len()], &vec![0.; gaps.len()]).unwrap();
+    let pair = x
+        .cross_entropy_with_logits(
+            &y,
+            CrossEntropySpec::new(ClassReduction::None, -100, 0.).unwrap(),
+        )
+        .unwrap();
+    for (value, &gap) in read(pair.value()).into_iter().zip(&gaps) {
+        let expected = (-f64::from(gap)).exp().ln_1p();
+        let relative_error = (f64::from(value) / expected - 1.).abs();
+        assert!(
+            relative_error < 2e-5,
+            "gap {gap}: loss {value}, expected {expected}, relative error {relative_error}"
+        );
+    }
 }
