@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653; // π(3 − √5)
-const GOLDEN_RATIO: f64 = 1.618_033_988_749_895; // (1 + √5) / 2
+const GOLDEN_RATIO: f64 = st_core::util::math::GOLDEN_RATIO;
 
 const FALLBACK_LABEL: &str = "spiraltorch.dynamic_label";
 const MAX_INTERNED_LABELS: usize = 256;
