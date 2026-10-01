@@ -6,6 +6,12 @@ rate-control projection and optional loss-feedback gate perform every update.
 The initial test isolates one prescribed rate proposal and the existing gate.
 It does not measure geometric parameter updates or an adaptive proposal producer.
 
+The [completed three-seed result](../benchmarks/results/2026-10-01-vision-feedback-ablation/README.md)
+has 400 updates per arm and exact fresh-process continuation for all 12 arms.
+The gate is active but does not establish an advantage over nominal SGD or the
+integrated-rate-matched control. Keep this negative result as the control for
+future Rust observation/policy changes, rather than tuning until one seed wins.
+
 ## Four Matched Arms
 
 | Arm | Nominal rate | Proposal | Rust loss gate |

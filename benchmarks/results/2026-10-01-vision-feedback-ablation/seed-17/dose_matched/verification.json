@@ -1,0 +1,39 @@
+{
+  "schema": "spiraltorch.vision.trainer_realdata_verification.v1",
+  "status": "passed",
+  "scope": "saved records/checkpoint/reference-weight verification, not a new training run",
+  "summary": {
+    "file": "summary.json",
+    "bytes": 54909,
+    "sha256": "9f39e0fdd979c386ca79fd559f7199ba06e46cac344c1fb58343d038602a545a"
+  },
+  "runs": [
+    {
+      "seed": 17,
+      "replay": {
+        "attempts": 400,
+        "accepted": 400,
+        "rejected": 0,
+        "split": [
+          37,
+          363
+        ],
+        "distinct_processes": true,
+        "all_batch_records_exact": true,
+        "all_bound_checkpoints_exact": true,
+        "trajectory_sha256": "157e6b7d37a13f2c4b91f80ee37f9efe6833727ae027e049732de0f76bf9cfa7",
+        "final_checkpoint_sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be",
+        "saved_reference_parameters": {
+          "tensors": 24,
+          "values": 5530,
+          "max_scaled_error": 8.934041804355971e-08
+        }
+      },
+      "flipped_images": 0,
+      "observed_images": 6400,
+      "unique_learning_rates": 1,
+      "all_evaluation_accuracies_equal": true,
+      "max_evaluation_ce_difference": 3.576278695405222e-08
+    }
+  ]
+}

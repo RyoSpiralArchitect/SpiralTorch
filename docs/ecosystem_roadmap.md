@@ -125,6 +125,13 @@ browser real-image restart, throughput or a Z-space policy advantage.
    closes the measured feedback continuation mismatch without relaxing the
    comparison. Standalone Rust also owns exact JSON float restoration. The next
    policy gate remains matched real-image learning, not more reporting surfaces.
+   The [first four-arm ablation](../benchmarks/results/2026-10-01-vision-feedback-ablation/README.md)
+   now completes three seeds, five epochs and fresh-process restarts. The gate
+   is active and suppresses a harmful prescribed half-rate proposal, but does
+   not demonstrate an advantage over nominal SGD or an integrated-rate-matched
+   control. Preserve that negative result. Next, examine whether the shared
+   Rust observation rule distinguishes batch noise from actual regression, then
+   rerun the same controls; do not count more reports or tuned seeds as progress.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the
