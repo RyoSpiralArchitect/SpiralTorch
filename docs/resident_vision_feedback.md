@@ -121,6 +121,15 @@ not just approximate equality. Existing checkpoint histories are preserved;
 reproducing an older build's future trajectory still requires its original
 loss kernel and numerical behavior.
 
+The subsequent macOS CI run found that preserving the rounding correction alone
+does not guarantee small-loss accuracy on another runtime: at logit gap 12 the
+relative error was `2.65e-4`, above the unchanged `2e-5` regression bound. The
+small-tail path now uses `x * (1 - x/2)` through the same explicit subtraction
+boundary for `x <= 2^-10`. Its analytic truncation error is below `3.2e-7`
+relative; device arithmetic still requires the GPU regression. This avoids the
+near-one logarithm in that range rather than weakening the test. The earlier
+results remain tied to their recorded builds and are not proof of this follow-up.
+
 The gate guards an external intervention, not the baseline SGD itself: a halted
 gate returns to the nominal rate and does not stop training. For a proposal
 below one, closing the gate increases the rate back toward nominal. Batch-to-
