@@ -1,5 +1,4 @@
 use crate::report::QuantizationReport;
-use std::f32;
 
 /// Configuration controlling quantization-aware training behaviour.
 #[derive(Debug, Clone, Copy, PartialEq)]

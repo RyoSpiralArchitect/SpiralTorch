@@ -59,7 +59,8 @@ impl Default for RamanujanCache {
 pub const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 
 /// Golden ratio φ used when blending softmax and hardmax consensus weights.
-pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
+/// Fixed bits retain compatibility with toolchains predating std's constant.
+pub const GOLDEN_RATIO: f64 = f64::from_bits(0x3ff9_e377_9b97_f4a8);
 /// Conjugate of φ (1/φ) that balances the softmax contribution in consensus blending.
 pub const GOLDEN_RATIO_CONJUGATE: f64 = 0.618_033_988_749_894_8;
 /// Complement of the conjugate that controls the hardmax contribution (1 - 1/φ).
