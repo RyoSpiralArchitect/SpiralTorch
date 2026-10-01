@@ -149,7 +149,10 @@ fn feedback_restart_preserves_loss_history_rates_and_every_weight() {
         assert_eq!(initial.schema, FEEDBACK_SCHEMA);
         assert!(trainer.enable_zspace_optimizer_feedback(config()).is_err());
         steps(&mut trainer, 37);
-        let saved = checkpoint(&trainer).to_json().unwrap();
+        let captured = checkpoint(&trainer);
+        let saved = captured.to_json().unwrap();
+        let decoded: VisionTrainingCheckpoint = serde_json::from_str(&saved).unwrap();
+        assert_eq!(captured.trainer, decoded.trainer);
         let saved = VisionTrainingCheckpoint::from_json(&saved).unwrap();
         let mut restored = ResidentVisionTrainer::from_checkpoint(
             device.clone(),

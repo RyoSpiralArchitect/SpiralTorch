@@ -103,6 +103,24 @@ comparison is not relaxed. Replaying the browser's **observed** losses through
 native Rust separately checks whether the control math itself agrees.
 See the [measured results and retained failures](../benchmarks/results/2026-10-01-vision-feedback/README.md).
 
+The [rounding follow-up](../benchmarks/results/2026-10-01-vision-ce-rounding/README.md)
+isolates this to CE's `log_one_plus` correction in the measured cases. It now
+uses the existing integer-defined f32 addition boundary for `1 + tail` and
+the rounded subtraction, instead of allowing their cancellation back to `tail`.
+The correction formula, loss observation and gate thresholds are not replaced
+by a tolerance or by quantizing the observed loss. This also fixes a genuine
+small-loss accuracy regression, independently of feedback.
+
+Fresh native/browser builds from the same source now pass the unchanged strict
+continuation comparison in both directions, including all feedback state and every weight.
+This is evidence for the tested devices and fixtures, not universal cross-GPU
+bitwise determinism. In addition, `st-core` enables exact JSON float roundtrips
+itself: loss-history restoration must not depend on a binding crate enabling
+the parser feature. A standalone Rust regression checks the actual f64 state,
+not just approximate equality. Existing checkpoint histories are preserved;
+reproducing an older build's future trajectory still requires its original
+loss kernel and numerical behavior.
+
 The gate guards an external intervention, not the baseline SGD itself: a halted
 gate returns to the nominal rate and does not stop training. For a proposal
 below one, closing the gate increases the rate back toward nominal. Batch-to-

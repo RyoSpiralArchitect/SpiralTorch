@@ -82,9 +82,12 @@ fn weight(x: f32, maximum: f32) -> f32 {
     return exp(-ldexp(gap.fraction,gap.exponent));
 }
 fn log_one_plus(tail: f32) -> f32 {
-    let whole = 1.0 + tail;
+    // The correction needs the rounded sum, not a reassociation of
+    // (1 + tail) - 1 back to tail. Reuse the compensated-sum rounding boundary.
+    let whole = rounded_add(1.0, tail);
     if (whole == 1.0) { return tail; }
-    return log(whole) * (tail / (whole - 1.0));
+    let rounded_tail = rounded_add(whole, -1.0);
+    return log(whole) * (tail / rounded_tail);
 }
 
 @compute @workgroup_size(256)

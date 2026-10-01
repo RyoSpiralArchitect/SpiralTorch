@@ -91,6 +91,37 @@ class Surface(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") == "1", "real WGPU opt-in")
 class Gpu(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("SPIRALTORCH_VISION_FEEDBACK_BROWSER_DIR"), "browser checkpoints")
+    def test_browser_feedback_checkpoints_continue_in_native(self):
+        directory = Path(os.environ["SPIRALTORCH_VISION_FEEDBACK_BROWSER_DIR"])
+        device = st.WgpuTensorDevice.create()
+        self.assertNotEqual(device.adapter_info()["device_type"], "Cpu")
+        for schedule in ("constant", "cosine"):
+            prefix = json.loads((directory / f"{schedule}-prefix.json").read_text())["result"]
+            uninterrupted = json.loads((directory / f"{schedule}-control.json").read_text())["result"]
+            self.assertTrue(prefix["passed"] and prefix["feedback"])
+            self.assertTrue(uninterrupted["passed"] and uninterrupted["feedback"])
+            self.assertEqual(len(prefix["records"]), 37)
+            self.assertEqual(len(uninterrupted["records"]), 100)
+            dataset, pipeline = base.inputs()
+            trainer = st.ResidentVisionTrainer.from_checkpoint_json(
+                device, dataset, base.dataset_id(), prefix["checkpoint"], pipeline)
+            self.assertEqual(base.checkpoint(trainer), prefix["checkpoint"])
+            self.assertEqual(feedback_steps(trainer, 63, control.controls()), uninterrupted["records"][37:])
+            self.assertEqual(base.checkpoint(trainer), uninterrupted["checkpoint"])
+
+    @unittest.skipUnless(os.environ.get("SPIRALTORCH_VISION_FEEDBACK_LEGACY_FIXTURE"), "previous feedback fixture")
+    def test_previous_feedback_checkpoints_preserve_history(self):
+        fixture = json.loads(Path(os.environ["SPIRALTORCH_VISION_FEEDBACK_LEGACY_FIXTURE"]).read_text())
+        device = st.WgpuTensorDevice.create()
+        self.assertNotEqual(device.adapter_info()["device_type"], "Cpu")
+        for case in fixture["cases"]:
+            for key in ("initial", "prefix", "final"):
+                dataset, pipeline = base.inputs()
+                trainer = st.ResidentVisionTrainer.from_checkpoint_json(
+                    device, dataset, base.dataset_id(), case[key], pipeline)
+                self.assertEqual(base.checkpoint(trainer), case[key])
+
     def test_feedback_history_and_updates_resume_in_fresh_processes(self):
         fixtures = []
         with tempfile.TemporaryDirectory(prefix="st-vision-feedback-") as directory:
