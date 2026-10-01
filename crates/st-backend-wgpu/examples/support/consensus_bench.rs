@@ -30,6 +30,8 @@ const NAMES: [&str; 4] = [
     "separate_batch",
     "paired_batch",
 ];
+// Freeze the measured fixture's f32 value, including on pre-1.99 toolchains.
+const FIXTURE_PHI: f32 = f32::from_bits(0x3fcf_1bbd);
 
 struct Prepared {
     input: Buffer,
@@ -79,7 +81,7 @@ impl Prepared {
             chimera_tile: params.chimera_tile,
             chimera_stripes: params.chimera_stripes,
             flags: u32::from(chimera),
-            phi: 1.618_034,
+            phi: FIXTURE_PHI,
             phi_conjugate: 0.618_034,
             phi_bias: 0.381_966,
             leech_scale: (0.75 * 0.001_929_574_309_403_922_5 * 24f64.sqrt()) as f32,

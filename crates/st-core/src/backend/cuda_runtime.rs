@@ -11,7 +11,6 @@ use crate::backend::rankk_launch::LaunchSlices;
 use crate::backend::rankk_software::Selection;
 use crate::ops::rank_entry::RankPlan;
 use cudarc::driver::{LaunchAsync, LaunchConfig};
-use std::f32;
 use std::sync::OnceLock;
 
 const MODULE_NAME: &str = "spiraltorch_rankk";

@@ -97,8 +97,9 @@ impl NarrativeHint {
         let base = (1.0 - self.decoherence).max(0.0);
         let mut best_tag = None;
         let mut best_weight = f32::MIN;
+        let phi = st_core::util::math::GOLDEN_RATIO as f32;
         for (idx, tag) in self.tags.iter().enumerate() {
-            let interference = ((self.phase + idx as f32 * 1.618_034).sin().abs() + 0.5).max(1e-3);
+            let interference = ((self.phase + idx as f32 * phi).sin().abs() + 0.5).max(1e-3);
             let weight = self.amplitude.abs() * self.coherence * base * interference;
             if weight > best_weight {
                 best_weight = weight;

@@ -8,7 +8,6 @@
 use crate::backend::rankk_launch::LaunchSlices;
 use crate::backend::rankk_software::Selection;
 use crate::ops::rank_entry::RankPlan;
-use std::f32;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 
