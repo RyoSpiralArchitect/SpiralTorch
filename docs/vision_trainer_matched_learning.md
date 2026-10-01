@@ -89,6 +89,18 @@ the local originals; publish the summary, verification and method without
 redistributing dataset images. The official test subset is evaluated every
 epoch and is development evidence, not an untouched final test.
 
+Recheck both saved trajectories and the independent final weights without any
+ML imports. The source revision binds this check to the measured runner:
+
+```bash
+python -I tools/verify_vision_trainer_replay.py "$NEW_FIXED_RUN_DIR" \
+  --source-ref 2d767c0c2169fb78788ccf3f22bb8eedc409b28c \
+  --output "$NEW_VERIFICATION_FILE"
+```
+
+The [recorded native result](../benchmarks/results/2026-10-01-vision-trainer-realdata/README.md)
+includes the initial probes, both three-seed conditions and retained-weight checks.
+
 ## Scope
 
 CI runs the stdlib-only replay checker's negative tests, not these real-data GPU

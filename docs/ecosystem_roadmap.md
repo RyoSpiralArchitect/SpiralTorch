@@ -18,7 +18,7 @@ Current scope of the vision execution path:
 | Resident image normalization and DataLoader handoff | Public API, homogeneous NCHW | Public API, same Rust loader | Public normalization/batch/continuation API; caller-supplied batches, no JS DataLoader |
 | Portable input checkpoint | Order/cursor, shuffle and transform RNG | Same Rust loader/transform state | Transform state; integrated trainer also owns order/cursor/shuffle |
 | Unified resident training boundary | Model/input/schedule owner, explicit settlement and bound checkpoint | Thin Rust-owned trainer client | Same Rust owner, async settlement; fresh-document and cross-runtime restart exercised |
-| Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch CPU and MPS comparison | Open |
+| Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch comparison; shared-trainer native process restart | Open |
 | Transfer-inclusive training throughput and memory | Open | Open | Open |
 
 The compiled ConvNeXt training path now connects model-owned gradients to
@@ -84,6 +84,15 @@ All five epochs complete with matching evaluation accuracies. This is a small
 shared-architecture learning baseline, not a speed, full-dataset quality or
 Z-space policy advantage. Every step observes loss/acceptance on the host.
 
+The [shared-trainer real-image replay](../benchmarks/results/2026-10-01-vision-trainer-realdata/README.md)
+now carries that Rust-owned boundary into 1,280 training / 320 development images,
+three seeds and five epochs. Both fixed SGD and flip plus warmup/cosine runs
+match their uninterrupted trajectory after a fresh-process 37/363 restart,
+including input/schedule state and every weight. Torch remains an independent
+model under the Rust-selected inputs/rates; both frameworks' final weights are
+retained and checked. This closes native real-image trainer continuation, not
+browser real-image restart, throughput or a Z-space policy advantage.
+
 1. **Extend matched real-data evidence.** Keep the completed numerical/learning
    baseline as the control while measuring transfer-inclusive throughput,
    memory, and restart equivalence. Carry the same task into the browser,
@@ -95,9 +104,10 @@ Z-space policy advantage. Every step observes loss/acceptance on the host.
    restart contracts. Specify whether rejected updates retry or consume a batch.
    Compare uninterrupted and resumed batch identities, transforms and updates.
    The Rust resident trainer now connects this boundary for full fixed-size
-   classifier batches, with thin clients and fresh-browser-instance restart now
-   exercised on synthetic data. Carry this same boundary into the real-image
-   comparison rather than duplicating policy in Python/browser clients.
+   classifier batches. Thin clients, synthetic fresh-browser-instance restart,
+   and native real-image process continuation are now exercised. Carry the
+   real-image comparison into the browser without duplicating input/trainer
+   policy in JavaScript; cross-device and crash-durability guarantees remain open.
 3. **Shared resident optimizer control.** Connect existing Rust optimizer and
    Z-space policy to the resident parameter owner rather than reimplementing it
    in Python/JavaScript. Preserve the plain-SGD control case and all-parameter

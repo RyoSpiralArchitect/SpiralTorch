@@ -1,7 +1,11 @@
 """Offline negative checks for the real-image trainer replay; stdlib only."""
 import copy
 import importlib.util
+import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -147,6 +151,72 @@ class ReplayChecks(unittest.TestCase):
         runner.write_json(path, dict(status="passed"))
         with self.assertRaises(FileExistsError):
             runner.write_json(path, dict(status="replacement"))
+
+    def cli_fixture(self):
+        root = self.directory / "cli"
+        directory = root / "seed-17"
+        directory.mkdir(parents=True)
+        for file in self.directory.glob("*.json"):
+            shutil.copyfile(file, directory / file.name)
+        records = self.phases["control"]["records"]
+        for i, row in enumerate(records):
+            row.update(sample_ids=list(range(10 * (i % 2), 10 * (i % 2) + 10)), flips=[False, True] * 5)
+        self.phases["prefix"]["records"] = copy.deepcopy(records[:1])
+        self.phases["resume"]["records"] = copy.deepcopy(records[1:])
+        contract = dict(source_sha256=runner.source_hashes(), data=dict(train_indices=list(range(20))))
+        evaluation = dict(spiraltorch=dict(accuracy=0.5, loss=1.), torch=dict(accuracy=0.5, loss=1.))
+        control = self.phases["control"]
+        control.update(admission={}, initial_evaluation=evaluation,
+                       epochs=[dict(evaluation=evaluation)] * 2, final_parameter_comparison=[])
+        for phase, value in self.phases.items():
+            value["contract"] = copy.deepcopy(contract)
+            runner.write_json(directory / f"{phase}.json", value)
+        run = {key: control[key] for key in ("contract", "admission", "initial_evaluation", "epochs",
+                                            "final_parameter_comparison", "reference_checkpoint")}
+        run.update(seed=17, checkpoints={phase: value["checkpoints"] for phase, value in self.phases.items()},
+                   phase_receipts={phase: runner.receipt(directory / f"{phase}.json") for phase in self.phases},
+                   replay=runner.verify_replay(directory, self.phases, 4, 1, list(range(20)), 10))
+        summary = dict(schema="spiraltorch.vision.trainer_matched_learning.v1", status="passed", runs=[run],
+                       recipe=dict(seeds=[17], epochs=2, train_per_class=2, batch_size=10,
+                                   horizontal_flip=True, schedule="constant", rate=0.01, restart_at=1))
+        runner.write_json(root / "summary.json", summary)
+        return root, summary
+
+    def call_cli(self, root):
+        return subprocess.run([sys.executable, "-I", str(path.with_name("verify_vision_trainer_replay.py")),
+                               str(root), "--output", str(root / "verification.json")],
+                              capture_output=True, text=True, timeout=30)
+
+    def test_standalone_verifier_recomputes_saved_result(self):
+        root, _ = self.cli_fixture()
+        result = self.call_cli(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "passed")
+
+    def test_standalone_verifier_rejects_edited_public_metric(self):
+        root, summary = self.cli_fixture()
+        summary["runs"][0]["epochs"][0]["evaluation"]["torch"]["accuracy"] = 0.9
+        (root / "summary.json").write_text(json.dumps(summary))
+        result = self.call_cli(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("differs from raw control", result.stderr)
+        self.assertFalse((root / "verification.json").exists())
+
+    def test_standalone_verifier_rejects_noop_augmentation(self):
+        root, summary = self.cli_fixture()
+        directory = root / "seed-17"
+        for phase, value in self.phases.items():
+            for row in value["records"]:
+                row["flips"] = [False] * 10
+            file = directory / f"{phase}.json"
+            file.write_text(json.dumps(value))
+            summary["runs"][0]["phase_receipts"][phase] = runner.receipt(file)
+        summary["runs"][0]["replay"] = runner.verify_replay(directory, self.phases, 4, 1, list(range(20)), 10)
+        (root / "summary.json").write_text(json.dumps(summary))
+        result = self.call_cli(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("augmentation was absent", result.stderr)
+        self.assertFalse((root / "verification.json").exists())
 
 
 if __name__ == "__main__":
