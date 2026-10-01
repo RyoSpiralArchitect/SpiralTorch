@@ -1,0 +1,310 @@
+{
+  "schema": "spiraltorch.vision.feedback_build_comparison.v1",
+  "status": "passed",
+  "runs": [
+    "three-seed-mps-v1",
+    "three-seed-mps-portable-v2"
+  ],
+  "boundary": "Exact replay on these retained trajectories only; not general equivalence of loss kernels.",
+  "native_binary_sha256": [
+    {
+      "spiraltorch.abi3.so": "3e92777988c378695bcb0869277f9d0afd5e0b1854abb2ab16b365dcae817617"
+    },
+    {
+      "spiraltorch.abi3.so": "5f2bb7adcd3fd0464677e650f35923b71496a7c9705273984f3662bdb839079d"
+    }
+  ],
+  "rows": [
+    {
+      "seed": 17,
+      "arm": "baseline",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 54897,
+          "sha256": "ede32106132d605e74def81a38c603210bcbb5602a0aac8af8cecb25b4564a71"
+        },
+        {
+          "bytes": 54897,
+          "sha256": "0859f12ecbbdb800178b35d8dbc460592ecf3f16d59bc0ba3f16614d9d589b9f"
+        }
+      ],
+      "final": {
+        "loss": 2.111466121673584,
+        "accuracy": 0.215625,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 9.906772819673172e-8
+    },
+    {
+      "seed": 17,
+      "arm": "fixed_proposal",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 61741,
+          "sha256": "3218183e0d38a21fd2d62a5c0bb5de13e7d0d62e07cea24a7125454ba233ec11"
+        },
+        {
+          "bytes": 61741,
+          "sha256": "73918fee6c782e374f02e49b88117bf2b2cfe67079bd7a5e26c637d8816f8f05"
+        }
+      ],
+      "final": {
+        "loss": 2.181283962726593,
+        "accuracy": 0.19375,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 6.60527233561199e-8
+    },
+    {
+      "seed": 17,
+      "arm": "loss_feedback",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 62294,
+          "sha256": "644db3ad9249af6a90c72c2759c7971ce1fede4b5edfc347324e65de1372ae63"
+        },
+        {
+          "bytes": 62294,
+          "sha256": "48fd7982e1aeb3d1b1c80c65bf559486b87c5d878e0e031e3959ae09e54828c4"
+        }
+      ],
+      "final": {
+        "loss": 2.115373361110687,
+        "accuracy": 0.21875,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 1.1447094774471031e-7,
+      "loss_increases": 194,
+      "adjacent_loss_pairs": 399,
+      "epoch_mean_preupdate_loss": [
+        2.3075462341308595,
+        2.2326053738594056,
+        2.196238312125206,
+        2.158091443777084,
+        2.1236135855317118
+      ]
+    },
+    {
+      "seed": 17,
+      "arm": "dose_matched",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 54909,
+          "sha256": "76d2d490703e401e0ec364a06aaef06a26c6ba77a9e884eaf74b625d2f2d2218"
+        },
+        {
+          "bytes": 54909,
+          "sha256": "9f39e0fdd979c386ca79fd559f7199ba06e46cac344c1fb58343d038602a545a"
+        }
+      ],
+      "final": {
+        "loss": 2.115020227432251,
+        "accuracy": 0.23125,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 8.934041804355971e-8
+    },
+    {
+      "seed": 29,
+      "arm": "baseline",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 54904,
+          "sha256": "f93f727045cd69c47299828e22b6fed40e59431d7b41336862448940f8387806"
+        },
+        {
+          "bytes": 54904,
+          "sha256": "8fe664366d96b736f1de67a41adb8c05fbd3cde9a0173211a99e87a5e0c4cc41"
+        }
+      ],
+      "final": {
+        "loss": 2.0087531983852385,
+        "accuracy": 0.240625,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 1.196624343497891e-7
+    },
+    {
+      "seed": 29,
+      "arm": "fixed_proposal",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 61779,
+          "sha256": "1f4a1e6ef94463f86c1533554479e6ddb2c7049b089d37328533fb8794fc6f4d"
+        },
+        {
+          "bytes": 61779,
+          "sha256": "c9505bbaad1aaadf40eb8923e7a6666f90929a4dbbc90c0fb2054d36058da654"
+        }
+      ],
+      "final": {
+        "loss": 2.073589360713959,
+        "accuracy": 0.190625,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 7.498097405366107e-8
+    },
+    {
+      "seed": 29,
+      "arm": "loss_feedback",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 62308,
+          "sha256": "a0ebcfe3207b7ef32a06c31b6f89b984a3a9ded5cf7b66176d30c82d1ade8766"
+        },
+        {
+          "bytes": 62308,
+          "sha256": "e0d67b2184667d501f872163b1ca431d0f6976e686d7c071769a0380f2f813e1"
+        }
+      ],
+      "final": {
+        "loss": 2.0115161418914793,
+        "accuracy": 0.240625,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 1.4058369149819397e-7,
+      "loss_increases": 207,
+      "adjacent_loss_pairs": 399,
+      "epoch_mean_preupdate_loss": [
+        2.249947485327721,
+        2.124310088157654,
+        2.0704003050923347,
+        2.039017993211746,
+        2.0186199635267257
+      ]
+    },
+    {
+      "seed": 29,
+      "arm": "dose_matched",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 54933,
+          "sha256": "3994a9fd1dc5e5e6576dd327083a66e72806f08eb002caf05c2a694f4c18cffb"
+        },
+        {
+          "bytes": 54933,
+          "sha256": "c442f12eb6cd1abe0e9a3a777a3657ac546b1e6779cebc3e57cb4f87dae5604a"
+        }
+      ],
+      "final": {
+        "loss": 2.0112342298030854,
+        "accuracy": 0.240625,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 1.2306223996519734e-7
+    },
+    {
+      "seed": 43,
+      "arm": "baseline",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 54873,
+          "sha256": "df36330a33b0acb84d082b6a99f20c5df024534190b7b2700295fde6046ddaf1"
+        },
+        {
+          "bytes": 54873,
+          "sha256": "61c2ec0eeb98fe05d6facf3844848b9312e6f967d7e51ff933fb9c0d32fb47c7"
+        }
+      ],
+      "final": {
+        "loss": 1.9832089424133301,
+        "accuracy": 0.296875,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 1.6995638523070767e-7
+    },
+    {
+      "seed": 43,
+      "arm": "fixed_proposal",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 61754,
+          "sha256": "cdf96d984da2e5e9e1aa74216cc6c824ff91ede534a68f4e7079f5a5fe2f8d6b"
+        },
+        {
+          "bytes": 61754,
+          "sha256": "e195f4b4207196e460632d828a23d1ad4b60a63e9921b6afa50a03a4226ecc4c"
+        }
+      ],
+      "final": {
+        "loss": 2.0513229787349703,
+        "accuracy": 0.265625,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 9.64663725415971e-8
+    },
+    {
+      "seed": 43,
+      "arm": "loss_feedback",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 62296,
+          "sha256": "2b08f0687f40b670ddc8ecb16ede0b20047ecef635775aa616b5f0f4592c5f5f"
+        },
+        {
+          "bytes": 62296,
+          "sha256": "2d81850d7f0c3f99272ca062c0ad17ec4a47463c8431693b023f035e6b95993d"
+        }
+      ],
+      "final": {
+        "loss": 1.9870746791362763,
+        "accuracy": 0.290625,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 1.2092451885696134e-7,
+      "loss_increases": 208,
+      "adjacent_loss_pairs": 399,
+      "epoch_mean_preupdate_loss": [
+        2.269914799928665,
+        2.135331028699875,
+        2.0647037819027902,
+        2.024176087975502,
+        1.9963902860879899
+      ]
+    },
+    {
+      "seed": 43,
+      "arm": "dose_matched",
+      "records_exact": 800,
+      "checkpoints_exact": 7,
+      "summary_receipts": [
+        {
+          "bytes": 54917,
+          "sha256": "f376e355e041ab3a9d075bb89ed17014845649145a8595bdae039fd4d8ae0fcc"
+        },
+        {
+          "bytes": 54917,
+          "sha256": "3a2b0a5399aa8368b98220ea973ed49675d8570cf383a03775ea635183b66bfb"
+        }
+      ],
+      "final": {
+        "loss": 1.9865345120429994,
+        "accuracy": 0.29375,
+        "examples": 320
+      },
+      "maximum_parameter_scaled_error": 1.0707350119455804e-7
+    }
+  ]
+}

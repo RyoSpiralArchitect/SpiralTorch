@@ -1,0 +1,1729 @@
+{
+  "schema": "spiraltorch.vision.feedback_ablation_publication.v1",
+  "boundary": "Complete measured arms, source-bound verification, hashes and rerun instructions; no raw images or weights published.",
+  "primary": {
+    "run": "three-seed-mps-portable-v2",
+    "runner_source_revision": "4fbd71f95e0a126406d53ae9d2afe9b7f7b3cac7",
+    "native_source_revision": "4fbd71f95e0a126406d53ae9d2afe9b7f7b3cac7",
+    "native_ce_change_revision": "4d5125ef8efafb08a63ab167393786fc3b0c2bf3",
+    "rustc": "1.98.0",
+    "features": [
+      "extension-module",
+      "nn",
+      "wgpu"
+    ]
+  },
+  "prior": {
+    "run": "three-seed-mps-v1",
+    "runner_source_revision": "c073fc74",
+    "native_ce_change_revision": "c24743dd922988ffddd63380dfae921ed9702afc"
+  },
+  "caveat": "Both runs precede the subsequent cubic small-tail CE and Rust 1.99 compatibility changes. Their learning evidence does not certify later binaries or all devices.",
+  "raw_receipts": [
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/control-final.json",
+      "bytes": 73328,
+      "sha256": "af72ab26a9c47be5873a7146f857f6fe25bc37c7fd3bfba0bde180431c5aed38"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/control-initial.json",
+      "bytes": 67234,
+      "sha256": "951e53d5caffc30bc9453a1d24de20cba1e862e88ced4751c48952340ab46843"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/control-split.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/control-torch-final.json",
+      "bytes": 166454,
+      "sha256": "b1c374a7c0a57dbe215ed4a8d2cfdcbfa4e28fbee63cef674813d91a4036a1f8"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/control.json",
+      "bytes": 347122,
+      "sha256": "c89745780ee5ccddc7f83a79e1a0977d7047e3bd5ed54185e9c9ee9acc7925e4"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/prefix-final.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/prefix-initial.json",
+      "bytes": 67234,
+      "sha256": "951e53d5caffc30bc9453a1d24de20cba1e862e88ced4751c48952340ab46843"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/prefix.json",
+      "bytes": 54472,
+      "sha256": "fee36efee7de72808f7c3860b446ded6950107d12f9e616c309bae4c0a23ba7d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/recipe.json",
+      "bytes": 378,
+      "sha256": "9600b1feb47d6156d5e39542b5ac431763913cc66c4440563d76d6c201ae5f7d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/resume-final.json",
+      "bytes": 73328,
+      "sha256": "af72ab26a9c47be5873a7146f857f6fe25bc37c7fd3bfba0bde180431c5aed38"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/resume-initial.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/seed-17/resume.json",
+      "bytes": 302241,
+      "sha256": "80c53efb8f036c91d86e4fb87300ca793db6afdddd85e969e86e71023cbaff88"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/summary.json",
+      "bytes": 54897,
+      "sha256": "ede32106132d605e74def81a38c603210bcbb5602a0aac8af8cecb25b4564a71"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/baseline/verification.json",
+      "bytes": 1213,
+      "sha256": "12d25adcfb6e3b3a9975d0f6cbcac9f73e02456909c17c56be36404bca3e783b"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/control-final.json",
+      "bytes": 73242,
+      "sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/control-initial.json",
+      "bytes": 67241,
+      "sha256": "553aca9336bb17862c6da86fb53525640e1b4da97722f601962266fa5dd0266a"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/control-split.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/control-torch-final.json",
+      "bytes": 166485,
+      "sha256": "25cfd9648a6a8a456231853cb4f0acd5b194253c13fdb9e052aa318eae1c7097"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/control.json",
+      "bytes": 347118,
+      "sha256": "9429b54b7a146cbbc83e872ba1e495ba0035e5b0a56d5353b79eeb6ff007661b"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/prefix-final.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/prefix-initial.json",
+      "bytes": 67241,
+      "sha256": "553aca9336bb17862c6da86fb53525640e1b4da97722f601962266fa5dd0266a"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/prefix.json",
+      "bytes": 54488,
+      "sha256": "b827e66a6992c91759934c581084339a6cb97bc05c20ffe5e0feef0b6a92fc4e"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/recipe.json",
+      "bytes": 394,
+      "sha256": "b60f57806955ee120dd3425d2fcebefe775cae466ae7ff60e5c0c1d6d54b34cc"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/resume-final.json",
+      "bytes": 73242,
+      "sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/resume-initial.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/seed-17/resume.json",
+      "bytes": 302257,
+      "sha256": "33adf6ebea5d21cf2703fe27cfb39fe86d46a2777bb5ddf2e8e08a329048c122"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/summary.json",
+      "bytes": 54909,
+      "sha256": "76d2d490703e401e0ec364a06aaef06a26c6ba77a9e884eaf74b625d2f2d2218"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/dose_matched/verification.json",
+      "bytes": 1213,
+      "sha256": "d004c81bf017d3312e6e5355594fe4e3c947ccf4a8a65a5d1d6ccc24f5ffe7a4"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/control-final.json",
+      "bytes": 73421,
+      "sha256": "c4de78bf001ac73d724dff0917d34b7a4b31d89e8ee1d1478687a24fb7ae73a5"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/control-initial.json",
+      "bytes": 67312,
+      "sha256": "45016f707df236eacf3cd6901032106295a95b1e22a53cba49eca9d80e9b2be3"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/control-split.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/control-torch-final.json",
+      "bytes": 166554,
+      "sha256": "46ebbe9638e1bdbd7be61ed87666bcc51c4f417bdcc0db3d3a8e35f7bac32704"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/control.json",
+      "bytes": 398392,
+      "sha256": "4935a7565b8e73012a74b48cebedfaf5f4844463b15cece09b2cc20439154ad6"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/prefix-final.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/prefix-initial.json",
+      "bytes": 67312,
+      "sha256": "45016f707df236eacf3cd6901032106295a95b1e22a53cba49eca9d80e9b2be3"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/prefix.json",
+      "bytes": 64754,
+      "sha256": "d998bd770569da0d591294a3d65fe2ce4e88f61c7f685d6e661165021097e3c8"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/recipe.json",
+      "bytes": 377,
+      "sha256": "85cfb7a670dc352edaa274a89293d2fec6fe8f2cedb814942176214de3127c13"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/resume-final.json",
+      "bytes": 73421,
+      "sha256": "c4de78bf001ac73d724dff0917d34b7a4b31d89e8ee1d1478687a24fb7ae73a5"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/resume-initial.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/seed-17/resume.json",
+      "bytes": 349361,
+      "sha256": "667a97618988f5d6cd0afd386291a108d801c74c78999ae8859a975a5c7fc72a"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/summary.json",
+      "bytes": 61741,
+      "sha256": "3218183e0d38a21fd2d62a5c0bb5de13e7d0d62e07cea24a7125454ba233ec11"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/fixed_proposal/verification.json",
+      "bytes": 1212,
+      "sha256": "59bb5c0383f2272fe8940892f7b4291e59970c912996e0526477f97ad543b096"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/control-final.json",
+      "bytes": 73893,
+      "sha256": "e551627b031384e3c94040f1849e9e19d1116e6c349b7bae9422c5d6a450dde9"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/control-initial.json",
+      "bytes": 67875,
+      "sha256": "12f7e1c0555083f3ee3c8af2d847b2c974ea733a80bd77b645c42f438ec23b67"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/control-split.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/control-torch-final.json",
+      "bytes": 166584,
+      "sha256": "2bf029d7589c65542c92436d06cabdc507fe5703e56d125d1ae6522b5e141f25"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/control.json",
+      "bytes": 774312,
+      "sha256": "bf5605b642774ebd17b92482349f5a775e316498999c13bf042c9a44d8d85bc0"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/prefix-final.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/prefix-initial.json",
+      "bytes": 67875,
+      "sha256": "12f7e1c0555083f3ee3c8af2d847b2c974ea733a80bd77b645c42f438ec23b67"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/prefix.json",
+      "bytes": 99825,
+      "sha256": "d8153a3bc0f4c64cdbcd426493584d633fc10d63e377fa0f697c0bbf65231632"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/recipe.json",
+      "bytes": 376,
+      "sha256": "e167ba2fee464d83e880369c96cd8752f153ac525589773387320df1f0e414a3"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/resume-final.json",
+      "bytes": 73893,
+      "sha256": "e551627b031384e3c94040f1849e9e19d1116e6c349b7bae9422c5d6a450dde9"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/resume-initial.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/seed-17/resume.json",
+      "bytes": 690686,
+      "sha256": "a616cc1fcac7e3b5ebb0b9fd6f276fc5e58728e5ba1e362eacad8c974bd92671"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/summary.json",
+      "bytes": 62294,
+      "sha256": "644db3ad9249af6a90c72c2759c7971ce1fede4b5edfc347324e65de1372ae63"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-17/loss_feedback/verification.json",
+      "bytes": 1214,
+      "sha256": "67d0a87b03b8a4a1b6d289fd8dff1727fde00da95f8edee9d7e3f305094ef4f4"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/control-final.json",
+      "bytes": 73376,
+      "sha256": "d7d633337764e657038f7f2cded18d54ff8b5f2f846c3a08102381c2bfe4ccf9"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/control-initial.json",
+      "bytes": 67302,
+      "sha256": "6f838e8fc4099b13e7ee5d7b2433a8196efe1ec927b058c008901055295b9699"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/control-split.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/control-torch-final.json",
+      "bytes": 166525,
+      "sha256": "d889f7167202cdab74bc6bc92a238cac5ececfbbd3ee6f2ffe613c1ceca0f68e"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/control.json",
+      "bytes": 347129,
+      "sha256": "b0c1ebae12d62767f5263813e7fb2d6d63729c7ebc2a18e98052b9c4bd08e057"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/prefix-final.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/prefix-initial.json",
+      "bytes": 67302,
+      "sha256": "6f838e8fc4099b13e7ee5d7b2433a8196efe1ec927b058c008901055295b9699"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/prefix.json",
+      "bytes": 54469,
+      "sha256": "e7d2f3e571a2d92e0e796013062e2b6664167dc6878847560fa68f18a9a3ec75"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/recipe.json",
+      "bytes": 378,
+      "sha256": "ca0d284e7d34981c732b4027c9e8827208a126a4a0213aadb0d9feb0b92428ac"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/resume-final.json",
+      "bytes": 73376,
+      "sha256": "d7d633337764e657038f7f2cded18d54ff8b5f2f846c3a08102381c2bfe4ccf9"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/resume-initial.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/seed-29/resume.json",
+      "bytes": 302244,
+      "sha256": "73e5c5efcae9a9fac449c92dd2e512eb7d4b5407518ef93c8f300411cc9b7b7d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/summary.json",
+      "bytes": 54904,
+      "sha256": "f93f727045cd69c47299828e22b6fed40e59431d7b41336862448940f8387806"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/baseline/verification.json",
+      "bytes": 1213,
+      "sha256": "f8c63281547b3f3326f7d448d34c8d47918595048ea89e01ef64ebd109a756f5"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/control-final.json",
+      "bytes": 73376,
+      "sha256": "350d92b826d9a9bf24733cef53cbd2eca2d0c1d6ad57a98750b7cdaba76cbab3"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/control-initial.json",
+      "bytes": 67309,
+      "sha256": "4d517f4198d951683328f80a0040f21e455825c38e567acd8335afc7df1822ca"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/control-split.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/control-torch-final.json",
+      "bytes": 166578,
+      "sha256": "73ed69481b8de2b060aea568b4302cea9e0b0ca519ce26431eb641c60b7b5ff0"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/control.json",
+      "bytes": 347141,
+      "sha256": "f06fab51f4782950777a4d61f14acb7d0c9ac9694f6c37ba570f975c86f5fd0e"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/prefix-final.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/prefix-initial.json",
+      "bytes": 67309,
+      "sha256": "4d517f4198d951683328f80a0040f21e455825c38e567acd8335afc7df1822ca"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/prefix.json",
+      "bytes": 54485,
+      "sha256": "1331ca2e1bd1fe6176335ac1566f2c4ffd9eef3558bff542643e8de99518a573"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/recipe.json",
+      "bytes": 394,
+      "sha256": "abaedc6d7654025c44328f22c5e0d5815e4536d86c466b45e29dd8a1e8639d00"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/resume-final.json",
+      "bytes": 73376,
+      "sha256": "350d92b826d9a9bf24733cef53cbd2eca2d0c1d6ad57a98750b7cdaba76cbab3"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/resume-initial.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/seed-29/resume.json",
+      "bytes": 302260,
+      "sha256": "2555e5e3508ef4143742731300392551e09f303f281cd4135e777ebc9af78588"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/summary.json",
+      "bytes": 54933,
+      "sha256": "3994a9fd1dc5e5e6576dd327083a66e72806f08eb002caf05c2a694f4c18cffb"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/dose_matched/verification.json",
+      "bytes": 1214,
+      "sha256": "566da4bf66e15bcc2ade91e92a57cfd7911e3791011a492ea1aed21070043679"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/control-final.json",
+      "bytes": 73474,
+      "sha256": "52794f78241ae6fab3b023d283843100323ae3d08aa7fc831a86798f0ee18d0e"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/control-initial.json",
+      "bytes": 67380,
+      "sha256": "efc3ecdc1375c2fa212a7a7e1336e6f976d4f63ce80b4aecae702e937d61ac19"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/control-split.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/control-torch-final.json",
+      "bytes": 166574,
+      "sha256": "e336f94906d433d78f205e027538aecc27ed161c9a05152ab42c5159a3f155ad"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/control.json",
+      "bytes": 398429,
+      "sha256": "50477eb6330b81006df55864a9c99c852a3aef0fd917c902db6c1137019a210a"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/prefix-final.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/prefix-initial.json",
+      "bytes": 67380,
+      "sha256": "efc3ecdc1375c2fa212a7a7e1336e6f976d4f63ce80b4aecae702e937d61ac19"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/prefix.json",
+      "bytes": 64751,
+      "sha256": "982041aa184ada3b15abe492add0557fc611f7fd5784184f159ce12d52747eda"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/recipe.json",
+      "bytes": 377,
+      "sha256": "de7e27e1a07b6df15922eff11a141fa162304c7e1e4f2ddcee8f24928cdb1d05"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/resume-final.json",
+      "bytes": 73474,
+      "sha256": "52794f78241ae6fab3b023d283843100323ae3d08aa7fc831a86798f0ee18d0e"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/resume-initial.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/seed-29/resume.json",
+      "bytes": 349364,
+      "sha256": "7b954d4bb08669e1a6c33f09e932f09a0a400048b788dcd92994af981bf91aba"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/summary.json",
+      "bytes": 61779,
+      "sha256": "1f4a1e6ef94463f86c1533554479e6ddb2c7049b089d37328533fb8794fc6f4d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/fixed_proposal/verification.json",
+      "bytes": 1214,
+      "sha256": "25d9e5fa8800e1521f6b87d5bfec5e72a3d30958abefcb77f914cdb0c18bfe5f"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/control-final.json",
+      "bytes": 74111,
+      "sha256": "40829cc65b4a78ec10bf7a4cd04a497c5ab399f11a440e0bcda7d280b5965017"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/control-initial.json",
+      "bytes": 67943,
+      "sha256": "bc2c233515f3576d1fc87b90b3dde4790677812c93057a81ac3b1c7e57bf8acf"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/control-split.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/control-torch-final.json",
+      "bytes": 166598,
+      "sha256": "d43ac98c47f0985395299fde01a56be6f1f9ec42283267488fca9e0f971c50d7"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/control.json",
+      "bytes": 774213,
+      "sha256": "489c6c79c6db908f8a9942eb3d5943e07251ffe13576217eb7631fb14aadbc0a"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/prefix-final.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/prefix-initial.json",
+      "bytes": 67943,
+      "sha256": "bc2c233515f3576d1fc87b90b3dde4790677812c93057a81ac3b1c7e57bf8acf"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/prefix.json",
+      "bytes": 99864,
+      "sha256": "e4d65e49247a31daf30a5934d6e793dfd0ed55f6e7a5f9b13efe5969a866d2c2"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/recipe.json",
+      "bytes": 376,
+      "sha256": "c3a934d3a5cae89c083b19a73ce1dc7ca1764a6f8a451c84250e68771725bfcf"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/resume-final.json",
+      "bytes": 74111,
+      "sha256": "40829cc65b4a78ec10bf7a4cd04a497c5ab399f11a440e0bcda7d280b5965017"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/resume-initial.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/seed-29/resume.json",
+      "bytes": 690534,
+      "sha256": "c2a4ccddeea9a7df6e38baaf079be1a987eef319e570b994ace536a6ef9cce7d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/summary.json",
+      "bytes": 62308,
+      "sha256": "a0ebcfe3207b7ef32a06c31b6f89b984a3a9ded5cf7b66176d30c82d1ade8766"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-29/loss_feedback/verification.json",
+      "bytes": 1215,
+      "sha256": "25e9530b7a5cac99aa8454d3ee55a878674c3681ae57705b03a510cdb981bb0b"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/control-final.json",
+      "bytes": 73160,
+      "sha256": "3df99ec4186c4d71a767f313468747bb348cab9605e13fc41e0eeb2b3d1aaf14"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/control-initial.json",
+      "bytes": 67294,
+      "sha256": "5e0d9a7ecea6e3f679003bb8cf6ba06334048e8a95e6433a20918a2f07dce3da"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/control-split.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/control-torch-final.json",
+      "bytes": 166350,
+      "sha256": "0eea208fe7f97426247991aee5497a499d57bc8c5c243631f907e64118414842"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/control.json",
+      "bytes": 347097,
+      "sha256": "0c04492cef8ef6a71be1c7a0b821cd10d2f833a3f1cab32798d4348441e840f6"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/prefix-final.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/prefix-initial.json",
+      "bytes": 67294,
+      "sha256": "5e0d9a7ecea6e3f679003bb8cf6ba06334048e8a95e6433a20918a2f07dce3da"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/prefix.json",
+      "bytes": 54480,
+      "sha256": "1ec97207430e59cbce1639cead5ff218095522f472b6e995cd47817892e726a6"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/recipe.json",
+      "bytes": 378,
+      "sha256": "845e730e91c48b8ca24821551b0b4e2e9bb8c7ba01dd693f9af8d79146d7ad57"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/resume-final.json",
+      "bytes": 73160,
+      "sha256": "3df99ec4186c4d71a767f313468747bb348cab9605e13fc41e0eeb2b3d1aaf14"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/resume-initial.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/seed-43/resume.json",
+      "bytes": 302233,
+      "sha256": "2848e1bcf43b37d05803caab85ce7c1af0440339bbf3b852f8056c6be39740e1"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/summary.json",
+      "bytes": 54873,
+      "sha256": "df36330a33b0acb84d082b6a99f20c5df024534190b7b2700295fde6046ddaf1"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/baseline/verification.json",
+      "bytes": 1214,
+      "sha256": "a1b3e8e7c268b721cf12820d7daf22fb332a3972d30f5b44c1b0188a3aae1ade"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/control-final.json",
+      "bytes": 73101,
+      "sha256": "4e31f908434c57b98170526294eea348b77866e95a967133bab1e76686b9b33d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/control-initial.json",
+      "bytes": 67301,
+      "sha256": "0123adb5cb197e9291f38baa3ef688e72e109333da2feca8f0506ecc26768fdb"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/control-split.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/control-torch-final.json",
+      "bytes": 166420,
+      "sha256": "feef1da1b119bdb28033afa6200d674a2673e793682547043a1d4601dccd14eb"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/control.json",
+      "bytes": 347125,
+      "sha256": "3da9452c2771194f6ab5b2d69236d13492d44ac34ae650da53e29b608998be47"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/prefix-final.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/prefix-initial.json",
+      "bytes": 67301,
+      "sha256": "0123adb5cb197e9291f38baa3ef688e72e109333da2feca8f0506ecc26768fdb"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/prefix.json",
+      "bytes": 54496,
+      "sha256": "77c226181a03895f1055d2ded3bc8b522f3eaf445b461dceb7a2cbc32b812a10"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/recipe.json",
+      "bytes": 394,
+      "sha256": "033e24d8b2e8db4925beba27d22fb0b818c2ecb7609a6c2b0f519878a464ad2f"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/resume-final.json",
+      "bytes": 73101,
+      "sha256": "4e31f908434c57b98170526294eea348b77866e95a967133bab1e76686b9b33d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/resume-initial.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/seed-43/resume.json",
+      "bytes": 302249,
+      "sha256": "4102e57546bb526ed0b57e81cfb601c6082e2386c72e8e10758dff7825e81778"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/summary.json",
+      "bytes": 54917,
+      "sha256": "f376e355e041ab3a9d075bb89ed17014845649145a8595bdae039fd4d8ae0fcc"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/dose_matched/verification.json",
+      "bytes": 1214,
+      "sha256": "d3a045484f312eb8eae7eee87f84c5bb875130822c24963aa8623cb05e6ab64c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/control-final.json",
+      "bytes": 73379,
+      "sha256": "32ee42b688642eb50069dca2cdb9c706bbe49ae68fa20b92fa98dbe789e66e2d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/control-initial.json",
+      "bytes": 67372,
+      "sha256": "345b1183288b656343866ff9ff1b8c557ecd466df1491ad4ae856b8717e1ca40"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/control-split.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/control-torch-final.json",
+      "bytes": 166525,
+      "sha256": "b8f826a2c7fb293e8e8cbd3a61751eb9a77abc0b2c04abb6023a7722fef798ce"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/control.json",
+      "bytes": 398405,
+      "sha256": "c2860e67e2c9458db37f5ff7720fbbdf8bf35cb500116405afa1eb52db0445c7"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/prefix-final.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/prefix-initial.json",
+      "bytes": 67372,
+      "sha256": "345b1183288b656343866ff9ff1b8c557ecd466df1491ad4ae856b8717e1ca40"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/prefix.json",
+      "bytes": 64762,
+      "sha256": "5e07e81c0017053514775def025a2229a83a54ad2a7bdc522656fc655c6a46d0"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/recipe.json",
+      "bytes": 377,
+      "sha256": "8dbd2d145337418fd3ef65e4e8db3fd60f5794611358149b8654d374d20bd9ff"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/resume-final.json",
+      "bytes": 73379,
+      "sha256": "32ee42b688642eb50069dca2cdb9c706bbe49ae68fa20b92fa98dbe789e66e2d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/resume-initial.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/seed-43/resume.json",
+      "bytes": 349353,
+      "sha256": "f8d3fdeb9864600746b093ab4f60cbc1fbf1b060a7f0c099c6881a2fc3763a87"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/summary.json",
+      "bytes": 61754,
+      "sha256": "cdf96d984da2e5e9e1aa74216cc6c824ff91ede534a68f4e7079f5a5fe2f8d6b"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/fixed_proposal/verification.json",
+      "bytes": 1212,
+      "sha256": "ff1afb3b799d96c8da35419c31defc2457fa968d0d5122b815d5226d6984ca6d"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/control-final.json",
+      "bytes": 73788,
+      "sha256": "b8b33f9ef7cd3e0f298fadaee1bf3c652a72eac6ff8fd91f308337e087ed1cba"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/control-initial.json",
+      "bytes": 67935,
+      "sha256": "5a674415998e05a9de45f04eb3748dc6a500c1b90e2c77ef460ae7d7b76ae588"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/control-split.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/control-torch-final.json",
+      "bytes": 166447,
+      "sha256": "c4802561922b1afcb07fd15dda41403b7cdfbfde1a8a033fc8214853948fe73c"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/control.json",
+      "bytes": 774318,
+      "sha256": "b6098cbc99061dcea01354280270168bc37afa49b084e9a3ba798b48918f7a05"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/prefix-final.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/prefix-initial.json",
+      "bytes": 67935,
+      "sha256": "5a674415998e05a9de45f04eb3748dc6a500c1b90e2c77ef460ae7d7b76ae588"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/prefix.json",
+      "bytes": 99863,
+      "sha256": "3b7817c1534b3fb65c9c5e6950228c6e08d64ca4aa22b3dd4d744383a37267c0"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/recipe.json",
+      "bytes": 376,
+      "sha256": "7c6ad543f003f5a41909a46b6510262896c6c1266b8a0a9784de127590767298"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/resume-final.json",
+      "bytes": 73788,
+      "sha256": "b8b33f9ef7cd3e0f298fadaee1bf3c652a72eac6ff8fd91f308337e087ed1cba"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/resume-initial.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/seed-43/resume.json",
+      "bytes": 690652,
+      "sha256": "640ba55097506a54456c48180330c5ef2a2e46eed898cf2f1f7b83b7ee289398"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/summary.json",
+      "bytes": 62296,
+      "sha256": "2b08f0687f40b670ddc8ecb16ede0b20047ecef635775aa616b5f0f4592c5f5f"
+    },
+    {
+      "file": "three-seed-mps-v1/seed-43/loss_feedback/verification.json",
+      "bytes": 1214,
+      "sha256": "0a3035921467a636ea0aa0993609b6ebf12e447568fd9d372ce64e2cc867189b"
+    },
+    {
+      "file": "three-seed-mps-v1/summary.json",
+      "bytes": 54925,
+      "sha256": "62ea585caaf41c8656e735ae31522932458e03bca2e0459634c57f5bffcb3c7f"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/control-final.json",
+      "bytes": 73328,
+      "sha256": "af72ab26a9c47be5873a7146f857f6fe25bc37c7fd3bfba0bde180431c5aed38"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/control-initial.json",
+      "bytes": 67234,
+      "sha256": "951e53d5caffc30bc9453a1d24de20cba1e862e88ced4751c48952340ab46843"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/control-split.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/control-torch-final.json",
+      "bytes": 166454,
+      "sha256": "b1c374a7c0a57dbe215ed4a8d2cfdcbfa4e28fbee63cef674813d91a4036a1f8"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/control.json",
+      "bytes": 347122,
+      "sha256": "8c0b1742f76f4baf0ec96a5a6268831b2133b16c53de11ea56848dce8a8ce476"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/prefix-final.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/prefix-initial.json",
+      "bytes": 67234,
+      "sha256": "951e53d5caffc30bc9453a1d24de20cba1e862e88ced4751c48952340ab46843"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/prefix.json",
+      "bytes": 54472,
+      "sha256": "ab0d489cad2610dce6e68fb6c7457f4d49d8da74e27a97d1e980256ae25934c0"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/recipe.json",
+      "bytes": 378,
+      "sha256": "9600b1feb47d6156d5e39542b5ac431763913cc66c4440563d76d6c201ae5f7d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/resume-final.json",
+      "bytes": 73328,
+      "sha256": "af72ab26a9c47be5873a7146f857f6fe25bc37c7fd3bfba0bde180431c5aed38"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/resume-initial.json",
+      "bytes": 73582,
+      "sha256": "6cb164b1fc4b29aa6062ba34f2ccacb642afd18d282099c68a09dc9d9cb19199"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/seed-17/resume.json",
+      "bytes": 302241,
+      "sha256": "bc97da41485f76ca14759d29eec3a849f46778f6556d66cf2ead16ffeaef0dd6"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/summary.json",
+      "bytes": 54897,
+      "sha256": "0859f12ecbbdb800178b35d8dbc460592ecf3f16d59bc0ba3f16614d9d589b9f"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/baseline/verification.json",
+      "bytes": 1213,
+      "sha256": "361d702507c15eaed91699bd104ab14634b21abe5e247fb391205fd4a04afc90"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/control-final.json",
+      "bytes": 73242,
+      "sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/control-initial.json",
+      "bytes": 67241,
+      "sha256": "553aca9336bb17862c6da86fb53525640e1b4da97722f601962266fa5dd0266a"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/control-split.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/control-torch-final.json",
+      "bytes": 166485,
+      "sha256": "25cfd9648a6a8a456231853cb4f0acd5b194253c13fdb9e052aa318eae1c7097"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/control.json",
+      "bytes": 347118,
+      "sha256": "ebe50d14c326ac3f4787e241bd185c337864ab99421845f8940310db7ad3fc6b"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/prefix-final.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/prefix-initial.json",
+      "bytes": 67241,
+      "sha256": "553aca9336bb17862c6da86fb53525640e1b4da97722f601962266fa5dd0266a"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/prefix.json",
+      "bytes": 54488,
+      "sha256": "6610a7a0e152033f6fc35f3ae8b6744ea77f5a5af10bd0b7b7bfdcff1269b04e"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/recipe.json",
+      "bytes": 394,
+      "sha256": "b60f57806955ee120dd3425d2fcebefe775cae466ae7ff60e5c0c1d6d54b34cc"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/resume-final.json",
+      "bytes": 73242,
+      "sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/resume-initial.json",
+      "bytes": 73551,
+      "sha256": "c232f1a871e82cb5ac9ba902a0959476ec91caa5d56a4208a74e09a0e607153c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/seed-17/resume.json",
+      "bytes": 302257,
+      "sha256": "af5119afab755305d121f0e03a08e0e02ba8a4426d71569f4a7be11b1c4df056"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/summary.json",
+      "bytes": 54909,
+      "sha256": "9f39e0fdd979c386ca79fd559f7199ba06e46cac344c1fb58343d038602a545a"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/dose_matched/verification.json",
+      "bytes": 1213,
+      "sha256": "73f62308d1d1b9adf6365b4474c596a5fc67f83da1f0b75a3d33dbbbbc3358c5"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/control-final.json",
+      "bytes": 73421,
+      "sha256": "c4de78bf001ac73d724dff0917d34b7a4b31d89e8ee1d1478687a24fb7ae73a5"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/control-initial.json",
+      "bytes": 67312,
+      "sha256": "45016f707df236eacf3cd6901032106295a95b1e22a53cba49eca9d80e9b2be3"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/control-split.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/control-torch-final.json",
+      "bytes": 166554,
+      "sha256": "46ebbe9638e1bdbd7be61ed87666bcc51c4f417bdcc0db3d3a8e35f7bac32704"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/control.json",
+      "bytes": 398392,
+      "sha256": "0918de75204d84416065ab7df46f139182d0f89fa79d60f747f20712ca981cda"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/prefix-final.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/prefix-initial.json",
+      "bytes": 67312,
+      "sha256": "45016f707df236eacf3cd6901032106295a95b1e22a53cba49eca9d80e9b2be3"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/prefix.json",
+      "bytes": 64754,
+      "sha256": "791f50a458a6a23f6795da9445c8487d366cfc2891be2dd387aff1fa74d6eb6d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/recipe.json",
+      "bytes": 377,
+      "sha256": "85cfb7a670dc352edaa274a89293d2fec6fe8f2cedb814942176214de3127c13"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/resume-final.json",
+      "bytes": 73421,
+      "sha256": "c4de78bf001ac73d724dff0917d34b7a4b31d89e8ee1d1478687a24fb7ae73a5"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/resume-initial.json",
+      "bytes": 73879,
+      "sha256": "ed78f6c08a018ff93993cb166d5211ae435403d9aa2526eb081970401ae50272"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/seed-17/resume.json",
+      "bytes": 349361,
+      "sha256": "be9aa2a341fe67a5aa82355e4d1bd7c14e5fe4094531015f2a85a810591a1cbf"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/summary.json",
+      "bytes": 61741,
+      "sha256": "73918fee6c782e374f02e49b88117bf2b2cfe67079bd7a5e26c637d8816f8f05"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/fixed_proposal/verification.json",
+      "bytes": 1212,
+      "sha256": "649f256641ab2c4133a6481d4cd690179793495316c2cf5aa094e162ebbb17bc"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/control-final.json",
+      "bytes": 73893,
+      "sha256": "e551627b031384e3c94040f1849e9e19d1116e6c349b7bae9422c5d6a450dde9"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/control-initial.json",
+      "bytes": 67875,
+      "sha256": "12f7e1c0555083f3ee3c8af2d847b2c974ea733a80bd77b645c42f438ec23b67"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/control-split.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/control-torch-final.json",
+      "bytes": 166584,
+      "sha256": "2bf029d7589c65542c92436d06cabdc507fe5703e56d125d1ae6522b5e141f25"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/control.json",
+      "bytes": 774312,
+      "sha256": "0419b6ad13ff35ef7121f10cb56894cbfb3f35ccaa06da95a3d331afb314cf8a"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/prefix-final.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/prefix-initial.json",
+      "bytes": 67875,
+      "sha256": "12f7e1c0555083f3ee3c8af2d847b2c974ea733a80bd77b645c42f438ec23b67"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/prefix.json",
+      "bytes": 99825,
+      "sha256": "cbbc7f749cde88813b559d0f5cbd8fe101096408bc875e5eb35c9ef57b427c49"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/recipe.json",
+      "bytes": 376,
+      "sha256": "e167ba2fee464d83e880369c96cd8752f153ac525589773387320df1f0e414a3"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/resume-final.json",
+      "bytes": 73893,
+      "sha256": "e551627b031384e3c94040f1849e9e19d1116e6c349b7bae9422c5d6a450dde9"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/resume-initial.json",
+      "bytes": 74122,
+      "sha256": "2d95c693a5dae01beb36fe643faff7cf8a0d6cb95a25a5dc2526d2c35df24539"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/seed-17/resume.json",
+      "bytes": 690686,
+      "sha256": "a63db6df06b48ed7d8a24951e743ddce53b6a006154971c49ce0c9e0e42f5f27"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/summary.json",
+      "bytes": 62294,
+      "sha256": "48fd7982e1aeb3d1b1c80c65bf559486b87c5d878e0e031e3959ae09e54828c4"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-17/loss_feedback/verification.json",
+      "bytes": 1214,
+      "sha256": "d4b9fa3a5f29475f93ad4ba96ee85dc453cedc5e52f12ecec41d9a9ccede636e"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/control-final.json",
+      "bytes": 73376,
+      "sha256": "d7d633337764e657038f7f2cded18d54ff8b5f2f846c3a08102381c2bfe4ccf9"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/control-initial.json",
+      "bytes": 67302,
+      "sha256": "6f838e8fc4099b13e7ee5d7b2433a8196efe1ec927b058c008901055295b9699"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/control-split.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/control-torch-final.json",
+      "bytes": 166525,
+      "sha256": "d889f7167202cdab74bc6bc92a238cac5ececfbbd3ee6f2ffe613c1ceca0f68e"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/control.json",
+      "bytes": 347129,
+      "sha256": "556215ec0f0e554d0479488100abe981a47e82219a966dc3109f93d0c183193e"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/prefix-final.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/prefix-initial.json",
+      "bytes": 67302,
+      "sha256": "6f838e8fc4099b13e7ee5d7b2433a8196efe1ec927b058c008901055295b9699"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/prefix.json",
+      "bytes": 54469,
+      "sha256": "5ce92195b54071cd573b984c14ff5b7f67a7bc940d6dfc1e8fd4ac6d966a1c55"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/recipe.json",
+      "bytes": 378,
+      "sha256": "ca0d284e7d34981c732b4027c9e8827208a126a4a0213aadb0d9feb0b92428ac"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/resume-final.json",
+      "bytes": 73376,
+      "sha256": "d7d633337764e657038f7f2cded18d54ff8b5f2f846c3a08102381c2bfe4ccf9"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/resume-initial.json",
+      "bytes": 73594,
+      "sha256": "c6d64a65c1b73b30d873627ef7f31cf53454d2cdc90374ffb2d03f957df40b07"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/seed-29/resume.json",
+      "bytes": 302244,
+      "sha256": "b3e15c8ec06296241721aeb4ffd241a9f7d3360649ba3563c9a46fdb9d72d408"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/summary.json",
+      "bytes": 54904,
+      "sha256": "8fe664366d96b736f1de67a41adb8c05fbd3cde9a0173211a99e87a5e0c4cc41"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/baseline/verification.json",
+      "bytes": 1213,
+      "sha256": "fa04f54662ed9c32d4b276e26af19ce95235b50e448e7847be94c120c570ab11"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/control-final.json",
+      "bytes": 73376,
+      "sha256": "350d92b826d9a9bf24733cef53cbd2eca2d0c1d6ad57a98750b7cdaba76cbab3"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/control-initial.json",
+      "bytes": 67309,
+      "sha256": "4d517f4198d951683328f80a0040f21e455825c38e567acd8335afc7df1822ca"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/control-split.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/control-torch-final.json",
+      "bytes": 166578,
+      "sha256": "73ed69481b8de2b060aea568b4302cea9e0b0ca519ce26431eb641c60b7b5ff0"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/control.json",
+      "bytes": 347141,
+      "sha256": "87008c6fabf7996052c92f0aad593b9237de3f459e5927a1d27a3907ab79972b"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/prefix-final.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/prefix-initial.json",
+      "bytes": 67309,
+      "sha256": "4d517f4198d951683328f80a0040f21e455825c38e567acd8335afc7df1822ca"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/prefix.json",
+      "bytes": 54485,
+      "sha256": "6111d3e9674908e60e7c693ba6a27fa2c8a2dc4302b12287dde054e43462ee94"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/recipe.json",
+      "bytes": 394,
+      "sha256": "abaedc6d7654025c44328f22c5e0d5815e4536d86c466b45e29dd8a1e8639d00"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/resume-final.json",
+      "bytes": 73376,
+      "sha256": "350d92b826d9a9bf24733cef53cbd2eca2d0c1d6ad57a98750b7cdaba76cbab3"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/resume-initial.json",
+      "bytes": 73574,
+      "sha256": "0813a2c03b5d1989329b828f4102f0dc51a6d8f07c7c1e55bbc8a08b105e07c2"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/seed-29/resume.json",
+      "bytes": 302260,
+      "sha256": "78f6722e72e45322a05670550ce3fa8e04d10acc3c81d01ed327cbbfa5e8e1fa"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/summary.json",
+      "bytes": 54933,
+      "sha256": "c442f12eb6cd1abe0e9a3a777a3657ac546b1e6779cebc3e57cb4f87dae5604a"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/dose_matched/verification.json",
+      "bytes": 1214,
+      "sha256": "e879d6e3f6c470422d5ce2f9bcf99e469a814bdef1a1cedaf6391bd1e1b73ba8"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/control-final.json",
+      "bytes": 73474,
+      "sha256": "52794f78241ae6fab3b023d283843100323ae3d08aa7fc831a86798f0ee18d0e"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/control-initial.json",
+      "bytes": 67380,
+      "sha256": "efc3ecdc1375c2fa212a7a7e1336e6f976d4f63ce80b4aecae702e937d61ac19"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/control-split.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/control-torch-final.json",
+      "bytes": 166574,
+      "sha256": "e336f94906d433d78f205e027538aecc27ed161c9a05152ab42c5159a3f155ad"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/control.json",
+      "bytes": 398429,
+      "sha256": "d2633e80722459e94c39016f59524ada3328d3c650738bb9e745b112174ef530"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/prefix-final.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/prefix-initial.json",
+      "bytes": 67380,
+      "sha256": "efc3ecdc1375c2fa212a7a7e1336e6f976d4f63ce80b4aecae702e937d61ac19"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/prefix.json",
+      "bytes": 64751,
+      "sha256": "181d0ef8cc517479e3df639a62dcc6c0135ab9a385f1fd29093def3ee3bbe823"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/recipe.json",
+      "bytes": 377,
+      "sha256": "de7e27e1a07b6df15922eff11a141fa162304c7e1e4f2ddcee8f24928cdb1d05"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/resume-final.json",
+      "bytes": 73474,
+      "sha256": "52794f78241ae6fab3b023d283843100323ae3d08aa7fc831a86798f0ee18d0e"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/resume-initial.json",
+      "bytes": 73580,
+      "sha256": "a2d6d211919a4e8089bcd0e0b67e6ef0fc72049e2046790a4eb43a2d793bfc9c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/seed-29/resume.json",
+      "bytes": 349364,
+      "sha256": "b468d1e7f529701e4075ba9d062b5560c374a76407b7f544d257384292fd80a1"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/summary.json",
+      "bytes": 61779,
+      "sha256": "c9505bbaad1aaadf40eb8923e7a6666f90929a4dbbc90c0fb2054d36058da654"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/fixed_proposal/verification.json",
+      "bytes": 1214,
+      "sha256": "8cd90fa2c0100809e74cc5ab1d6afdd71ad0e41c077c618c96c070c7b9732da6"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/control-final.json",
+      "bytes": 74111,
+      "sha256": "40829cc65b4a78ec10bf7a4cd04a497c5ab399f11a440e0bcda7d280b5965017"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/control-initial.json",
+      "bytes": 67943,
+      "sha256": "bc2c233515f3576d1fc87b90b3dde4790677812c93057a81ac3b1c7e57bf8acf"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/control-split.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/control-torch-final.json",
+      "bytes": 166598,
+      "sha256": "d43ac98c47f0985395299fde01a56be6f1f9ec42283267488fca9e0f971c50d7"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/control.json",
+      "bytes": 774213,
+      "sha256": "eec902e769673d7e695a146182e0b43b30b1f1694b61f490f968f7f491db6466"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/prefix-final.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/prefix-initial.json",
+      "bytes": 67943,
+      "sha256": "bc2c233515f3576d1fc87b90b3dde4790677812c93057a81ac3b1c7e57bf8acf"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/prefix.json",
+      "bytes": 99864,
+      "sha256": "3cc35cabb7728c9b3022279545022a51cce461f7bd8b1421fd8715ddb6854a19"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/recipe.json",
+      "bytes": 376,
+      "sha256": "c3a934d3a5cae89c083b19a73ce1dc7ca1764a6f8a451c84250e68771725bfcf"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/resume-final.json",
+      "bytes": 74111,
+      "sha256": "40829cc65b4a78ec10bf7a4cd04a497c5ab399f11a440e0bcda7d280b5965017"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/resume-initial.json",
+      "bytes": 74069,
+      "sha256": "69200ad4b7eea731a17601ba790e407262e1ff29ec0542496751c927bee2d8b6"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/seed-29/resume.json",
+      "bytes": 690534,
+      "sha256": "48521b25a09fc725514f1be8311cf4f2b1aff110874a8af50e6d3960e7ba0c07"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/summary.json",
+      "bytes": 62308,
+      "sha256": "e0d67b2184667d501f872163b1ca431d0f6976e686d7c071769a0380f2f813e1"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-29/loss_feedback/verification.json",
+      "bytes": 1215,
+      "sha256": "cd20f68f361fec66ab3b8902409a618723eba453122cb35875c0b52e48bdd9cd"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/control-final.json",
+      "bytes": 73160,
+      "sha256": "3df99ec4186c4d71a767f313468747bb348cab9605e13fc41e0eeb2b3d1aaf14"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/control-initial.json",
+      "bytes": 67294,
+      "sha256": "5e0d9a7ecea6e3f679003bb8cf6ba06334048e8a95e6433a20918a2f07dce3da"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/control-split.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/control-torch-final.json",
+      "bytes": 166350,
+      "sha256": "0eea208fe7f97426247991aee5497a499d57bc8c5c243631f907e64118414842"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/control.json",
+      "bytes": 347097,
+      "sha256": "05305250f45e68ad0770e69f1359b61036fc0b108ab11c210f99c592f988028c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/prefix-final.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/prefix-initial.json",
+      "bytes": 67294,
+      "sha256": "5e0d9a7ecea6e3f679003bb8cf6ba06334048e8a95e6433a20918a2f07dce3da"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/prefix.json",
+      "bytes": 54480,
+      "sha256": "46de075f1ee9f7d3c8dd6a504c242e16cf63538ef391eca51a1e678f6a654385"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/recipe.json",
+      "bytes": 378,
+      "sha256": "845e730e91c48b8ca24821551b0b4e2e9bb8c7ba01dd693f9af8d79146d7ad57"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/resume-final.json",
+      "bytes": 73160,
+      "sha256": "3df99ec4186c4d71a767f313468747bb348cab9605e13fc41e0eeb2b3d1aaf14"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/resume-initial.json",
+      "bytes": 73469,
+      "sha256": "8501534ce6a84fa4049fd2a2fa6fea8ec7c146e460470e7f6262a182515ff503"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/seed-43/resume.json",
+      "bytes": 302233,
+      "sha256": "4abdf7c465e6342e22592348c5f0a004ce0e3fd3f665be5ed670196205fdeef3"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/summary.json",
+      "bytes": 54873,
+      "sha256": "61c2ec0eeb98fe05d6facf3844848b9312e6f967d7e51ff933fb9c0d32fb47c7"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/baseline/verification.json",
+      "bytes": 1214,
+      "sha256": "e51ba23d8fa1eee955e953eda2fa4506761d7a30e0d6419c07eb7287430e0b74"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/control-final.json",
+      "bytes": 73101,
+      "sha256": "4e31f908434c57b98170526294eea348b77866e95a967133bab1e76686b9b33d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/control-initial.json",
+      "bytes": 67301,
+      "sha256": "0123adb5cb197e9291f38baa3ef688e72e109333da2feca8f0506ecc26768fdb"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/control-split.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/control-torch-final.json",
+      "bytes": 166420,
+      "sha256": "feef1da1b119bdb28033afa6200d674a2673e793682547043a1d4601dccd14eb"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/control.json",
+      "bytes": 347125,
+      "sha256": "ef1618171c45dd4d44c4c77c570b897854c7b7bd3ad181f697457f23095c5a8f"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/prefix-final.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/prefix-initial.json",
+      "bytes": 67301,
+      "sha256": "0123adb5cb197e9291f38baa3ef688e72e109333da2feca8f0506ecc26768fdb"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/prefix.json",
+      "bytes": 54496,
+      "sha256": "7dc82ff589318c204b9eff9169a60c8f3119eb6edf8f4791ecf9bc818c58b66d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/recipe.json",
+      "bytes": 394,
+      "sha256": "033e24d8b2e8db4925beba27d22fb0b818c2ecb7609a6c2b0f519878a464ad2f"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/resume-final.json",
+      "bytes": 73101,
+      "sha256": "4e31f908434c57b98170526294eea348b77866e95a967133bab1e76686b9b33d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/resume-initial.json",
+      "bytes": 73586,
+      "sha256": "ad702b701cb15727bc76b1b6f45c5c11979e08271df6fb20dd4160de55c04fdb"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/seed-43/resume.json",
+      "bytes": 302249,
+      "sha256": "d9fc501c189a57947f89b0872b3ae30b6cecc3c9e98676b9079f60e51188f5c3"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/summary.json",
+      "bytes": 54917,
+      "sha256": "3a2b0a5399aa8368b98220ea973ed49675d8570cf383a03775ea635183b66bfb"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/dose_matched/verification.json",
+      "bytes": 1214,
+      "sha256": "68faa808beff5f0431fa89de63f0b4eef352b312d5b8ccab5bf1ed42f18b7539"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/control-final.json",
+      "bytes": 73379,
+      "sha256": "32ee42b688642eb50069dca2cdb9c706bbe49ae68fa20b92fa98dbe789e66e2d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/control-initial.json",
+      "bytes": 67372,
+      "sha256": "345b1183288b656343866ff9ff1b8c557ecd466df1491ad4ae856b8717e1ca40"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/control-split.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/control-torch-final.json",
+      "bytes": 166525,
+      "sha256": "b8f826a2c7fb293e8e8cbd3a61751eb9a77abc0b2c04abb6023a7722fef798ce"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/control.json",
+      "bytes": 398405,
+      "sha256": "011cb3d8b60f5c6fe2f2c99ddca5050f27d93e1d8abb5ec15b5cd47f8c0672b2"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/prefix-final.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/prefix-initial.json",
+      "bytes": 67372,
+      "sha256": "345b1183288b656343866ff9ff1b8c557ecd466df1491ad4ae856b8717e1ca40"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/prefix.json",
+      "bytes": 64762,
+      "sha256": "8321686f552fc80e6649c863a17a56ae6f71352ce2420fab13e1e6c21b6f8cae"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/recipe.json",
+      "bytes": 377,
+      "sha256": "8dbd2d145337418fd3ef65e4e8db3fd60f5794611358149b8654d374d20bd9ff"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/resume-final.json",
+      "bytes": 73379,
+      "sha256": "32ee42b688642eb50069dca2cdb9c706bbe49ae68fa20b92fa98dbe789e66e2d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/resume-initial.json",
+      "bytes": 73653,
+      "sha256": "5282af8a1e41a91a24b6d4980ebaff8b05c811ccd39122b81eeb4f1ec614dc26"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/seed-43/resume.json",
+      "bytes": 349353,
+      "sha256": "3f21d5c8833877a609bc426567817e5be7b553ceda602d7c24c11e4d6027abb0"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/summary.json",
+      "bytes": 61754,
+      "sha256": "e195f4b4207196e460632d828a23d1ad4b60a63e9921b6afa50a03a4226ecc4c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/fixed_proposal/verification.json",
+      "bytes": 1212,
+      "sha256": "0f76d15ce8e50b72a1a50e13f5ceac9bdcab5c9ec8022616647e5b68d0aa0ebf"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/control-final.json",
+      "bytes": 73788,
+      "sha256": "b8b33f9ef7cd3e0f298fadaee1bf3c652a72eac6ff8fd91f308337e087ed1cba"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/control-initial.json",
+      "bytes": 67935,
+      "sha256": "5a674415998e05a9de45f04eb3748dc6a500c1b90e2c77ef460ae7d7b76ae588"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/control-split.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/control-torch-final.json",
+      "bytes": 166447,
+      "sha256": "c4802561922b1afcb07fd15dda41403b7cdfbfde1a8a033fc8214853948fe73c"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/control.json",
+      "bytes": 774318,
+      "sha256": "9ca33c6a340aed698a4fd0ce41aa434d9a3219edf49b76f865bb82d5a9e6fb8d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/prefix-final.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/prefix-initial.json",
+      "bytes": 67935,
+      "sha256": "5a674415998e05a9de45f04eb3748dc6a500c1b90e2c77ef460ae7d7b76ae588"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/prefix.json",
+      "bytes": 99863,
+      "sha256": "cd01d28ce6edb9e28145e17e340db7c1a83af52a2e54da4b23b5e1c42b82f099"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/recipe.json",
+      "bytes": 376,
+      "sha256": "7c6ad543f003f5a41909a46b6510262896c6c1266b8a0a9784de127590767298"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/resume-final.json",
+      "bytes": 73788,
+      "sha256": "b8b33f9ef7cd3e0f298fadaee1bf3c652a72eac6ff8fd91f308337e087ed1cba"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/resume-initial.json",
+      "bytes": 74235,
+      "sha256": "4261d29f689eaf0d0cea65f5b31fff39700fb0611671ef6a2eaa1f2de1e18f92"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/seed-43/resume.json",
+      "bytes": 690652,
+      "sha256": "6683fca0e7a1f032da8749ed0a6c9e78d716cb923c764e5b89832e4500e0c98d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/summary.json",
+      "bytes": 62296,
+      "sha256": "2d81850d7f0c3f99272ca062c0ad17ec4a47463c8431693b023f035e6b95993d"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/seed-43/loss_feedback/verification.json",
+      "bytes": 1214,
+      "sha256": "0503879b3b3304c35ba44274370aa40e122cbf174f948950594452ab980ce148"
+    },
+    {
+      "file": "three-seed-mps-portable-v2/summary.json",
+      "bytes": 54925,
+      "sha256": "07c39a24d07bdf6bd5b0cb3868f14d396e75c4071ce3473ca58f7ca4992e070d"
+    },
+    {
+      "file": "three-seed-mps-v1-verification.json",
+      "bytes": 488,
+      "sha256": "f77d8345ecfd394b18a8ceeadf3a8f1c26e69e09121413a67b7810795efc3b4f"
+    },
+    {
+      "file": "three-seed-mps-portable-v2-verification.json",
+      "bytes": 488,
+      "sha256": "bde576d397476391ad39001a985f9258adb49484468008e58260ba3c6bc48231"
+    },
+    {
+      "file": "build-comparison-v1-v2.json",
+      "bytes": 8453,
+      "sha256": "1c7b484845be755865e6c558e33e996592c4b58f914741aed6ee2e91864e2646"
+    }
+  ]
+}

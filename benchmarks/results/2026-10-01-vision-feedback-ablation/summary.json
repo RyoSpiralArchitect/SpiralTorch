@@ -1,0 +1,1724 @@
+{
+  "schema": "spiraltorch.vision.feedback_ablation.v1",
+  "status": "passed",
+  "boundary": "Prescribed rate proposal plus existing Rust loss gate on a shared small ConvNeXt. Retrospective integrated-rate control; no geometric-update, full producer, speed or untouched-test claim.",
+  "recipe": {
+    "torch_device": "mps",
+    "seeds": [
+      17,
+      29,
+      43
+    ],
+    "train_per_class": 128,
+    "test_per_class": 32,
+    "batch_size": 16,
+    "epochs": 5,
+    "rate": 0.01,
+    "control_scale": 0.5,
+    "restart_at": 37
+  },
+  "orchestrator_sha256": "6b5e9103a14a0f4a5c86da16e4f52e73304a99c204f1479483ef208da7e4d528",
+  "runs": [
+    {
+      "seed": 17,
+      "arms": {
+        "baseline": {
+          "rates": {
+            "updates": 400,
+            "total": 3.999999910593033,
+            "mean": 0.009999999776482582,
+            "minimum": 0.009999999776482582,
+            "maximum": 0.009999999776482582,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.3066199094057085,
+                "torch": 2.306619891524315
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.2500163674354554,
+                  "accuracy": 0.14375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.2500163912773132,
+                  "accuracy": 0.14375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.229764774441719,
+                "torch": 2.2297647655010224
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.2003291130065916,
+                  "accuracy": 0.178125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.2003291130065916,
+                  "accuracy": 0.178125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.1922115117311476,
+                "torch": 2.19221151471138
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1637604355812075,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.163760447502136,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.1535075291991235,
+                "torch": 2.1535075128078462
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1311172962188722,
+                  "accuracy": 0.228125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1311172962188722,
+                  "accuracy": 0.228125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.1189866453409194,
+                "torch": 2.118986617028713
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.111466121673584,
+                  "accuracy": 0.215625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.111466085910797,
+                  "accuracy": 0.215625,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "75f552d8beb279020cf41955f34e7d7c05e413fc5f274bb9cdda1a3033c62faa",
+            "final_checkpoint_sha256": "af72ab26a9c47be5873a7146f857f6fe25bc37c7fd3bfba0bde180431c5aed38",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 9.906772819673172e-08
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 3.576278695405222e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 54897,
+            "sha256": "0859f12ecbbdb800178b35d8dbc460592ecf3f16d59bc0ba3f16614d9d589b9f"
+          }
+        },
+        "fixed_proposal": {
+          "rates": {
+            "updates": 400,
+            "total": 1.9999999552965164,
+            "mean": 0.004999999888241291,
+            "minimum": 0.004999999888241291,
+            "maximum": 0.004999999888241291,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.334107446670532,
+                "torch": 2.3341074168682097
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.2892802000045775,
+                  "accuracy": 0.1,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.289280116558075,
+                  "accuracy": 0.1,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.2680839776992796,
+                "torch": 2.2680839240550994
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.247339594364166,
+                  "accuracy": 0.15,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.247339594364166,
+                  "accuracy": 0.15,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.2372270420193674,
+                "torch": 2.237227053940296
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.221222126483917,
+                  "accuracy": 0.159375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.221222150325775,
+                  "accuracy": 0.159375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.2121386557817457,
+                "torch": 2.2121386349201204
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.199202859401703,
+                  "accuracy": 0.1875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1992028832435606,
+                  "accuracy": 0.1875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.1909550204873085,
+                "torch": 2.190955013036728
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.181283962726593,
+                  "accuracy": 0.19375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.181284010410309,
+                  "accuracy": 0.19375,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "0de9f4afab33fd23f464c6b200b59b37cc6197e9cafe42b5a26f94c1c122cfea",
+            "final_checkpoint_sha256": "c4de78bf001ac73d724dff0917d34b7a4b31d89e8ee1d1478687a24fb7ae73a5",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 6.60527233561199e-08
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 8.344650259672903e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 61741,
+            "sha256": "73918fee6c782e374f02e49b88117bf2b2cfe67079bd7a5e26c637d8816f8f05"
+          }
+        },
+        "loss_feedback": {
+          "rates": {
+            "updates": 400,
+            "total": 3.849374890793115,
+            "mean": 0.009623437226982787,
+            "minimum": 0.006874999962747097,
+            "maximum": 0.009999999776482582,
+            "unique": 6
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.3075462341308595,
+                "torch": 2.3075462162494658
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.252717685699463,
+                  "accuracy": 0.1375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.252717649936676,
+                  "accuracy": 0.1375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.2326053738594056,
+                "torch": 2.232605370879173
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.205044686794281,
+                  "accuracy": 0.178125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.20504469871521,
+                  "accuracy": 0.178125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.196238312125206,
+                "torch": 2.196238322556019
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1690449595451353,
+                  "accuracy": 0.2,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1690449476242066,
+                  "accuracy": 0.2,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.158091443777084,
+                "torch": 2.1580914318561555
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.135766661167145,
+                  "accuracy": 0.221875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.135766679048538,
+                  "accuracy": 0.221875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.1236135855317118,
+                "torch": 2.123613578081131
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.115373361110687,
+                  "accuracy": 0.21875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1153733670711516,
+                  "accuracy": 0.21875,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "0ff01ba434f76dbd7cc2cb11f04a326d992b24eefdb19ef746735beb5e5c1051",
+            "final_checkpoint_sha256": "e551627b031384e3c94040f1849e9e19d1116e6c349b7bae9422c5d6a450dde9",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 1.1447094774471031e-07
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 3.576278695405222e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 62294,
+            "sha256": "48fd7982e1aeb3d1b1c80c65bf559486b87c5d878e0e031e3959ae09e54828c4"
+          }
+        },
+        "dose_matched": {
+          "rates": {
+            "updates": 400,
+            "total": 3.8493748754262924,
+            "mean": 0.009623437188565731,
+            "minimum": 0.009623437188565731,
+            "maximum": 0.009623437188565731,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.3082056075334547,
+                "torch": 2.308205598592758
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.252255356311798,
+                  "accuracy": 0.1375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.252255356311798,
+                  "accuracy": 0.1375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.231971871852875,
+                "torch": 2.231971836090088
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.203234624862671,
+                  "accuracy": 0.178125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.203234648704529,
+                  "accuracy": 0.178125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.1950844675302505,
+                "torch": 2.195084463059902
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1675304532051087,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1675304889678957,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.1574927851557733,
+                "torch": 2.157492783665657
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1354215800762177,
+                  "accuracy": 0.21875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1354215860366823,
+                  "accuracy": 0.21875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.1237014502286913,
+                "torch": 2.123701439797878
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.115020227432251,
+                  "accuracy": 0.23125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1150202453136444,
+                  "accuracy": 0.23125,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "157e6b7d37a13f2c4b91f80ee37f9efe6833727ae027e049732de0f76bf9cfa7",
+            "final_checkpoint_sha256": "a5431d1222d18d8f12ab01560bfc204afded92ee49561a2707ab7ae0815cb5be",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 8.934041804355971e-08
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 3.576278695405222e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 54909,
+            "sha256": "9f39e0fdd979c386ca79fd559f7199ba06e46cac344c1fb58343d038602a545a"
+          }
+        }
+      },
+      "identical_initial_model_and_inputs": true,
+      "identical_batch_trajectories": true,
+      "dose_matched_rate": 0.009623437188565731,
+      "integrated_rate_difference": -1.5366822481155396e-08,
+      "feedback": {
+        "open_observations": 152,
+        "halted_observations": 194,
+        "maximum_gate": 0.625,
+        "changed_rate_updates": 152
+      }
+    },
+    {
+      "seed": 29,
+      "arms": {
+        "baseline": {
+          "rates": {
+            "updates": 400,
+            "total": 3.999999910593033,
+            "mean": 0.009999999776482582,
+            "minimum": 0.009999999776482582,
+            "maximum": 0.009999999776482582,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.243311856687069,
+                "torch": 2.2433118402957914
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1458471775054933,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1458471417427063,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.1199002787470818,
+                "torch": 2.119900274276733
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0927778840065003,
+                  "accuracy": 0.20625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0927778601646425,
+                  "accuracy": 0.20625,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.0670056700706483,
+                "torch": 2.067005644738674
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0554568827152253,
+                  "accuracy": 0.246875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.055456870794296,
+                  "accuracy": 0.246875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.036168685555458,
+                "torch": 2.036168672144413
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0410819172859194,
+                  "accuracy": 0.2375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0410819709300996,
+                  "accuracy": 0.2375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.016045844554901,
+                "torch": 2.016045795381069
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0087531983852385,
+                  "accuracy": 0.240625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.008753216266632,
+                  "accuracy": 0.240625,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "9a00b054422fee8eeb139244b5ca000da14bc5795f7b8bc9e084f9a10c509764",
+            "final_checkpoint_sha256": "d7d633337764e657038f7f2cded18d54ff8b5f2f846c3a08102381c2bfe4ccf9",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 1.196624343497891e-07
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 5.364418020903372e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 54904,
+            "sha256": "8fe664366d96b736f1de67a41adb8c05fbd3cde9a0173211a99e87a5e0c4cc41"
+          }
+        },
+        "fixed_proposal": {
+          "rates": {
+            "updates": 400,
+            "total": 1.9999999552965164,
+            "mean": 0.004999999888241291,
+            "minimum": 0.004999999888241291,
+            "maximum": 0.004999999888241291,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.2931396901607513,
+                "torch": 2.2931397020816804
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.201356828212738,
+                  "accuracy": 0.203125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.201356840133667,
+                  "accuracy": 0.203125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.1765907257795334,
+                "torch": 2.176590692996979
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.146698796749115,
+                  "accuracy": 0.19375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1466987788677216,
+                  "accuracy": 0.19375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.1252727255225183,
+                "torch": 2.125272697210312
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1120001792907717,
+                  "accuracy": 0.2,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1120001316070556,
+                  "accuracy": 0.2,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.092340278625488,
+                "torch": 2.0923402696847915
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0931735932826996,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0931735932826996,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.0701127991080286,
+                "torch": 2.0701128035783767
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.073589360713959,
+                  "accuracy": 0.190625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.073589336872101,
+                  "accuracy": 0.190625,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "f0ad36056e74b29e50f2d285ae3fb3784fb051a26bcc1fcadc32109166e5eaa0",
+            "final_checkpoint_sha256": "52794f78241ae6fab3b023d283843100323ae3d08aa7fc831a86798f0ee18d0e",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 7.498097405366107e-08
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 4.7683716086766026e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 61779,
+            "sha256": "c9505bbaad1aaadf40eb8923e7a6666f90929a4dbbc90c0fb2054d36058da654"
+          }
+        },
+        "loss_feedback": {
+          "rates": {
+            "updates": 400,
+            "total": 3.8893748889677227,
+            "mean": 0.009723437222419307,
+            "minimum": 0.00624999962747097,
+            "maximum": 0.009999999776482582,
+            "unique": 7
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.249947485327721,
+                "torch": 2.249947449564934
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1506759762763976,
+                  "accuracy": 0.2,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1506759762763976,
+                  "accuracy": 0.2,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.124310088157654,
+                "torch": 2.124310111999512
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0964208066463472,
+                  "accuracy": 0.209375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0964208245277405,
+                  "accuracy": 0.209375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.0704003050923347,
+                "torch": 2.070400279760361
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.058467674255371,
+                  "accuracy": 0.25,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0584676802158355,
+                  "accuracy": 0.25,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.039017993211746,
+                "torch": 2.0390180110931397
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.043234944343567,
+                  "accuracy": 0.2375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0432349741458893,
+                  "accuracy": 0.2375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.0186199635267257,
+                "torch": 2.0186199471354485
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0115161418914793,
+                  "accuracy": 0.240625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0115161418914793,
+                  "accuracy": 0.240625,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "c48311abe76b07a804b6219f072659caddae900997e76894a285713541ee3200",
+            "final_checkpoint_sha256": "40829cc65b4a78ec10bf7a4cd04a497c5ab399f11a440e0bcda7d280b5965017",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 1.4058369149819397e-07
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 2.9802322387695312e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 62308,
+            "sha256": "e0d67b2184667d501f872163b1ca431d0f6976e686d7c071769a0380f2f813e1"
+          }
+        },
+        "dose_matched": {
+          "rates": {
+            "updates": 400,
+            "total": 3.8893748074769974,
+            "mean": 0.009723437018692493,
+            "minimum": 0.009723437018692493,
+            "maximum": 0.009723437018692493,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.2452541917562483,
+                "torch": 2.2452541798353196
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1480348706245422,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.148034918308258,
+                  "accuracy": 0.196875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.1220248848199845,
+                "torch": 2.122024865448475
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0949747025966645,
+                  "accuracy": 0.209375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.094974714517593,
+                  "accuracy": 0.209375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.069132609665394,
+                "torch": 2.069132599234581
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.057729405164719,
+                  "accuracy": 0.253125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0577294647693636,
+                  "accuracy": 0.253125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.0383033409714697,
+                "torch": 2.0383033201098444
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0432110369205474,
+                  "accuracy": 0.2375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0432110369205474,
+                  "accuracy": 0.2375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.0182363212108614,
+                "torch": 2.0182362720370293
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0112342298030854,
+                  "accuracy": 0.240625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0112342476844787,
+                  "accuracy": 0.240625,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "73ad5d223b5d3c54099f369a6ededb5062dd85a1637f60fbdb462ad29fe4832a",
+            "final_checkpoint_sha256": "350d92b826d9a9bf24733cef53cbd2eca2d0c1d6ad57a98750b7cdaba76cbab3",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 1.2306223996519734e-07
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 5.960464477539063e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 54933,
+            "sha256": "c442f12eb6cd1abe0e9a3a777a3657ac546b1e6779cebc3e57cb4f87dae5604a"
+          }
+        }
+      },
+      "identical_initial_model_and_inputs": true,
+      "identical_batch_trajectories": true,
+      "dose_matched_rate": 0.009723437018692493,
+      "integrated_rate_difference": -8.149072527885437e-08,
+      "feedback": {
+        "open_observations": 116,
+        "halted_observations": 240,
+        "maximum_gate": 0.75,
+        "changed_rate_updates": 115
+      }
+    },
+    {
+      "seed": 43,
+      "arms": {
+        "baseline": {
+          "rates": {
+            "updates": 400,
+            "total": 3.999999910593033,
+            "mean": 0.009999999776482582,
+            "minimum": 0.009999999776482582,
+            "maximum": 0.009999999776482582,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.266848236322403,
+                "torch": 2.266848233342171
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.166102743148804,
+                  "accuracy": 0.190625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1661027550697325,
+                  "accuracy": 0.190625,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.1311302587389944,
+                "torch": 2.1311302706599236
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.076170289516449,
+                  "accuracy": 0.259375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.076170343160629,
+                  "accuracy": 0.259375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.0604491949081423,
+                "torch": 2.0604491904377937
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0275138318538666,
+                  "accuracy": 0.28125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.027513873577118,
+                  "accuracy": 0.28125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.019749242067337,
+                "torch": 2.0197492480278014
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0030409395694733,
+                  "accuracy": 0.275,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0030409574508665,
+                  "accuracy": 0.275,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 1.9928083717823029,
+                "torch": 1.9928084015846252
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 1.9832089424133301,
+                  "accuracy": 0.296875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 1.9832089483737945,
+                  "accuracy": 0.296875,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "926ef48bf96af1a402db14000105085a77c0a80ef658af5a25c28573179c7bd8",
+            "final_checkpoint_sha256": "3df99ec4186c4d71a767f313468747bb348cab9605e13fc41e0eeb2b3d1aaf14",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 1.6995638523070767e-07
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 5.364418020903372e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 54873,
+            "sha256": "61c2ec0eeb98fe05d6facf3844848b9312e6f967d7e51ff933fb9c0d32fb47c7"
+          }
+        },
+        "fixed_proposal": {
+          "rates": {
+            "updates": 400,
+            "total": 1.9999999552965164,
+            "mean": 0.004999999888241291,
+            "minimum": 0.004999999888241291,
+            "maximum": 0.004999999888241291,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.3137921333312987,
+                "torch": 2.313792097568512
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.2360162138938904,
+                  "accuracy": 0.15,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.2360162854194643,
+                  "accuracy": 0.15,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.203883485496044,
+                "torch": 2.2038834795355795
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1640756726264954,
+                  "accuracy": 0.2125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1640756368637084,
+                  "accuracy": 0.2125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.142281173169613,
+                "torch": 2.1422811672091484
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1126060843467713,
+                  "accuracy": 0.246875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1126060962677,
+                  "accuracy": 0.246875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.098028379678726,
+                "torch": 2.0980283662676813
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.078972738981247,
+                  "accuracy": 0.246875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.078972727060318,
+                  "accuracy": 0.246875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 2.0650707677006723,
+                "torch": 2.065070755779743
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0513229787349703,
+                  "accuracy": 0.265625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0513229727745057,
+                  "accuracy": 0.265625,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "477bd37997743e5ad2ee5cb8f7bff5be5b1073d8799a77062e90ecb26757fa47",
+            "final_checkpoint_sha256": "32ee42b688642eb50069dca2cdb9c706bbe49ae68fa20b92fa98dbe789e66e2d",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 9.64663725415971e-08
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 7.152557390810443e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 61754,
+            "sha256": "e195f4b4207196e460632d828a23d1ad4b60a63e9921b6afa50a03a4226ecc4c"
+          }
+        },
+        "loss_feedback": {
+          "rates": {
+            "updates": 400,
+            "total": 3.8556248894892633,
+            "mean": 0.009639062223723158,
+            "minimum": 0.006874999962747097,
+            "maximum": 0.009999999776482582,
+            "unique": 6
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.269914799928665,
+                "torch": 2.2699147880077364
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.170243167877197,
+                  "accuracy": 0.190625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1702431559562685,
+                  "accuracy": 0.190625,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.135331028699875,
+                "torch": 2.1353310257196427
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0802587032318116,
+                  "accuracy": 0.253125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0802587032318116,
+                  "accuracy": 0.253125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.0647037819027902,
+                "torch": 2.064703768491745
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.032612866163254,
+                  "accuracy": 0.28125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.032612884044647,
+                  "accuracy": 0.28125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.024176087975502,
+                "torch": 2.0241760909557343
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.0068887531757356,
+                  "accuracy": 0.26875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.006888735294342,
+                  "accuracy": 0.26875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 1.9963902860879899,
+                "torch": 1.996390274167061
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 1.9870746791362763,
+                  "accuracy": 0.290625,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 1.9870746850967407,
+                  "accuracy": 0.290625,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "f9a5539cba08d4a92d2ac956256b9e8461616a7deb7100340b3aa152e9dbdeba",
+            "final_checkpoint_sha256": "b8b33f9ef7cd3e0f298fadaee1bf3c652a72eac6ff8fd91f308337e087ed1cba",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 1.2092451885696134e-07
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 3.576278695405222e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 62296,
+            "sha256": "2d81850d7f0c3f99272ca062c0ad17ec4a47463c8431693b023f035e6b95993d"
+          }
+        },
+        "dose_matched": {
+          "rates": {
+            "updates": 400,
+            "total": 3.855624794960022,
+            "mean": 0.009639061987400055,
+            "minimum": 0.009639061987400055,
+            "maximum": 0.009639061987400055,
+            "unique": 1
+          },
+          "epochs": [
+            {
+              "epoch": 1,
+              "accepted_updates": 80,
+              "train_loss": {
+                "spiraltorch": 2.2695648282766343,
+                "torch": 2.269564801454544
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.1704781651496887,
+                  "accuracy": 0.1875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.1704781651496887,
+                  "accuracy": 0.1875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 2,
+              "accepted_updates": 160,
+              "train_loss": {
+                "spiraltorch": 2.135242372751236,
+                "torch": 2.1352423653006554
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.080724912881851,
+                  "accuracy": 0.259375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0807249188423156,
+                  "accuracy": 0.259375,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 3,
+              "accepted_updates": 240,
+              "train_loss": {
+                "spiraltorch": 2.0644677013158796,
+                "torch": 2.0644676983356476
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.031570166349411,
+                  "accuracy": 0.28125,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.031570219993591,
+                  "accuracy": 0.28125,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 4,
+              "accepted_updates": 320,
+              "train_loss": {
+                "spiraltorch": 2.0233517080545425,
+                "torch": 2.0233517050743104
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 2.006230819225311,
+                  "accuracy": 0.26875,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 2.0062308073043824,
+                  "accuracy": 0.26875,
+                  "examples": 320
+                }
+              }
+            },
+            {
+              "epoch": 5,
+              "accepted_updates": 400,
+              "train_loss": {
+                "spiraltorch": 1.9960260316729546,
+                "torch": 1.9960260435938835
+              },
+              "evaluation": {
+                "spiraltorch": {
+                  "loss": 1.9865345120429994,
+                  "accuracy": 0.29375,
+                  "examples": 320
+                },
+                "torch": {
+                  "loss": 1.9865345418453217,
+                  "accuracy": 0.29375,
+                  "examples": 320
+                }
+              }
+            }
+          ],
+          "replay": {
+            "attempts": 400,
+            "accepted": 400,
+            "rejected": 0,
+            "split": [
+              37,
+              363
+            ],
+            "distinct_processes": true,
+            "all_batch_records_exact": true,
+            "all_bound_checkpoints_exact": true,
+            "trajectory_sha256": "1b399b8e946242960a00aa7ab972a9c51acaa7dbfc075bc97b069260402e0689",
+            "final_checkpoint_sha256": "4e31f908434c57b98170526294eea348b77866e95a967133bab1e76686b9b33d",
+            "saved_reference_parameters": {
+              "tensors": 24,
+              "values": 5530,
+              "max_scaled_error": 1.0707350119455804e-07
+            }
+          },
+          "all_evaluation_accuracies_equal": true,
+          "max_evaluation_ce_difference": 5.364418020903372e-08,
+          "summary": {
+            "file": "summary.json",
+            "bytes": 54917,
+            "sha256": "3a2b0a5399aa8368b98220ea973ed49675d8570cf383a03775ea635183b66bfb"
+          }
+        }
+      },
+      "identical_initial_model_and_inputs": true,
+      "identical_batch_trajectories": true,
+      "dose_matched_rate": 0.009639061987400055,
+      "integrated_rate_difference": -9.452924132347107e-08,
+      "feedback": {
+        "open_observations": 143,
+        "halted_observations": 201,
+        "maximum_gate": 0.625,
+        "changed_rate_updates": 143
+      }
+    }
+  ]
+}

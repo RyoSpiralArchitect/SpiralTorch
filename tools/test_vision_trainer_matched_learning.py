@@ -229,7 +229,8 @@ class ReplayChecks(unittest.TestCase):
         root, original = self.cli_fixture()
         for key, value in (("torch_device", "cpu"), ("test_per_class", 2), ("train_per_class", 4),
                            ("batch_size", 5), ("horizontal_flip", False), ("schedule", "cosine"),
-                           ("rate", 0.02), ("epochs", 3), ("restart_at", 2)):
+                           ("rate", 0.02), ("epochs", 3), ("restart_at", 2),
+                           ("control_scale", 0.5), ("optimizer_feedback", True)):
             with self.subTest(key=key):
                 summary = copy.deepcopy(original)
                 summary["recipe"][key] = value

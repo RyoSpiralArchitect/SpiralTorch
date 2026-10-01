@@ -1,0 +1,239 @@
+{
+  "schema": "vision_feedback_final_runtime_validation.v1",
+  "passed": true,
+  "source_capture": "70c6f8eb6a182928ffc233cac5fa45a67108c783",
+  "parent_implementation": "7e91127bae3af2449412e3a53a7ef5296e7e916d",
+  "build_toolchain": "Rust 1.98.0",
+  "native_adapter": {
+    "name": "Apple M4",
+    "backend": "Metal",
+    "device_type": "IntegratedGpu"
+  },
+  "browser_adapter": {
+    "backend": "BrowserWebGpu",
+    "device_type": "Other",
+    "name": ""
+  },
+  "python_feedback_suite": {
+    "passed": 6,
+    "skipped": 0,
+    "covers_browser_to_native_resume": true,
+    "covers_unsafe_f32_loss_floor": true
+  },
+  "trainer": [
+    {
+      "schedule": "constant",
+      "browser_modes": 4,
+      "control_attempts": 100,
+      "prefix_attempts": 37,
+      "resume_attempts": 63,
+      "accepted_updates": 90,
+      "rejected_updates": 10,
+      "native_browser_records_exact": true,
+      "native_browser_checkpoints_exact": true,
+      "browser_fresh_document_resume_exact": true,
+      "native_to_browser_max_parameter_scaled_error": 0
+    },
+    {
+      "schedule": "cosine",
+      "browser_modes": 4,
+      "control_attempts": 100,
+      "prefix_attempts": 37,
+      "resume_attempts": 63,
+      "accepted_updates": 90,
+      "rejected_updates": 10,
+      "native_browser_records_exact": true,
+      "native_browser_checkpoints_exact": true,
+      "browser_fresh_document_resume_exact": true,
+      "native_to_browser_max_parameter_scaled_error": 0
+    }
+  ],
+  "cross_entropy": {
+    "rows": 7513,
+    "reductions": [
+      {
+        "reduction": "none",
+        "maximum_relative_error": 0.000003718393104906574,
+        "maximum_relative_error_saved_reference": 0.000003718393104906574,
+        "relative_error_bound": 0.00002,
+        "native_browser_loss_bits_exact": true,
+        "native_browser_gradient_bits_exact": true
+      },
+      {
+        "reduction": "sum",
+        "maximum_relative_error": 1.0490616089798464e-8,
+        "maximum_relative_error_saved_reference": 1.0490616089798464e-8,
+        "relative_error_bound": 0.00002,
+        "native_browser_loss_bits_exact": true,
+        "native_browser_gradient_bits_exact": true
+      },
+      {
+        "reduction": "mean",
+        "maximum_relative_error": 9.440701974828731e-11,
+        "maximum_relative_error_saved_reference": 9.440701974828731e-11,
+        "relative_error_bound": 0.00002,
+        "native_browser_loss_bits_exact": true,
+        "native_browser_gradient_bits_exact": true
+      }
+    ],
+    "f64_reference_oracle_comparison": {
+      "bitwise_equal": false,
+      "differing_values": 765,
+      "maximum_relative_difference": 3.2366249385007146e-16,
+      "initial_publication_verifier": "Exact JS-vs-saved-Python libm assertion failed; retained locally. Both references are now checked independently against the unchanged CE bound."
+    }
+  },
+  "scope": "Synthetic local native/browser correctness; not browser real-image learning, universal GPU determinism, policy benefit or throughput.",
+  "local_archive_receipts": [
+    {
+      "file": "build/spiraltorch-vision-feedback-final-web-20261001/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js",
+      "bytes": 4526,
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-final-web-20261001/spiraltorch_wasm.d.ts",
+      "bytes": 145393,
+      "sha256": "d91f57a7f79aa1535b545539da0bff493f59656fcc54036b083cf3e0133442d4"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-final-web-20261001/spiraltorch_wasm.js",
+      "bytes": 424463,
+      "sha256": "f5758843b1aa91864229a65e1ebb430f1cd6153fce3cfb70ade13af3a6c23cdd"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-final-web-20261001/spiraltorch_wasm_bg.wasm",
+      "bytes": 9825065,
+      "sha256": "fe7ca9695ec3963900eb247608ea43150b4a456f72b75af67d3d2500f6a7980e"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-final-web-20261001/spiraltorch_wasm_bg.wasm.d.ts",
+      "bytes": 81955,
+      "sha256": "0d5ff68eaab505e7b8ec6bfebb7f6f42417d5f14e7c9a2aaf793655f8bae5f72"
+    },
+    {
+      "file": "build/spiraltorch-vision-feedback-final-wheel-20261001/spiraltorch-0.4.27-cp38-abi3-macosx_11_0_arm64.whl",
+      "bytes": 10481432,
+      "sha256": "340790a478e25c6e832643061940aa008413c8d298a0007835f81e8c51754c39"
+    },
+    {
+      "file": "fixtures/browser/constant-control.json",
+      "bytes": 194528,
+      "sha256": "4b124a610f0aea186d9a3bef81baa1cb86404418bb113be61d571fa07a15fd84"
+    },
+    {
+      "file": "fixtures/browser/constant-prefix.json",
+      "bytes": 84980,
+      "sha256": "048390b09ae6fe6c4bbfd2f106ecd1a46376f613fe92e89c4d80bea6712b7e1b"
+    },
+    {
+      "file": "fixtures/browser/constant-python.json",
+      "bytes": 130951,
+      "sha256": "bd7ebd7a84b98384bba6541766b9b1a7cb0312cbbdc53f5b206570f537c41c4b"
+    },
+    {
+      "file": "fixtures/browser/constant-resume.json",
+      "bytes": 130873,
+      "sha256": "374c7811cb1c5ddb68e0d20accf2554ba929cf97f02965088e67374e57da4d1e"
+    },
+    {
+      "file": "fixtures/browser/cosine-control.json",
+      "bytes": 194792,
+      "sha256": "d8da8a302cd572054030e6aaf2bf7d01b7a019d382da4c08c946607b32da5227"
+    },
+    {
+      "file": "fixtures/browser/cosine-prefix.json",
+      "bytes": 85217,
+      "sha256": "17db14a29493e0a7b5b78fd6383d6165497d86b7350f06825a92c3ee40ff5d0f"
+    },
+    {
+      "file": "fixtures/browser/cosine-python.json",
+      "bytes": 131192,
+      "sha256": "8aa4c9a9ec8adf4bb15a50d03ddd7d51623022ed19acea07cfc459700a3404b2"
+    },
+    {
+      "file": "fixtures/browser/cosine-resume.json",
+      "bytes": 131114,
+      "sha256": "e9a5a4a9e4ce7742bb9ca61030896814567f56580333262c9e0746bebb081957"
+    },
+    {
+      "file": "fixtures/spiraltorch-vision-feedback-final-native-20261001.json",
+      "bytes": 487503,
+      "sha256": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313"
+    },
+    {
+      "file": "fixtures/vision-ce-domain-input-20261001.json",
+      "bytes": 316643,
+      "sha256": "2fe9a3aabb6af0cce5033b21451f44deb0772385e48f9cf3a709f16906d26573"
+    },
+    {
+      "file": "fixtures/vision-ce-loss-domain-browser-20261001.html",
+      "bytes": 2246,
+      "sha256": "fa66a1cb97dda0aeac36766fee6f69540e83c4334d050a443e37e76a967fde03"
+    },
+    {
+      "file": "fixtures/vision-ce-loss-domain-cubic-handoff-20261001.json",
+      "bytes": 830205,
+      "sha256": "261b8b2e162bd0400e59fd8f172424344d700129ba8416235901924eda1adb32"
+    },
+    {
+      "file": "fixtures/vision-ce-loss-domain-final-head-20261001.json",
+      "bytes": 603666,
+      "sha256": "68990b5f2ddc12e6b02a92ab58150576fdc850a04c249f21e5e88bc0f460fd94"
+    },
+    {
+      "file": "fixtures/vision-ce-loss-domain-final-head-browser-20261001.json",
+      "bytes": 551562,
+      "sha256": "dd75ebae27e559dfcac7d662dbb134215397e008efad586bc7c71ae3268adb07"
+    },
+    {
+      "file": "logs/publication-oracle-exact-initial.log",
+      "bytes": 120378,
+      "sha256": "c8b8bdb01199c5288cbc0140d24d0c1b839f9e6638b864146bff95e588e3435e"
+    },
+    {
+      "file": "logs/spiraltorch-feedback-f32-domain-tests-20261001.log",
+      "bytes": 1485,
+      "sha256": "76bc93da138ddf8095a4300358fa56516333e0c1911a7492780e5edc1b262c8e"
+    },
+    {
+      "file": "logs/spiraltorch-rust199-official-strict-subset-20261001.log",
+      "bytes": 119359,
+      "sha256": "195ba5558b456abd43e4c92f6edf0a017b3fde144561cddaeccee7e82dc067e9"
+    },
+    {
+      "file": "logs/spiraltorch-rust199-python-clippy-20261001.log",
+      "bytes": 143402,
+      "sha256": "887d007f7cd7822d1ec099948f77a2e7aa48638a2bd270b49502e2aea1522409"
+    },
+    {
+      "file": "logs/spiraltorch-vision-ce-cubic-optin-gpu-tests-20261001.log",
+      "bytes": 149099,
+      "sha256": "3772cc4f07a705fc83726a2cf76b0f60347cdb4c1caacd06b4ead305cf103824"
+    },
+    {
+      "file": "logs/spiraltorch-vision-feedback-final-native-fixture-20261001.log",
+      "bytes": 117,
+      "sha256": "59e576526bbe68decbc036e5a773507e9e49550d5fdeb08e793bc128018ad5fe"
+    },
+    {
+      "file": "logs/spiraltorch-vision-feedback-final-python-all-20261001.log",
+      "bytes": 104,
+      "sha256": "7fa48c4f5dca92443ce63f779e69d4081a01b2ec2e3885bd4e0ccdc1fb3abc97"
+    },
+    {
+      "file": "logs/spiraltorch-vision-feedback-final-wasm-build-20261001.log",
+      "bytes": 111651,
+      "sha256": "93c86631fe68b00aca36fbf344b7c068712a275c42954bb1dd9646e2509dde48"
+    },
+    {
+      "file": "logs/spiraltorch-vision-feedback-final-wheel-build-20261001.log",
+      "bytes": 115850,
+      "sha256": "6286f8ac3ecebb58c6bcb96bfaf7eedb0de8a0ac056336f5db57a469d426424a"
+    },
+    {
+      "file": "verify-runtime-oracle-exact-initial.cjs",
+      "bytes": 6958,
+      "sha256": "417f933f0d3b21b8c172be8adf9e2f69e9508ca11dc41777164f9a1aff5a5d38"
+    }
+  ]
+}
