@@ -132,6 +132,11 @@ browser real-image restart, throughput or a Z-space policy advantage.
    control. Preserve that negative result. Next, examine whether the shared
    Rust observation rule distinguishes batch noise from actual regression, then
    rerun the same controls; do not count more reports or tuned seeds as progress.
+   The [fixed-model probe](../benchmarks/results/2026-10-01-vision-feedback-stationarity/README.md)
+   now shows substantial gate activity on all six frozen initial/final models,
+   despite stable full-pass loss. Next implement an opt-in, checkpointed Rust
+   observation window and compare it with the existing default. Coverage-based
+   aggregation is a candidate, not a demonstrated quality or stability improvement.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the
