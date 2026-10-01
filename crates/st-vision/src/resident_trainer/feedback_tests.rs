@@ -50,6 +50,8 @@ fn feedback_configuration_is_opt_in_and_validated_before_execution() {
     assert!(ResidentVisionTrainerConfig::from_json(&value.to_string()).is_err());
     value["optimizer_feedback"] = json!({"unknown": true});
     assert!(ResidentVisionTrainerConfig::from_json(&value.to_string()).is_err());
+    value["optimizer_feedback"] = json!({"loss_floor": 1e-310});
+    assert!(ResidentVisionTrainerConfig::from_json(&value.to_string()).is_err());
 }
 
 #[test]

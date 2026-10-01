@@ -63,7 +63,8 @@ try {
   pipeline.addNormalize(new Float32Array([0.5]), new Float32Array([0.25]));
   const template = pipeline.checkpointJson();
   const config = JSON.stringify(reference.config);
-  for (const [key, value] of [["model_seed", 43], ["shuffle_seed", "01"], ["batch_size", 3]]) {
+  for (const [key, value] of [["model_seed", 43], ["shuffle_seed", "01"], ["batch_size", 3],
+    ["optimizer_feedback", {loss_floor: 1e-310}]]) {
     reject(() => ResidentVisionTrainer.createWithPipeline(device, dataset, fixture.dataset_sha256,
       JSON.stringify({...reference.config, [key]: value}), pipeline), "invalid config " + key);
   }
