@@ -7,6 +7,9 @@ use serde_json::{json, Value};
 use st_tensor::Tensor;
 use std::process::Command;
 
+#[path = "control_tests.rs"]
+mod control_tests;
+
 const DATA_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn device() -> Option<TensorDevice> {

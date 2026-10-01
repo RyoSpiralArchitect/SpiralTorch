@@ -174,6 +174,18 @@ impl WasmResidentVisionTrainer {
         serde_json::to_string(self.inner.state()).map_err(js_error)
     }
 
+    #[wasm_bindgen(js_name = applyZSpaceMetaOptimizerReportJson)]
+    pub fn apply_zspace_meta_optimizer_report_json(
+        &mut self,
+        report: &str,
+    ) -> Result<String, JsValue> {
+        let receipt = self
+            .inner
+            .apply_zspace_meta_optimizer_report_json(report)
+            .map_err(js_error)?;
+        serde_json::to_string(&receipt).map_err(js_error)
+    }
+
     #[wasm_bindgen(getter, js_name = hasPendingUpdate)]
     pub fn has_pending_update(&self) -> bool {
         self.inner.has_pending_update()

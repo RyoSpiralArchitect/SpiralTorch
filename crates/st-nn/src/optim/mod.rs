@@ -13,6 +13,9 @@ use st_core::runtime::zspace_optimizer::{
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorError};
 use std::f32::consts::PI;
 
+mod parameter_control;
+pub use parameter_control::ZSpaceParameterControlState;
+
 /// Trait implemented by adapters that emit local learning-rate multipliers based on
 /// spectral statistics extracted from Z-space gradients.
 pub trait LocalLearningRateAdapter {
@@ -150,7 +153,7 @@ fn checked_scaled_learning_rate(rate: f32, factor: f32) -> PureResult<f32> {
 
 /// Audit receipt for applying one Rust-validated meta-optimizer control to
 /// model-parameter learning rates.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub struct ZSpaceParameterControlReceipt {
     pub control_contract_version: &'static str,
     pub control_kind: &'static str,
@@ -164,6 +167,13 @@ pub struct ZSpaceParameterControlReceipt {
     pub source_learning_rate: f64,
     pub source_effective_learning_rate: f64,
     pub changed: bool,
+}
+
+impl ZSpaceParameterControlReceipt {
+    /// Publish the same control observation from host or resident parameter owners.
+    pub fn emit(self, scope: &'static str) {
+        emit_parameter_control_receipt(scope, self);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

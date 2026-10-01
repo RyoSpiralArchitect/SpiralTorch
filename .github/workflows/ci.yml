@@ -442,6 +442,7 @@ jobs:
         run: |
           python -I -m unittest discover -s bindings/st-py/tests -p test_vision_resident_training.py
           python -I -m unittest discover -s bindings/st-py/tests -p test_vision_trainer_clients.py
+          python -I -m unittest discover -s bindings/st-py/tests -p test_vision_trainer_control.py
           python -I tools/test_vision_classifier_handoff.py
           python -I tools/test_vision_trainer_matched_learning.py
       - name: Public vision input checkpoint and native replay fixture
