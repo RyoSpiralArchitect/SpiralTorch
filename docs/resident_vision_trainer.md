@@ -79,9 +79,11 @@ boundary keeps that boundary even if the live trainer continues or drops.
 The same Rust implementation compiles for wasm32 with `settle_async()` and
 checkpoint `read_async()`. Dropping a settlement future keeps the pending update
 so it can be observed again. A canceled checkpoint mapping only drops that frozen
-snapshot; the trainer remains settled. This does not yet expose a JavaScript
-DataLoader or a new Python trainer binding, and compilation alone is not evidence
-of real-browser training restart.
+snapshot; the trainer remains settled. The [thin clients](resident_vision_trainer_clients.md)
+now expose the same owner in Python and WASM, including in-memory datasets,
+explicit settlement and combined checkpoints. This does not add a general-purpose
+JavaScript DataLoader. Compilation alone is not evidence of browser restart;
+the client guide describes actual fresh-document and cross-runtime replay.
 
 ## Validation
 
@@ -103,5 +105,5 @@ cargo check --locked -p st-vision --features wgpu --target wasm32-unknown-unknow
 ```
 
 This is a restart/correctness gate, not a throughput or real-image quality claim.
-The next work is thin client exposure, actual browser continuation, and connecting
-Rust Z-space optimizer control while preserving the fixed-SGD matched baseline.
+The next work is connecting Rust Z-space optimizer control while preserving the
+fixed-SGD matched baseline, and measuring transfer-inclusive learning throughput.

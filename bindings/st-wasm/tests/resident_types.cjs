@@ -240,9 +240,45 @@ function checkVisionTrainingContract(types, label) {
   console.log(label + " resident vision training TypeScript contract passed");
 }
 
+function checkVisionTrainerContract(types, label) {
+  const get = name => {
+    const value = types.match(new RegExp("^( *)export class " + name + " \\{[\\s\\S]*?^\\1\\}", "m"))?.[0];
+    assert.ok(value, label + " exports " + name);
+    return value;
+  };
+  const dataset = get("TensorVisionDataset"), trainer = get("ResidentVisionTrainer");
+  assert.match(dataset, /constructor\(descriptor: string\)/);
+  assert.match(dataset, /push\(channels: number, height: number, width: number, data: Float32Array, class_id: number, label\?: string \| null\): void/);
+  assert.match(dataset, /readonly length: number/);
+  assert.match(trainer, /private constructor\(\)/);
+  assert.match(trainer, /static defaultConfigJson\(\): string/);
+  const args = "device: WgpuTensorDevice, dataset: TensorVisionDataset, dataset_sha256: string, ";
+  for (const [name, arg] of [["create", "config_json"], ["fromCheckpointJson", "payload"]]) {
+    assert.match(trainer, new RegExp("static " + name + "\\(" + args + arg + ": string\\): ResidentVisionTrainer"));
+    assert.match(trainer, new RegExp("static " + name + "WithPipeline\\(" + args + arg + ": string, pipeline: VisionTransformPipeline\\): ResidentVisionTrainer"));
+  }
+  assert.match(trainer, /restoreCheckpointJson\(payload: string\): void/);
+  assert.match(trainer, /stateJson\(\): string/);
+  assert.match(trainer, /readonly hasPendingUpdate: boolean/);
+  assert.match(trainer, /submitNext\(\): ResidentVisionSubmission/);
+  assert.match(trainer, /settle\(\): Promise<ResidentVisionStepOutcome>/);
+  assert.match(trainer, /checkpointSnapshot\(\): VisionTrainingCheckpointSnapshot/);
+  const submission = get("ResidentVisionSubmission"), outcome = get("ResidentVisionStepOutcome");
+  for (const handle of [submission, outcome]) assert.match(handle, /readonly attemptedRevision: bigint/);
+  assert.match(submission, /readonly epoch: bigint/);
+  assert.match(submission, /readonly learningRate: number/);
+  assert.match(submission, /labels\(\): \(string \| null\)\[\]/);
+  assert.match(submission, /images\(\): WgpuTensor/);
+  assert.match(submission, /lossTensor\(\): WgpuTensor/);
+  assert.match(outcome, /readonly accepted: boolean/);
+  assert.match(get("VisionTrainingCheckpointSnapshot"), /readJson\(\): Promise<string>/);
+  console.log(label + " unified vision trainer TypeScript contract passed");
+}
+
 for (const [source, label] of [[types, "generated"], [shipped, "shipped"]]) {
   checkMatmulContract(source, label);
   checkRankContract(source, label);
   checkNnContract(source, label);
   checkVisionTrainingContract(source, label);
+  checkVisionTrainerContract(source, label);
 }

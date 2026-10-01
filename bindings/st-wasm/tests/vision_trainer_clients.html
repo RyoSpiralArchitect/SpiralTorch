@@ -1,0 +1,164 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust-owned vision trainer restart</title>
+<style>
+body { background: #eef1e7; color: #22362f; font: 17px Georgia, serif; margin: 3rem; }
+pre { white-space: pre-wrap; font: 14px ui-monospace, monospace; padding: 1.4rem; background: #fffdf5; }
+</style>
+<h1>Rust-owned vision trainer restart</h1>
+<p>Model, input stream, shuffle, transforms and learning-rate schedule remain Rust-owned.</p>
+<pre id="result" data-status="running">Preparing WebGPU...</pre>
+<script type="module">
+import init, {WgpuTensorDevice, TensorVisionDataset, VisionTransformPipeline,
+  ResidentVisionTrainer} from "/module/spiraltorch_wasm.js";
+
+const output = document.querySelector("#result");
+const query = new URLSearchParams(location.search);
+const mode = query.get("mode"), schedule = query.get("schedule");
+const report = {schema: "vision_trainer_browser.v1", mode, schedule, passed: false};
+const check = (ok, message) => { if (!ok) throw Error(message); };
+const equal = (a, b, message) => check(typeof a === "bigint" ? a === b : JSON.stringify(a) === JSON.stringify(b), message);
+const reject = (action, message) => {
+  try { action(); } catch { return; }
+  throw Error("accepted " + message);
+};
+const bits = a => Array.from(new Uint32Array(new Float32Array(a).buffer));
+async function read(tensor) {
+  const snapshot = tensor.snapshot();
+  try { return await snapshot.readValues(); }
+  finally { snapshot.free(); tensor.free(); }
+}
+async function checkpoint(trainer) {
+  const snapshot = trainer.checkpointSnapshot();
+  try { return await snapshot.readJson(); } finally { snapshot.free(); }
+}
+function parameters(payload) {
+  const model = JSON.parse(payload).model;
+  return [...model.backbone.parameters, ...model.head];
+}
+
+try {
+  check(["control", "prefix", "resume", "python"].includes(mode), "invalid mode");
+  check(["constant", "cosine"].includes(schedule), "invalid schedule");
+  await init();
+  const fixture = await (await fetch("/python.json")).json();
+  check(fixture.schema === "vision_trainer_client_fixture.v1", "fixture schema");
+  const reference = fixture.cases.find(c => c.scheduled === (schedule === "cosine"));
+  check(reference, "missing schedule case");
+  const device = await WgpuTensorDevice.create();
+  report.adapter = device.adapterInfo();
+  report.user_agent = navigator.userAgent;
+  check(!/cpu/i.test(report.adapter.device_type), "CPU adapter is not GPU evidence");
+  const dataset = new TensorVisionDataset("CIFAR10");
+  for (const [data, target, label] of fixture.samples) dataset.push(3, 4, 4, new Float32Array(data), target, label);
+  for (const bad of [-1, 1.5, 2 ** 32, "3", NaN, null])
+    reject(() => dataset.push(bad, 4, 4, new Float32Array(48), 0), "invalid sample dimension");
+  reject(() => dataset.push(3, 4, 4, new Float64Array(48), 0), "wrong typed array");
+  reject(() => dataset.push(3, 4, 4, new Float32Array(48), 16777217), "rounded class id");
+  equal(dataset.length, 20, "invalid pushes mutated dataset");
+  const pipeline = VisionTransformPipeline.createCpu(29);
+  pipeline.addRandomHorizontalFlip(0.5);
+  pipeline.addNormalize(new Float32Array([0.5]), new Float32Array([0.25]));
+  const template = pipeline.checkpointJson();
+  const config = JSON.stringify(reference.config);
+  for (const [key, value] of [["model_seed", 43], ["shuffle_seed", "01"], ["batch_size", 3]]) {
+    reject(() => ResidentVisionTrainer.createWithPipeline(device, dataset, fixture.dataset_sha256,
+      JSON.stringify({...reference.config, [key]: value}), pipeline), "invalid config " + key);
+  }
+  let prior, trainer;
+  if (mode === "resume") {
+    prior = await (await fetch(`/saved/${schedule}-prefix.json`)).json();
+    check(prior.passed && prior.records.length === 37, "incomplete prefix");
+    trainer = ResidentVisionTrainer.fromCheckpointJsonWithPipeline(device, dataset,
+      fixture.dataset_sha256, prior.checkpoint, pipeline);
+  } else if (mode === "python") {
+    trainer = ResidentVisionTrainer.fromCheckpointJsonWithPipeline(device, dataset,
+      fixture.dataset_sha256, reference.prefix, pipeline);
+  } else {
+    trainer = ResidentVisionTrainer.createWithPipeline(device, dataset, fixture.dataset_sha256, config, pipeline);
+  }
+  report.initial = await checkpoint(trainer);
+  if (prior) equal(report.initial, prior.checkpoint, "browser checkpoint restore");
+  if (mode === "python") equal(report.initial, reference.prefix, "native checkpoint restore");
+  equal(pipeline.checkpointJson(), template, "factory mutated pipeline template");
+  const frozen = trainer.checkpointSnapshot();
+  dataset.push(3, 4, 4, new Float32Array(48), 0, "new");
+  pipeline.addCenterCrop(2, 2);
+  const count = mode === "control" ? 100 : mode === "prefix" ? 37 : 63;
+  report.records = [];
+  let held;
+  for (let i = 0; i < count; i++) {
+    const before = JSON.parse(trainer.stateJson());
+    const submitted = trainer.submitNext();
+    check(trainer.hasPendingUpdate, "missing pending marker");
+    reject(() => trainer.submitNext(), "pending submission");
+    reject(() => trainer.checkpointSnapshot(), "pending checkpoint");
+    reject(() => trainer.restoreCheckpointJson(report.initial), "pending restore");
+    const labels = submitted.labels();
+    check(!labels.includes("new"), "dataset copy was not frozen");
+    const images = await read(submitted.images());
+    const receipt = await trainer.settle();
+    check(!trainer.hasPendingUpdate, "pending marker after settlement");
+    equal(receipt.attemptedRevision, submitted.attemptedRevision, "receipt revision");
+    equal(receipt.accepted, !labels.includes("7"), "wrong acceptance");
+    const after = JSON.parse(trainer.stateJson());
+    if (!receipt.accepted) equal(before.learning_rate, after.learning_rate, "rejection advanced scheduler");
+    report.records.push({revision: Number(receipt.attemptedRevision), epoch: Number(submitted.epoch),
+      rate_bits: bits([submitted.learningRate])[0], labels, images_bits: bits(images), accepted: receipt.accepted});
+    if (i === count - 1) held = submitted.images();
+    submitted.free(); receipt.free();
+    if (i % 10 === 0) output.textContent = `${schedule} / ${mode}: ${i + 1} of ${count} attempts`;
+  }
+  equal(await frozen.readJson(), report.initial, "frozen checkpoint changed");
+  reject(() => frozen.readJson(), "consumed snapshot");
+  frozen.free();
+  report.checkpoint = await checkpoint(trainer);
+  const corrupted = JSON.parse(report.checkpoint);
+  corrupted.trainer.accepted_updates++;
+  reject(() => trainer.restoreCheckpointJson(JSON.stringify(corrupted)), "invalid checkpoint hash");
+  equal(await checkpoint(trainer), report.checkpoint, "failed restore mutated trainer");
+  report.state = JSON.parse(trainer.stateJson());
+  if (mode === "resume") {
+    const control = await (await fetch(`/saved/${schedule}-control.json`)).json();
+    check(control.passed && control.records.length === 100, "incomplete control");
+    equal([...prior.records, ...report.records], control.records, "resumed batch/transform/rate sequence");
+    equal(report.checkpoint, control.checkpoint, "resumed final model/input/trainer checkpoint");
+    report.bitwise_resume = true;
+  }
+  if (mode === "python") {
+    equal(report.records, reference.records.slice(37), "Python-to-browser input/rate/acceptance continuation");
+    const actual = JSON.parse(report.checkpoint), expected = JSON.parse(reference.final);
+    equal(actual.input, expected.input, "Python-to-browser final input RNGs");
+    equal(actual.trainer, expected.trainer, "Python-to-browser final trainer state");
+    const a = parameters(report.checkpoint), b = parameters(reference.final);
+    equal(a.length, b.length, "parameter count");
+    let maximum = 0, values = 0;
+    for (let i = 0; i < a.length; i++) {
+      equal(a[i].name, b[i].name, "parameter role");
+      equal(a[i].shape, b[i].shape, "parameter shape");
+      equal(a[i].values.length, b[i].values.length, "parameter value count");
+      for (let j = 0; j < a[i].values.length; j++) {
+        const error = Math.abs(a[i].values[j] - b[i].values[j]) / (1 + Math.abs(b[i].values[j]));
+        check(Number.isFinite(error) && error <= 2e-4, `cross-runtime parameter error ${i}/${j}: ${error}`);
+        maximum = Math.max(maximum, error); values++;
+      }
+    }
+    report.cross_runtime = {parameter_tensors: a.length, parameter_values: values, max_scaled_error: maximum, bound: 2e-4};
+  }
+  trainer.free(); dataset.free(); pipeline.free();
+  equal((await read(held)).length, 96, "retained submission lifetime");
+  device.free();
+  report.passed = true;
+} catch (error) {
+  report.error = String(error?.stack ?? error);
+}
+try {
+  const saved = await fetch(`/result/${schedule}-${mode}.json`, {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(report)});
+  check(saved.ok, "result persistence failed");
+} catch (error) { report.passed = false; report.error = String(error); }
+output.textContent = JSON.stringify({passed: report.passed, mode, schedule,
+  adapter: report.adapter, attempts: report.records?.length, state: report.state,
+  bitwise_resume: report.bitwise_resume, cross_runtime: report.cross_runtime, error: report.error}, null, 2);
+output.dataset.status = report.passed ? "done" : "error";
+</script>

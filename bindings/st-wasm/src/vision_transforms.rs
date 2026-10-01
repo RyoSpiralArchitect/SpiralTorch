@@ -15,7 +15,7 @@ fn error(err: impl std::fmt::Display) -> JsValue {
 
 #[wasm_bindgen(js_name = VisionTransformPipeline)]
 pub struct WasmVisionTransformPipeline {
-    inner: TransformPipeline,
+    pub(crate) inner: TransformPipeline,
     gpu: bool,
     tensor_device: Option<TensorDevice>,
     adapter_info: Option<String>,

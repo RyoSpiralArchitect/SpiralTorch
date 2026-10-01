@@ -69,6 +69,10 @@ pub use vision_transforms::*;
 mod vision_resident;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
 pub use vision_resident::*;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+mod vision_trainer;
+#[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+pub use vision_trainer::*;
 
 pub use api_llm_policy::*;
 pub use autograd::*;
