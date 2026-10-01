@@ -21,6 +21,13 @@ produce frequent gate closures under changing batches, while full-pass mean loss
 remains stable. This identifies a limitation in the observation population, not
 proof that a replacement policy improves actual training.
 
+The [completed observation-window comparison](../benchmarks/results/2026-10-01-vision-feedback-window/README.md)
+now eliminates gate activity on those frozen losses, but does not improve
+learning over nominal SGD and delays synthetic regression detection. All 12
+window-ablation arms resume exactly from 37/400. Keep width one as the default;
+do not interpret quieter observations as a quality win or retune this development
+set until one appears.
+
 ## Four Matched Arms
 
 | Arm | Nominal rate | Proposal | Rust loss gate |
@@ -86,3 +93,34 @@ Per-epoch official test-subset evaluation is development evidence, not an
 untouched final test. Per-step readbacks and sequential frameworks rule out
 throughput or peak-memory claims. The gate guards the external proposal: closing
 it returns to the nominal rate, which increases the rate for a proposal below one.
+
+## Compare The Rust Observation Window
+
+`--feedback-window-observations 80` changes only the feedback arm's Rust loss
+aggregation. All other gate settings retain their defaults, and the other three
+arms keep the same rules. The dose-matched rate is recomputed from that run;
+do not reuse the old gate's retrospective rate. Recipe verification binds the
+requested width to the actual trainer configuration. The 37/363 split now lies
+inside a partial 80-observation window, whose state must also resume exactly.
+
+The width is derived from this task's 1,280 images / batch 16, not selected by
+development accuracy. Five passes provide only four completed-window comparisons;
+this is a substantial change in response cadence, not an equivalent gate with
+less noise. See [window semantics](resident_vision_feedback.md#optional-observation-windows).
+
+First replay the retained frozen-model observations with a newly built wheel:
+
+```bash
+python -I tools/compare_vision_feedback_windows.py \
+  --stationarity "$FROZEN_PROBE_DIR" --verification "$FROZEN_VERIFICATION_JSON" \
+  --output "$NEW_WINDOW_COMPARISON_DIR"
+```
+
+This requires exact reproduction of all recorded default gate trajectories,
+then compares windowed trajectories and partial-state restart. A separate
+synthetic abrupt-regression sequence records detection delay at three positions
+inside the window; neither this sequence nor a quieter frozen gate establishes
+learning quality. The original binary-bound probe verifier remains unchanged.
+Run the four-arm command above in a new directory with
+`--feedback-window-observations 80` to evaluate actual learning under the same
+controls, not just gate activity. Keep the old results and failed criteria.

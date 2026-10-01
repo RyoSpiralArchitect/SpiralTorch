@@ -77,6 +77,8 @@ def compare_seed(directory, recipe, seed):
         require({key: arm_recipe[key] for key in expected_common} == expected_common
                 and arm_recipe["rate"] == rate and arm_recipe["control_scale"] == scale
                 and arm_recipe["optimizer_feedback"] is (arm == "loss_feedback")
+                and arm_recipe.get("feedback_window_observations", 1) == (
+                    recipe.get("feedback_window_observations", 1) if arm == "loss_feedback" else 1)
                 and arm_recipe["schedule"] == "constant" and not arm_recipe["horizontal_flip"],
                 "arm recipe differs from declared ablation")
         for key in ("data", "dataset_sha256", "adapter", "source_sha256", "native_binary_sha256", "environment"):
@@ -122,7 +124,8 @@ def run_arm(args, directory, seed, arm, rate):
     if arm in ("fixed_proposal", "loss_feedback"):
         command.extend(("--control-scale", repr(args.control_scale)))
     if arm == "loss_feedback":
-        command.append("--optimizer-feedback")
+        command.extend(("--optimizer-feedback", "--feedback-window-observations",
+                        str(args.feedback_window_observations)))
     subprocess.run(command, check=True)
     runner.write_json(directory / "verification.json", verify_arm(directory))
 
@@ -166,6 +169,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--rate", type=float, default=0.01)
     parser.add_argument("--control-scale", type=float, default=0.5)
+    parser.add_argument("--feedback-window-observations", type=int, default=1,
+                        help="accepted losses per Rust gate window; other gate settings remain defaults")
     parser.add_argument("--restart-at", type=int, default=37)
     parser.add_argument("--verify", type=Path, help="recheck a retained run without ML imports; output is a new JSON file")
     parser.add_argument("--source-ref", help="measured runner revision for --verify")
@@ -176,6 +181,8 @@ def main():
         parser.error("data-root and a proposal scale strictly between zero and one are required")
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("duplicate seeds")
+    if not 1 <= args.feedback_window_observations < 2 ** 53:
+        parser.error("feedback window must be a positive exact integer")
     args.output.mkdir(parents=True, exist_ok=False)
     recipe = {key: value for key, value in vars(args).items() if key not in ("data_root", "output", "verify", "source_ref")}
     result = dict(schema="spiraltorch.vision.feedback_ablation.v1", status="error", boundary=BOUNDARY,

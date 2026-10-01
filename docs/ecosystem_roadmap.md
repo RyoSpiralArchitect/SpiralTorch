@@ -134,9 +134,17 @@ browser real-image restart, throughput or a Z-space policy advantage.
    rerun the same controls; do not count more reports or tuned seeds as progress.
    The [fixed-model probe](../benchmarks/results/2026-10-01-vision-feedback-stationarity/README.md)
    now shows substantial gate activity on all six frozen initial/final models,
-   despite stable full-pass loss. Next implement an opt-in, checkpointed Rust
-   observation window and compare it with the existing default. Coverage-based
-   aggregation is a candidate, not a demonstrated quality or stability improvement.
+   despite stable full-pass loss. An opt-in, checkpointed
+   [Rust observation window](resident_vision_feedback.md#optional-observation-windows)
+   now preserves partial aggregates and the original default. Native/Python/WASM
+   checks cover windowed transitions and restart. The
+   [window comparison](../benchmarks/results/2026-10-01-vision-feedback-window/README.md)
+   now completes matched learning and latency probes: frozen-model gate activity
+   disappears, but regression detection is delayed and learning does not improve
+   over the relevant controls. Retain the default, preserve this negative result,
+   and advance transfer-inclusive execution measurements rather than tune until
+   these development seeds favor a window. Model-derived proposal production and
+   its latent-state restart remain separate future optimizer gates.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

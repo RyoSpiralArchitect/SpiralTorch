@@ -1,0 +1,15 @@
+{
+  "schema": "spiraltorch.vision.feedback_ablation_verification.v1",
+  "status": "passed",
+  "boundary": "Prescribed rate proposal plus existing Rust loss gate on a shared small ConvNeXt. Retrospective integrated-rate control; no geometric-update, full producer, speed or untouched-test claim.",
+  "summary": {
+    "file": "summary.json",
+    "bytes": 54955,
+    "sha256": "1948e51ff1bca4dd717fbb629ca25b8060fa49e8853b405af87407d6aa5af4a9"
+  },
+  "seeds": [
+    17,
+    29,
+    43
+  ]
+}

@@ -396,6 +396,9 @@ jobs:
           node bindings/st-wasm/tests/vision_input_checkpoint.cjs \
             "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
             "$RUNNER_TEMP/vision-input-checkpoint-python/vision-input-checkpoint.json"
+          node bindings/st-wasm/tests/zspace_feedback_window.cjs \
+            "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
+            "$RUNNER_TEMP/vision-input-checkpoint-python/feedback-window.json"
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
@@ -448,15 +451,22 @@ jobs:
           python -I tools/test_vision_trainer_matched_learning.py
           python -I tools/test_vision_feedback_ablation.py
           python -I tools/test_vision_feedback_stationarity.py
+          python -I tools/test_vision_feedback_windows.py
       - name: Public vision input checkpoint and native replay fixture
         env:
           SPIRALTORCH_INPUT_CHECKPOINT_HANDOFF: ${{ runner.temp }}/vision-input-checkpoint.json
         run: python -I bindings/st-py/tests/test_vision_input_checkpoint.py
+      - name: Public Rust feedback window and native replay fixture
+        env:
+          SPIRALTORCH_FEEDBACK_WINDOW_HANDOFF: ${{ runner.temp }}/feedback-window.json
+        run: python -I bindings/st-py/tests/test_zspace_feedback_window.py
       - name: Share fresh Python input checkpoint for WASM replay
         uses: actions/upload-artifact@v7
         with:
           name: vision-input-checkpoint-python
-          path: ${{ runner.temp }}/vision-input-checkpoint.json
+          path: |
+            ${{ runner.temp }}/vision-input-checkpoint.json
+            ${{ runner.temp }}/feedback-window.json
           if-no-files-found: error
           retention-days: 1
       - name: Sanity-check packaged stubs

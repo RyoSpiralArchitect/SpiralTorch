@@ -1,0 +1,13 @@
+{
+  "schema": "spiraltorch.vision.feedback_window_wasm_replay.v1",
+  "status": "passed",
+  "scope": "Retained-loss gate replay under wasm32, not image inference or browser GPU training",
+  "source_summary_sha256": "2dab88cad6114905a3e2608a0bbf0f76f9d052221fa0b4bf7ac11f8b21b77f17",
+  "wasm_sha256": "1dc52210482c2abc05a226e15c077b6a3378eecb7df9ebff2c048634152ea724",
+  "verifier_sha256": "6dae5244e782e54ff2798f2c48c97280c9307480d58b991a689c67c0dd06c1a7",
+  "cases": 6,
+  "streams": 36,
+  "observations": 14400,
+  "all_states_exact": true,
+  "partial_restart_at": 37
+}

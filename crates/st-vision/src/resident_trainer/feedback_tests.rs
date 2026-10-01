@@ -19,6 +19,14 @@ fn controlled(
     device: &TensorDevice,
     scheduled: bool,
 ) -> ResidentVisionTrainer<TensorVisionDataset> {
+    controlled_with_config(device, scheduled, config())
+}
+
+fn controlled_with_config(
+    device: &TensorDevice,
+    scheduled: bool,
+    config: ZSpaceOptimizerFeedbackConfig,
+) -> ResidentVisionTrainer<TensorVisionDataset> {
     let mut trainer = ResidentVisionTrainer::new(
         &model(),
         device.clone(),
@@ -27,7 +35,7 @@ fn controlled(
         rate(scheduled),
     )
     .unwrap();
-    trainer.enable_zspace_optimizer_feedback(config()).unwrap();
+    trainer.enable_zspace_optimizer_feedback(config).unwrap();
     trainer
         .apply_zspace_meta_optimizer_report(&control_tests::report(1, 0.5))
         .unwrap();
@@ -56,8 +64,20 @@ fn feedback_configuration_is_opt_in_and_validated_before_execution() {
 
 #[test]
 fn actual_losses_drive_the_core_gate_and_all_weights_match_explicit_rates() {
+    losses_drive_core_and_parameters(config());
+}
+
+#[test]
+fn windowed_losses_drive_the_same_core_and_parameter_owner() {
+    losses_drive_core_and_parameters(ZSpaceOptimizerFeedbackConfig {
+        loss_window_observations: 4,
+        ..config()
+    });
+}
+
+fn losses_drive_core_and_parameters(feedback_config: ZSpaceOptimizerFeedbackConfig) {
     let Some(device) = device() else { return };
-    let mut trainer = controlled(&device, false);
+    let mut trainer = controlled_with_config(&device, false, feedback_config.clone());
     let mut reference = ResidentVisionTrainer::new(
         &model(),
         device.clone(),
@@ -66,14 +86,14 @@ fn actual_losses_drive_the_core_gate_and_all_weights_match_explicit_rates() {
         rate(false),
     )
     .unwrap();
-    let mut feedback = initialize_zspace_optimizer_feedback(config())
+    let mut feedback = initialize_zspace_optimizer_feedback(feedback_config.clone())
         .unwrap()
         .state;
     let mut changed = 0;
     let mut rejected = 0;
     for step in 1..=30 {
         let control = control_zspace_optimizer_feedback(ZSpaceOptimizerFeedbackControlRequest {
-            config: config(),
+            config: feedback_config.clone(),
             state: feedback.clone(),
             target_step: step,
             proposed_learning_rate_scale: 0.5,
@@ -103,7 +123,7 @@ fn actual_losses_drive_the_core_gate_and_all_weights_match_explicit_rates() {
             let loss = submitted.loss.snapshot().unwrap().read().unwrap()[0];
             let observed =
                 observe_zspace_optimizer_feedback(ZSpaceOptimizerFeedbackObserveRequest {
-                    config: config(),
+                    config: feedback_config.clone(),
                     state: feedback,
                     observation: ZSpaceOptimizerFeedbackObservation {
                         step,
@@ -146,66 +166,91 @@ fn actual_losses_drive_the_core_gate_and_all_weights_match_explicit_rates() {
 fn feedback_restart_preserves_loss_history_rates_and_every_weight() {
     let Some(device) = device() else { return };
     for scheduled in [false, true] {
-        let mut trainer = controlled(&device, scheduled);
-        let initial = checkpoint(&trainer);
-        assert_eq!(initial.schema, FEEDBACK_SCHEMA);
-        assert!(trainer.enable_zspace_optimizer_feedback(config()).is_err());
-        steps(&mut trainer, 37);
-        let captured = checkpoint(&trainer);
-        let saved = captured.to_json().unwrap();
-        let decoded: VisionTrainingCheckpoint = serde_json::from_str(&saved).unwrap();
-        assert_eq!(captured.trainer, decoded.trainer);
-        let saved = VisionTrainingCheckpoint::from_json(&saved).unwrap();
-        let mut restored = ResidentVisionTrainer::from_checkpoint(
-            device.clone(),
-            loader(&device, 4, 20),
-            DATA_ID,
-            &saved,
-        )
-        .unwrap();
-        assert_eq!(steps(&mut trainer, 63), steps(&mut restored, 63));
-        let current = checkpoint(&trainer);
-        assert_eq!(
-            current.to_json().unwrap(),
-            checkpoint(&restored).to_json().unwrap()
-        );
-        assert_eq!(
-            current
-                .trainer
-                .optimizer_feedback()
-                .unwrap()
-                .state()
-                .control_step,
-            100
-        );
-        assert!(trainer.enable_zspace_optimizer_feedback(config()).is_err());
+        for window_size in [1, 13] {
+            let mut trainer = controlled_with_config(
+                &device,
+                scheduled,
+                ZSpaceOptimizerFeedbackConfig {
+                    loss_window_observations: window_size,
+                    ..config()
+                },
+            );
+            let initial = checkpoint(&trainer);
+            assert_eq!(initial.schema, FEEDBACK_SCHEMA);
+            assert!(trainer.enable_zspace_optimizer_feedback(config()).is_err());
+            steps(&mut trainer, 37);
+            let captured = checkpoint(&trainer);
+            if window_size > 1 {
+                assert!(
+                    captured
+                        .trainer
+                        .optimizer_feedback()
+                        .unwrap()
+                        .state()
+                        .loss_window
+                        .as_ref()
+                        .unwrap()
+                        .observations
+                        > 0
+                );
+            }
+            let saved = captured.to_json().unwrap();
+            let decoded: VisionTrainingCheckpoint = serde_json::from_str(&saved).unwrap();
+            assert_eq!(captured.trainer, decoded.trainer);
+            let saved = VisionTrainingCheckpoint::from_json(&saved).unwrap();
+            let mut restored = ResidentVisionTrainer::from_checkpoint(
+                device.clone(),
+                loader(&device, 4, 20),
+                DATA_ID,
+                &saved,
+            )
+            .unwrap();
+            assert_eq!(steps(&mut trainer, 63), steps(&mut restored, 63));
+            let current = checkpoint(&trainer);
+            assert_eq!(
+                current.to_json().unwrap(),
+                checkpoint(&restored).to_json().unwrap()
+            );
+            assert_eq!(
+                current
+                    .trainer
+                    .optimizer_feedback()
+                    .unwrap()
+                    .state()
+                    .control_step,
+                100
+            );
+            assert!(trainer.enable_zspace_optimizer_feedback(config()).is_err());
 
-        let mut bad_clock = current.clone();
-        let mut value =
-            serde_json::to_value(bad_clock.trainer.optimizer_feedback.as_ref().unwrap()).unwrap();
-        value["state"]["control_step"] = json!(101);
-        bad_clock.trainer.optimizer_feedback = Some(serde_json::from_value(value).unwrap());
-        bad_clock.trainer_sha256 = digest(&bad_clock.trainer).unwrap();
-        let mut bad_config = current.clone();
-        let mut value =
-            serde_json::to_value(bad_config.trainer.optimizer_feedback.as_ref().unwrap()).unwrap();
-        value["config"]["maximum_gate"] = json!(0.);
-        bad_config.trainer.optimizer_feedback = Some(serde_json::from_value(value).unwrap());
-        bad_config.trainer_sha256 = digest(&bad_config.trainer).unwrap();
-        let mut downgraded = current.clone();
-        downgraded.schema = CONTROLLED_SCHEMA.into();
-        for corrupt in [bad_clock, bad_config, downgraded] {
-            assert!(trainer.restore_checkpoint(&corrupt).is_err());
+            let mut bad_clock = current.clone();
+            let mut value =
+                serde_json::to_value(bad_clock.trainer.optimizer_feedback.as_ref().unwrap())
+                    .unwrap();
+            value["state"]["control_step"] = json!(101);
+            bad_clock.trainer.optimizer_feedback = Some(serde_json::from_value(value).unwrap());
+            bad_clock.trainer_sha256 = digest(&bad_clock.trainer).unwrap();
+            let mut bad_config = current.clone();
+            let mut value =
+                serde_json::to_value(bad_config.trainer.optimizer_feedback.as_ref().unwrap())
+                    .unwrap();
+            value["config"]["maximum_gate"] = json!(0.);
+            bad_config.trainer.optimizer_feedback = Some(serde_json::from_value(value).unwrap());
+            bad_config.trainer_sha256 = digest(&bad_config.trainer).unwrap();
+            let mut downgraded = current.clone();
+            downgraded.schema = CONTROLLED_SCHEMA.into();
+            for corrupt in [bad_clock, bad_config, downgraded] {
+                assert!(trainer.restore_checkpoint(&corrupt).is_err());
+                assert_eq!(
+                    checkpoint(&trainer).to_json().unwrap(),
+                    current.to_json().unwrap()
+                );
+            }
+            trainer.restore_checkpoint(&initial).unwrap();
             assert_eq!(
                 checkpoint(&trainer).to_json().unwrap(),
-                current.to_json().unwrap()
+                initial.to_json().unwrap()
             );
         }
-        trainer.restore_checkpoint(&initial).unwrap();
-        assert_eq!(
-            checkpoint(&trainer).to_json().unwrap(),
-            initial.to_json().unwrap()
-        );
     }
 }
 

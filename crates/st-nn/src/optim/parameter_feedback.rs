@@ -63,6 +63,12 @@ impl ZSpaceParameterFeedbackState {
                 .state
                 .relative_loss_delta_ema
                 .is_some_and(|value| value.abs() > f64::MAX / 2.0)
+            || self.state.loss_window.as_ref().is_some_and(|window| {
+                [window.mean, window.previous_mean]
+                    .into_iter()
+                    .flatten()
+                    .any(|value| value.abs() > 2.0 * f64::from(f32::MAX))
+            })
         {
             return Err(error("feedback exceeds the finite f32 loss domain"));
         }
@@ -171,6 +177,40 @@ mod tests {
             let restored: ZSpaceParameterFeedbackState = serde_json::from_value(value).unwrap();
             assert!(restored.preview(0.01, 0.5).is_err(), "{field}");
         }
+    }
+
+    #[test]
+    fn window_means_remain_finite_and_restore_rejects_out_of_domain_means() {
+        let mut state = ZSpaceParameterFeedbackState::new(ZSpaceOptimizerFeedbackConfig {
+            loss_window_observations: 2,
+            loss_floor: MIN_F32_LOSS_FLOOR,
+            relative_delta_ema_alpha: 1.0,
+            ..Default::default()
+        })
+        .unwrap();
+        for loss in [0.0, 0.0, f32::MAX, f32::MAX, -f32::MAX, -f32::MAX] {
+            let (pending, rate) = state.preview(0.01, 0.5).unwrap();
+            state = pending.observe(loss, rate, 0).unwrap();
+            state.validate().unwrap();
+        }
+        let mut encoded = serde_json::to_value(&state).unwrap();
+        encoded["state"]["loss_window"]["previous_mean"] = serde_json::json!(f64::MAX);
+        let restored: ZSpaceParameterFeedbackState = serde_json::from_value(encoded).unwrap();
+        assert!(restored.preview(0.01, 0.5).is_err());
+
+        let mut state = ZSpaceParameterFeedbackState::new(ZSpaceOptimizerFeedbackConfig {
+            loss_window_observations: 3,
+            ..Default::default()
+        })
+        .unwrap();
+        for loss in [1.0, 2.0] {
+            let (pending, rate) = state.preview(0.01, 0.5).unwrap();
+            state = pending.observe(loss, rate, 0).unwrap();
+        }
+        let mut encoded = serde_json::to_value(&state).unwrap();
+        encoded["state"]["loss_window"]["mean"] = serde_json::json!(f64::MAX);
+        let restored: ZSpaceParameterFeedbackState = serde_json::from_value(encoded).unwrap();
+        assert!(restored.preview(0.01, 0.5).is_err());
     }
 
     #[test]

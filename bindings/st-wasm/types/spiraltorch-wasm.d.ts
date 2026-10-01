@@ -3877,6 +3877,8 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ZSpaceOptimizerFeedbackConfigInput = {
+        /** Equal-weight observations per comparison window; omitted means one. */
+        loss_window_observations?: number;
         loss_ema_alpha?: number;
         relative_delta_ema_alpha?: number;
         loss_floor?: number;
@@ -3893,7 +3895,17 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ZSpaceOptimizerFeedbackConfig =
-        Required<ZSpaceOptimizerFeedbackConfigInput>;
+        Required<Omit<ZSpaceOptimizerFeedbackConfigInput, "loss_window_observations">> & {
+            loss_window_observations?: number;
+        };
+
+    export type ZSpaceOptimizerFeedbackLossWindow = {
+        observations_per_window: number;
+        observations: number;
+        completed_windows: number;
+        mean: number | null;
+        previous_mean: number | null;
+    };
 
     export type ZSpaceOptimizerFeedbackState = {
         control_step: number;
@@ -3906,6 +3918,7 @@ declare module "spiraltorch-wasm" {
         regression_streak: number;
         improvement_streak: number;
         halted: boolean;
+        loss_window?: ZSpaceOptimizerFeedbackLossWindow;
     };
 
     export type ZSpaceOptimizerFeedbackObservation = {
@@ -3993,6 +4006,7 @@ declare module "spiraltorch-wasm" {
         relative_loss_delta_ema: number | null;
         action:
             | "initialize"
+            | "await_window"
             | "warmup"
             | "hold"
             | "recover"
