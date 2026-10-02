@@ -85,9 +85,10 @@ def test_causal_control_uses_same_tangent_and_tied_mixing(client):
     assert torch.equal(coordinates.grad, other.grad)
 
 
-def test_causal_oracle_matches_rust_geometric_forward_and_gradient(client):
+@pytest.mark.parametrize("sequence", [5, 128])
+def test_causal_oracle_matches_rust_geometric_forward_and_gradient(client, sequence):
     torch.manual_seed(103)
-    x = torch.randn(2, 5, 3)
+    x = torch.randn(2, sequence, 3)
     x[..., 0] = 1
     x.requires_grad_()
     other = x.detach().clone().requires_grad_()

@@ -1,0 +1,94 @@
+{
+  "schema": "spiraltorch.elliptic_causal_factorial_validation.v1",
+  "status": "completed",
+  "study_id": "2d5860c91905b26b6b29e729b94cfa9c710bb11ade2e4125f827c778a89c3954",
+  "executed_revision": "03cee5fb8c65cffefaf4d60da4c5691a32dc6175",
+  "process_exit_code": 0,
+  "completed_resume_exit_code": 0,
+  "results_sha256": "d7b0ff56b3573c8e9d0a4f790aa95b043a145030afe56f3d302a13729184cd8f",
+  "journal_sha256": "0f00780bbad12cac0a7c2be10dd3f285eb2e177ea2e8f9bb07ff1056dabe76a7",
+  "runs": 12,
+  "steps_per_run": 512,
+  "primary_updates": 6144,
+  "continuation_only_validation_updates": 24,
+  "all_checkpoint_hashes_verified": true,
+  "all_base_freeze_checks_passed": true,
+  "all_next_adapter_and_adam_updates_exact": true,
+  "completed_resume_preserves_results_and_journal": true,
+  "completed_resume_does_not_rerun_endpoints": true,
+  "all_projection_gradients_verified": true,
+  "parameter_count": 8450,
+  "initial_parameter_hashes": {
+    "41:tangent": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+    "41:elliptic": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+    "41:causal_tangent": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+    "41:causal_elliptic": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+    "43:tangent": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+    "43:elliptic": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+    "43:causal_tangent": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+    "43:causal_elliptic": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+    "47:tangent": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+    "47:elliptic": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+    "47:causal_tangent": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+    "47:causal_elliptic": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88"
+  },
+  "pointwise_replays": {
+    "previous_study_id": "45779e67f9c688c2dff5d12f3b68a8a961630785c731b62bb55164ccc6d59d45",
+    "previous_result_sha256": "010b0da2303b8a3ba180ef86bd1d373022ee606c293b3905613df0b3dbf9c768",
+    "run_keys": [
+      "41:tangent",
+      "41:elliptic",
+      "43:tangent",
+      "43:elliptic",
+      "47:tangent",
+      "47:elliptic"
+    ],
+    "exact_fields": [
+      "baseline",
+      "scores",
+      "records",
+      "development",
+      "initial_parameter_sha256",
+      "parameter_count"
+    ],
+    "independent_replicates": false
+  },
+  "native_sha256": "36acfb9d2d4128a8a006c9fa5ba74f5ffb72c0a662bc11b2248ced5770201292",
+  "executed_source_sha256": {
+    "driver": "c1dc7419dea1a420fb6e444f1a50a68c37ee95bcbf6ea63b025dcb9d84c11463",
+    "helper": "bbf058df42555e190c2025f879af2170c20bf6be4763a5c6a6a6cd4ad876dece",
+    "bridge": "795e86e209c8437def9d3de02605ed6784dde6d6460d1c3c10006bfdc1ab0c9e",
+    "study_adapter": "39456844f9e59169cc4fd901853c78bc4f2b0dfdfb53f4c870808699ad807813",
+    "pointwise_adapter": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "elliptic_bridge": "6fefa5d5d6ec26a2391d18628d5bc7f85f121d668b954e1e8ff2c008b833c9c2"
+  },
+  "combined_client_tests": {
+    "passed": 97,
+    "failed": 0,
+    "skipped": 0,
+    "actual_training_shape_parity": [
+      2,
+      128,
+      3
+    ],
+    "native_sha256": "36acfb9d2d4128a8a006c9fa5ba74f5ffb72c0a662bc11b2248ced5770201292",
+    "geometry_bridge_sha256": "73b9702a71fb889882912817916e61412935639929baa237089bea59090400f6",
+    "elliptic_bridge_sha256": "2fd8aed19ba4ae62e1f02db73d154499e7361c7b8a41460d0d999283f35048e3",
+    "merged_telemetry_tests_sha256": "6fe8d99cdd76f6abc55bd4bcab197291462d6d076bcd8fe47cf61899ab74cc2a",
+    "causal_study_test_sha256": "a05b6b73e85ba38b549c40b45fe44ab75e1d768ca45502560391bc5f2cb4f0eb",
+    "local_log_sha256": "0c7e58700bb7f7fc1bf005af646c19a0e0934fa6d2b7f26773d354adea70dee7",
+    "frozen_study_runtime_modified": false
+  },
+  "local_logs_sha256": {
+    "training": "9d890f494d7677babc60092d983fb4eb27447233bfc6a099648b3a3350b9c52f",
+    "completed_resume": "d7daa78c308a58488be734ec3edd4067193f61a04b1480952c2a16c9f1f2b748"
+  },
+  "summary_tool_sha256": "c3219056df8f05b415bffb490c186cdfe10e5920aebf8e689c44fe8fb79846ef",
+  "limitations": [
+    "Reused exploratory endpoints, not pristine confirmation.",
+    "Equal parameters and data, not equal compute or expressivity.",
+    "No speed, significance, resident-GPU or general geometry failure claim.",
+    "All matched geometry and mixing contrasts lose on both datasets for every seed."
+  ],
+  "public_summary_reproduced_byte_exact": true
+}

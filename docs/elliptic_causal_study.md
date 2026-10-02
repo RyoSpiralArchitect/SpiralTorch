@@ -90,4 +90,20 @@ The [causal bridge contract](elliptic_causal_learning.md) still applies: full
 unpadded sequences only, `use_cache=False`, first-order float32 inputs, bounded
 rows/pairs and explicit Rust CPU transport. Neither speed, resident WGPU, cached
 generation nor pretrained quality improvement follows from these tests. The
-study harness is ready; a protocol file alone is not a completed experiment.
+tests alone do not establish pretrained-model quality; the completed experiment
+is recorded separately below.
+
+## Completed Run
+
+The [12-run numeric record](../benchmarks/results/2026-10-02-elliptic-causal-factorial/README.md)
+now contains all final checkpoints' receipts and sealed endpoints. Both geometry
+and causal mixing lose their matched contrasts in every seed on both evaluation
+sets; all active adapters improve the unchanged base. The pointwise tangent arm
+remains best. Six rerun pointwise results exactly match the previous study and
+must not be counted as additional independent evidence.
+
+This supports the learning/continuation contract, not promoting causal elliptic
+mixing as a better default. A next architectural hypothesis is to preserve the
+current-token feature path and add a learnable contextual correction rather than
+replace it with mixed features. That would require new paired ordinary controls
+and a new fixed protocol; this run does not establish the cause of the loss.
