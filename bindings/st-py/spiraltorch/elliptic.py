@@ -32,6 +32,22 @@ _TORCH_ERROR_MESSAGE = (
 _LAST_TELEMETRY = ContextVar("spiraltorch_elliptic_telemetry", default=None)
 
 
+class _LazyTelemetry:
+    """Keep the immutable Rust snapshot until a caller requests Python objects."""
+
+    __slots__ = ("_batch", "_data")
+
+    def __init__(self, batch: Any) -> None:
+        self._batch = batch
+        self._data = None
+
+    def get(self) -> List[Any]:
+        if self._data is None:
+            self._data = self._batch.telemetry()
+            self._batch = None
+        return self._data
+
+
 def _require_native() -> None:
     global _EllipticWarp, _EllipticTelemetry
     if _EllipticWarp is None:
@@ -122,7 +138,7 @@ else:
             feature_tensor = torch.tensor(batch.features, device=device, dtype=dtype)
             ctx.save_for_backward(orientation)
             ctx.batch = batch
-            _LAST_TELEMETRY.set((orientation.shape[:-1], batch.telemetry()))
+            _LAST_TELEMETRY.set((orientation.shape[:-1], _LazyTelemetry(batch)))
             return feature_tensor.reshape(*orientation.shape[:-1], 9)
 
         @staticmethod
@@ -142,7 +158,8 @@ else:
             state = _LAST_TELEMETRY.get()
             if state is None:
                 return None
-            shape, data = state
+            shape, snapshot = state
+            data = snapshot.get()
             if as_dict:
                 converted = [
                     tele.as_dict() if tele is not None else None for tele in data
@@ -165,6 +182,8 @@ def elliptic_warp_autograd(
 
     Degenerate rows, chart poles and the azimuth cut raise rather than silently
     replacing features/gradients by zero. Higher-order gradients are unsupported.
+    Python telemetry objects are materialized only when requested, including via
+    ``EllipticWarpFunction.last_telemetry()``; the Rust map and VJP are unchanged.
 
     Args:
         warp: Rust-backed :class:`EllipticWarp` instance.
