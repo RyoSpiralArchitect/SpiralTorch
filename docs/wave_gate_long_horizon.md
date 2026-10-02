@@ -50,7 +50,9 @@ interruption are not adopted. Frozen-base weights and gradients are checked
 before each checkpoint becomes resumable, not merely at the end of an arm.
 
 `--resume` requires the existing study identity and verifies each referenced
-checkpoint hash before continuing. Completed arms are reused; an interrupted
+checkpoint hash before continuing. It rehashes the saved plan's actual binding
+fields, not only the claimed ID, and compares the regenerated batch schedule.
+Completed arms are reused; an interrupted
 arm starts at the next unconsumed batch. Endpoint continuation checks consume
 two extra updates per run, without replacing its saved step-512 weights.
 Final evaluation therefore always reloads the selected fixed endpoint, not the
@@ -124,3 +126,11 @@ not a demonstrated geometric advantage or a recommendation to use this adapter
 instead of the simpler control. No additional endpoint-driven radius search was
 performed. Nonlinear matched controls and geometries that learn directions or
 relationships, rather than only radial compression, remain the next hypotheses.
+
+After that run, review exposed a resume guard that trusted the saved plan's
+claimed ID without rehashing its binding fields. The guard is now fixed, with
+tests editing the saved config, data hash, source hash and schedule. The published
+experiment's original plan was independently compared to its frozen copy and
+rehashed; it was never edited. The scientific result remains bound to the executed
+`82d5ed3d4815ddee32e434941f553709e2e7319a` source, not retroactively attributed to
+this later guard. The frozen driver and completed artifacts remain unchanged.

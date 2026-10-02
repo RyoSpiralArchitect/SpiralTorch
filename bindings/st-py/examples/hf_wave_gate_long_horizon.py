@@ -549,6 +549,7 @@ def main():
             existing = json.loads((args.output_dir / "plan.json").read_text())
             require(
                 existing["study_id"] == study_id
+                and identity({key: existing.get(key) for key in binding}) == study_id
                 and existing["batch_schedules"] == plan["batch_schedules"],
                 "resume protocol/runtime/data identity differs",
             )

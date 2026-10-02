@@ -76,5 +76,21 @@
     "public_reaggregation_byte_exact": true,
     "local_originals_retained": true,
     "interpretation": "All active arms improve baseline, but tangent is best for every seed on both fixed evaluation sets. No geometric advantage, significance or speed claim."
+  },
+  "post_run_plan_guard": {
+    "pre_fix_regression": "saved config edit with unchanged study_id was accepted in an isolated tiny-model fixture",
+    "pre_fix_failed_tests": 1,
+    "post_fix_python_tests": {
+      "passed": 62,
+      "failed": 0,
+      "skipped": 0
+    },
+    "pre_fix_log_sha256": "119e7e305d25f2eadad91b6130f0dc1b7afadfda88b842adffff3fc478638ca6",
+    "post_fix_log_sha256": "e36d6930cf443c852fefe1878d6c72b0961c538c4d444e3104217d48bc482d4a",
+    "current_driver_sha256": "947c224e3a15b55e4be8cb62869cce8bae32b460912832c271bbce9b7ace9d5d",
+    "current_driver_tests_sha256": "22ca8349e99ee8b477db5acd0a094a8ad713f215c7229572031305ece5f05e76",
+    "original_study_plan_binding_rehashed": true,
+    "original_study_source_and_results_unchanged": true,
+    "note": "The completed numerical experiment uses the frozen 82d5ed3 source. This later resume guard is not retroactively part of that experiment."
   }
 }

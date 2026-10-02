@@ -221,8 +221,9 @@ def test_data_partition_and_per_block_causal_loss(driver):
     assert len(result["block_losses"]) == 4
 
 
+@pytest.mark.parametrize("plan_edit", ["config", "data", "script", "schedule"])
 def test_cli_resume_binds_protocol_and_evaluates_only_after_all_runs(
-    driver, tmp_path, monkeypatch
+    driver, tmp_path, monkeypatch, plan_edit
 ):
     config = json.loads(
         Path(driver.__file__)
@@ -316,6 +317,22 @@ def test_cli_resume_binds_protocol_and_evaluates_only_after_all_runs(
         driver.main()
     assert not evaluations
     source.write_text(original_config)
+    plan_path = output / "plan.json"
+    original_plan = plan_path.read_text()
+    edited = json.loads(original_plan)
+    if plan_edit == "config":
+        edited["config"]["learning_rate"] *= 2
+    elif plan_edit == "data":
+        edited["data"]["train_tokens_sha256"] = "0" * 64
+    elif plan_edit == "script":
+        edited["script_sha256"] = "0" * 64
+    else:
+        edited["batch_schedules"]["41"][0] = [0, 0]
+    plan_path.write_text(json.dumps(edited))
+    with pytest.raises(ValueError, match="identity differs"):
+        driver.main()
+    assert not evaluations
+    plan_path.write_text(original_plan)
     driver.main()
     assert len(evaluations) == 8
     driver.main()

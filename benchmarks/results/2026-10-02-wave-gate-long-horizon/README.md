@@ -63,14 +63,21 @@ to prefer this geometry over the simpler adapter for this language-model task.
 ## Evidence
 
 `plan.json` fixes corpus/token hashes, model/runtime/source identities, actual
-data partitions and every batch schedule. `validation.json` records **59 passing
-Python tests**: 47 covering geometric clients and restart/evaluation boundaries,
+data partitions and every batch schedule. `validation.json` records **62 passing
+Python tests**: 50 covering geometric clients and restart/evaluation boundaries,
 plus 12 for completed-result aggregation without Torch or another evaluation.
 Tests include a real tiny HF interruption/resume with exact parameter, Adam and
 history equality; changed-protocol/corrupt-checkpoint rejection; single-writer
 exclusion; rejecting mutated-base checkpoints; and preventing early endpoint
 evaluation. CI now includes these geometry tests with explicit native-export
 checks and offline tiny HF models; local tests do not claim remote CI completion.
+
+Post-run review found that resume compared a saved plan's claimed ID without
+rehashing its contents. A scratch-fixture regression reproduced the issue, and
+the current driver now rejects edits to saved config, data/source hashes or batch
+schedules. The executed study's original plan binding was independently rehashed
+and matched its frozen public copy. Its result and executed source identity are
+unchanged; this later guard is not presented as part of the measured old source.
 
 The summary tool preserves paired per-seed cross-entropy differences for each
 evaluation set, including losing seeds. It verifies the sealed result hash and
