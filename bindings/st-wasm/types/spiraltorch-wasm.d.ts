@@ -24,6 +24,7 @@ declare module "spiraltorch-wasm" {
         private constructor();
         readonly features: Float32Array;
         vjp(upstream: Float32Array): Float32Array;
+        jvp(tangent: Float32Array): Float32Array;
         free(): void;
     }
     /** Immutable causal snapshot with all tied query/key/value derivatives. */
@@ -38,6 +39,7 @@ declare module "spiraltorch-wasm" {
         readonly features: Float32Array;
         readonly mix: number;
         vjp(upstream: Float32Array): EllipticAnchoredGradients;
+        jvp(orientations: Float32Array, rawMix: number): Float32Array;
         free(): void;
     }
     export class EllipticAnchoredGradients {

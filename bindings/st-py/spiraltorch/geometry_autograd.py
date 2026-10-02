@@ -71,8 +71,19 @@ if torch is not None:
                 _values(orientation), raw_mix=raw_mix.detach().item()
             )
             ctx.save_for_backward(orientation, raw_mix)
+            ctx.save_for_forward(orientation, raw_mix)
             return torch.tensor(
                 ctx.snapshot.features, device=orientation.device, dtype=orientation.dtype
+            ).reshape(*orientation.shape[:-1], 9)
+
+        @staticmethod
+        def jvp(ctx: Any, _warp: Any, dx: Any, dg: Any) -> Any:
+            orientation, _ = ctx.saved_tensors
+            if dx is None:
+                dx = torch.zeros_like(orientation)
+            values = ctx.snapshot.jvp(_values(dx), 0.0 if dg is None else dg.detach().item())
+            return torch.tensor(
+                values, device=orientation.device, dtype=orientation.dtype
             ).reshape(*orientation.shape[:-1], 9)
 
         @staticmethod

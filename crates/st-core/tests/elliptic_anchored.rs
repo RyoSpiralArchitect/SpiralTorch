@@ -129,3 +129,65 @@ fn empty_rows_and_invalid_inputs_are_checked_even_at_saturation() {
     assert!(full.vjp(&[]).is_err());
     assert!(full.vjp(&[f32::NAN; 36]).is_err());
 }
+#[test]
+fn joint_jvp_matches_difference_and_vjp_for_signed_gates() {
+    let warp = EllipticWarp::for_learning(1.3, 3, 2).unwrap();
+    let x = [1.0, 0.3, -0.4, 1.0, -0.2, 0.5];
+    let dx = [0.0, 0.2, 0.3, 0.0, -0.4, 0.1];
+    let dg = -0.35;
+    let seed = (0..18).map(|i| (i as f32 * 0.3).sin()).collect::<Vec<_>>();
+    for raw in [-30.0, -0.7, 0.0, 0.4, 30.0] {
+        let batch = warp.differentiate_anchored_batch(&x, raw, 2).unwrap();
+        let jv = batch.jvp(&dx, dg).unwrap();
+        let vjp = batch.vjp(&seed).unwrap();
+        let lhs: f64 = jv
+            .iter()
+            .zip(&seed)
+            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .sum();
+        let rhs = dx
+            .iter()
+            .zip(&vjp.orientations)
+            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .sum::<f64>()
+            + f64::from(dg) * f64::from(vjp.raw_mix);
+        assert!((lhs - rhs).abs() < 1e-6);
+        let plus = x
+            .iter()
+            .zip(dx)
+            .map(|(&x, v)| x + 0.001 * v)
+            .collect::<Vec<_>>();
+        let minus = x
+            .iter()
+            .zip(dx)
+            .map(|(&x, v)| x - 0.001 * v)
+            .collect::<Vec<_>>();
+        let high = warp
+            .differentiate_anchored_batch(&plus, raw + 0.001 * dg, 2)
+            .unwrap();
+        let low = warp
+            .differentiate_anchored_batch(&minus, raw - 0.001 * dg, 2)
+            .unwrap();
+        for ((&actual, &high), &low) in jv.iter().zip(high.features()).zip(low.features()) {
+            assert!((actual - (high - low) / 0.002).abs() < 0.002);
+        }
+    }
+    let local = warp.differentiate_batch(&x, 2).unwrap();
+    let zero = warp.differentiate_anchored_batch(&x, 0.0, 2).unwrap();
+    assert_eq!(local.jvp(&dx).unwrap(), zero.jvp(&dx, 0.0).unwrap());
+    assert!(zero.jvp(&[0.0; 6], 1.0).unwrap().iter().any(|&v| v != 0.0));
+}
+
+#[test]
+fn joint_jvp_validates_even_at_a_saturated_gate() {
+    let warp = EllipticWarp::for_learning(1.0, 2, 1).unwrap();
+    let batch = warp
+        .differentiate_anchored_batch(&[1.0, 0.2, 0.3], 30.0, 1)
+        .unwrap();
+    assert!(batch.jvp(&[], 0.0).is_err());
+    assert!(batch.jvp(&[f32::NAN; 3], 0.0).is_err());
+    assert!(batch.jvp(&[0.0; 3], f32::INFINITY).is_err());
+    let empty = warp.differentiate_anchored_batch(&[], 0.5, 1).unwrap();
+    assert!(empty.jvp(&[], 0.7).unwrap().is_empty());
+    assert!(empty.jvp(&[], f32::NAN).is_err());
+}
