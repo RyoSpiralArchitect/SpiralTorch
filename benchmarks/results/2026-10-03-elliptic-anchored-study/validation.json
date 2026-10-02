@@ -1,0 +1,90 @@
+{
+  "schema": "spiraltorch.elliptic_anchored_study_validation.v1",
+  "status": "completed",
+  "study_id": "229ccd7afba7893e7e18c7f354249957e977381afac80938c4c36cdcfd4b3ca8",
+  "training_source_revision": "af1c10c39a97ca862568dd3e3fb2259efa0e5ced",
+  "process": {
+    "training_and_evaluation_exit_code": 0,
+    "uninterrupted": true,
+    "completed_runs": 12,
+    "primary_updates": 6144,
+    "extra_continuation_updates": 24
+  },
+  "completed_resume": {
+    "exit_code": 0,
+    "endpoints_rerun": false,
+    "plan_journal_results_byte_unchanged": true,
+    "sha256_before_and_after": {
+      "plan.json": "19eab1f4e427de6ae662a3fa8c6d1611f03272030835e471788e70becf335515",
+      "journal.json": "052e4f8a3d8de52e0e416827cb71364f57058a1a393b6544d04ca6f5cc6e7d23",
+      "results.json": "f76f12f1f8f232c43c3ce41240c21d1f36a1cf6574dea6fce0e389ff4b37e678"
+    }
+  },
+  "checkpoints": {
+    "verification_exit_code": 0,
+    "public_receipt": "checkpoint-verification.json",
+    "sha256": "54223d74fa82c394fcea240f0e8f30d17c8aeb8ec5d43038b81899b9875aa5e0",
+    "all_twelve_finite_and_paired": true,
+    "all_twelve_exact_continuation_and_frozen_base": true,
+    "verification_source_sha256": "66edd2552a7ae1245ee3b71f49cecc3c19fc6112fb999f2de257ac4047d380ed",
+    "scope": "Saved state contents were loaded locally. The original training driver verified frozen-base and next adapter/Adam execution before unlocking endpoints."
+  },
+  "tests": {
+    "preflight_passed": 165,
+    "postrun_passed": 166,
+    "skipped": 0,
+    "postrun_exit_code": 0,
+    "public_and_previous_summary_byte_reproduction": true
+  },
+  "summary": {
+    "exit_code": 0,
+    "public_inputs_reproduce_byte_for_byte": true,
+    "sha256": "8545ac6d7a7ba10a35ad939bd4522a22c6e864a17e80c67b4fef903b4d2ec293",
+    "summarizer_sha256": "434827d40b85bd73e1e59495ba2f1df965dd44d7a4b753fe28e45659de96d4c8"
+  },
+  "historical_replays": {
+    "baseline_exact": true,
+    "all_six_gated_controls_exact": true,
+    "independent_replications": false
+  },
+  "preserved_launch_artifacts": {
+    "plan.json.gz": "84077e92fc5501fe0f9508598351104427980ba3ad77278f20e3ad8035695de9",
+    "preflight.json": "2188037ff9c233c87952a906e1fe9baaf2b2f9980d10343b1a6a5aa327fae697"
+  },
+  "runtime": {
+    "native_sha256": "d4cd553f402cd8c248072017fd5c23725a6439ab275aeb6bed338cc2ed42808b",
+    "bridge_sha256": "8484b0b95168502bec19212c00d6c93bbd98b8582391a561adc6c5e1647dd260",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "device": "cpu",
+    "dtype": "float32"
+  },
+  "source_sha256": {
+    "bindings/st-py/examples/hf_elliptic_anchored_study.py": "8efdd2186d8b73c9f27854121f859a6f4b388dc0c2b13b4a0a5b187bf1d60757",
+    "bindings/st-py/examples/hf_elliptic_pride_anchored.json": "9c6c3604fddfbb8fd0e229b02898f289cd667ac0aec94115a2a8069b6b4b5464",
+    "bindings/st-py/examples/hf_elliptic_gated_study.py": "2be932d2fbcfebf23770895d9d8382a9f98670af7a9aa27f85a4267f505b3d54",
+    "bindings/st-py/examples/hf_elliptic_causal_study.py": "39456844f9e59169cc4fd901853c78bc4f2b0dfdfb53f4c870808699ad807813",
+    "bindings/st-py/examples/hf_elliptic_nonlinear_study.py": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "bindings/st-py/examples/hf_wave_gate_long_horizon.py": "91b3175f5b72a35c27e31acf09d0edf4ab87d462cd6bd012f9c99acbb34b1d31",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "752009289edeb9748dcf8fa8f544f7f8ffe5039793a791247522ca037f2c736f",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "8484b0b95168502bec19212c00d6c93bbd98b8582391a561adc6c5e1647dd260",
+    "tools/summarize_wave_gate_long_horizon.py": "434827d40b85bd73e1e59495ba2f1df965dd44d7a4b753fe28e45659de96d4c8",
+    "bindings/st-py/tests/test_elliptic_anchored_study.py": "3007fb013c2cb0e8e021fe122e5e3da53e529c090c5a785ea082c1a959f01f21",
+    "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "13a27b0246dcdb896fdb76dbcf5ac83b9f3e5e60ee8ef6f9f8ea6c53f24f0c5f"
+  },
+  "local_log_sha256": {
+    "training.log": "4cc7b634ab5a99f0a7bdddd9ad80b3981bf8e996856bf16412fa569582d2c9ce",
+    "checkpoint-verification.log": "488b84ff31048fc6e7c46edf023cc79d3d8dbf9f0c6471a7840b942a9808141a",
+    "completed-resume.log": "d7daa78c308a58488be734ec3edd4067193f61a04b1480952c2a16c9f1f2b748",
+    "postrun-tests.log": "75f08f9b4c3faeef4dac6b393feda50fbe8fd9ec8e966e04efe3ad738def4076",
+    "incomplete-verification-rejection.log": "88ed705801699f7c8e37a98b2d5533f91d661437dc4c039008d3927061827f9b"
+  },
+  "limitations": [
+    "Ordinary anchored tangent wins every seed on both endpoints; no geometric quality advantage established",
+    "Pride/Alice and protocol choice are exploratory reuse, not unseen confirmation",
+    "Only three seeds with shared evaluation blocks; no significance or broad generalization claim",
+    "Equal parameters and updates, not equal computation or feature rank",
+    "No speed, resident WGPU, AMP or cross-model compatibility claim",
+    "Raw text, weights, checkpoints, packages and raw logs stay local"
+  ]
+}

@@ -86,3 +86,18 @@ parity at the training shape, no accelerator RNG changes, equal initialization,
 schema isolation, actual tiny-HF training/interrupted resume and rejection of
 unpaired, mislabeled or incomplete outcomes. Preflight is not pretrained-model
 quality evidence.
+
+## Completed Outcome
+
+The [completed twelve-run study](../benchmarks/results/2026-10-03-elliptic-anchored-study/README.md)
+finds that anchored elliptic improves over its gated-context counterpart in all
+seeds on both sets (-0.028651 mean Pride CE, -0.011172 Alice). The ordinary
+anchored tangent still wins in every seed: the primary geometry difference is
++0.116164 on Pride and +0.064956 on Alice. Ordinary anchor/context effects are
+mixed on transfer, with an explicit seed-43 regression. All losing conditions
+are retained, not hidden by the favorable mean interaction.
+
+All 6144 primary updates, 24 continuation checks and endpoint evaluations
+completed; checkpoint contents are finite, frozen bases unchanged and completed
+resume is a byte-identical no-op. The six gated-context controls exactly replay
+their earlier records and scores; they are not independent new replications.
