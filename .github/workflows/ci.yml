@@ -614,6 +614,7 @@ jobs:
           python -P bindings/st-py/tests/test_native_binding_ownership.py
           python -P bindings/st-py/tests/test_tensor_out.py
           python -P bindings/st-py/tests/test_autograd_prepacked.py
+          python -P bindings/st-py/tests/test_geometry_optional_dependency.py
           python -P bindings/st-py/tests/test_gelu_host.py
           python -P tests/test_configure_pypi_token_secret.py
           python -P tests/test_llm_char_vae_context_guidance.py
