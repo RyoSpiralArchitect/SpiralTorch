@@ -31,5 +31,21 @@
     "Causal ordinary attention uses Torch; the geometric composition and VJP are Rust owned.",
     "Paired parameters and data, not matched arithmetic, expressivity or compute.",
     "Reused exploratory endpoints; no speed or significance claim."
-  ]
+  ],
+  "after_parent_optional_dependency_fix": {
+    "python_tests": {
+      "passed": 91,
+      "failed": 0,
+      "skipped": 0
+    },
+    "local_test_log_sha256": "2118bfd2dad7681d454f23873a0b51258a62323c7876c791f2d103cccedbc5d1",
+    "tested_bridge_sha256": "73b9702a71fb889882912817916e61412935639929baa237089bea59090400f6",
+    "frozen_study_runtime_modified": false
+  },
+  "launch": {
+    "study_id": "2d5860c91905b26b6b29e729b94cfa9c710bb11ade2e4125f827c778a89c3954",
+    "source_revision": "03cee5fb8c65cffefaf4d60da4c5691a32dc6175",
+    "plan_uncompressed_sha256": "ec96bd52de101ab6e1d0e88768ccb3e406894326bbe5ddf386b15c16ff1fa39c",
+    "completion_claim": false
+  }
 }
