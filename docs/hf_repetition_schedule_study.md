@@ -74,6 +74,27 @@ descriptive. Read the continuation texts and generated lengths as well as the
 numeric scores: natural EOS or shorter output can reduce observed loops without
 improving language. Three seeds do not establish statistical significance.
 
+After all nine runs and 36 generation reports complete, assess without changing
+the frozen execution sources or inputs:
+
+```bash
+"$PYTHON" -I tools/assess_hf_repetition_schedule_study.py "$OUTPUT" \
+  --output "$ASSESSMENT_JSON"
+```
+
+This rejects missing/duplicate conditions, incomplete horizons, mismatched
+artifact hashes and altered source/input files. It revalidates Rust generation
+evidence against the actual saved adapter fingerprint, then decodes the committed
+tokens to check every published continuation text. All 432 prompt continuations
+and their token lengths are exported, not a selected showcase. The output omits
+private raw paths and contains the frozen final paired effects and gate result.
+No assessment is emitted for a still-running study.
+
+```bash
+"$PYTHON" -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools \
+  -q tools/test_assess_hf_repetition_schedule_study.py
+```
+
 Retain complete raw logs, cards and adapters locally. Publish all conditions,
 derived verification/results, hashes, representative text and reproduction
 instructions, but not private machine paths or model weights. The earlier
