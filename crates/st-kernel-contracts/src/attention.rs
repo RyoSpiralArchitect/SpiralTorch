@@ -94,6 +94,15 @@ impl AttentionSpec {
     pub fn query_shape(&self) -> [usize; 4] {
         self.query
     }
+    /// Canonical head-concatenated output: [batch, query, heads * head_dim].
+    /// Element (b, q, h * D + d) is the head-major output (b, h, q, d).
+    pub fn merged_output_shape(&self) -> Result<[usize; 3], AttentionError> {
+        Ok([
+            self.query[0],
+            self.query[2],
+            product(&[self.query[1], self.query[3]])?,
+        ])
+    }
     pub fn key_shape(&self) -> [usize; 4] {
         self.key
     }

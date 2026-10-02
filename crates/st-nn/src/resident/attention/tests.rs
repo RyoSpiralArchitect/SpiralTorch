@@ -164,7 +164,11 @@ mod gpu {
         let input = device.upload(&[1, 5, 6], &values).unwrap();
         let bias = device.upload(&[1, 2, 5, 5], bias.data()).unwrap();
         let result = compiled.forward(&input, None, Some(&bias)).unwrap();
+        let merged = compiled
+            .forward_merged_heads(&input, None, Some(&bias))
+            .unwrap();
         close(&read(&result), expected.data());
+        close(&read(&merged), expected.data());
         let plain = compiled.forward(&input, None, None).unwrap();
         assert!(read(&plain)
             .iter()
@@ -172,6 +176,7 @@ mod gpu {
             .any(|(a, b)| (a - b).abs() > 1e-8));
         drop((input, bias, compiled, layer));
         close(&read(&result), expected.data());
+        close(&read(&merged), expected.data());
     }
 
     #[test]
@@ -206,13 +211,24 @@ mod gpu {
             .mul(&device.upload(&[2, 4, 6], &[2.; 48]).unwrap())
             .unwrap();
         let failed = compiled.forward(&bad, None, None).unwrap();
+        let merged_failed = compiled.forward_merged_heads(&bad, None, None).unwrap();
+        let merged_first = compiled.forward_merged_heads(&input, None, None).unwrap();
         for _ in 0..6 {
             close(
                 &read(&compiled.forward(&input, None, None).unwrap()),
                 &expected,
             );
+            close(
+                &read(&compiled.forward_merged_heads(&input, None, None).unwrap()),
+                &expected,
+            );
         }
         close(&read(&first), &expected);
+        close(&read(&merged_first), &expected);
+        assert!(matches!(
+            merged_failed.snapshot().unwrap().read(),
+            Err(GpuError::NonFinite)
+        ));
         assert!(matches!(
             failed.snapshot().unwrap().read(),
             Err(GpuError::NonFinite)

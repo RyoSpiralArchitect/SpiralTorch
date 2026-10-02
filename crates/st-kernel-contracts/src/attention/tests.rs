@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn merged_output_shape_checks_width_even_with_an_empty_batch() {
+    for shape in [[2, 3, 5, 7], [0, 3, 5, 7], [2, 0, 5, 7], [2, 3, 0, 7]] {
+        let key = [shape[0], shape[1], 6, shape[3]];
+        let spec = AttentionSpec::new(&shape, &key, &key, 1., AttentionMask::None).unwrap();
+        assert_eq!(
+            spec.merged_output_shape().unwrap(),
+            [shape[0], shape[2], shape[1] * shape[3]]
+        );
+    }
+    let shape = [0, usize::MAX, 1, 2];
+    let spec = AttentionSpec::new(&shape, &shape, &shape, 1., AttentionMask::None).unwrap();
+    assert_eq!(spec.merged_output_shape(), Err(AttentionError::Overflow));
+}
+
+#[test]
 fn causal_prefill_and_cached_query_offsets_are_not_interchangeable() {
     let shape = [1, 1, 3, 1];
     let spec = AttentionSpec::new(

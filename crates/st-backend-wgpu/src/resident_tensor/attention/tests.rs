@@ -31,6 +31,16 @@ fn data(len: usize, phase: f32) -> Vec<f32> {
         .collect()
 }
 
+fn merge_heads(shape: [usize; 4], values: &[f32]) -> Vec<f32> {
+    let layout = NdLayout::contiguous(&shape)
+        .unwrap()
+        .permute(&[0, 2, 1, 3])
+        .unwrap();
+    (0..layout.len())
+        .map(|i| values[layout.storage_index(i).unwrap()])
+        .collect()
+}
+
 #[test]
 fn shader_parses_and_validates_without_a_runtime() {
     let module = naga::front::wgsl::parse_str(SHADER_SOURCE).unwrap();
@@ -212,6 +222,21 @@ fn plain_and_biased_attention_match_rust_across_heads_and_dimension_tails() {
                     )
                     .unwrap();
                 close(&read(&output), &expected);
+                assert_eq!(output.layout().shape(), q_shape);
+                let merged = q_gpu
+                    .scaled_dot_attention_merged_heads(
+                        &k_gpu,
+                        &v_gpu,
+                        0.375,
+                        mask,
+                        (mode & 1 != 0).then_some(&z_gpu),
+                        (mode & 2 != 0).then_some(&pair_gpu),
+                    )
+                    .unwrap();
+                assert_eq!(merged.layout().shape(), spec.merged_output_shape().unwrap());
+                assert!(merged.layout().is_contiguous());
+                assert_eq!(merged.layout().offset(), 0);
+                close(&read(&merged), &merge_heads(q_shape, &expected));
             }
         }
     }
@@ -336,9 +361,15 @@ fn strided_qkv_and_broadcast_bias_read_directly_and_outputs_are_owned() {
     let output = q
         .scaled_dot_attention(&k, &v, 0.5, mask, Some(&z), Some(&pair))
         .unwrap();
+    let merged = q
+        .scaled_dot_attention_merged_heads(&k, &v, 0.5, mask, Some(&z), Some(&pair))
+        .unwrap();
     let next = output.gelu().unwrap();
+    let merged_next = merged.gelu().unwrap();
     drop((q, k, v, z, pair));
     close(&read(&output), &expected);
+    close(&read(&merged), &merge_heads(spec.query_shape(), &expected));
+    assert!(read(&merged_next).iter().all(|value| value.is_finite()));
     assert!(read(&next).iter().all(|value| value.is_finite()));
     close(&read(&output), &expected);
 }
@@ -414,6 +445,10 @@ fn strided_columns_offsets_and_independently_broadcast_inputs_match_reference() 
                 .scaled_dot_attention(&k, &v, 0.375, mask, Some(&z), Some(&pair))
                 .unwrap();
             close(&read(&output), &expected);
+            let merged = q
+                .scaled_dot_attention_merged_heads(&k, &v, 0.375, mask, Some(&z), Some(&pair))
+                .unwrap();
+            close(&read(&merged), &merge_heads(spec.query_shape(), &expected));
         }
     }
 }
@@ -463,6 +498,86 @@ fn cropped_failed_storage_keeps_guards_for_every_direct_operand_and_empty_query(
         output.snapshot().unwrap().read(),
         Err(TensorError::NonFinite)
     ));
+}
+
+#[test]
+fn merged_heads_keep_empty_shapes_and_all_guards() {
+    let Some(device) = device() else { return };
+    for shape in [[0, 2, 3, 7], [2, 0, 3, 7], [2, 2, 0, 7]] {
+        let key_shape = [shape[0], shape[1], 5, shape[3]];
+        let q = device.upload(&shape, &[]).unwrap();
+        let kv = device
+            .upload(&key_shape, &vec![0.; key_shape.iter().product()])
+            .unwrap();
+        let out = q
+            .scaled_dot_attention_merged_heads(&kv, &kv, 1., AttentionMask::None, None, None)
+            .unwrap();
+        assert_eq!(
+            out.layout().shape(),
+            [shape[0], shape[2], shape[1] * shape[3]]
+        );
+        assert!(read(&out).is_empty());
+    }
+    let good = device.upload(&[1], &[0.]).unwrap();
+    let failed = device
+        .upload(&[2], &[0., f32::MAX])
+        .unwrap()
+        .mul(&device.upload(&[2], &[1., 2.]).unwrap())
+        .unwrap()
+        .narrow(0, 0, 1)
+        .unwrap();
+    for queries in [0, 1] {
+        for slot in 0..5 {
+            let input = |which, shape: &[usize]| {
+                (if slot == which { &failed } else { &good })
+                    .broadcast_to(shape)
+                    .unwrap()
+            };
+            let output = input(0, &[2, 2, queries, 1])
+                .scaled_dot_attention_merged_heads(
+                    &input(1, &[2, 2, 3, 1]),
+                    &input(2, &[2, 2, 3, 1]),
+                    1.,
+                    AttentionMask::Causal { query_offset: 0 },
+                    Some(&input(3, &[2, 2, 3])),
+                    Some(&input(4, &[2, 2, queries, 3])),
+                )
+                .unwrap();
+            assert!(matches!(
+                output.snapshot().unwrap().read(),
+                Err(TensorError::NonFinite)
+            ));
+            assert!(matches!(
+                output.gelu().unwrap().snapshot().unwrap().read(),
+                Err(TensorError::NonFinite)
+            ));
+        }
+    }
+    let q = device.upload(&[2, 2, 1, 1], &[f32::MAX; 4]).unwrap();
+    let k = device.upload(&[2, 2, 1, 1], &[2.; 4]).unwrap();
+    let overflow = q
+        .scaled_dot_attention_merged_heads(&k, &k, 1., AttentionMask::None, None, None)
+        .unwrap();
+    assert!(matches!(
+        overflow.snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    assert!(q
+        .scaled_dot_attention_merged_heads(&k, &k, f32::NAN, AttentionMask::None, None, None)
+        .is_err());
+    assert!(q
+        .scaled_dot_attention_merged_heads(&k, &k, 1., AttentionMask::None, Some(&good), None)
+        .is_err());
+    assert!(q
+        .scaled_dot_attention_merged_heads(
+            &k,
+            &k,
+            1.,
+            AttentionMask::Causal { query_offset: 1 },
+            None,
+            None
+        )
+        .is_err());
 }
 
 #[test]

@@ -25,6 +25,7 @@ struct Params {
     pair_bias: View,
 };
 override KEY_TILE: u32 = 1u;
+override MERGED_HEADS: u32 = 0u;
 
 @group(0) @binding(0) var<storage, read> queries: array<f32>;
 @group(0) @binding(1) var<storage, read> keys: array<f32>;
@@ -59,6 +60,9 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     let query = row % params.queries;
     let batch = context / params.heads;
     let head = context % params.heads;
+    // Resolve the output order before the key loop, retaining one row index.
+    // Both specializations are bijections over the validated element count.
+    let output_row = select(row, (batch * params.queries + query) * params.heads + head, MERGED_HEADS != 0u);
     let query_base = params.query.offset + batch * params.query.strides.x + head * params.query.strides.y + query * params.query.strides.z;
     let key_base = params.key.offset + batch * params.key.strides.x + head * params.key.strides.y;
     let value_base = params.value.offset + batch * params.value.strides.x + head * params.value.strides.y;
@@ -121,5 +125,5 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
         }
         workgroupBarrier();
     }
-    for (var i = lane; i < d; i += 64u) { output[row * d + i] = accum[i]; }
+    for (var i = lane; i < d; i += 64u) { output[output_row * d + i] = accum[i]; }
 }

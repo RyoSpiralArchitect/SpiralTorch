@@ -190,6 +190,28 @@ impl ResidentAttentionBlock {
         z_bias: Option<&st_backend_wgpu::resident_tensor::ResidentTensor>,
         pair_bias: Option<&st_backend_wgpu::resident_tensor::ResidentTensor>,
     ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, InferenceError> {
+        self.forward_impl::<false>(input, z_bias, pair_bias)
+    }
+
+    /// Opt into writing attention directly in head-concatenated order, avoiding
+    /// the intermediate head-merge copy. Same values, shapes and guards as
+    /// [Self::forward]. This is not always faster; select it using measurements
+    /// for the actual shape/device rather than a universal performance policy.
+    pub fn forward_merged_heads(
+        &mut self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        z_bias: Option<&st_backend_wgpu::resident_tensor::ResidentTensor>,
+        pair_bias: Option<&st_backend_wgpu::resident_tensor::ResidentTensor>,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, InferenceError> {
+        self.forward_impl::<true>(input, z_bias, pair_bias)
+    }
+
+    fn forward_impl<const MERGED_HEADS: bool>(
+        &mut self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+        z_bias: Option<&st_backend_wgpu::resident_tensor::ResidentTensor>,
+        pair_bias: Option<&st_backend_wgpu::resident_tensor::ResidentTensor>,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, InferenceError> {
         require_uncommitted_route()?;
         if input.layout().shape() != self.input_layout().shape() {
             return Err(InferenceError::Attention(
@@ -219,19 +241,29 @@ impl ResidentAttentionBlock {
         let query = head(0)?;
         let keys = head(1)?;
         let values = head(2)?;
-        let attended = query.scaled_dot_attention(
-            &keys,
-            &values,
-            self.spec.scale(),
-            self.spec.mask(),
-            z_bias,
-            pair_bias,
-        )?;
-        let merged = attended.permute(&[0, 2, 1, 3])?.contiguous()?.reshape(&[
-            batch,
-            sequence,
-            heads * dim,
-        ])?;
+        let merged = if MERGED_HEADS {
+            query.scaled_dot_attention_merged_heads(
+                &keys,
+                &values,
+                self.spec.scale(),
+                self.spec.mask(),
+                z_bias,
+                pair_bias,
+            )?
+        } else {
+            query
+                .scaled_dot_attention(
+                    &keys,
+                    &values,
+                    self.spec.scale(),
+                    self.spec.mask(),
+                    z_bias,
+                    pair_bias,
+                )?
+                .permute(&[0, 2, 1, 3])?
+                .contiguous()?
+                .reshape(&[batch, sequence, heads * dim])?
+        };
         Ok(self.output.forward_tensor(&merged)?)
     }
 }
