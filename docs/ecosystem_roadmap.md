@@ -21,8 +21,9 @@ control performs better on the tiny authored corpus; this is not a quality win.
 The [WaveGate pullback repair](wave_gate_learning.md) now includes the missing
 parameter saturation derivative, separates raw VJPs from training-policy rewrites,
 and hardens shared CPU/WGPU projection arithmetic. Its Rust/Python Tensor API is
-available; an immutable Torch/WASM learning adapter is the next client boundary,
-followed by combinations only after isolated controls. Rust owns each geometric
+available, together with an owned Rust forward snapshot consumed by a Torch
+residual adapter and a WASM learning client. Isolated off/tangent/WaveGate
+controls precede combinations. Rust owns each geometric
 rule; Python/WASM own transport and orchestration, not replacement mathematics.
 Pretrained FT quality, mixed precision and resident geometric execution remain
 open, rather than being inferred from the wiring tests.

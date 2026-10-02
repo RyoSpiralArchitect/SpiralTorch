@@ -1,4 +1,4 @@
-# WaveGate Pullbacks Before Client Adapters
+# WaveGate Learning Clients And Pullbacks
 
 `st_nn::WaveGate::vjp` exposes the current Rust forward map's first-order
 input/gate/bias pullback without averaging, gradient rewriting or accumulation.
@@ -23,8 +23,54 @@ inputs/upstream/parameters and finite resulting derivatives are checked before
 accumulation. The active Rust NN execution policy selects CPU or WGPU; this
 host-`Tensor` path still uploads/readbacks and is not resident GPU execution.
 
-This is the prerequisite for a future immutable Torch-autograd/WASM learning
-adapter. It is not yet such an adapter, and higher-order gradients are not claimed.
+## Immutable Learning Clients
+
+`st_nn::WaveGateKernel::forward` takes input rows and shared gate/bias vectors.
+It returns an owned `WaveGateLearningBatch` containing the input, parameters,
+output and recipe. Its reusable `vjp` reads that snapshot, not a live module.
+Both calls explicitly select CPU and restore the caller's execution policy.
+Python exposes the same kernel and snapshot; WASM exposes them with the `nn`
+feature. Output/gradient getters return copies in both clients. Free WASM
+snapshots and pullbacks after use; retained snapshots consume host memory.
+
+The new kernel defaults to saturation 1.0 and porosity 0.05. This is an explicit
+learning recipe, **not** the legacy module's inferred saturation 10000/topos
+porosity. Match all configuration values when comparing the two interfaces.
+
+```python
+import torch
+from spiraltorch import WaveGateAdapter
+
+adapter = WaveGateAdapter(64, strength=0.1, curvature=-1.0)
+x = torch.randn(2, 16, 64)
+optimizer = torch.optim.Adam(adapter.parameters(), lr=1e-3)
+optimizer.zero_grad()
+loss = (adapter(x) - 0.9 * x).square().mean()
+loss.backward()
+optimizer.step()
+```
+
+The adapter starts as the identity with zero shared gate/bias (2F parameters).
+Both can receive gradients on the first step. Leading axes are independent
+rows; projection mixes only the final feature axis, not tokens. Strength zero
+is an explicit bypass. A `state_dict` stores learned vectors and the recipe;
+optimizer state must also be saved for an identical next update.
+`wave_gate_autograd(x, gate, bias, kernel=...)` exposes the non-residual operation.
+
+Torch retains its normal in-place version checks. Replacing the adapter's
+recipe after forward does not reinterpret an already-created backward.
+Float32 inputs and first-order gradients only: no AMP, compile, double
+backward, trainable curvature or implicit model discovery is promised.
+Torch GPU tensors incur explicit CPU copies; WASM runs scalar Rust here.
+The text encoder/infusion API remains on the native module and is not included
+in this parameter-owned adapter.
+
+For a cached HF model, the local-only
+`bindings/st-py/examples/hf_elliptic_learning.py --geometry wave_gate` probe
+compares off, the parameter-matched tangent map at zero, and WaveGate.
+Its tiny authored corpus tests wiring, not generalization. Zero initialization
+and full-batch deterministic updates mean multiple seed labels are not
+independent experimental draws. No speed competition is attached to this probe.
 
 ## Map And Chain Rule
 

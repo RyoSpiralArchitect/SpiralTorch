@@ -45,6 +45,7 @@ mod tensor;
 mod text;
 mod theory;
 mod topos_resonator;
+mod wave_gate_learning;
 mod trainer;
 mod vision;
 mod wgpu;
@@ -301,6 +302,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     zspace_semantic_review::register(py, m)?;
     elliptic::register(py, m)?;
     topos_resonator::register(m)?;
+    wave_gate_learning::register(m)?;
     theory::register(py, m)?;
     qr::register(py, m)?;
     julia_bridge::register(py, m)?;
@@ -348,6 +350,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     #[allow(unused_mut)]
     let mut exports = vec![
         "Tensor",
+        "WaveGateKernel",
+        "WaveGateLearningBatch",
         "AutogradTensor",
         "AutogradPackedRhs",
         "AUTOGRAD_CONTRACT_VERSION",
