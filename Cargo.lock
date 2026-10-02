@@ -3447,6 +3447,7 @@ dependencies = [
  "rand_chacha",
  "serde",
  "serde_json",
+ "sha2",
  "spiral-config",
  "st-backend-wgpu",
  "st-core",

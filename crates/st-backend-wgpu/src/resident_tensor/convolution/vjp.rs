@@ -105,6 +105,19 @@ pub(crate) fn backward(
         grid_for(layouts[1].len(), &limits)?,
         grid_for(layouts[2].len(), &limits)?,
     ];
+    let profile =
+        input
+            .device
+            .profile_slot()
+            .begin(|| super::super::profile::ConvolutionVjpGeometry {
+                kind: "depthwise",
+                input: input.layout.shape().to_vec(),
+                weights: weights.layout.shape().to_vec(),
+                upstream: upstream.layout.shape().to_vec(),
+                stride,
+                padding,
+                dilation,
+            })?;
     let guard = Shared::new(runtime::empty_buffer::<u32>(
         gpu,
         "tensor.depthwise_vjp.guard",
@@ -177,7 +190,7 @@ pub(crate) fn backward(
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("tensor.depthwise_vjp.pass"),
-                timestamp_writes: None,
+                timestamp_writes: profile.as_ref().map(|p| p.writes(index)),
             });
             pass.set_pipeline(&kernels.pipelines[index]);
             pass.set_bind_group(0, &binding, &[]);
@@ -185,6 +198,9 @@ pub(crate) fn backward(
         }
     }
     context.queue().submit(Some(encoder.finish()));
+    if let Some(profile) = profile {
+        profile.finish(&outputs[0]);
+    }
     Ok(outputs)
 }
 
