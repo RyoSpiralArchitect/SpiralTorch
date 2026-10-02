@@ -5543,6 +5543,12 @@ class HfRepetitionUnlikelihoodBatchPlan:
     report: Mapping[str, object] | None
     sequences: tuple[Mapping[str, object], ...] | None
 
+class HfCausalLabelAlignmentCollator:
+    def __init__(
+        self, base_collator: Callable[[List[Dict[str, Any]]], Mapping[str, Any]],
+    ) -> None: ...
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]: ...
+
 class HfRepetitionUnlikelihoodCollator:
     config: Dict[str, object]
     def __init__(
@@ -13059,6 +13065,7 @@ __all__ = [
     "HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA",
     "HfRepetitionUnlikelihoodBatchPlan",
     "HfRepetitionUnlikelihoodCollator",
+    "HfCausalLabelAlignmentCollator",
     "hf_repetition_unlikelihood_recipe_contract",
     "hf_repetition_unlikelihood_trainer_class",
     "validate_zspace_parameter_trajectory",
