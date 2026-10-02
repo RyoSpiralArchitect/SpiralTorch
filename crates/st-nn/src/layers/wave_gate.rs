@@ -14,6 +14,9 @@ use st_tensor::{
     LanguageWaveEncoder, TensorUtilBackend,
 };
 
+mod learning;
+pub use learning::{WaveGateKernel, WaveGateLearningBatch};
+
 #[allow(clippy::too_many_arguments)]
 fn emit_wave_gate_forward_meta(
     rows: usize,

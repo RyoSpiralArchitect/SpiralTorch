@@ -20,6 +20,8 @@ __all__ = [
     "ToposResonatorAdapter",
     "topos_resonator_autograd",
     "EllipticResidualAdapter",
+    "WaveGateAdapter",
+    "wave_gate_autograd",
 ]
 _SCHEMA = "spiraltorch.topos_resonator_adapter.v1"
 
@@ -56,6 +58,36 @@ def _values(tensor: Any) -> list[float]:
 
 if torch is not None:
 
+    class _WaveGateFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, value: Any, gate: Any, bias: Any, kernel: Any) -> Any:
+            features = value.shape[-1]
+            ctx.snapshot = kernel.forward(
+                _values(value),
+                _values(gate),
+                _values(bias),
+                value.numel() // features,
+                features,
+            )
+            # Keep Torch's version checks, but the mathematical pullback reads
+            # only the owned Rust snapshot, never current adapter parameters.
+            ctx.save_for_backward(value, gate, bias)
+            return torch.tensor(
+                ctx.snapshot.output, device=value.device, dtype=value.dtype
+            ).reshape(value.shape)
+
+        @staticmethod
+        @torch.autograd.function.once_differentiable
+        def backward(ctx: Any, grad_output: Any) -> tuple[Any, Any, Any, None]:
+            value, gate, bias = ctx.saved_tensors
+            gradients = ctx.snapshot.vjp(_values(grad_output))
+            return tuple(
+                torch.tensor(
+                    gradient, device=parameter.device, dtype=parameter.dtype
+                ).reshape(parameter.shape)
+                for gradient, parameter in zip(gradients, (value, gate, bias))
+            ) + (None,)
+
     class _ToposResonatorFunction(torch.autograd.Function):
         @staticmethod
         def forward(ctx: Any, value: Any, gate: Any, kernel: Any) -> Any:
@@ -90,6 +122,34 @@ if torch is not None:
                 ),
                 None,
             )
+
+
+def wave_gate_autograd(value: Any, gate: Any, bias: Any, *, kernel: Any = None) -> Any:
+    """Rust WaveGate with shared feature vectors and sum-reduced parameter VJPs.
+
+    Leading axes are independent rows; the final feature axis is coupled by the
+    radial projection. Float32 CPU transport only, with first-order gradients.
+    No parameter-gradient averaging or training-policy rewrite is applied.
+    """
+    _input(value)
+    for name, parameter in (("gate", gate), ("bias", bias)):
+        if (
+            not isinstance(parameter, torch.Tensor)
+            or parameter.dtype != value.dtype
+            or parameter.device != value.device
+        ):
+            raise TypeError(f"{name} must be a float32 tensor on the input device")
+        if parameter.shape != (value.shape[-1],):
+            raise ValueError(f"{name} must be a shared vector of feature width")
+    from . import WaveGateKernel
+
+    if kernel is None:
+        kernel = WaveGateKernel()
+    if not isinstance(kernel, WaveGateKernel):
+        raise TypeError("kernel must be an immutable Rust WaveGateKernel")
+    if max(value.numel(), value.shape[-1]) > kernel.max_values:
+        raise ValueError("input exceeds the geometric kernel's value budget")
+    return _WaveGateFunction.apply(value, gate, bias, kernel)
 
 
 def topos_resonator_autograd(value: Any, gate: Any, *, kernel: Any = None) -> Any:
@@ -128,7 +188,78 @@ if torch is None:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             _require_torch()
 
+    class WaveGateAdapter:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            _require_torch()
+
 else:
+
+    class WaveGateAdapter(torch.nn.Module):
+        """Identity-start residual through a Rust WaveGate, with 2F parameters.
+
+        Zero gate/bias keep the original hidden state and allow both to learn
+        immediately. No token mixing or implicit model patching is performed.
+        The native module's text encoder is not part of this adapter.
+        """
+
+        def __init__(
+            self, features: int, *, strength: float = 0.1, **kernel_options: Any
+        ) -> None:
+            super().__init__()
+            if (
+                isinstance(features, bool)
+                or not isinstance(features, int)
+                or features <= 0
+            ):
+                raise ValueError("features must be a positive integer")
+            from . import WaveGateKernel
+
+            self.features = features
+            self.strength = _strength(strength)
+            self._kernel = WaveGateKernel(**kernel_options)
+            if features > self._kernel.max_values:
+                raise ValueError("features exceed the geometric kernel's value budget")
+            self.gate = torch.nn.Parameter(torch.zeros(features, dtype=torch.float32))
+            self.bias = torch.nn.Parameter(torch.zeros(features, dtype=torch.float32))
+
+        @property
+        def execution_backend(self) -> str:
+            return self._kernel.execution_backend
+
+        def forward(self, value: Any) -> Any:
+            _input(value)
+            if value.shape[-1] != self.features:
+                raise ValueError("input feature width differs from the adapter")
+            strength = _strength(self.strength)
+            if strength == 0.0:
+                return value
+            return value + strength * wave_gate_autograd(
+                value, self.gate, self.bias, kernel=self._kernel
+            )
+
+        def get_extra_state(self) -> dict[str, Any]:
+            return {
+                "schema": "spiraltorch.wave_gate_adapter.v1",
+                "features": self.features,
+                "strength": _strength(self.strength),
+                "kernel": json.loads(self._kernel.configuration_json()),
+            }
+
+        def set_extra_state(self, state: dict[str, Any]) -> None:
+            if (
+                not isinstance(state, dict)
+                or set(state) != {"schema", "features", "strength", "kernel"}
+                or state["schema"] != "spiraltorch.wave_gate_adapter.v1"
+                or state["features"] != self.features
+            ):
+                raise ValueError("incompatible WaveGate adapter state")
+            from . import WaveGateKernel
+
+            strength = _strength(state["strength"])
+            kernel = WaveGateKernel(**state["kernel"])
+            if self.features > kernel.max_values:
+                raise ValueError("features exceed the geometric kernel's value budget")
+            self.strength, self._kernel = strength, kernel
 
     class EllipticResidualAdapter(torch.nn.Module):
         """Identity-initialized residual through the Rust elliptic feature map.

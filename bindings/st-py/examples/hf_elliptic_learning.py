@@ -1,12 +1,14 @@
 """Local-only pretrained learning-path probe, not a language-quality benchmark.
 
 Explicitly select a tensor-valued block. Uses a tiny authored corpus, frozen base,
-and off / parameter-matched tangent-linear / elliptic controls. No downloads.
+and off / parameter-matched tangent-linear / geometric controls. No downloads.
+The legacy filename also supports WaveGate via --geometry wave_gate.
 """
 
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -30,6 +32,16 @@ class TangentControl(st.EllipticResidualAdapter):
         coordinates = self.orientation(value)
         features = self.anchor + coordinates @ self.tangent.T
         return value + self.strength * self.readout(features)
+
+
+class WaveGateTangentControl(st.WaveGateAdapter):
+    """First-order map at the zero gate/bias initialization, with the same 2F parameters."""
+
+    def forward(self, value):
+        curvature = self.get_extra_state()["kernel"]["curvature"]
+        return value + self.strength * (value * self.gate + self.bias) / math.sqrt(
+            -curvature
+        )
 
 
 TEXT = {
@@ -58,6 +70,10 @@ def main():
     parser.add_argument("--block", required=True)
     parser.add_argument("--features", type=int, required=True)
     parser.add_argument("--steps", type=int, default=6)
+    parser.add_argument(
+        "--geometry", choices=("elliptic", "wave_gate"), default="elliptic"
+    )
+    parser.add_argument("--seeds", type=int, nargs="+", default=[17, 29, 43])
     parser.add_argument("--checkpoint-dir", type=Path)
     args = parser.parse_args()
     if not args.model_dir.is_dir() or args.steps < 2:
@@ -94,7 +110,7 @@ def main():
     with torch.no_grad():
         baseline_logits = model(**batches["train"]).logits
     report = {
-        "schema": "spiraltorch.hf_elliptic_learning.v1",
+        "schema": f"spiraltorch.hf_{args.geometry}_learning.v1",
         "scope": "bounded pretrained wiring/control experiment; tiny authored corpus",
         "model_type": model.config.model_type,
         "base_parameter_sha256": baseline_hash,
@@ -109,18 +125,31 @@ def main():
         "device": "cpu",
         "geometry_execution": "rust_f32_cpu",
         "threads": 2,
+        "geometry": args.geometry,
+        "seed_scope": (
+            "deterministic zero initialization; seeds do not create independent data or parameter draws"
+            if args.geometry == "wave_gate"
+            else "trainable projection initialization"
+        ),
         "texts": TEXT,
         "inputs": {
             key: {k: v.tolist() for k, v in b.items()} for key, b in batches.items()
         },
         "runs": [],
     }
-    for seed in (17, 29, 43):
-        for arm in ("off", "tangent", "elliptic"):
+    for seed in args.seeds:
+        for arm in ("off", "tangent", args.geometry):
             torch.manual_seed(seed)
-            constructor = (
-                TangentControl if arm == "tangent" else st.EllipticResidualAdapter
-            )
+            if args.geometry == "wave_gate":
+                constructor = (
+                    WaveGateTangentControl if arm == "tangent" else st.WaveGateAdapter
+                )
+                gradient_fields = ("gate_grad_l1", "bias_grad_l1")
+            else:
+                constructor = (
+                    TangentControl if arm == "tangent" else st.EllipticResidualAdapter
+                )
+                gradient_fields = ("orientation_grad_l1", "readout_grad_l1")
             adapter = constructor(args.features, strength=0.0 if arm == "off" else 0.1)
             parent.add_module(child_name, torch.nn.Sequential(original, adapter))
             with torch.no_grad():
@@ -132,8 +161,8 @@ def main():
                 "parameters": sum(p.numel() for p in adapter.parameters()),
                 "train_loss": [],
                 "development_loss": [],
-                "orientation_grad_l1": [],
-                "readout_grad_l1": [],
+                gradient_fields[0]: [],
+                gradient_fields[1]: [],
             }
             try:
                 for step in range(args.steps + 1):
@@ -148,14 +177,16 @@ def main():
                         break
                     opt.zero_grad()
                     if arm == "off":
-                        run["orientation_grad_l1"].append(0.0)
-                        run["readout_grad_l1"].append(0.0)
+                        for label in gradient_fields:
+                            run[label].append(0.0)
                         continue
                     loss.backward()
-                    for label, parameter in (
-                        ("orientation_grad_l1", adapter.orientation.weight),
-                        ("readout_grad_l1", adapter.readout.weight),
-                    ):
+                    parameters = (
+                        (adapter.gate, adapter.bias)
+                        if args.geometry == "wave_gate"
+                        else (adapter.orientation.weight, adapter.readout.weight)
+                    )
+                    for label, parameter in zip(gradient_fields, parameters):
                         assert (
                             parameter.grad is not None
                             and torch.isfinite(parameter.grad).all()
@@ -167,10 +198,7 @@ def main():
                         (model(**batches["train"]).logits - baseline_logits).abs().max()
                     )
                 if arm != "off":
-                    assert (
-                        sum(run["orientation_grad_l1"]) > 0
-                        and sum(run["readout_grad_l1"]) > 0
-                    )
+                    assert all(sum(run[label]) > 0 for label in gradient_fields)
                 assert all(
                     p.grad is None for p in model.parameters() if not p.requires_grad
                 )
@@ -185,7 +213,7 @@ def main():
                     raise FileExistsError(f"checkpoint already exists: {path.name}")
                 torch.save(
                     {
-                        "schema": "spiraltorch.hf_elliptic_checkpoint.v1",
+                        "schema": f"spiraltorch.hf_{args.geometry}_checkpoint.v1",
                         "adapter": adapter.state_dict(),
                         "optimizer": opt.state_dict(),
                         "base_parameter_sha256": baseline_hash,
@@ -201,6 +229,28 @@ def main():
                     "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 }
             report["runs"].append(run)
+    if args.geometry == "wave_gate":
+        kernel = st.WaveGateKernel(curvature=-0.7, saturation=1.0, porosity=0.2)
+        x, gate, bias, seed = (
+            [0.2, -0.3, 1.5, 0.5],
+            [1.4, -1.1],
+            [0.15, -0.05],
+            [0.35, -0.2, -0.1, 0.3],
+        )
+        batch = kernel.forward(x, gate, bias, 2, 2)
+        gradients = batch.vjp(seed)
+        report["native_fixture"] = {
+            "input": x,
+            "gate": gate,
+            "bias": bias,
+            "upstream": seed,
+            "output": batch.output,
+            "grad_input": gradients[0],
+            "grad_gate": gradients[1],
+            "grad_bias": gradients[2],
+        }
+        print(json.dumps(report, indent=2, allow_nan=False))
+        return
     warp = st.EllipticWarp(1.0, 4, 2)
     x = [0.3, 0.4, 0.8, 1e-4, 2e-4, 1.0, 1e20, 2e20, 3e20]
     batch = warp.map_orientations_batch(x)

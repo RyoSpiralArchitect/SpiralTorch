@@ -54,7 +54,11 @@ mod nn_resident;
 mod tuner;
 mod utils;
 #[cfg(all(target_arch = "wasm32", feature = "nn"))]
+mod wave_gate_learning;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
 pub use nn_resident::*;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+pub use wave_gate_learning::*;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
 mod wgpu_resident;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]

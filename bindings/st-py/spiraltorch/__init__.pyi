@@ -11,7 +11,25 @@ from .geometry_autograd import (
     ToposResonatorAdapter as ToposResonatorAdapter,
     topos_resonator_autograd as topos_resonator_autograd,
     EllipticResidualAdapter as EllipticResidualAdapter,
+    WaveGateAdapter as WaveGateAdapter,
+    wave_gate_autograd as wave_gate_autograd,
 )
+
+class WaveGateKernel:
+    def __init__(self, *, curvature: float = ..., saturation: float = ...,
+                 porosity: float = ..., max_values: int = ...) -> None: ...
+    @property
+    def execution_backend(self) -> Literal["rust_f32_cpu"]: ...
+    @property
+    def max_values(self) -> int: ...
+    def configuration_json(self) -> str: ...
+    def forward(self, input: Sequence[float], gate: Sequence[float], bias: Sequence[float],
+                rows: int, features: int) -> WaveGateLearningBatch: ...
+
+class WaveGateLearningBatch:
+    @property
+    def output(self) -> List[float]: ...
+    def vjp(self, upstream: Sequence[float]) -> Tuple[List[float], List[float], List[float]]: ...
 
 class ToposResonatorKernel:
     def __init__(self, *, coupling: float = ..., iterations: int = ...,

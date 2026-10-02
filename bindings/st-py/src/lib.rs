@@ -45,6 +45,8 @@ mod tensor;
 mod text;
 mod theory;
 mod topos_resonator;
+#[cfg(feature = "nn")]
+mod wave_gate_learning;
 mod trainer;
 mod vision;
 mod wgpu;
@@ -301,6 +303,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     zspace_semantic_review::register(py, m)?;
     elliptic::register(py, m)?;
     topos_resonator::register(m)?;
+    #[cfg(feature = "nn")]
+    wave_gate_learning::register(m)?;
     theory::register(py, m)?;
     qr::register(py, m)?;
     julia_bridge::register(py, m)?;
@@ -505,6 +509,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 
     #[cfg(feature = "nn")]
     exports.extend_from_slice(&[
+        "WaveGateKernel",
+        "WaveGateLearningBatch",
         "Identity",
         "Scaler",
         "NonLiner",
