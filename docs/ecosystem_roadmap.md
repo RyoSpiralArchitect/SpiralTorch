@@ -19,7 +19,8 @@ Current scope of the vision execution path:
 | Portable input checkpoint | Order/cursor, shuffle and transform RNG | Same Rust loader/transform state | Transform state; integrated trainer also owns order/cursor/shuffle |
 | Unified resident training boundary | Model/input/schedule owner, explicit settlement and bound checkpoint | Thin Rust-owned trainer client | Same Rust owner, async settlement; fresh-document and cross-runtime restart exercised |
 | Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch comparison; shared-trainer native process restart | Open |
-| Transfer-inclusive training throughput and memory | Open | Open | Open |
+| Transfer-inclusive training throughput | Rust/WGPU execution via Python client | Bounded matched native timing; large-batch gap remains | Open |
+| Training peak GPU memory | Open | Open | Open |
 
 The compiled ConvNeXt training path now connects model-owned gradients to
 resident parameter updates with version checks, stale-gradient rejection and
@@ -99,6 +100,16 @@ browser real-image restart, throughput or a Z-space policy advantage.
    recording that environment separately. Neither synthetic loss decrease nor
    kernel timings close these remaining gates; new model families or a model
    hub are not prerequisites.
+   The [first transfer-inclusive timing sweep](../benchmarks/results/2026-10-02-vision-training-throughput/README.md)
+   now completes 180 workers across three seeds, batches 1/16/64 and both plain
+   and identity-feedback modes. All final weights match the eager Torch
+   reference within the existing bound; all 90 baseline/candidate Rust
+   checkpoints are identical. Combining receipt and feedback-scalar readback
+   preserves correctness but does not establish a general speedup. The
+   large-batch throughput gap remains around 21x on this small Apple M4 model.
+   Profile GPU passes, then optimize the measured dominant reductions; do not
+   label host settlement time as mapping-only cost. Peak GPU memory and browser
+   real-image throughput remain open gates.
 2. **Restartable input and trainer state.** Keep model snapshots distinct from
    data order/cursor, augmentation RNG and schedule state, then connect their
    restart contracts. Specify whether rejected updates retry or consume a batch.

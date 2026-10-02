@@ -40,6 +40,11 @@ claim. GPU memory and epoch-boundary/input-stream scaling remain open gates.
 
 ## Run
 
+The [first complete paired result](../benchmarks/results/2026-10-02-vision-training-throughput/README.md)
+preserves all 180 workers and 90 exact baseline/candidate checkpoints, including
+the remaining large-batch gap to eager Torch and the lack of a general speedup
+from combined scalar readback. It does not close the memory or browser gates.
+
 Use two separately retained wheel environments with the same Python/Torch
 dependencies. The tool records native binary and harness hashes; retain their
 build source/feature receipts alongside the results. It never downloads data.
@@ -49,6 +54,8 @@ python -I tools/bench_vision_trainer_vs_torch.py \
   --data-root "$CIFAR_ROOT" --output "$NEW_RESULT_DIR" \
   --baseline-python "$BASELINE_PYTHON" --candidate-python "$CANDIDATE_PYTHON" \
   --seeds 17 29 43 --batches 1 16 64 --steps 16 --warmup 3 --repeats 5
+python -I tools/verify_vision_training_timing.py "$NEW_RESULT_DIR" \
+  --source-ref "$CAPTURED_SOURCE_COMMIT" --output "$NEW_VERIFICATION_JSON"
 python -I tools/test_vision_training_timing.py
 ```
 
