@@ -1,4 +1,5 @@
 import copy
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -124,8 +125,9 @@ def test_invalid_or_partial_evidence_cannot_be_summarized(summary_module, corrup
         summary_module.summarize(plan, result, journal, "sealed")
 
 
+@pytest.mark.parametrize("compressed", [False, True])
 def test_cli_binds_input_bytes_and_never_overwrites(
-    summary_module, tmp_path, monkeypatch
+    summary_module, tmp_path, monkeypatch, compressed
 ):
     plan, result, journal = fixture()
     raw_result = json.dumps(result).encode()
@@ -137,8 +139,9 @@ def test_cli_binds_input_bytes_and_never_overwrites(
     }
     arguments = ["summarize"]
     for name, raw in files.items():
-        path = tmp_path / f"{name}.json"
-        path.write_bytes(raw)
+        suffix = ".json.gz" if compressed and name == "results" else ".json"
+        path = tmp_path / f"{name}{suffix}"
+        path.write_bytes(gzip.compress(raw, mtime=0) if suffix.endswith(".gz") else raw)
         arguments.extend([f"--{name}", str(path)])
     output = tmp_path / "summary.json"
     monkeypatch.setattr(sys, "argv", arguments + ["--output", str(output)])
@@ -150,7 +153,9 @@ def test_cli_binds_input_bytes_and_never_overwrites(
     with pytest.raises(FileExistsError):
         summary_module.main()
     assert output.read_bytes() == summary_bytes
-    (tmp_path / "results.json").write_bytes(raw_result + b"\n")
+    result_path = tmp_path / ("results.json.gz" if compressed else "results.json")
+    changed = raw_result + b"\n"
+    result_path.write_bytes(gzip.compress(changed, mtime=0) if compressed else changed)
     other = tmp_path / "must-not-exist.json"
     monkeypatch.setattr(sys, "argv", arguments + ["--output", str(other)])
     with pytest.raises(ValueError, match="hash"):

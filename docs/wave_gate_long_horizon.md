@@ -107,3 +107,20 @@ confidence interval. Seeds vary sample order, not initialization, and reuse the
 same evaluation blocks. No block-independent significance claim follows.
 This is a receipt check, not a revalidation of original checkpoint contents or
 process termination; those remain part of the local completion verification.
+Inputs ending in `.gz` are decompressed before hash validation. The published
+result record preserves all numeric histories in `results.json.gz`; input hashes
+in the summary refer to uncompressed bytes, while `SHA256SUMS` binds the published
+compressed file. Raw terminal logs, checkpoints and model/corpus files stay local.
+
+## Completed 512-Step Result
+
+The [three-seed result](../benchmarks/results/2026-10-02-wave-gate-long-horizon/README.md)
+completed all nine runs and exact adapter/Adam continuation checks. All active
+arms improve held-out cross-entropy versus the shared frozen baseline, but tangent
+is best in every seed on both evaluation sets. Learning radius beats fixed radius
+but does not close the tangent gap. The radius grows from 4 to 9.20-9.32.
+This supports a working learning connection and reduced projection contraction,
+not a demonstrated geometric advantage or a recommendation to use this adapter
+instead of the simpler control. No additional endpoint-driven radius search was
+performed. Nonlinear matched controls and geometries that learn directions or
+relationships, rather than only radial compression, remain the next hypotheses.

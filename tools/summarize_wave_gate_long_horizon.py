@@ -2,6 +2,7 @@
 """Summarize a completed, hash-sealed study without importing Torch or scoring again."""
 
 import argparse
+import gzip
 import hashlib
 import json
 import math
@@ -139,10 +140,11 @@ def main():
     for name in ("plan", "results", "journal", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     args = parser.parse_args()
-    raw = {
-        name: getattr(args, name).read_bytes()
-        for name in ("plan", "results", "journal")
-    }
+    raw = {}
+    for name in ("plan", "results", "journal"):
+        path = getattr(args, name)
+        value = path.read_bytes()
+        raw[name] = gzip.decompress(value) if path.suffix == ".gz" else value
     hashes = {name: hashlib.sha256(value).hexdigest() for name, value in raw.items()}
     parsed = {name: json.loads(value) for name, value in raw.items()}
     summary = summarize(

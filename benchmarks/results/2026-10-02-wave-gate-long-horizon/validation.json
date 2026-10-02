@@ -2,7 +2,7 @@
   "schema": "spiraltorch.wave_gate_long_horizon_validation.v1",
   "source_revision": "82d5ed3d4815ddee32e434941f553709e2e7319a",
   "study_id": "a4e516af8cef3d57b524425004d9969b0b54022cba1a08852ecec9fd90db6d88",
-  "status": "training_in_progress_not_an_outcome",
+  "status": "completed",
   "python_tests": {
     "passed": 47,
     "failed": 0,
@@ -15,7 +15,7 @@
   "native_sha256": "ecbfe0cf6ca7551d6d667aab766645387cb185b3488421e007ecf832e737af8a",
   "local_test_log_sha256": "3e04027c2b5e867c12d2480f00bf5dc19ad21885c1741ac559eb7de50cbc3553",
   "notes": [
-    "This receipt validates restart/gating behavior, not completion or quality of the live 512-step experiment.",
+    "Structural tests alone do not establish experiment completion or quality. The completion record below separately verifies the actual fixed-endpoint run.",
     "Native Rust/WASM mathematics are reused unchanged from the preceding radius study.",
     "The first test draft compared different batch shapes; after matching batch shape, causal CE agreement passes without broadening tolerance."
   ],
@@ -46,5 +46,35 @@
     "workflow_yaml": "parsed",
     "native_exports": "required before pytest collection",
     "scope": "Local macOS run with Python -I and pytest importlib mode, explicitly selecting the frozen native package. This is not remote Ubuntu CI completion."
+  },
+  "completion": {
+    "primary_process_exit_code": 0,
+    "completed_resume_process_exit_code": 0,
+    "runs": 9,
+    "primary_updates": 4608,
+    "extra_validation_updates": 18,
+    "all_endpoint_cursors": 512,
+    "all_frozen_bases_unchanged": true,
+    "all_next_adapter_and_adam_updates_equal": true,
+    "all_endpoint_checkpoint_hashes_reverified": true,
+    "all_training_losses_and_gradients_finite": true,
+    "all_observed_affines_finite": true,
+    "completed_resume_repeated_no_endpoints": true,
+    "result_hash_unchanged_after_completed_resume": true,
+    "results_sha256": "cc10f160da9b6ba33b139aff15c3fdc8e2664640b38ae3ba89429b05128c11d3",
+    "local_training_log_sha256": "9caa09acb5394e6fdb7488b1af4a67692ac8b045587705a190ca48c67fe8c6bc",
+    "local_completed_resume_log_sha256": "80375b9750164f4ee2a0013dcd9970926b1dde261709f4e55743f126f58d2147",
+    "latest_python_tests": {
+      "passed": 59,
+      "failed": 0,
+      "skipped": 0,
+      "aggregation_tests": 12,
+      "local_test_log_sha256": "d5033bc39404d9074b165880b77e67e97c35c48ff4e7c85f8f66af5db94c1613"
+    },
+    "aggregator_source_sha256": "6f7ab040bc427ea56fc3a1537fb868e5284c9824197906d5524fe2e34ea95d15",
+    "aggregator_test_sha256": "29ddff68a1149e380029be53a172aefd559f87c28140e6b29c0193b4e6ad18d3",
+    "public_reaggregation_byte_exact": true,
+    "local_originals_retained": true,
+    "interpretation": "All active arms improve baseline, but tangent is best for every seed on both fixed evaluation sets. No geometric advantage, significance or speed claim."
   }
 }
