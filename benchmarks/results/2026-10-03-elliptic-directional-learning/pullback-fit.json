@@ -1,0 +1,33 @@
+{
+  "schema": "spiraltorch.elliptic_pullback_fit.v1",
+  "scope": "Synthetic feature fitting, no LM-quality or speed claim",
+  "initial_loss": 2.323535631170339,
+  "final_loss": 1.1818324097134791e-13,
+  "accepted_updates": 5,
+  "losses": [
+    2.323535631170339,
+    0.7881460429905489,
+    0.0771574265162383,
+    0.0012341461321246916,
+    1.4954360405550204e-7,
+    1.1818324097134791e-13
+  ],
+  "max_linear_system_residual": 9.539965848508281e-8,
+  "damping": 0.001,
+  "orientation": [
+    1,
+    0.34999994329585,
+    -0.19999983016563191,
+    1,
+    -0.3999998092086097,
+    0.5999998732216325
+  ],
+  "target_orientation": [
+    1,
+    0.35,
+    -0.2,
+    1,
+    -0.4,
+    0.6
+  ]
+}
