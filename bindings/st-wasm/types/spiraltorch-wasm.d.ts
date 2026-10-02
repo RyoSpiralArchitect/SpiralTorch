@@ -17,6 +17,7 @@ declare module "spiraltorch-wasm" {
         forwardCausal(orientations: Float32Array, batch: number, sequence: number, max_pairs: number): EllipticCausalLearningBatch;
         /** Signed ambient correction; raw_mix is shared, finite and narrowed to f32. */
         forwardGatedCausal(orientations: Float32Array, batch: number, sequence: number, raw_mix: number, max_pairs: number): EllipticGatedCausalLearningBatch;
+        forwardAnchored(orientations: Float32Array, raw_mix: number): EllipticAnchoredLearningBatch;
         free(): void;
     }
     export class EllipticLearningBatch {
@@ -30,6 +31,19 @@ declare module "spiraltorch-wasm" {
         private constructor();
         readonly features: Float32Array;
         vjp(upstream: Float32Array): Float32Array;
+        free(): void;
+    }
+    export class EllipticAnchoredLearningBatch {
+        private constructor();
+        readonly features: Float32Array;
+        readonly mix: number;
+        vjp(upstream: Float32Array): EllipticAnchoredGradients;
+        free(): void;
+    }
+    export class EllipticAnchoredGradients {
+        private constructor();
+        readonly orientations: Float32Array;
+        readonly rawMix: number;
         free(): void;
     }
     export class EllipticGatedCausalLearningBatch {

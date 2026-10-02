@@ -4,6 +4,8 @@ use crate::utils::{js_error, js_u32};
 use js_sys::Number;
 #[cfg(target_arch = "wasm32")]
 use st_core::theory::microlocal::{
+    EllipticAnchoredGradients as CoreAnchoredGradients,
+    EllipticAnchoredLearningBatch as CoreAnchoredBatch,
     EllipticCausalLearningBatch as CoreCausalBatch,
     EllipticGatedCausalGradients as CoreGatedGradients,
     EllipticGatedCausalLearningBatch as CoreGatedBatch, EllipticLearningBatch as CoreBatch,
@@ -23,6 +25,53 @@ pub struct EllipticWarpKernel {
 #[wasm_bindgen]
 pub struct EllipticLearningBatch {
     inner: CoreBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct EllipticAnchoredLearningBatch {
+    inner: CoreAnchoredBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct EllipticAnchoredGradients {
+    inner: CoreAnchoredGradients,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl EllipticAnchoredGradients {
+    #[wasm_bindgen(getter)]
+    pub fn orientations(&self) -> Vec<f32> {
+        self.inner.orientations.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = rawMix)]
+    pub fn raw_mix(&self) -> f32 {
+        self.inner.raw_mix
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl EllipticAnchoredLearningBatch {
+    #[wasm_bindgen(getter)]
+    pub fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn mix(&self) -> f32 {
+        self.inner.mix()
+    }
+
+    pub fn vjp(&self, upstream: &[f32]) -> Result<EllipticAnchoredGradients, JsValue> {
+        self.inner
+            .vjp(upstream)
+            .map(|inner| EllipticAnchoredGradients { inner })
+            .map_err(js_error)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -117,6 +166,22 @@ impl EllipticWarpKernel {
         self.warp
             .differentiate_batch(orientations, self.max_rows)
             .map(|inner| EllipticLearningBatch { inner })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = forwardAnchored)]
+    pub fn forward_anchored(
+        &self,
+        orientations: &[f32],
+        raw_mix: Number,
+    ) -> Result<EllipticAnchoredLearningBatch, JsValue> {
+        let raw: &JsValue = raw_mix.as_ref();
+        let raw_mix = raw
+            .as_f64()
+            .ok_or_else(|| js_error("raw_mix must be a number"))? as f32;
+        self.warp
+            .differentiate_anchored_batch(orientations, raw_mix, self.max_rows)
+            .map(|inner| EllipticAnchoredLearningBatch { inner })
             .map_err(js_error)
     }
 

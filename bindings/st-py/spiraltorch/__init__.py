@@ -9553,6 +9553,7 @@ def __getattr__(name: str) -> _Any:
     if name in {"ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter",
                 "EllipticCausalResidualAdapter", "elliptic_causal_autograd",
                 "EllipticGatedCausalResidualAdapter", "elliptic_gated_causal_autograd",
+                "EllipticAnchoredResidualAdapter", "elliptic_anchored_autograd",
                 "WaveGateAdapter", "wave_gate_autograd"}:
         module = import_module("spiraltorch.geometry_autograd")
         value = getattr(module, name)
@@ -9632,6 +9633,7 @@ _EXPORTED.update(
      "ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter",
      "EllipticCausalResidualAdapter", "elliptic_causal_autograd",
      "EllipticGatedCausalResidualAdapter", "elliptic_gated_causal_autograd",
+     "EllipticAnchoredResidualAdapter", "elliptic_anchored_autograd",
      "WaveGateAdapter", "wave_gate_autograd"]
 )
 if _resolve_rs_attr("ToposResonatorKernel") is not None:

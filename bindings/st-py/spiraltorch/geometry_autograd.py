@@ -24,6 +24,8 @@ __all__ = [
     "elliptic_causal_autograd",
     "EllipticGatedCausalResidualAdapter",
     "elliptic_gated_causal_autograd",
+    "EllipticAnchoredResidualAdapter",
+    "elliptic_anchored_autograd",
     "WaveGateAdapter",
     "wave_gate_autograd",
 ]
@@ -61,6 +63,28 @@ def _values(tensor: Any) -> list[float]:
 
 
 if torch is not None:
+
+    class _EllipticAnchoredFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, warp: Any, orientation: Any, raw_mix: Any) -> Any:
+            ctx.snapshot = warp.map_anchored_batch(
+                _values(orientation), raw_mix=raw_mix.detach().item()
+            )
+            ctx.save_for_backward(orientation, raw_mix)
+            return torch.tensor(
+                ctx.snapshot.features, device=orientation.device, dtype=orientation.dtype
+            ).reshape(*orientation.shape[:-1], 9)
+
+        @staticmethod
+        @torch.autograd.function.once_differentiable
+        def backward(ctx: Any, upstream: Any) -> tuple[Any, ...]:
+            orientation, raw_mix = ctx.saved_tensors
+            dx, dg = ctx.snapshot.vjp(_values(upstream))
+            return (
+                None,
+                torch.tensor(dx, device=orientation.device, dtype=orientation.dtype).reshape_as(orientation),
+                torch.tensor(dg, device=raw_mix.device, dtype=raw_mix.dtype),
+            )
 
     class _EllipticGatedCausalFunction(torch.autograd.Function):
         @staticmethod
@@ -268,6 +292,31 @@ def elliptic_gated_causal_autograd(
     return _EllipticGatedCausalFunction.apply(warp, orientation, raw_mix, max_pairs)
 
 
+def elliptic_anchored_autograd(warp: Any, orientation: Any, raw_mix: Any) -> Any:
+    """Rust signed blend toward phi(1,0,0), with input and shared-gate VJPs.
+
+    Leading axes are independent rows, never token mixing. Supports float32
+    [...,3] and a scalar float32 raw gate on the same device, at most 65536 rows.
+    The fixed chart anchor has no trainable coordinates. First-order CPU transport.
+    """
+    _input(orientation)
+    from . import EllipticWarp
+
+    if not isinstance(warp, EllipticWarp):
+        raise TypeError("warp must be a spiraltorch.EllipticWarp instance")
+    if orientation.shape[-1] != 3 or orientation.numel() // 3 > 65_536:
+        raise ValueError("anchored orientations need [...,3] within the row budget")
+    if (
+        not isinstance(raw_mix, torch.Tensor)
+        or raw_mix.dtype != orientation.dtype
+        or raw_mix.device != orientation.device
+    ):
+        raise TypeError("raw_mix must be a float32 tensor on the input device")
+    if raw_mix.ndim != 0:
+        raise ValueError("raw_mix must be a shared scalar")
+    return _EllipticAnchoredFunction.apply(warp, orientation, raw_mix)
+
+
 def wave_gate_autograd(
     value: Any,
     gate: Any,
@@ -360,6 +409,10 @@ if torch is None:
             _require_torch()
 
     class EllipticGatedCausalResidualAdapter:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            _require_torch()
+
+    class EllipticAnchoredResidualAdapter:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             _require_torch()
 
@@ -659,6 +712,40 @@ else:
                 raise ValueError("incompatible gated causal elliptic adapter state")
             super().set_extra_state(
                 {**state, "schema": "spiraltorch.elliptic_causal_residual_adapter.v1"}
+            )
+
+    class EllipticAnchoredResidualAdapter(EllipticResidualAdapter):
+        """Identity-start residual with a Rust-owned, fixed-anchor correction.
+
+        11*F+3 parameters; raw gate zero preserves the original pointwise map.
+        The anchor is phi(1,0,0) of this warp, not a learned vector. No token mixing
+        or sequence cache is introduced; leading axes remain independent rows.
+        """
+
+        def __init__(self, features: int, *, raw_mix: float = 0.0, **options: Any) -> None:
+            value = torch.tensor(float(raw_mix), dtype=torch.float32)
+            if not torch.isfinite(value):
+                raise ValueError("raw_mix must be finite and representable as float32")
+            super().__init__(features, **options)
+            self.raw_mix = torch.nn.Parameter(value)
+
+        def _map_features(self, orientation: Any) -> Any:
+            return elliptic_anchored_autograd(self._warp, orientation, self.raw_mix)
+
+        def get_extra_state(self) -> dict[str, Any]:
+            return {
+                **super().get_extra_state(),
+                "schema": "spiraltorch.elliptic_anchored_residual_adapter.v1",
+            }
+
+        def set_extra_state(self, state: dict[str, Any]) -> None:
+            if (
+                not isinstance(state, dict)
+                or state.get("schema") != "spiraltorch.elliptic_anchored_residual_adapter.v1"
+            ):
+                raise ValueError("incompatible anchored elliptic adapter state")
+            super().set_extra_state(
+                {**state, "schema": "spiraltorch.elliptic_residual_adapter.v1"}
             )
 
     class ToposResonatorAdapter(torch.nn.Module):

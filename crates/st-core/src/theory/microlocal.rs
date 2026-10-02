@@ -28,6 +28,8 @@ use std::sync::{Arc, Mutex};
 
 #[path = "microlocal/elliptic.rs"]
 mod elliptic;
+#[path = "microlocal/elliptic_anchored.rs"]
+mod elliptic_anchored;
 #[path = "microlocal/elliptic_causal.rs"]
 mod elliptic_causal;
 #[path = "microlocal/elliptic_learning.rs"]
@@ -35,6 +37,7 @@ mod elliptic_learning;
 
 use elliptic::EllipticAccumulator;
 pub use elliptic::{EllipticDifferential, EllipticTelemetry, EllipticWarp, LieFrame};
+pub use elliptic_anchored::{EllipticAnchoredGradients, EllipticAnchoredLearningBatch};
 pub use elliptic_causal::{
     EllipticCausalLearningBatch, EllipticGatedCausalGradients, EllipticGatedCausalLearningBatch,
 };
