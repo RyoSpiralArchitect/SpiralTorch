@@ -7,6 +7,9 @@ use st_nn::{
 };
 use st_tensor::NdLayout;
 
+#[path = "attention_projection.rs"]
+mod projection;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn floats(value: &serde_json::Value) -> Vec<f32> {
@@ -45,6 +48,14 @@ pub async fn run() -> Result<serde_json::Value> {
 /// Test-only supplied fixture lets the browser exercise larger kernel regimes
 /// without embedding benchmark arrays into the library or duplicating the math.
 pub async fn run_fixture(fixture: serde_json::Value) -> Result<serde_json::Value> {
+    run_fixture_with_projection(fixture, "scalar").await
+}
+
+pub async fn run_fixture_with_projection(
+    fixture: serde_json::Value,
+    projection: &str,
+) -> Result<serde_json::Value> {
+    let (tile, kernel) = projection::options(projection)?;
     if fixture["schema"] != "spiraltorch.attention_chain_torch.v1" {
         return Err("wrong fixture schema".into());
     }
@@ -112,9 +123,9 @@ pub async fn run_fixture(fixture: serde_json::Value) -> Result<serde_json::Value
             .collect();
         let frame = SimpleZFrame::new(dims[0], dims[1], dims[2]);
         let geometry = ZRBFAttention::new(width, heads, ZMetricWeights::default(), true)?;
-        let kernel = geometry.kernel_bias(&frame, &indices, &indices)?;
-        geometry_checks.push(serde_json::json!({"name": name, "max_abs_error": close(kernel.data(), &floats(&scenario["expected_kernel"]), name)?}));
-        let pair = device.upload(&[1, heads, sequence, sequence], kernel.data())?;
+        let geometry_bias = geometry.kernel_bias(&frame, &indices, &indices)?;
+        geometry_checks.push(serde_json::json!({"name": name, "max_abs_error": close(geometry_bias.data(), &floats(&scenario["expected_kernel"]), name)?}));
+        let pair = device.upload(&[1, heads, sequence, sequence], geometry_bias.data())?;
         let input = device.upload(&shape, &floats(&scenario["input"]))?;
         for causal in [false, true] {
             let mask = if causal {
@@ -128,7 +139,8 @@ pub async fn run_fixture(fixture: serde_json::Value) -> Result<serde_json::Value
                 mask,
                 std::array::from_fn(|i| (&weights[i], &biases[i])),
             )?;
-            let mut compiled = plan.compile_wgpu(runtime.clone())?;
+            let mut compiled =
+                plan.compile_wgpu_with_options(runtime.clone(), tile, kernel, Default::default())?;
             for case in scenario["cases"]
                 .as_array()
                 .unwrap()
@@ -159,6 +171,7 @@ pub async fn run_fixture(fixture: serde_json::Value) -> Result<serde_json::Value
     }
     Ok(serde_json::json!({
         "schema": "spiraltorch.attention_chain.v1", "passed": true,
+        "projection": projection,
         "adapter": format!("{:?}", runtime.adapter_info()),
         "reference_torch_version": fixture["torch_version"],
         "checks": checks, "geometry_checks": geometry_checks,
@@ -168,6 +181,11 @@ pub async fn run_fixture(fixture: serde_json::Value) -> Result<serde_json::Value
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unknown_projection_is_not_silently_defaulted() {
+        assert!(super::projection::options("register").is_err());
+    }
+
     #[test]
     fn invalid_reference_values_never_pass_the_numerical_gate() {
         for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {

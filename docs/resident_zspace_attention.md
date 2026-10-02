@@ -89,6 +89,14 @@ only the caller's final snapshot materializes the output. Inputs, biases and
 both graphs must share the owning device and queue. Outputs retain their own
 storage and deferred failure guards across graph reuse.
 
+`compile_wgpu_with_options(runtime, tile, kernel, accumulation)` selects the
+existing resident matmul implementation for **both** QKV and output projections.
+It works on native WGPU and browser WASM; it does not change attention, geometry
+or failure guards. The ordinary `compile_wgpu` remains Scalar with the default
+tile/accumulation. For example, opt into `MatmulKernel::Register2x2` with
+`MatmulTile::new(16, 16, 16)?`; invalid register tiles fail rather than silently
+falling back. Choosing a tile is not a portable guarantee of better performance.
+
 The existing `ZRBFAttention` supplies two explicit adapters:
 
 - `kernel_bias(frame, queries, keys)` returns `[H*Q,K]` host geometry metadata
@@ -228,3 +236,30 @@ place the generated benchmark fixture at
 `target/attention-chain-web/benchmark-fixture.json`, and open the same local page
 with `?suite=benchmark`. Require 18 output checks and three geometry checks. This
 larger browser run is numerical validation, not a browser timing benchmark.
+
+### Projection-Only Controls
+
+To hold attention and the executable fixed while changing only projections,
+register the same release executable under three labels and explicitly select
+the corresponding modes:
+
+```bash
+BIN=target/release/examples/resident_attention_chain_bench
+python3 -I tools/bench_attention_chain_vs_torch.py --fixture "$FIXTURE" \
+  --native "st_scalar=$BIN" --native-projection st_scalar=scalar \
+  --native "st_register8=$BIN" --native-projection st_register8=register8 \
+  --native "st_register16=$BIN" --native-projection st_register16=register16 \
+  --devices cpu mps --rounds 5 --samples 9 --warmup 50 --burst 4 --output "$NEW_RESULT"
+```
+
+Use the environment settings above. Five rounds rotate all five engines through
+every order position. Native reports must confirm the requested mode; omitting
+the option preserves compatibility with older four-argument benchmark binaries.
+The test/benchmark presets share one Rust definition: Scalar/default tile,
+Register2x2/default tile, or Register2x2/16x16x16. Accumulation is unchanged.
+
+The browser page accepts `?projection=register8` or `?projection=register16`,
+and these may be combined with `suite=benchmark`. Rust validates the mode and
+executes the same fixture; JavaScript does not implement projection or geometry
+math. The original parity suite includes tail dimensions and unequal input/
+output widths, not just the larger tile-aligned benchmark shapes.

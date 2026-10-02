@@ -1,5 +1,9 @@
 //! Bounded full-chain timings against a generated, independent Torch fixture.
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "support/attention_projection.rs"]
+mod projection;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod native {
     use serde_json::{json, Value};
     use st_backend_wgpu::{resident_tensor::TensorDevice, runtime};
@@ -47,9 +51,11 @@ mod native {
 
     pub fn main() -> Result<()> {
         let args: Vec<_> = std::env::args().skip(1).collect();
-        if args.len() != 4 {
-            return Err("usage: <fixture.json> <samples>=3 <warmup>=1 <burst=1..64>".into());
+        if !(4..=5).contains(&args.len()) {
+            return Err("usage: <fixture.json> <samples>=3 <warmup>=1 <burst=1..64> [scalar|register8|register16]".into());
         }
+        let projection = args.get(4).map_or("scalar", String::as_str);
+        let (tile, projection_kernel) = crate::projection::options(projection)?;
         let samples = args[1].parse::<usize>()?;
         let warmup = args[2].parse::<usize>()?;
         let burst = args[3].parse::<usize>()?;
@@ -128,7 +134,12 @@ mod native {
                     mask,
                     std::array::from_fn(|i| (&weights[i], &biases[i])),
                 )?;
-                let mut graph = plan.compile_wgpu(runtime.clone())?;
+                let mut graph = plan.compile_wgpu_with_options(
+                    runtime.clone(),
+                    tile,
+                    projection_kernel,
+                    Default::default(),
+                )?;
                 let host_bias = case["geometry_strength"].as_f64().map(|s| {
                     kernel
                         .data()
@@ -214,7 +225,7 @@ mod native {
         }
         println!(
             "{}",
-            json!({"schema":"spiraltorch.attention_chain_bench.v1","status":"passed","engine":"st_wgpu","adapter":format!("{:?}",runtime.adapter_info()),"warmup":warmup,"samples_per_route":samples,"burst":burst,"cases":cases,"boundary":"Resident: fixed input/bias/weights, burst forwards, queue completion included, reads/checks excluded. Host-to-host: fresh input and bias upload plus owning output read each forward, weights remain resident. Setup, compile and geometry construction excluded. This is a host-timed inference comparison, not kernel timestamps or training."})
+            json!({"schema":"spiraltorch.attention_chain_bench.v1","status":"passed","engine":"st_wgpu","projection":projection,"adapter":format!("{:?}",runtime.adapter_info()),"warmup":warmup,"samples_per_route":samples,"burst":burst,"cases":cases,"boundary":"Resident: fixed input/bias/weights, burst forwards, queue completion included, reads/checks excluded. Host-to-host: fresh input and bias upload plus owning output read each forward, weights remain resident. Setup, compile and geometry construction excluded. This is a host-timed inference comparison, not kernel timestamps or training."})
         );
         Ok(())
     }

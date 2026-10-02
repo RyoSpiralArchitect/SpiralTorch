@@ -119,14 +119,42 @@ impl AttentionInferencePlan {
         &self,
         runtime: st_backend_wgpu::runtime::WgpuRuntime,
     ) -> Result<ResidentAttentionBlock, InferenceError> {
+        self.compile_wgpu_with_options(
+            runtime,
+            Default::default(),
+            st_backend_wgpu::resident_matmul::MatmulKernel::Scalar,
+            Default::default(),
+        )
+    }
+
+    /// Choose the existing resident matmul implementation for both projections.
+    /// Attention, geometry, ownership and numerical guards are unchanged.
+    #[cfg(feature = "wgpu")]
+    pub fn compile_wgpu_with_options(
+        &self,
+        runtime: st_backend_wgpu::runtime::WgpuRuntime,
+        tile: st_backend_wgpu::resident_matmul::MatmulTile,
+        kernel: st_backend_wgpu::resident_matmul::MatmulKernel,
+        accumulation: st_backend_wgpu::resident_matmul::MatmulAccumulation,
+    ) -> Result<ResidentAttentionBlock, InferenceError> {
         require_uncommitted_route()?;
         st_backend_wgpu::resident_tensor::attention::validate_limits(
             self.spec,
             &runtime.context().device().limits(),
         )?;
         Ok(ResidentAttentionBlock {
-            qkv: self.qkv.compile_graph_wgpu(runtime.clone())?,
-            output: self.output.compile_graph_wgpu(runtime)?,
+            qkv: self.qkv.compile_graph_wgpu_with_options(
+                runtime.clone(),
+                tile,
+                kernel,
+                accumulation,
+            )?,
+            output: self.output.compile_graph_wgpu_with_options(
+                runtime,
+                tile,
+                kernel,
+                accumulation,
+            )?,
             spec: self.spec,
         })
     }
