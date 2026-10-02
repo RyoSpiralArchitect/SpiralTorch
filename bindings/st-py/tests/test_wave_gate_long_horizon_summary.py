@@ -45,7 +45,7 @@ def test_gate_serialization_is_independent_of_libm_and_decimal_context(summary_m
             summary_module.canonical_gate(raw)
 
 
-@pytest.mark.parametrize("study", ["elliptic-gated-study", "elliptic-anchored-study"])
+@pytest.mark.parametrize("study", ["elliptic-gated-study", "elliptic-anchored-study", "elliptic-chart-step-study"])
 def test_committed_summary_rebuilds_byte_for_byte(summary_module, monkeypatch, tmp_path, study):
     directory = Path(__file__).resolve().parents[3] / f"benchmarks/results/2026-10-03-{study}"
     output = tmp_path / "summary.json"
@@ -268,7 +268,7 @@ def test_anchored_factorial_reports_real_reference_and_all_four_gates(summary_mo
 def chart_fixture():
     plan, result, journal = anchored_fixture()
     rename = dict(zip(plan["config"]["arms"], ["adam_tangent", "adam_elliptic", "chart_tangent", "chart_elliptic"]))
-    plan["config"].update(schema="spiraltorch.elliptic_chart_step_protocol.v1", arms=list(rename.values()), reference_arm="adam_tangent")
+    plan["config"].update(schema="spiraltorch.elliptic_chart_step_protocol.v1", arms=list(rename.values()), reference_arm="adam_tangent", relative_damping=0.1)
     for row in result["runs"]:
         old = row["run_key"]
         seed, arm = old.split(":")
@@ -278,7 +278,7 @@ def chart_fixture():
             enabled = rename[arm].startswith("chart_")
             record["optimizer_step"] = {"enabled": enabled}
             if enabled:
-                record["optimizer_step"].update(metric=[1., 0., 0., 2.], damped_condition=1.8, proposal_l2=.1, step_l2=.1, applied_step_l2=.100000001, cosine=.9, gradient_dot_proposal=-.01, gradient_dot_applied_step=-.01)
+                record["optimizer_step"].update(metric=[1., 0., 0., 2.], damped_condition=(2. + .15) / (1. + .15), proposal_l2=.1, step_l2=.1, applied_step_l2=.100000001, cosine=.9, gradient_dot_proposal=-.01, gradient_dot_applied_step=-.01)
     return plan, result, journal
 
 
@@ -293,7 +293,7 @@ def test_chart_factorial_keeps_reference_interaction_and_step_receipts(summary_m
     assert report["chart_step_trajectories"]["41:chart_elliptic"]["nonzero_proposals"] == 2
 
 
-@pytest.mark.parametrize("corruption", ["pairing", "count", "enabled", "missing", "nan", "norm", "cosine", "metric"])
+@pytest.mark.parametrize("corruption", ["pairing", "count", "enabled", "missing", "nan", "norm", "applied_norm", "vanished_tiny_step", "cosine", "metric", "indefinite_metric", "condition", "damping"])
 def test_chart_summary_rejects_inconsistent_receipts(summary_module, corruption):
     plan, result, journal = chart_fixture()
     row = next(r for r in result["runs"] if r["run_key"].endswith(":chart_elliptic"))
@@ -310,11 +310,47 @@ def test_chart_summary_rejects_inconsistent_receipts(summary_module, corruption)
         receipt["gradient_dot_applied_step"] = float("nan")
     elif corruption == "norm":
         receipt["step_l2"] = .2
+    elif corruption == "applied_norm":
+        receipt["applied_step_l2"] = .2
+    elif corruption == "vanished_tiny_step":
+        receipt.update(proposal_l2=1e-30, step_l2=1e-30, applied_step_l2=0.)
     elif corruption == "cosine":
         receipt["cosine"] = -1
+    elif corruption == "indefinite_metric":
+        receipt["metric"] = [1., 2., 2., 1.]
+    elif corruption == "condition":
+        receipt["damped_condition"] = 1.8
+    elif corruption == "damping":
+        plan["config"]["relative_damping"] = 0.2
     else:
         receipt["metric"] = [0., 0., 0., 0.]
     with pytest.raises(ValueError):
+        summary_module.summarize(plan, result, journal, "sealed")
+
+
+@pytest.mark.parametrize("scale", [1e-300, 1., 1e300, 1e308])
+@pytest.mark.parametrize("cross,condition", [(0., 1.), (1., 21.), (-1., 21.), (1. + 1e-15, 21.)])
+def test_chart_metric_scale_and_rank_one_roundoff(summary_module, scale, cross, condition):
+    plan, result, journal = chart_fixture()
+    receipt = result["runs"][2]["records"][0]["optimizer_step"]
+    assert receipt["enabled"]
+    receipt.update(metric=[scale, cross * scale, cross * scale, scale], damped_condition=condition)
+    summary_module.summarize(plan, result, journal, "sealed")
+
+
+@pytest.mark.parametrize("metric", [[1., 1. + 1e-8, 1. + 1e-8, 1.], [1e-300, 1e300, 1e300, 1e-300]])
+def test_chart_metric_rejects_negative_determinant_and_overflow(summary_module, metric):
+    plan, result, journal = chart_fixture()
+    result["runs"][2]["records"][0]["optimizer_step"]["metric"] = metric
+    with pytest.raises(ValueError, match="positive semidefinite"):
+        summary_module.summarize(plan, result, journal, "sealed")
+
+
+@pytest.mark.parametrize("damping", [None, True, "0.1", 0., 2., float("nan"), float("inf")])
+def test_chart_summary_rejects_invalid_damping(summary_module, damping):
+    plan, result, journal = chart_fixture()
+    plan["config"]["relative_damping"] = damping
+    with pytest.raises(ValueError, match="relative damping"):
         summary_module.summarize(plan, result, journal, "sealed")
 
 

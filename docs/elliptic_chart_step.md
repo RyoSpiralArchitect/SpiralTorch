@@ -50,6 +50,15 @@ proposal keeps the norm of that arm's current Adam proposal. This does **not**
 equate cumulative step lengths after trajectories diverge. Both native and
 actually applied f32 displacement norms are recorded.
 
+The read-only study validator requires the applied displacement norm to match
+the proposal within `2e-5` relative tolerance, with no absolute floor. A vanished
+nonzero update therefore fails rather than being reported as budget-preserving.
+It also checks positive semidefiniteness of the symmetric mean Gram matrix
+(normalized determinant tolerance `64 * ulp(1.0)` for f64 accumulation), then
+checks the damped condition against that matrix and the configured damping
+within `1e-6` relative tolerance, accounting for the native f32 damping boundary.
+These are receipt consistency checks, not a new geometric execution rule.
+
 The affine control uses the native Jacobian at its constant chart anchor.
 For both maps the anchored gate multiplies the local Jacobian by a shared scalar;
 that scalar cancels in relative damping and step normalization when nonzero.

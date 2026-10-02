@@ -139,6 +139,8 @@ def contrast_report(config, measured, sets, contrasts):
 def chart_step_report(config, runs, measured, sets):
     arms = {"adam_tangent", "adam_elliptic", "chart_tangent", "chart_elliptic"}
     require(set(config["arms"]) == arms and config.get("reference_arm") == "adam_tangent", "incomplete chart factorial design")
+    damping = config.get("relative_damping")
+    require(type(damping) in (int, float) and math.isfinite(damping) and 1e-6 <= damping <= 1.0, "invalid relative damping")
     for seed in config["seeds"]:
         rows = [runs[f"{seed}:{arm}"] for arm in arms]
         for field in ("initial_parameter_sha256", "initial_projection_sha256"):
@@ -157,10 +159,24 @@ def chart_step_report(config, runs, measured, sets):
             require(all(type(receipt.get(k)) in (int, float) and math.isfinite(receipt[k]) for k in fields), "invalid chart-step scalar")
             require(all(receipt[k] >= 0 for k in fields[:3]), "negative step norm")
             require(math.isclose(receipt["proposal_l2"], receipt["step_l2"], rel_tol=1e-6, abs_tol=1e-40), "native chart step changed proposal budget")
+            # No absolute floor: a vanished tiny update is not a preserved budget.
+            require(math.isclose(receipt["proposal_l2"], receipt["applied_step_l2"], rel_tol=2e-5, abs_tol=0.0), "applied chart step changed proposal budget")
             require(receipt["damped_condition"] >= 1, "invalid damped condition")
             metric = receipt.get("metric")
             require(isinstance(metric, list) and len(metric) == 4 and all(type(v) in (int, float) and math.isfinite(v) for v in metric), "invalid chart metric")
             require(metric[0] >= 0 and metric[3] >= 0 and metric[0] + metric[3] > 0 and metric[1] == metric[2], "invalid chart metric")
+            # Normalize before products to avoid overflowing/underflowing det(G).
+            scale = max(metric[0], metric[3])
+            a, b, c = metric[0] / scale, metric[1] / scale, metric[3] / scale
+            require(math.isfinite(b) and a * c - b * b >= -64 * math.ulp(1.0), "chart metric is not positive semidefinite")
+            trace = a + c
+            a, b, c = 2 * a / trace + damping, 2 * b / trace, 2 * c / trace + damping
+            determinant = a * c - b * b
+            largest = ((a + c) + math.hypot(a - c, 2 * b)) * 0.5
+            require(determinant > 0, "invalid damped chart metric")
+            expected_condition = largest * largest / determinant
+            # The native configuration crosses an f32 boundary; metrics use f64.
+            require(math.isclose(receipt["damped_condition"], expected_condition, rel_tol=1e-6), "chart condition differs from metric and damping")
             cosine = receipt.get("cosine")
             require((receipt["proposal_l2"] == 0 and cosine is None and receipt["applied_step_l2"] == 0) or (receipt["proposal_l2"] > 0 and type(cosine) in (int, float) and math.isfinite(cosine) and 0 <= cosine <= 1), "invalid step direction cosine")
         active = [r for r in receipts if r["proposal_l2"] > 0]

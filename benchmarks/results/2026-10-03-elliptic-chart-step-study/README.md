@@ -91,6 +91,14 @@ passes 209 postrun Python tests with no skips. `checkpoint-verification.json`
 records saved-content checks; `validation.json` records process termination,
 resume immutability, runtime/source/log hashes and public summary reproduction.
 
+Post-review revalidation additionally rejects inconsistent **applied** update
+norms, indefinite Gram matrices and conditions inconsistent with the metric and
+damping. It passes 78 summarizer tests and 240 related Python tests, including
+byte-identical reproduction of this summary. `review-validation.json` binds the
+new validator/test sources and unchanged published inputs. The original launch,
+training, checkpoint and completion records remain untouched; no model was
+retrained or endpoint reevaluated for this read-only check.
+
 Training source: `76ccee3649bcadd407539de6e14b832cc1e480e0`.
 Summary source: `48199ca5163cc1a3ced8662f2f82c6a429e1b328`.
 The Python/native package and transitive client files are frozen separately
