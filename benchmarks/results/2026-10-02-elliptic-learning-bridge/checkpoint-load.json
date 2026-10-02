@@ -1,0 +1,68 @@
+{
+  "schema": "spiraltorch.elliptic_checkpoint_load.v1",
+  "checks": [
+    {
+      "filename": "17-elliptic.pt",
+      "bytes": 106695,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "17-off.pt",
+      "bytes": 36696,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "17-tangent.pt",
+      "bytes": 107253,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "29-elliptic.pt",
+      "bytes": 106695,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "29-off.pt",
+      "bytes": 36696,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "29-tangent.pt",
+      "bytes": 107253,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "43-elliptic.pt",
+      "bytes": 106695,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "43-off.pt",
+      "bytes": 36696,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    },
+    {
+      "filename": "43-tangent.pt",
+      "bytes": 107253,
+      "weights_only_load": true,
+      "adapter_and_optimizer_load": true,
+      "steps": 6
+    }
+  ]
+}
