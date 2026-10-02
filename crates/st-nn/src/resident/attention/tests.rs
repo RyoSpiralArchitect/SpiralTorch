@@ -98,6 +98,7 @@ mod gpu {
         ZTensor,
     };
     use st_backend_wgpu::{
+        resident_matmul::{MatmulKernel, MatmulTile},
         resident_tensor::{ResidentTensor, TensorDevice, TensorError as GpuError},
         runtime,
     };
@@ -176,9 +177,22 @@ mod gpu {
     #[test]
     fn composed_chain_retains_outputs_and_failed_guards_across_reuse() {
         let Some(device) = device() else { return };
+        for (tile, kernel) in [
+            (MatmulTile::default(), MatmulKernel::Scalar),
+            (MatmulTile::default(), MatmulKernel::Register2x2),
+            (
+                MatmulTile::new(16, 16, 16).unwrap(),
+                MatmulKernel::Register2x2,
+            ),
+        ] {
+            check_guards_and_reuse(&device, tile, kernel);
+        }
+    }
+
+    fn check_guards_and_reuse(device: &TensorDevice, tile: MatmulTile, kernel: MatmulKernel) {
         let params = parameters();
         let mut compiled = plan(&params, AttentionMask::Causal { query_offset: 0 })
-            .compile_wgpu(device.runtime().clone())
+            .compile_wgpu_with_options(device.runtime().clone(), tile, kernel, Default::default())
             .unwrap();
         let input = device
             .upload(&[4, 2, 6], &[0.2; 48])
@@ -215,5 +229,18 @@ mod gpu {
             .is_err());
         let wrong_bias = device.upload(&[4], &[0.; 4]).unwrap();
         assert!(compiled.forward(&input, Some(&wrong_bias), None).is_err());
+    }
+
+    #[test]
+    fn invalid_register_tile_is_rejected_without_scalar_fallback() {
+        let Some(device) = device() else { return };
+        assert!(plan(&parameters(), AttentionMask::None)
+            .compile_wgpu_with_options(
+                device.runtime().clone(),
+                MatmulTile::new(7, 8, 16).unwrap(),
+                MatmulKernel::Register2x2,
+                Default::default(),
+            )
+            .is_err());
     }
 }

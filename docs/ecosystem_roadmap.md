@@ -224,8 +224,13 @@ controls rather than choosing between them:
    now retains all plain/zero/Z-RBF controls, including a rejected unconditional
    key-tiling rollout. A shape-selected tile improves the measured 128/256-token
    regimes versus the previous ST kernel, but still trails PyTorch MPS; short
-   samples remain sensitive to warmup. Head packing and projection dispatch are
-   the next execution costs to isolate, not a reason to claim LLM quality gains.
+   samples remain sensitive to warmup. The next
+   [projection-only comparison](../benchmarks/results/2026-10-02-attention-projection-kernels/README.md)
+   connects existing Register2x2 kernels to both projections, with native/WASM
+   parity. The explicit 16x16 preset improves the measured larger inputs, while
+   Scalar remains the default because short/device behavior is not settled.
+   Head packing and submission costs remain optimization targets; these are
+   inference measurements, not a reason to claim LLM quality gains.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

@@ -1,10 +1,20 @@
 """Lightweight fail-closed coverage checks; no torch or GPU import required."""
 import copy
 import unittest
-from bench_attention_chain_vs_torch import validate_report
+from bench_attention_chain_vs_torch import validate_report, projection_options, require_projection
 
 
 class ReportTests(unittest.TestCase):
+    def test_projection_controls_are_explicit_and_confirmed(self):
+        self.assertEqual(projection_options(["st=register16"], {"st":"binary"}), {"st":"register16"})
+        for values in (["st"], ["other=scalar"], ["st=typo"], ["st=scalar", "st=scalar"]):
+            with self.assertRaises(ValueError):
+                projection_options(values, {"st":"binary"})
+        for report in ({}, {"projection":"scalar"}):
+            with self.assertRaises(ValueError):
+                require_projection(report, "register16")
+        require_projection({"projection":"register16"}, "register16")
+
     def setUp(self):
         self.fixture = {"scenarios": [{"name": "s", "cases": [{"name": "c"}]}]}
         self.report = dict(status="passed", samples_per_route=3, warmup=2, burst=4,

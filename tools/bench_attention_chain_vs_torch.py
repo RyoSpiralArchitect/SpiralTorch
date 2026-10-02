@@ -22,6 +22,22 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def projection_options(values, binaries):
+    pairs = [value.split("=", 1) for value in values]
+    if any(len(pair) != 2 for pair in pairs):
+        raise ValueError("projection must be LABEL=MODE")
+    options = dict(pairs)
+    if (len(options) != len(pairs) or set(options) - set(binaries)
+            or any(mode not in ("scalar", "register8", "register16") for mode in options.values())):
+        raise ValueError("projection labels/modes must match unique native engines")
+    return options
+
+
+def require_projection(report, expected):
+    if report.get("projection") != expected:
+        raise ValueError("native report does not confirm the requested projection")
+
+
 def validate_report(report, fixture, samples, warmup, burst):
     expected = {s["name"] + "/" + c["name"] for s in fixture["scenarios"] for c in s["cases"]}
     names = [c["name"] for c in report["cases"]]
@@ -117,6 +133,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--native", action="append", default=[], metavar="LABEL=RELEASE_BINARY")
+    parser.add_argument("--native-projection", action="append", default=[], metavar="LABEL=MODE",
+                        help="scalar, register8 or register16; omitted preserves historical binary CLI")
     parser.add_argument("--devices", nargs="+", choices=("cpu", "mps"), default=["cpu", "mps"])
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--samples", type=int, default=7)
@@ -139,6 +157,10 @@ def main():
     binaries = dict(value.split("=", 1) for value in args.native)
     if len(binaries) != len(args.native) or set(binaries) & {"torch_"+d for d in args.devices}:
         parser.error("engine labels must be unique")
+    try:
+        projections = projection_options(args.native_projection, binaries)
+    except ValueError as error:
+        parser.error(str(error))
     fixture = json.loads(args.fixture.read_text())
     if fixture["schema"] != "spiraltorch.attention_chain_torch.v1":
         parser.error("wrong fixture schema")
@@ -147,6 +169,7 @@ def main():
     orders = [engines[i % len(engines):] + engines[:i % len(engines)] for i in range(args.rounds)]
     report = dict(schema="spiraltorch.attention_chain_comparison.v1", status="running",
         fixture_sha256=digest(args.fixture), binary_sha256={k:digest(v) for k,v in binaries.items()},
+        native_projections=projections,
         python_version=platform.python_version(), torch_version=torch.__version__, platform=platform.platform(),
         recipe=dict(rounds=args.rounds, samples=args.samples, warmup=args.warmup, burst=args.burst,
                     order_seed=args.order_seed, orders=orders), runs=[],
@@ -157,9 +180,13 @@ def main():
             for engine in order:
                 print(f"round {round_index}: {engine}", file=sys.stderr, flush=True)
                 if engine in binaries:
-                    completed = subprocess.run([binaries[engine], str(args.fixture), str(args.samples),
-                        str(args.warmup), str(args.burst)], capture_output=True, text=True, check=True, timeout=600)
+                    command = [binaries[engine], str(args.fixture), str(args.samples), str(args.warmup), str(args.burst)]
+                    if engine in projections:
+                        command.append(projections[engine])
+                    completed = subprocess.run(command, capture_output=True, text=True, check=True, timeout=600)
                     result = json.loads(completed.stdout)
+                    if engine in projections:
+                        require_projection(result, projections[engine])
                 else:
                     result = torch_run(torch, fixture, engine.removeprefix("torch_"), args.samples, args.warmup, args.burst)
                 validate_report(result, fixture, args.samples, args.warmup, args.burst)
