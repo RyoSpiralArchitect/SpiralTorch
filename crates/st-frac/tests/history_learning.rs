@@ -105,6 +105,57 @@ fn no_history_is_exactly_zero_including_the_step_scale_derivative() {
 }
 
 #[test]
+fn empty_history_skips_unrepresentable_discarded_scale_and_coefficients() {
+    for (kernel_len, shape) in [(1, vec![2, 3]), (8, vec![6, 1])] {
+        for (step, alpha) in [
+            (0.1, 38.5),
+            (0.1, 100.0),
+            (1.0, f32::MAX),
+            (f32::MIN_POSITIVE, f32::MAX),
+        ] {
+            let kernel = FractionalGlKernel::new(kernel_len, step, 6, 48).unwrap();
+            let saved = kernel
+                .forward_history(&[f32::MAX; 6], &shape, 1, alpha)
+                .unwrap();
+            assert!(saved.output().iter().all(|&v| v == 0.0));
+            let gradient = saved.vjp(&[f32::MAX; 6]).unwrap();
+            assert_eq!(gradient.input, [0.0; 6]);
+            assert_eq!(gradient.alpha, 0.0);
+            assert_eq!(saved.jvp(&[f32::MAX; 6], f32::MAX).unwrap(), [0.0; 6]);
+        }
+    }
+}
+
+#[test]
+fn empty_history_still_validates_samples_orders_and_directions() {
+    for (kernel_len, shape) in [(1, vec![2, 3]), (8, vec![6, 1])] {
+        let kernel = FractionalGlKernel::new(kernel_len, 0.1, 6, 48).unwrap();
+        for alpha in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(matches!(
+                kernel.forward_history(&[1.0; 6], &shape, 1, alpha),
+                Err(FractionalLearningError::Operator(
+                    st_frac::FracErr::Alpha { .. }
+                ))
+            ));
+        }
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(matches!(
+                kernel.forward_history(&[value; 6], &shape, 1, 38.5),
+                Err(FractionalLearningError::Operator(
+                    st_frac::FracErr::NonFiniteSample { .. }
+                ))
+            ));
+        }
+        let saved = kernel.forward_history(&[1.0; 6], &shape, 1, 38.5).unwrap();
+        assert!(saved.vjp(&[]).is_err());
+        assert!(saved.vjp(&[f32::NAN; 6]).is_err());
+        assert!(saved.jvp(&[], 1.0).is_err());
+        assert!(saved.jvp(&[f32::INFINITY; 6], 1.0).is_err());
+        assert!(saved.jvp(&[1.0; 6], f32::NAN).is_err());
+    }
+}
+
+#[test]
 fn history_keeps_the_same_shape_budget_and_finite_domain_guards() {
     let kernel = FractionalGlKernel::new(4, 1.0, 10, 20).unwrap();
     assert!(matches!(

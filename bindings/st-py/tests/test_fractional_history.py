@@ -74,14 +74,22 @@ def test_native_history_does_not_subtract_large_rounded_current_values():
 
 
 @pytest.mark.parametrize("shape,kernel_len", [((2, 3, 4), 1), ((2, 1, 4), 8)])
-def test_empty_history_has_zero_input_and_order_derivatives(shape, kernel_len):
+@pytest.mark.parametrize("step,order", [(.7, .6), (.1, 38.5), (.1, 100.), (1., 1e38)])
+def test_empty_history_has_zero_input_and_order_derivatives(shape, kernel_len, step, order):
     x = torch.ones(shape, requires_grad=True)
-    a = torch.tensor(.6, requires_grad=True)
+    a = torch.tensor(order, requires_grad=True)
+    kernel = st.FractionalGlKernel(kernel_len=kernel_len, step=step)
     y = st.fractional_gl_history_autograd(
-        x, a, axis=1, kernel=st.FractionalGlKernel(kernel_len=kernel_len, step=.7))
+        x, a, axis=1, kernel=kernel)
     assert torch.count_nonzero(y) == 0
     gx, ga = torch.autograd.grad(y.sum(), (x, a))
     assert torch.count_nonzero(gx) == 0 and ga == 0
+    with torch.autograd.forward_ad.dual_level():
+        dx = torch.autograd.forward_ad.make_dual(x.detach(), torch.ones_like(x))
+        da = torch.autograd.forward_ad.make_dual(a.detach(), torch.tensor(1.))
+        primal, tangent = torch.autograd.forward_ad.unpack_dual(
+            st.fractional_gl_history_autograd(dx, da, axis=1, kernel=kernel))
+        assert torch.count_nonzero(primal) == torch.count_nonzero(tangent) == 0
 
 
 def test_independent_local_gate_recovers_pointwise_and_history_is_strictly_past():

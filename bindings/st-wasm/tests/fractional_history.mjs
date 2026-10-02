@@ -20,6 +20,25 @@ later.free(); gradient.free(); history.free();
 for (const bad of [NaN, Infinity, 0, -1, '.6']) assert.throws(() => kernel.forward_history(x, shape, 1, bad));
 for (const bad of [-1, .5, 3, '1']) assert.throws(() => kernel.forward_history(x, shape, bad, .6));
 
+for (const [k, dims] of [[1, [2, 3]], [8, [6, 1]]]) {
+    for (const [step, alpha] of [[.1, 38.5], [.1, 100], [1, 1e38]]) {
+        const emptyKernel = new FractionalGlKernel(k, step, 6, 48);
+        const values = f32(Array(6).fill(1e38));
+        const batch = emptyKernel.forward_history(values, new Uint32Array(dims), 1, alpha);
+        assert.deepEqual(Array.from(batch.output), Array(6).fill(0));
+        const pullback = batch.vjp(values);
+        assert.deepEqual(Array.from(pullback.input), Array(6).fill(0));
+        assert.equal(pullback.alpha, 0);
+        assert.deepEqual(Array.from(batch.jvp(values, 1e38)), Array(6).fill(0));
+        for (const bad of [NaN, Infinity, 0, -1]) {
+            assert.throws(() => emptyKernel.forward_history(values, new Uint32Array(dims), 1, bad));
+        }
+        assert.throws(() => batch.vjp(f32(Array(6).fill(NaN))));
+        assert.throws(() => batch.jvp(values, NaN));
+        pullback.free(); batch.free(); emptyKernel.free();
+    }
+}
+
 const targetBatch = kernel.forward_history(x, shape, 1, .65);
 const targetHistory = targetBatch.output;
 const targetLocal = [.2, -.25, .15], targetGate = [-.35, .3, .4];
