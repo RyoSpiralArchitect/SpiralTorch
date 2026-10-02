@@ -91,3 +91,9 @@ python -S tools/summarize_wave_gate_long_horizon.py \
 The output must match `summary.json` byte-for-byte. The summarizer never imports
 Torch or evaluates a model, and rejects incomplete studies. Reused endpoints,
 three seeds and the post-negative-result design make this exploratory evidence.
+
+Following review, derived `final_mix` values are serialized at 12 decimal places
+using fixed-precision Decimal evaluation rather than platform `libm.tanh`. Only
+these descriptive values were regenerated; raw gates, losses, training records,
+the launch plan and checkpoints are unchanged. `validation.json` preserves the
+original reproduction receipt and appends the canonical summary's hashes/checks.

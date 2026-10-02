@@ -370,5 +370,52 @@
     "byte_identical": true,
     "output_sha256": "141ebba07f471806a9213564408ce676e47e11fd224100e1a2b135487c144783",
     "tool_sha256": "ea2ad2d16e1668024bfc175aca275d67e4474e1427d303590e951ed28d7faca0"
+  },
+  "summary_canonicalization": {
+    "method": "Decimal precision 50, ROUND_HALF_EVEN, 12 decimal places; no platform libm",
+    "original_summary_sha256": "141ebba07f471806a9213564408ce676e47e11fd224100e1a2b135487c144783",
+    "canonical_summary_sha256": "e07f38704bc4da8390f91651b0bb602c93e6ac6cdf12ecaf6d061c1c34153987",
+    "tool_sha256": "d433c4ab456b5772c46cba9768513309d128014069627096c9698efc9e19f419",
+    "changed_fields": [
+      {
+        "path": ".gate_trajectories.41:gated_tangent.final_mix",
+        "before": 0.047122760106063595,
+        "after": 0.047122760106
+      },
+      {
+        "path": ".gate_trajectories.41:gated_elliptic.final_mix",
+        "before": -0.5197417426179626,
+        "after": -0.519741742618
+      },
+      {
+        "path": ".gate_trajectories.43:gated_tangent.final_mix",
+        "before": 0.09153566054239391,
+        "after": 0.091535660542
+      },
+      {
+        "path": ".gate_trajectories.43:gated_elliptic.final_mix",
+        "before": -0.4508932363653563,
+        "after": -0.450893236365
+      },
+      {
+        "path": ".gate_trajectories.47:gated_tangent.final_mix",
+        "before": 0.09241802952898412,
+        "after": 0.092418029529
+      },
+      {
+        "path": ".gate_trajectories.47:gated_elliptic.final_mix",
+        "before": -0.43587578509305575,
+        "after": -0.435875785093
+      }
+    ],
+    "raw_study_files_unchanged": true,
+    "tests": {
+      "passed": 28,
+      "skipped": 0,
+      "exit_code": 0,
+      "log_sha256": "d44b16e9653157d7fff6edca0f37c6795ba2d0f318b56a4702076df189ebc846"
+    },
+    "summary_command_exit_code": 0,
+    "committed_summary_cli_byte_identical": true
   }
 }
