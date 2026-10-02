@@ -114,6 +114,11 @@ large rounded current values. `FractionalHistoryAdapter` is an experimental
 or a capacity-matched quality win. Its causal, joint-learning and resume
 fixtures precede a pretrained comparison with ordinary causal controls; do
 not mix different mathematics into the PyTorch speed track.
+The [independent-history study](fractional_history_study.md) fixes pointwise,
+learned ordinary EMA, fixed GL history and learned GL history under the same
+three-seed/512-update schedule. Matching the learned arms' parameter count is
+not matching their filter prior or compute; completion and quality remain
+separate gates from the passing tiny-HF controls.
 
 ## Restarted execution slice: vision across Rust, Python, and browser
 

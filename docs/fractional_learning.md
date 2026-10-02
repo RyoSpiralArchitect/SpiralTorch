@@ -164,6 +164,8 @@ hypothesis, not evidence that fractional history improves language modeling.
 Any pretrained comparison must retain pointwise and ordinary causal controls,
 report parameter counts and additional work, and use the same data/update
 schedule. Existing full-GL checkpoints and comparisons keep their meaning.
+The [four-arm independent-history protocol](fractional_history_study.md) fixes
+those controls before observing pretrained outcomes.
 
 ## WASM
 
