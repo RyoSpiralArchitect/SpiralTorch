@@ -59,6 +59,17 @@ revision or returns `TrainingError::Rejected`. In a browser, use
 `update.snapshot()?.read_async().await?`. Either operation is an explicit
 synchronization boundary; neither is required to submit the next step.
 
+`update.snapshot_with_scalar(loss.value())?` captures acceptance flags, one
+logical scalar and its validity guard in the same submission. Native `read()`
+and browser `read_async()` return `(revision, scalar)` only after acceptance and
+finite-value validation. Rejected updates return `TrainingError::Rejected`
+before inspecting scalar validity, so an invalid loss cannot hide rejection.
+Negative finite scalars and single-element offset views are supported; foreign
+devices and non-scalar shapes fail before dispatch. The caller associates the
+scalar with this update; the API does not prove gradient/loss provenance.
+The small payload uses one staging map when it fits the device buffer limit.
+Snapshots retain their values after later updates or owner destruction.
+
 ## Boundaries And Next Connection
 
 - This is exact plain SGD. Reduction, clipping, momentum, decay, and geometric

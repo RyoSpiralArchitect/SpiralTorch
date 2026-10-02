@@ -12,8 +12,11 @@ try {
   if (!adapter || fallback !== false) throw Error("Non-fallback adapter not confirmed");
   await init();
   const report = JSON.parse(await run_parameter_checks());
+  const scalarChecks = ["scalar_receipt_one_map", "scalar_offset_view", "scalar_shape_validation",
+    "scalar_finite_guard", "scalar_rejection_priority", "retained_scalar_receipt"];
   if (report.schema !== "spiraltorch.resident_parameters.contract.v1" || report.status !== "passed" ||
-      report.parameter_checks.length !== 13 || report.conv2d_steps !== 16 ||
+      report.parameter_checks.length !== 19 || !scalarChecks.every(name => report.parameter_checks.includes(name)) ||
+      report.conv2d_steps !== 16 ||
       report.conv2d_training_loop_readbacks !== 0 ||
       !(report.conv2d_final_mse < report.conv2d_initial_mse * 0.1)) {
     throw Error("Incomplete resident parameter checks");

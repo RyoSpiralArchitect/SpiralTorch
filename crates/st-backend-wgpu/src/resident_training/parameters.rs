@@ -341,6 +341,84 @@ impl ResidentParameterUpdate {
             revision: self.revision,
         })
     }
+
+    /// Capture this update's flags and one guarded scalar in the same submission.
+    /// The caller associates the observation with the update; this does not
+    /// prove that the supplied scalar produced its gradients. A rejected update
+    /// takes precedence over invalid scalar data, as in separate receipt reads.
+    pub fn snapshot_with_scalar(
+        &self,
+        scalar: &ResidentTensor,
+    ) -> Result<ResidentParameterScalarReadback, TrainingError> {
+        let context = self.device.runtime().context();
+        scalar.require_context(context)?;
+        if scalar.layout().len() != 1 {
+            return Err(TensorError::Length.into());
+        }
+        let count = self.count.checked_add(2).ok_or(TrainingError::Overflow)?;
+        let mut encoder = context.device().create_command_encoder(&Default::default());
+        let batch = runtime::ReadbackBatch::encode_spans(
+            context,
+            &[
+                (&self.flags, 0, count),
+                (scalar.values(), scalar.layout().offset(), 1),
+                (scalar.flags(), 0, 1),
+            ],
+            "parameters.scalar_snapshot",
+            &mut encoder,
+        )?;
+        context.queue().submit(Some(encoder.finish()));
+        Ok(ResidentParameterScalarReadback {
+            batch,
+            count: self.count,
+            revision: self.revision,
+        })
+    }
+}
+
+/// Frozen update acceptance and a finite scalar, with one map when the small
+/// combined payload fits a staging buffer. Negative finite scalars are valid.
+pub struct ResidentParameterScalarReadback {
+    batch: runtime::ReadbackBatch<u32>,
+    count: usize,
+    revision: u64,
+}
+
+impl ResidentParameterScalarReadback {
+    pub fn staging_buffer_count(&self) -> usize {
+        self.batch.staging_buffer_count()
+    }
+
+    fn decode(
+        words: &[Vec<u32>],
+        count: usize,
+        revision: u64,
+    ) -> Result<(u64, f32), TrainingError> {
+        let expected = count.checked_add(2).ok_or(TrainingError::InvalidReadback)?;
+        if words.len() != 3
+            || words[0].len() != expected
+            || words[1].len() != 1
+            || words[2].len() != 1
+        {
+            return Err(TrainingError::InvalidReadback);
+        }
+        readback::validation_flags(bytemuck::cast_slice(&words[0]), count)?;
+        let scalar = f32::from_bits(u32::from_le(words[1][0]));
+        if words[2][0] != 0 || !scalar.is_finite() {
+            return Err(TensorError::NonFinite.into());
+        }
+        Ok((revision, scalar))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read(self) -> Result<(u64, f32), TrainingError> {
+        Self::decode(&self.batch.read()?, self.count, self.revision)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn read_async(self) -> Result<(u64, f32), TrainingError> {
+        Self::decode(&self.batch.read_async().await?, self.count, self.revision)
+    }
 }
 
 pub struct ResidentParameterUpdateReadback {

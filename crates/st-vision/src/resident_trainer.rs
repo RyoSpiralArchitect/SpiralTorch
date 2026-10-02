@@ -573,12 +573,12 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             .pending
             .as_ref()
             .ok_or_else(|| invalid("no pending update"))?;
-        let result = pending.update.snapshot()?.read();
-        let loss = match (&result, &pending.feedback) {
-            (Ok(revision), Some(feedback)) if *revision == pending.update.revision() => {
-                Some(feedback.loss.snapshot()?.read()?[0])
-            }
-            _ => None,
+        let (result, loss) = match &pending.feedback {
+            Some(feedback) => match pending.update.snapshot_with_scalar(&feedback.loss)?.read() {
+                Ok((revision, loss)) => (Ok(revision), Some(loss)),
+                Err(error) => (Err(error), None),
+            },
+            None => (pending.update.snapshot()?.read(), None),
         };
         self.finish_settlement(result, loss)
     }
@@ -590,12 +590,17 @@ impl<D: VisionDataset> ResidentVisionTrainer<D> {
             .pending
             .as_ref()
             .ok_or_else(|| invalid("no pending update"))?;
-        let result = pending.update.snapshot()?.read_async().await;
-        let loss = match (&result, &pending.feedback) {
-            (Ok(revision), Some(feedback)) if *revision == pending.update.revision() => {
-                Some(feedback.loss.snapshot()?.read_async().await?[0])
-            }
-            _ => None,
+        let (result, loss) = match &pending.feedback {
+            Some(feedback) => match pending
+                .update
+                .snapshot_with_scalar(&feedback.loss)?
+                .read_async()
+                .await
+            {
+                Ok((revision, loss)) => (Ok(revision), Some(loss)),
+                Err(error) => (Err(error), None),
+            },
+            None => (pending.update.snapshot()?.read_async().await, None),
         };
         self.finish_settlement(result, loss)
     }

@@ -44,10 +44,12 @@ or implicit history reset is allowed.
   cancellation keeps the update pending and prohibits reuse/checkpointing;
   retrying settlement does not duplicate an observation.
 
-The opt-in gate needs one scalar loss snapshot in addition to the acceptance
-receipt already observed by this trainer. It does not read all parameters,
-images or gradients. This is an explicit synchronization cost, not a claim of
-readback-free training. Disabled trainers retain their previous path.
+The opt-in gate captures its scalar loss and acceptance receipt together through
+the shared Rust `snapshot_with_scalar` route. One staging map observes both;
+rejection is checked before scalar validity. It does not read all parameters,
+images or gradients. This remains an explicit synchronization cost, not a claim
+of readback-free training. Disabled trainers retain their previous path, and
+feedback/checkpoint semantics are unchanged.
 
 ## Optional Observation Windows
 
