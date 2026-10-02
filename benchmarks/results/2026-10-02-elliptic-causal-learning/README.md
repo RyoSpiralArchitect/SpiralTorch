@@ -24,6 +24,8 @@ modified by this implementation.
   0.000256497. A 100-update coordinate-learning check reduces MSE from 0.0353041
   to 0.000104894. That is a small feature-matching task, not language-model FT.
 - Kernel-contract Clippy, targeted Python Ruff and source whitespace checks pass.
+- Strict TypeScript checks pass for the public WASM declarations and usage fixture;
+  the new signatures agree with the generated wasm-bindgen declarations.
 
 `browser-report.json` contains the visible browser result and all learning losses.
 `validation.json` records runtime/source hashes and the verification scope.
@@ -35,6 +37,7 @@ stay local. No corpus text, model weights or private machine paths are published
 ```bash
 cargo test -p st-kernel-contracts
 cargo test -p st-core --test elliptic_learning
+tsc --noEmit --strict --target ES2022 --lib ES2022,DOM bindings/st-wasm/types/spiraltorch-wasm.d.ts bindings/st-wasm/tests/elliptic_causal_types.ts
 ```
 
 Build/install the current native Python binding, require its new

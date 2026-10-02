@@ -9,6 +9,27 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Rust f32 CPU feature map and first-order snapshots; not resident WebGPU. */
+    export class EllipticWarpKernel {
+        constructor(radius: number, sheets: number, harmonics: number, max_rows: number);
+        forward(orientations: Float32Array): EllipticLearningBatch;
+        /** Full unpadded [batch, sequence, 3]; max_pairs bounds batch*sequence^2. */
+        forwardCausal(orientations: Float32Array, batch: number, sequence: number, max_pairs: number): EllipticCausalLearningBatch;
+        free(): void;
+    }
+    export class EllipticLearningBatch {
+        private constructor();
+        readonly features: Float32Array;
+        vjp(upstream: Float32Array): Float32Array;
+        free(): void;
+    }
+    /** Immutable causal snapshot with all tied query/key/value derivatives. */
+    export class EllipticCausalLearningBatch {
+        private constructor();
+        readonly features: Float32Array;
+        vjp(upstream: Float32Array): Float32Array;
+        free(): void;
+    }
     /** Original Rust NN Module. Requires webgpu; inputs/outputs stay resident. */
     export class Sequential {
         constructor();

@@ -38,7 +38,9 @@
     "bindings/st-wasm/src/elliptic_learning.rs": "fc0ef114c1eaa388846476d6828802b627a7ad461c9a17e68c617207a8bfd442",
     "bindings/st-py/spiraltorch/geometry_autograd.py": "795e86e209c8437def9d3de02605ed6784dde6d6460d1c3c10006bfdc1ab0c9e",
     "bindings/st-py/tests/test_elliptic_causal_learning.py": "99bcbcca0bd7132ea9e5488185a9c8b81eb9bdf8a9aa700ee5b2d9d7b6188e77",
-    "bindings/st-wasm/tests/elliptic_causal_learning.html": "f87e886d3dc7b2c8efc37bffc1296696c1c979fbed6478bcd159707cb061858b"
+    "bindings/st-wasm/tests/elliptic_causal_learning.html": "f87e886d3dc7b2c8efc37bffc1296696c1c979fbed6478bcd159707cb061858b",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "ab84998db6c0f8eb1ef9940e703717c993e9df1acdaa958b56bd22a903b6a17a",
+    "bindings/st-wasm/tests/elliptic_causal_types.ts": "f09801ef6a8c8b18c8284fc084d401b9317ac2e462f6db5224d11f6a5c6f633c"
   },
   "limitations": [
     "Tiny HF fixture, not pretrained LLM evaluation",
@@ -52,5 +54,6 @@
     "failed": 0,
     "skipped": 0,
     "local_log_sha256": "9d8859a0a5aa4fcfcb4309b12508aeb1e7c91a0c86a4ce50f8d935eba4575ce3"
-  }
+  },
+  "typescript_validation": "strict noEmit usage fixture passed; signatures match generated wasm-bindgen declarations"
 }
