@@ -1,0 +1,106 @@
+{
+  "study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+  "status": "completed",
+  "runs": {
+    "41:pointwise": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-l20klaji.pt",
+        "sha256": "148c336a8dc597fec194205a8dee18f28c3b79097a7d990fb6cd84449fa0257b"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:fractional_fixed": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-czhure89.pt",
+        "sha256": "7835b113ee54954d823411d7319d1fa228d7bef67b8f405f46f6e703584cbe1d"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:fractional_learned": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-tmvu24pu.pt",
+        "sha256": "1080ad88f9528833abb9b029ddb71356edb635fe5cb9a8171ecbfeb3e0fb0837"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:pointwise": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-n8p1eoem.pt",
+        "sha256": "e6d386c34074e395b7eaf055e76fb947d7e3aa3ab7b268ee87e114ea20a54ca0"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:fractional_fixed": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-lyuee9se.pt",
+        "sha256": "b12274f443fac5c740873396b3be995bc6f41170bbdffc83d1fad398ea8d8e33"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:fractional_learned": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-stdpucx6.pt",
+        "sha256": "a0183b3e519b78dfce929a31520035c96267e5687a3f5275fbf3baa15d40fb5d"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:pointwise": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-5ck9l_29.pt",
+        "sha256": "58ea25d28d595f5ba547dfaa16c1e37542dc7cb1b3b1e162d2bbd4f8bb104fd3"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:fractional_fixed": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-ot8blvph.pt",
+        "sha256": "dec08f217ff0f113b1d765ad63c71e8701b580e7c062fefe5cf94433c5359c73"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:fractional_learned": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-3gqvz8w8.pt",
+        "sha256": "fe88f8d25d7d435c5a84350919ca00e419a12d66601acf77242720356f1b2f94"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    }
+  },
+  "results_sha256": "1718d44bd879d7c76449f1315a9cf72f78016575395c9f576275f3e47aa9f15b"
+}

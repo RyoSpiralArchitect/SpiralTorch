@@ -1,0 +1,101 @@
+{
+  "schema": "spiraltorch.fractional_memory_validation.v1",
+  "status": "completed",
+  "study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+  "training_source_revision": "21121092b6e5ecbe7ba4464046f1a02d7021d3a4",
+  "training_native_revision": "727d31c7ca80ea348e8d6623ff95aa0ff64d5651",
+  "training_native_sha256": "d35e9645230c3f3406d411ef31535c226b4c14c63de33f7b7f270120f202579c",
+  "training": {
+    "exit_code": 0,
+    "active_runs": 9,
+    "primary_updates": 4608,
+    "extra_continuation_updates": 18,
+    "all_frozen_base_checks_passed": true,
+    "all_exact_next_update_checks_passed": true,
+    "endpoint_evaluation_after_all_runs": true
+  },
+  "saved_content_verification": {
+    "exit_code": 0,
+    "report_sha256": "14abc58c3a69500dff9aa2483fcc2df04399f5245aa26823a2140a3e44290470",
+    "verifier_sha256": "1491e2cd96b7bff7d6e920adb371ffa4f8a8872bf28b0fc46436aa656993a60b",
+    "frozen_client_files": 4,
+    "frozen_package_files": 67
+  },
+  "completed_resume": {
+    "exit_code": 0,
+    "endpoints_not_rerun": true,
+    "original_plan_journal_results_unchanged": true
+  },
+  "original_artifacts_sha256": {
+    "plan.json": "1cf159e438bf0451e8bf0f6df2398e8851dc2ae65200d209dc5e5363ccc0e8b3",
+    "journal.json": "8c31de99af13887d95785f1d206436bda1665ae3698a456b38c5995eee401ef5",
+    "results.json": "1718d44bd879d7c76449f1315a9cf72f78016575395c9f576275f3e47aa9f15b"
+  },
+  "summary_reproduction": {
+    "hash_seeds": [
+      1,
+      42
+    ],
+    "exit_codes": [
+      0,
+      0
+    ],
+    "byte_identical_to_public_summary": true,
+    "summary_sha256": "9d8e06396dc4dc8f44d86bc1e10cc55738ab239f2153e839625aea3b3f5f919b",
+    "postrun_change": "Visit arms in frozen protocol order instead of Python set order; numeric summary content is unchanged."
+  },
+  "main_integration": {
+    "native_source_revision": "bb80483a66e5e31d4d2d8c4acccf70c48bf26bf6",
+    "study_integration_revision": "73e08d728c0931b2ad50e5d3301f5ab01892cb62",
+    "native_sha256": "32210323f0a5503fe04da37081aeaa602b85504cf81b6fcc9c64bf0e3bb40d77",
+    "python_tests_passed": 257,
+    "python_tests_skipped": 0,
+    "python_test_exit_code": 0,
+    "python_test_files": [
+      "bindings/st-py/tests/test_geometry_autograd.py",
+      "bindings/st-py/tests/test_geometry_optional_dependency.py",
+      "bindings/st-py/tests/test_fractional_learning.py",
+      "bindings/st-py/tests/test_fractional_memory_study.py",
+      "bindings/st-py/tests/test_elliptic_gated_causal.py",
+      "bindings/st-py/tests/test_elliptic_anchored.py",
+      "bindings/st-py/tests/test_elliptic_gated_study.py",
+      "bindings/st-py/tests/test_elliptic_anchored_study.py",
+      "bindings/st-py/tests/test_elliptic_context_ablation.py",
+      "bindings/st-py/tests/test_elliptic_learning.py",
+      "bindings/st-py/tests/test_elliptic_directional.py",
+      "bindings/st-py/tests/test_elliptic_chart_step.py",
+      "bindings/st-py/tests/test_elliptic_causal_learning.py",
+      "bindings/st-py/tests/test_wave_gate_vjp.py",
+      "bindings/st-py/tests/test_wave_gate_learning.py",
+      "bindings/st-py/tests/test_wave_gate_radius.py",
+      "bindings/st-py/tests/test_wave_gate_conditioning_example.py",
+      "bindings/st-py/tests/test_wave_gate_long_horizon.py",
+      "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py",
+      "bindings/st-py/tests/test_elliptic_nonlinear_study.py",
+      "bindings/st-py/tests/test_elliptic_causal_study.py"
+    ],
+    "actual_node_wasm_fractional_learning_passed": true,
+    "actual_node_wasm_chart_step_learning_passed": true,
+    "joint_strict_typescript_passed": true,
+    "scope": "Separate integration build/tests, not the frozen package used by the pretrained study. CI state is separate."
+  },
+  "verification_sources_sha256": {
+    "tools/summarize_wave_gate_long_horizon.py": "c56986dc7288162ed1f771b9663232b359b06e5bfc88de31b7001ab14802bf75",
+    "bindings/st-py/tests/test_fractional_memory_study.py": "81a32e843932f7e0c203d268293da4f8438be68ae3217b8e066bd1ab8503e5a2",
+    "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "4b40c98ff9545a8a42ea8d9c9dadefd1e3900481a380f2fae912d1a926f2219e"
+  },
+  "local_log_sha256": {
+    "training.log": "adece5e34de7096d2aa9682b97f0f80aff6aa1113dc0f58cad9b265c941465ca",
+    "checkpoint-verification.log": "4837dc93e45f6f3aadbd425ab0b2bd8a7dd6b848f3e3dcfaa47b57cb866c7b8b",
+    "completed-resume.log": "d7daa78c308a58488be734ec3edd4067193f61a04b1480952c2a16c9f1f2b748",
+    "publication-tests.log": "30b18a4b623e194f390188c0c2e49939194f2f9b338da7157f885a9552d1f7ad",
+    "training-shape-oracle.log": "bb0b78cb62ee6540ab558642294026bac97f256dd91817de650c35d716648cc6"
+  },
+  "scope": [
+    "Saved adapter/Adam states and receipts were inspected locally; private weights are not supplied in this publication.",
+    "The original training driver executed frozen-base and exact next-update checks; the saved-content verifier does not retrain or rescore.",
+    "Reused exploratory Pride/Alice data, three paired minibatch seeds, no significance or speed claim.",
+    "The no-adapter model is the shared baseline; learning alpha adds one trainable scalar.",
+    "Model weights, books, checkpoints, packages and raw logs stay local."
+  ]
+}
