@@ -58,6 +58,16 @@ Native classes are resolved after facade initialization; last-telemetry state is
 context-local, not shared between threads. A backward retains its original
 configuration even if the warp is subsequently reconfigured.
 
+Learning does not eagerly convert each row's telemetry into Python objects.
+`return_telemetry=True` and `EllipticWarpFunction.last_telemetry()` materialize
+and cache those objects on demand from the same immutable forward snapshot.
+Repeated requests retain the same telemetry objects, including after backward
+or warp reconfiguration. Rust still computes and stores the native telemetry;
+this removes unnecessary Python conversion, not geometry computation or CPU
+transport. The context retains at most its latest snapshot, and materialization
+releases its batch reference (autograd independently retains what it needs).
+No adapter configuration or checkpoint schema changes are required.
+
 Python warp construction/configuration now rejects invalid radii and zero sheet
 or harmonic counts instead of silently clamping. Radii must be at least `1e-6`
 and have a finite f32 maximum geodesic. Rust callers can use `for_learning` for
