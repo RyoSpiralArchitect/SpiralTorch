@@ -1,0 +1,110 @@
+{
+  "schema": "spiraltorch.elliptic_gated_context_validation.v1",
+  "source_revision": "b8c6fd0d03553c8a34b5dd2f1984bea93f7d82c0",
+  "status": "passed",
+  "scope": "Rust-owned forward/VJP and client learning-path validation; not pretrained quality or performance evidence",
+  "environment": {
+    "platform": "Apple Silicon macOS",
+    "rust": "1.98.0",
+    "rustfmt": "nightly-2026-04-15",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  },
+  "rust": {
+    "passed": 8,
+    "skipped": 0,
+    "clippy": "passed"
+  },
+  "python": {
+    "passed": 106,
+    "skipped": 0,
+    "test_files": [
+      "bindings/st-py/tests/test_geometry_optional_dependency.py",
+      "bindings/st-py/tests/test_geometry_autograd.py",
+      "bindings/st-py/tests/test_elliptic_learning.py",
+      "bindings/st-py/tests/test_elliptic_causal_learning.py",
+      "bindings/st-py/tests/test_elliptic_gated_causal.py",
+      "bindings/st-py/tests/test_wave_gate_vjp.py",
+      "bindings/st-py/tests/test_wave_gate_learning.py",
+      "bindings/st-py/tests/test_wave_gate_radius.py",
+      "bindings/st-py/tests/test_wave_gate_conditioning_example.py",
+      "bindings/st-py/tests/test_wave_gate_long_horizon.py",
+      "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py",
+      "bindings/st-py/tests/test_elliptic_nonlinear_study.py",
+      "bindings/st-py/tests/test_elliptic_causal_study.py"
+    ],
+    "training_shape": [
+      2,
+      128,
+      3
+    ],
+    "mps": "host transport forward/VJP passed; not resident execution",
+    "hf": "tiny random GPT-2 actual loss reaches orientation/readout/raw gate; base remains frozen",
+    "continuation": "next parameters and complete Adam state exact"
+  },
+  "wasm": {
+    "build": "passed",
+    "browser": "passed",
+    "typescript": "strict passed",
+    "finite_difference_max_orientation": 0.0002211126348829473,
+    "finite_difference_max_gate": 0.00004560147172477658,
+    "synthetic_updates": 150,
+    "initial_mse": 0.006494067560166822,
+    "final_mse": 0.00023349141741539509,
+    "final_raw_mix": 0.46631351113319397
+  },
+  "artifacts": {
+    "native_sha256": "08dde1be2a9225fce10b8a807c1574cebb64c7eb15987357e0210484002392e3",
+    "python_bridge_sha256": "c303a7a6988e4ce7781b46932e2390a8eb6cd3c653c496a7644dc8136dbff239",
+    "wasm_raw_build_sha256": "4f14e0cba8979fd81842ad48c2a41500c3d8eab5c93639c596878dd5fa4edcc8",
+    "wasm_web_sha256": "fb01bbd1f1ce8f918f21648aa44607d612cbc267ee39f38aeace92713f882436",
+    "wasm_js_sha256": "960de8d80b3cb8c28c70e7b2e2d95977cee6f224c346e9cfc96af5749c566958"
+  },
+  "source_sha256": {
+    "crates/st-core/src/theory/microlocal/elliptic_causal.rs": "f95afe63f21820551b635132359ff84ffbd9d83382aef2887dd53d90e2cc7441",
+    "crates/st-core/src/theory/microlocal/elliptic_learning.rs": "e930835ca5f5c330d9ffaf77a081f85f98f8027941fee986af32af93bd8929df",
+    "crates/st-core/tests/elliptic_gated_causal.rs": "c61f7abbd4d82a37d190ec2c8c306135d7ee9bb25a9fa19e6eb2eb77e5b831af",
+    "bindings/st-py/src/elliptic.rs": "0f1bbf47a39b161fc161ffc196f9cbbb8846518f2db5d07d34b906e686326d80",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "c303a7a6988e4ce7781b46932e2390a8eb6cd3c653c496a7644dc8136dbff239",
+    "bindings/st-py/spiraltorch/elliptic.py": "6fefa5d5d6ec26a2391d18628d5bc7f85f121d668b954e1e8ff2c008b833c9c2",
+    "bindings/st-wasm/src/elliptic_learning.rs": "28c4bff44be06d294e721190250ef3de09cc44523fd527bbf2671848780ed150",
+    "bindings/st-wasm/tests/elliptic_gated_causal_learning.html": "07a9e27f6c730fd2274cd396314a38e620881e91bdac4ee6fe44f54f3e8341f7",
+    "bindings/st-wasm/tests/elliptic_gated_causal_types.ts": "274050c88001aa3a6fb745b205db0c41ede55ecdd8fb003aa46aba83aa73524e",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "0ce2f190d4040ec253262783c0a3c5802d594f001921097546e9ed2237865af8",
+    "bindings/st-py/tests/test_geometry_optional_dependency.py": "f70cf207603bc0375ac8311b9d9704c4f1fe314c6a7aa52d49730a2504946986",
+    "bindings/st-py/tests/test_geometry_autograd.py": "cf8990585d375311dc4f0d56cf04af271e2c85e526d3526fac779109e9b8d511",
+    "bindings/st-py/tests/test_elliptic_learning.py": "ad24915a5c322e14e2dfd204e3c9d968e0bb5d9814670962cc96a46db28c88e1",
+    "bindings/st-py/tests/test_elliptic_causal_learning.py": "4567da047c276a0387704e8d6bed7dced6b9a5c9a3c624f8c4ac3f81364bfe6e",
+    "bindings/st-py/tests/test_elliptic_gated_causal.py": "78d63da4fe65fed675a468af0e88fd0645337ca88c90d1e190cc0c64e2d688f9",
+    "bindings/st-py/tests/test_wave_gate_vjp.py": "c289a440b0b6ab5d36d5fadacf79224424be1f39a33f50b24d660faa97769f38",
+    "bindings/st-py/tests/test_wave_gate_learning.py": "7b3a7768e23407aaa3968a9c53d64bedc4129e53555fd64cece123dab4f389fe",
+    "bindings/st-py/tests/test_wave_gate_radius.py": "34951327641aa8022352c1dd55b0afb106087941ae8d4abb562be020e29bee76",
+    "bindings/st-py/tests/test_wave_gate_conditioning_example.py": "68e846afccc6dde120ad01c568804f38d06de534b3cbb9a5fb510d425966afb9",
+    "bindings/st-py/tests/test_wave_gate_long_horizon.py": "22ca8349e99ee8b477db5acd0a094a8ad713f215c7229572031305ece5f05e76",
+    "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "2dc35312351f1910927a31cc411e82cd84adfcc386e9de569783601b37ba6409",
+    "bindings/st-py/tests/test_elliptic_nonlinear_study.py": "520299071c3f81a699d0ae6ae1410befeecda43c9e5416deae592134ceb2982e",
+    "bindings/st-py/tests/test_elliptic_causal_study.py": "a05b6b73e85ba38b549c40b45fe44ab75e1d768ca45502560391bc5f2cb4f0eb"
+  },
+  "local_log_sha256": {
+    "native-build.log": "9810db0914fda34f19ef0815b985cc4dc8a1bac0f585b342edc26d9c73d8f81a",
+    "wasm-build.log": "882ec71d117cd96b02de35facd6e7cbf09085f0d44d9bc147cdcb184b8ccb6a5",
+    "focused-tests.log": "3a490ce94e619e9367b8e85a715b3aeb0b72e043b2544ca7c971984e855eec83",
+    "full-tests.log": "938db918d7f22c492e60a926b2768b5325537348b3c262f6ab3ac21fd5dbc1a8",
+    "rust-tests.log": "afea82c07cb6a0e187919c8fcc729b09dca082a67ae5c3cf7dfbf2ee83b4a740",
+    "rust-tests-disk-failure.log": "67470173c684000786727e4497a633db7170e535b1011ddc6efea78d0eb794b4",
+    "clippy.log": "8aebea3ac487e381905b59ece48375ff766572d7e9c8d32693a61f40265cfb73"
+  },
+  "storage_recovery": {
+    "first_native_link": "failed: no space left; retry passed",
+    "rust_test_rebuild": "failed: no space left; retry passed",
+    "removed": "3 obsolete Python and 2 obsolete core incremental-build directories, plus this run raw WASM build copies after browser validation",
+    "preserved": "frozen experiment packages, models, corpora, checkpoints and generated tested web WASM"
+  },
+  "limitations": [
+    "No pretrained-model quality study for this gate yet",
+    "No throughput claim; Torch comparison uses equivalent mathematics",
+    "Full unpadded contexts; no KV cache, padding mask, AMP or higher-order derivatives",
+    "Future comparison requires a gated ordinary control with the same additional parameter"
+  ]
+}
