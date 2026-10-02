@@ -3295,6 +3295,15 @@ different positional route.
 
 ## Open-topos learning and inference hints
 
+For a differentiable hidden-state intervention rather than a control hint,
+`from spiraltorch import ToposResonatorAdapter, topos_resonator_autograd` now
+connects the Rust finite-unroll recurrence and VJP to Torch/HF training.
+The gate starts at zero for an identity residual and is stored with its Rust
+recipe in `state_dict`. This initial bridge is **f32 CPU execution with explicit
+host transfers**, not resident GPU training. See the
+[placement, checkpoint and WASM guide](../../docs/geometric_learning_bridge.md)
+and the offline `examples/topos_resonator_learning.py` control experiment.
+
 `topos_control_signal()` turns an open-cartesian guard into one compact pressure
 signal, while `topos_training_hints()` and `topos_inference_hints()` split the
 same signal into named controls for local learning loops and hosted-model

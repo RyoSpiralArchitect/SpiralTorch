@@ -26,6 +26,7 @@ mod tensor_execution_receipt;
 mod tensor_mean;
 mod topos_control;
 mod topos_policy;
+mod topos_resonator;
 mod topos_route;
 mod trainer_checkpoint;
 mod trainer_external;
@@ -110,6 +111,8 @@ pub use tensor_execution_receipt::*;
 pub use tensor_mean::*;
 pub use topos_control::*;
 pub use topos_policy::*;
+#[cfg(target_arch = "wasm32")]
+pub use topos_resonator::*;
 pub use topos_route::*;
 pub use trainer_checkpoint::*;
 pub use trainer_external::*;

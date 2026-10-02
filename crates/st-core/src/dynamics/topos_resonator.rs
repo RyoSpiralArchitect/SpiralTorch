@@ -285,10 +285,78 @@ pub struct ToposResonatorStep {
     pub audit: ToposResonatorAudit,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ToposResonatorBackward {
     pub grad_input: Vec<f32>,
     pub grad_gate: Vec<f32>,
+}
+
+/// Immutable CPU operator sharing the same transition and VJP as the NN layer.
+/// Clients transport tensor rows; no client-side recurrence is required.
+#[derive(Clone, Debug)]
+pub struct ToposResonatorOperator {
+    config: ToposResonatorConfig,
+    topos: OpenCartesianTopos,
+}
+
+impl ToposResonatorOperator {
+    pub fn new(
+        config: ToposResonatorConfig,
+        topos: OpenCartesianTopos,
+    ) -> Result<Self, ToposResonatorError> {
+        let operator = Self { config, topos };
+        validate_topos_resonator_state(operator.request(&[], &[], 0, 1))?;
+        Ok(operator)
+    }
+
+    pub fn config(&self) -> ToposResonatorConfig {
+        self.config
+    }
+
+    pub fn topos(&self) -> &OpenCartesianTopos {
+        &self.topos
+    }
+
+    fn request<'a>(
+        &'a self,
+        input: &'a [f32],
+        gate: &'a [f32],
+        rows: usize,
+        features: usize,
+    ) -> ToposResonatorRequest<'a> {
+        ToposResonatorRequest {
+            input,
+            gate,
+            rows,
+            features,
+            config: self.config,
+            topos: &self.topos,
+        }
+    }
+
+    pub fn forward(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        rows: usize,
+        features: usize,
+    ) -> Result<ToposResonatorStep, ToposResonatorError> {
+        apply_topos_resonator(self.request(input, gate, rows, features))
+    }
+
+    pub fn backward(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        grad_output: &[f32],
+        rows: usize,
+        features: usize,
+    ) -> Result<ToposResonatorBackward, ToposResonatorError> {
+        backward_topos_resonator(ToposResonatorBackwardRequest {
+            request: self.request(input, gate, rows, features),
+            grad_output,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -658,6 +726,50 @@ mod tests {
             config,
             topos,
         }
+    }
+
+    #[test]
+    fn immutable_operator_preserves_core_forward_backward_and_validation() {
+        let topos = topos(1.0, 0.2);
+        let config = ToposResonatorConfig::new(0.35, 6).unwrap();
+        let operator = ToposResonatorOperator::new(config, topos.clone()).unwrap();
+        let input = [0.2, -0.4, 4.0, -3.0];
+        let gate = [0.3, -0.2, 0.7, 0.5];
+        let grad_output = [0.4, -0.7, -0.3, 0.8];
+        let request = ToposResonatorRequest {
+            input: &input,
+            gate: &gate,
+            rows: 2,
+            features: 2,
+            config,
+            topos: &topos,
+        };
+        assert_eq!(
+            operator.forward(&input, &gate, 2, 2).unwrap(),
+            apply_topos_resonator(request).unwrap()
+        );
+        assert_eq!(
+            operator
+                .backward(&input, &gate, &grad_output, 2, 2)
+                .unwrap(),
+            backward_topos_resonator(ToposResonatorBackwardRequest {
+                request,
+                grad_output: &grad_output
+            })
+            .unwrap()
+        );
+        assert!(operator.forward(&input, &gate, 2, 3).is_err());
+        assert!(operator
+            .backward(&input, &gate, &[f32::NAN; 4], 2, 2)
+            .is_err());
+        assert!(operator.forward(&[], &[], 0, 2).unwrap().output.is_empty());
+        assert!(operator
+            .backward(&[], &[], &[], 0, 2)
+            .unwrap()
+            .grad_gate
+            .is_empty());
+        let shallow = OpenCartesianTopos::new(-1.0, 1e-6, 1.0, 6, 128).unwrap();
+        assert!(ToposResonatorOperator::new(config, shallow).is_err());
     }
 
     #[test]

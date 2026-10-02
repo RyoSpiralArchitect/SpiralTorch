@@ -1,0 +1,91 @@
+{
+  "schema": "spiraltorch.topos_learning_provenance.v1",
+  "date": "2026-10-02",
+  "source_commit": "fd50a207da6250805953833bb21d1c3ebd7e9eaf",
+  "environment": {
+    "os": "macOS",
+    "arch": "aarch64",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "rust": "1.98.0",
+    "formatter": "nightly-2026-04-15",
+    "wasm_bindgen": "0.2.104",
+    "native_build_profile": "debug",
+    "wasm_build_profile": "debug",
+    "torch_threads": 1,
+    "ambient_patching": false
+  },
+  "source_sha256": {
+    "crates/st-core/src/dynamics/topos_resonator.rs": "93db2d3c16b23afb5fff032485aaf21d967e92c48ef182179e13a120b313d027",
+    "bindings/st-py/src/topos_resonator.rs": "195b9f63f34dcadace282b7b33f75211c47bf38a27e0709bf4450d8c4ab16955",
+    "bindings/st-py/src/lib.rs": "512df249e81ee3ba46381dd948449daccc37a430fc1dbb08de373b4cd3944a05",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "e2ef6db0efb04465e02292e53e72f4a6d8773c8c59015ff9b3bb13a3df12e1e8",
+    "bindings/st-py/spiraltorch/__init__.py": "d314ab6ee6bca031df117dd5bdec8767d656234818c0985436b1855e94825499",
+    "bindings/st-py/tests/test_geometry_autograd.py": "cf8990585d375311dc4f0d56cf04af271e2c85e526d3526fac779109e9b8d511",
+    "bindings/st-py/examples/topos_resonator_learning.py": "882949910002f2e5202526dbc8afbba63236c23e39e69b261a56279b3051d7ab",
+    "bindings/st-wasm/src/topos_resonator.rs": "7f7c88275eaac3a6a80ebbf5bfd7cdca2ef6dbe3a867ce600e1df157b4a8fc95",
+    "bindings/st-wasm/src/lib.rs": "00dcc0a7fba2800ccfb6196aef7fdd41aaae4f66ec6e5bbcd79183e99e177b3f",
+    "bindings/st-wasm/tests/topos_resonator_learning.html": "922f91abd8444b630d5633987f1e26fe66a5f35f169e35d77f91c7e6109e53d1"
+  },
+  "binary_sha256": {
+    "native_extension": "c0e64cae6c63ce9e277162af5ee4a69103c424203bb2fc58f461b8d3f3d6d4f8",
+    "wasm": "af270a6543b8db128f6da0633a22643dba8d7527bdbf23b695aa1796118e0299",
+    "wasm_js": "fc26264a010256eea6a5d97365143e77f18e6467a75c09ab8701cdb87c931d40"
+  },
+  "local_log_sha256": {
+    "core-tests": "dab4be460f830b5e57db5810280d91f4134266ac32f20a981438ca6ce29c5dd3",
+    "nn-tests": "865651f117245038ee89db40b8091d2c6a8512a3432967980b82e2c2ead7e75a",
+    "pytest": "f1055d388ee50c8a25630bf442b353dcc51f9ad3f4387f7619a05006cb127577",
+    "native-build-final": "a6389afb7a17ae05e3680690b508b85356ada742aa979e8946054e3cd59d93fe",
+    "wasm-build-final": "8187cc08c7ac31b4463ce6cd46f42dec74326c2a044f954c490315cdfeff925c",
+    "clippy": "5b4aa5a0c92ed5f664faac033f4b2e19d17b9e9555a3181f12ac0bd394e6a573",
+    "wasm-clippy": "26f2d9c4f504c3019ab73123abd14230742bb081b14b339d91679b008e5a5c3f",
+    "fmt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "probe-final": "780eef0379f07580b4e038eb86de827c5431b8705041292a873d9e247275a786"
+  },
+  "validation": {
+    "core_tests": {
+      "passed": 8
+    },
+    "nn_tests": {
+      "passed": 7
+    },
+    "python_tests": {
+      "passed": 10,
+      "skipped": 0,
+      "accelerator_transport": "MPS; Rust execution stays on CPU"
+    },
+    "native_build": "passed",
+    "wasm_build": "passed",
+    "browser": "passed",
+    "core_strict_clippy": "passed",
+    "wasm_strict_clippy": {
+      "status": "failed",
+      "findings": 19,
+      "files_unchanged_from_parent": true,
+      "files": [
+        "cobol.rs",
+        "cosmology.rs",
+        "fractal_field.rs",
+        "scale_stack.rs",
+        "cobol_bridge.rs",
+        "fft.rs",
+        "mellin.rs"
+      ]
+    },
+    "workspace_format": "passed",
+    "new_python_ruff": "passed",
+    "learning_run_repeat": "byte-identical",
+    "browser_repeat": "byte-identical"
+  },
+  "scope": {
+    "model": "random tiny GPT2 architecture, frozen base",
+    "pretrained_ft": false,
+    "quality_advantage": false,
+    "speed_comparison": false,
+    "cuda_tested": false,
+    "resident_geometry": false,
+    "higher_order_gradients": false
+  }
+}

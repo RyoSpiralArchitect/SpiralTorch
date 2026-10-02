@@ -44,6 +44,7 @@ mod telemetry;
 mod tensor;
 mod text;
 mod theory;
+mod topos_resonator;
 mod trainer;
 mod vision;
 mod wgpu;
@@ -299,6 +300,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     zspace_runtime_protocol_catalog::register(py, m)?;
     zspace_semantic_review::register(py, m)?;
     elliptic::register(py, m)?;
+    topos_resonator::register(m)?;
     theory::register(py, m)?;
     qr::register(py, m)?;
     julia_bridge::register(py, m)?;
