@@ -64,7 +64,7 @@ pub(crate) struct AttentionKernels {
     layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     module: wgpu::ShaderModule,
-    pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; 2],
+    pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; 4],
     guard: guard_capture::GuardCapture,
 }
 
@@ -110,11 +110,19 @@ impl AttentionKernels {
         }
     }
 
-    fn pipeline(&self, device: &wgpu::Device, spec: AttentionSpec) -> &wgpu::ComputePipeline {
+    fn pipeline(
+        &self,
+        device: &wgpu::Device,
+        spec: AttentionSpec,
+        order: OutputOrder,
+    ) -> &wgpu::ComputePipeline {
         let tile = key_tile(spec);
-        self.pipelines[usize::from(tile == 4)].get_or_init(|| {
-            let constants =
-                std::collections::HashMap::from([("KEY_TILE".to_owned(), f64::from(tile))]);
+        let merged = u32::from(matches!(order, OutputOrder::MergedHeads));
+        self.pipelines[usize::from(tile == 4) * 2 + merged as usize].get_or_init(|| {
+            let constants = std::collections::HashMap::from([
+                ("KEY_TILE".to_owned(), f64::from(tile)),
+                ("MERGED_HEADS".to_owned(), f64::from(merged)),
+            ]);
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("attention.forward"),
                 layout: Some(&self.pipeline_layout),
@@ -320,10 +328,7 @@ impl ResidentTensor {
                 keys: spec.keys() as u32,
                 head_dim: spec.head_dim() as u32,
                 scale,
-                flags: u32::from(z_bias.is_some())
-                    | (u32::from(pair_bias.is_some()) << 1)
-                    | causal
-                    | (u32::from(matches!(order, OutputOrder::MergedHeads)) << 3),
+                flags: u32::from(z_bias.is_some()) | (u32::from(pair_bias.is_some()) << 1) | causal,
                 query_offset,
                 groups_x: grid[0],
                 heads: spec.query_shape()[1] as u32,
@@ -366,7 +371,7 @@ impl ResidentTensor {
                 label: Some("attention.forward"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(kernels.pipeline(gpu, spec));
+            pass.set_pipeline(kernels.pipeline(gpu, spec, order));
             pass.set_bind_group(0, &binding, &[]);
             pass.dispatch_workgroups(grid[0], grid[1], 1);
         }
