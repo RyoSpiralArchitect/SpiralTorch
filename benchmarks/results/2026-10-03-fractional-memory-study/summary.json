@@ -1,0 +1,384 @@
+{
+  "schema": "spiraltorch.fractional_memory_summary.v1",
+  "study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+  "steps_per_run": 512,
+  "runs": 9,
+  "primary_updates": 4608,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "pointwise": {
+          "mean_ce": 4.063162281778124,
+          "mean_delta_vs_baseline": -0.010550987058215888,
+          "mean_delta_vs_pointwise": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.063169747591019,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.06321660677592,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.063100490967432,
+              "delta_vs_pointwise": 0.0
+            }
+          ]
+        },
+        "fractional_fixed": {
+          "mean_ce": 4.0656376507547165,
+          "mean_delta_vs_baseline": -0.008075618081623048,
+          "mean_delta_vs_pointwise": 0.002475368976593136,
+          "paired_delta_sample_sd": 6.51459237297382e-05,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.065712610880534,
+              "delta_vs_pointwise": 0.0025428632895154735
+            },
+            {
+              "seed": 43,
+              "ce": 4.065629464387894,
+              "delta_vs_pointwise": 0.002412857611973962
+            },
+            {
+              "seed": 47,
+              "ce": 4.065570876995722,
+              "delta_vs_pointwise": 0.0024703860282899726
+            }
+          ]
+        },
+        "fractional_learned": {
+          "mean_ce": 4.065377065870497,
+          "mean_delta_vs_baseline": -0.008336202965842254,
+          "mean_delta_vs_pointwise": 0.0022147840923733377,
+          "paired_delta_sample_sd": 4.341564712447744e-05,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.065432822704315,
+              "delta_vs_pointwise": 0.0022630751132961535
+            },
+            {
+              "seed": 43,
+              "ce": 4.065395587682724,
+              "delta_vs_pointwise": 0.002178980906804462
+            },
+            {
+              "seed": 47,
+              "ce": 4.065302787224452,
+              "delta_vs_pointwise": 0.0022022962570193982
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "pointwise": {
+          "mean_ce": 4.005609318614006,
+          "mean_delta_vs_baseline": -0.00619816780090332,
+          "mean_delta_vs_pointwise": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.005642734467983,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.005637861788273,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.005547359585762,
+              "delta_vs_pointwise": 0.0
+            }
+          ]
+        },
+        "fractional_fixed": {
+          "mean_ce": 4.007388651371002,
+          "mean_delta_vs_baseline": -0.0044188350439071655,
+          "mean_delta_vs_pointwise": 0.0017793327569961548,
+          "paired_delta_sample_sd": 3.3518532510201245e-05,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.007454201579094,
+              "delta_vs_pointwise": 0.0018114671111106873
+            },
+            {
+              "seed": 43,
+              "ce": 4.007382445037365,
+              "delta_vs_pointwise": 0.001744583249092102
+            },
+            {
+              "seed": 47,
+              "ce": 4.007329307496548,
+              "delta_vs_pointwise": 0.001781947910785675
+            }
+          ]
+        },
+        "fractional_learned": {
+          "mean_ce": 4.007407175997893,
+          "mean_delta_vs_baseline": -0.004400310417016051,
+          "mean_delta_vs_pointwise": 0.0017978573838869731,
+          "paired_delta_sample_sd": 2.0401340454515782e-05,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.007458463311195,
+              "delta_vs_pointwise": 0.0018157288432121277
+            },
+            {
+              "seed": 43,
+              "ce": 4.007413491606712,
+              "delta_vs_pointwise": 0.0017756298184394836
+            },
+            {
+              "seed": 47,
+              "ce": 4.007349573075771,
+              "delta_vs_pointwise": 0.0018022134900093079
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "Seeds vary paired minibatch order. Every arm starts at identity with zero per-feature gates; no random adapter initialization or endpoint selection.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "The no-adapter frozen model is the shared zero-update baseline. Pointwise uses 768 parameters; fixed GL has 768 trainable plus one frozen order scalar; learned GL has 769 trainable parameters. This is not an exactly parameter-matched or compute-matched claim.",
+    "Fixed and learned GL use the same public Rust map, step 1, kernel length 32 and initial alpha 0.5. The fixed arm freezes log_alpha. Python does not reconstruct fractional mathematics.",
+    "Primary contrasts: fixed GL minus pointwise for history, and learned GL minus fixed GL for order adaptation. Both history compute and scalar flexibility can matter; a quality difference is not proof of unique geometric advantage.",
+    "Complete all nine 512-update runs and exact next-update continuation before endpoint evaluation. Development scores do not select hyperparameters, checkpoints or run length.",
+    "Pride/Alice are reused exploratory endpoints, not untouched confirmation. Report each seed and losing outcomes without significance or broad generalization claims.",
+    "CPU float32, frozen local GPT-2, full unpadded contexts, no KV cache. GL history resets at each 128-token block. Extra geometry compute and CPU copies are not a throughput benchmark.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "reference_arm": "pointwise",
+  "paired_fractional_contrasts": {
+    "pride_unused_tail": {
+      "fixed_minus_pointwise": {
+        "weights": {
+          "fractional_fixed": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": 0.002475368976593136,
+        "paired_sample_sd": 6.51459237297382e-05,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0025428632895154735
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.002412857611973962
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.0024703860282899726
+          }
+        ]
+      },
+      "learned_minus_fixed": {
+        "weights": {
+          "fractional_learned": 1,
+          "fractional_fixed": -1
+        },
+        "mean_ce_difference": -0.00026058488421979814,
+        "paired_sample_sd": 2.385808648494872e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.00027978817621931995
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0002338767051695001
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0002680897712705743
+          }
+        ]
+      },
+      "learned_minus_pointwise": {
+        "weights": {
+          "fractional_learned": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": 0.0022147840923733377,
+        "paired_sample_sd": 4.341564712447744e-05,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0022630751132961535
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.002178980906804462
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.0022022962570193982
+          }
+        ]
+      }
+    },
+    "alice_transfer": {
+      "fixed_minus_pointwise": {
+        "weights": {
+          "fractional_fixed": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": 0.0017793327569961548,
+        "paired_sample_sd": 3.3518532510201245e-05,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0018114671111106873
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.001744583249092102
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.001781947910785675
+          }
+        ]
+      },
+      "learned_minus_fixed": {
+        "weights": {
+          "fractional_learned": 1,
+          "fractional_fixed": -1
+        },
+        "mean_ce_difference": 1.852462689081828e-05,
+        "paired_sample_sd": 1.3477019805644663e-05,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 4.26173210144043e-06
+          },
+          {
+            "seed": 43,
+            "ce_difference": 3.104656934738159e-05
+          },
+          {
+            "seed": 47,
+            "ce_difference": 2.0265579223632812e-05
+          }
+        ]
+      },
+      "learned_minus_pointwise": {
+        "weights": {
+          "fractional_learned": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": 0.0017978573838869731,
+        "paired_sample_sd": 2.0401340454515782e-05,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0018157288432121277
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.0017756298184394836
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.0018022134900093079
+          }
+        ]
+      }
+    }
+  },
+  "order_trajectories": {
+    "41:fractional_fixed": {
+      "learnable_order": false,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.5,
+      "final_log_alpha": -0.6931471824645996,
+      "min_alpha": 0.5,
+      "max_alpha": 0.5,
+      "nonzero_order_gradient_steps": 0
+    },
+    "41:fractional_learned": {
+      "learnable_order": true,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.8268868327140808,
+      "final_log_alpha": -0.1900874376296997,
+      "min_alpha": 0.5,
+      "max_alpha": 0.8268868327140808,
+      "nonzero_order_gradient_steps": 511
+    },
+    "43:fractional_fixed": {
+      "learnable_order": false,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.5,
+      "final_log_alpha": -0.6931471824645996,
+      "min_alpha": 0.5,
+      "max_alpha": 0.5,
+      "nonzero_order_gradient_steps": 0
+    },
+    "43:fractional_learned": {
+      "learnable_order": true,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.7733337879180908,
+      "final_log_alpha": -0.25704455375671387,
+      "min_alpha": 0.5,
+      "max_alpha": 0.7733337879180908,
+      "nonzero_order_gradient_steps": 511
+    },
+    "47:fractional_fixed": {
+      "learnable_order": false,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.5,
+      "final_log_alpha": -0.6931471824645996,
+      "min_alpha": 0.5,
+      "max_alpha": 0.5,
+      "nonzero_order_gradient_steps": 0
+    },
+    "47:fractional_learned": {
+      "learnable_order": true,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.8130422234535217,
+      "final_log_alpha": -0.20697221159934998,
+      "min_alpha": 0.5,
+      "max_alpha": 0.8130422234535217,
+      "nonzero_order_gradient_steps": 511
+    }
+  },
+  "input_sha256": {
+    "plan": "1cf159e438bf0451e8bf0f6df2398e8851dc2ae65200d209dc5e5363ccc0e8b3",
+    "results": "1718d44bd879d7c76449f1315a9cf72f78016575395c9f576275f3e47aa9f15b",
+    "journal": "8c31de99af13887d95785f1d206436bda1665ae3698a456b38c5995eee401ef5"
+  }
+}
