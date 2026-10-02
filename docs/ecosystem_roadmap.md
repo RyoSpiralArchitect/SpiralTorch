@@ -210,7 +210,11 @@ controls rather than choosing between them:
    cache expansion; do not implement a separate client-side interpretation.
    The [first resident forward slice](resident_zspace_attention.md) now covers
    causal offsets and both score biases, with matched PyTorch fixtures on native
-   WGPU and browser WebGPU. Projection-chain lowering and backward remain open.
+   WGPU and browser WebGPU. Frozen QKV/output projection lowering now connects
+   existing `Linear` and `ZRBFAttention` parameters and geometric bias without
+   activation readback, with 12 matched full-chain controls on both clients.
+   This is mean-only inference; uncertainty outputs, backward, KV-cache ownership
+   and complete decoder integration remain open. Performance is not yet measured.
 3. **Measure the complete language path.** Require numerical agreement before
    transfer-inclusive throughput measurements, with resident-only timings
    labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are

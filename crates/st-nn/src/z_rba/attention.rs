@@ -353,6 +353,81 @@ impl ZRBFAttention {
         })
     }
 
+    /// Head-major additive score bias `[heads * queries, keys]`, using the exact
+    /// same checked product kernel as the ordinary mean/variance forward path.
+    /// This is host geometry metadata, not an activation readback. Upload once
+    /// as `[1, heads, queries, keys]` and explicitly broadcast shared frames.
+    pub fn kernel_bias<G: ZFrameGeometry>(
+        &self,
+        frame: &G,
+        queries: &[ZIndex],
+        keys: &[ZIndex],
+    ) -> PureResult<Tensor> {
+        let invalid = || TensorError::InvalidDimensions {
+            rows: queries.len(),
+            cols: keys.len(),
+        };
+        let rows = self
+            .n_heads
+            .checked_mul(queries.len())
+            .ok_or_else(invalid)?;
+        let count = rows
+            .checked_mul(keys.len())
+            .filter(|n| *n <= isize::MAX as usize / 4)
+            .ok_or_else(invalid)?;
+        self.metric.validate()?;
+        for params in &self.head_params {
+            params.validate()?;
+        }
+        let mut values = Vec::with_capacity(count);
+        for head in 0..self.n_heads {
+            let params = self.parameters_for_head(head);
+            params.validate()?;
+            for query in queries {
+                for key in keys {
+                    values.push(product_kernel_checked(
+                        frame,
+                        &self.metric,
+                        query,
+                        key,
+                        &params,
+                    )?);
+                }
+            }
+        }
+        Tensor::from_vec(rows, keys.len(), values)
+    }
+
+    /// Explicit mean-only inference lowering. It deliberately does not return
+    /// fabricated variance or entropy in place of `ZRBFAttentionOutput`.
+    /// Use `kernel_bias` as the pair-bias input to retain this module's geometry.
+    pub fn mean_inference_plan(
+        &self,
+        input: st_tensor::NdLayout,
+        mask: st_kernel_contracts::attention::AttentionMask,
+    ) -> Result<crate::resident::AttentionInferencePlan, crate::resident::InferenceError> {
+        let zero = Tensor::zeros(1, self.d_model)?;
+        crate::resident::AttentionInferencePlan::from_parameters(
+            input,
+            self.n_heads,
+            mask,
+            [
+                (&self.query, &zero),
+                (&self.key, &zero),
+                (&self.value, &zero),
+                (&self.output, &zero),
+            ],
+        )
+    }
+
+    fn parameters_for_head(&self, head: usize) -> ArdParameters {
+        if self.ard {
+            self.head_params[head].clone()
+        } else {
+            ArdParameters::default()
+        }
+    }
+
     fn apply_linear(
         &self,
         tensor: &Tensor,
@@ -408,11 +483,7 @@ impl ZRBFAttention {
         let mut kernel_matrix = vec![0.0f32; rows * rows];
 
         for head in 0..self.n_heads {
-            let head_params = if self.ard {
-                self.head_params[head].clone()
-            } else {
-                ArdParameters::default()
-            };
+            let head_params = self.parameters_for_head(head);
             telemetry.length_scales[head] = head_params.clone();
             let offset = head * self.head_dim;
             let mut q_head = Vec::with_capacity(rows * self.head_dim);
@@ -750,6 +821,74 @@ mod tests {
             * (-0.5 * (sheet / ard.ell_sheet).powi(2)).exp()
             * (-0.5 * (echo / ard.ell_echo).powi(2)).exp();
         assert!((kernel - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn exported_kernel_preserves_rectangular_head_order_and_ard_policy() {
+        let frame = SimpleZFrame::new(3, 2, 8);
+        let indices: Vec<_> = (0..3)
+            .map(|i| ZIndex {
+                band: i,
+                sheet: i % 2,
+                echo: i * 3,
+            })
+            .collect();
+        for ard in [false, true] {
+            let layer = ZRBFAttention::new(6, 2, ZMetricWeights::default(), ard).unwrap();
+            let bias = layer.kernel_bias(&frame, &indices[..2], &indices).unwrap();
+            assert_eq!(bias.shape(), (4, 3));
+            for head in 0..2 {
+                let params = if ard {
+                    layer.head_params[head].clone()
+                } else {
+                    ArdParameters::default()
+                };
+                for (q, query) in indices[..2].iter().enumerate() {
+                    for (k, key) in indices.iter().enumerate() {
+                        assert_eq!(
+                            bias.data()[(head * 2 + q) * 3 + k],
+                            product_kernel_checked(&frame, &layer.metric, query, key, &params)
+                                .unwrap()
+                        );
+                    }
+                }
+            }
+            let empty_queries = layer.kernel_bias(&frame, &[], &indices).unwrap();
+            assert_eq!(empty_queries.shape(), (0, 3));
+            let empty_keys = layer.kernel_bias(&frame, &indices, &[]).unwrap();
+            assert_eq!(empty_keys.shape(), (6, 0));
+        }
+    }
+
+    #[test]
+    fn exported_kernel_rejects_bad_geometry_and_parameters_instead_of_zeroing() {
+        struct InvalidFrame;
+        impl ZFrameGeometry for InvalidFrame {
+            fn band_distance(&self, _: usize, _: usize) -> f32 {
+                f32::NAN
+            }
+            fn sheet_distance(&self, _: usize, _: usize) -> f32 {
+                0.
+            }
+            fn echo_circular_distance(&self, _: usize, _: usize) -> f32 {
+                0.
+            }
+        }
+        let index = [ZIndex {
+            band: 0,
+            sheet: 0,
+            echo: 0,
+        }];
+        let mut layer = ZRBFAttention::new(6, 2, ZMetricWeights::default(), false).unwrap();
+        assert!(matches!(
+            layer.kernel_bias(&InvalidFrame, &index, &index),
+            Err(TensorError::NonFiniteValue { .. })
+        ));
+        layer.head_params[1].sigma2 = f32::NAN;
+        assert!(matches!(
+            layer.kernel_bias(&SimpleZFrame::new(1, 1, 1), &[], &[]),
+            Err(TensorError::NonFiniteValue { .. })
+        ));
     }
 
     #[test]

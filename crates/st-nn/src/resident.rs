@@ -12,6 +12,10 @@ pub use st_kernel_contracts::graph::{
 use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
+mod attention;
+pub use attention::AttentionInferencePlan;
+#[cfg(feature = "wgpu")]
+pub use attention::ResidentAttentionBlock;
 #[cfg(feature = "wgpu")]
 mod convolution;
 mod graph;
@@ -94,6 +98,10 @@ impl InferenceOp {
 
 #[derive(Debug, Error)]
 pub enum InferenceError {
+    #[error("invalid resident attention plan: {0}")]
+    Attention(&'static str),
+    #[error(transparent)]
+    AttentionContract(#[from] st_kernel_contracts::attention::AttentionError),
     #[error("resident Module forwarding cannot bypass a committed tensor execution plan")]
     ResidentForwardPolicy,
     #[error("resident module update rejected: {0}")]

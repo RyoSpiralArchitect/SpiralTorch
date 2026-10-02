@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident Projection and Z-RBF Attention Chain</title>
+<pre id="result" data-status="running">Checking resident projection/attention chain...</pre>
+<script type="module">
+import init, {run_attention_chain_checks} from "../../../target/attention-chain-web/resident_attention_chain_browser.js";
+const result = document.querySelector("#result");
+try {
+  await init();
+  const report = JSON.parse(await run_attention_chain_checks());
+  if (report.schema !== "spiraltorch.attention_chain.v1" || !report.passed ||
+      report.checks.length !== 12 || report.geometry_checks.length !== 2) throw Error("Incomplete chain fixture");
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({passed: false, error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>
