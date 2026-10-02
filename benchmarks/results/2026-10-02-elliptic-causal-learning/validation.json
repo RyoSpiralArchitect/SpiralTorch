@@ -46,5 +46,11 @@
     "CPU transport for device tensors, not resident WGPU",
     "First-order f32 outputs with wide gradient accumulation; tolerance parity, not bitwise Torch identity",
     "No speed or empirical geometry advantage claim"
-  ]
+  ],
+  "after_parent_rng_review_tests": {
+    "passed": 77,
+    "failed": 0,
+    "skipped": 0,
+    "local_log_sha256": "9d8859a0a5aa4fcfcb4309b12508aeb1e7c91a0c86a4ce50f8d935eba4575ce3"
+  }
 }

@@ -40,7 +40,7 @@ The forward score routine is shared with the pre-existing attention reference.
 from spiraltorch import EllipticCausalResidualAdapter, elliptic_causal_autograd
 import torch
 
-# Example placement for a float32, frozen GPT-2 with hidden width 768.
+# Example placement for a float32 CPU, frozen GPT-2 with hidden width 768.
 # Choose the tensor-valued block explicitly for other architectures.
 model.eval().requires_grad_(False)
 model.config.use_cache = False

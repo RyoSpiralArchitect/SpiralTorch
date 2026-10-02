@@ -14,7 +14,8 @@ modified by this implementation.
   attention input/bias, multiple batches/heads, causal offsets and empty shapes.
 - All five elliptic core tests pass, including finite differences through the
   composed feature map and causal attention, pair budgets and batch isolation.
-- All 75 Python geometric-learning tests pass with no skips. Seven new cases
+- All 77 Python geometric-learning tests pass with no skips after incorporating
+  the parent study's accelerator-RNG review fix. Seven new causal cases
   compare against equivalent PyTorch attention, check causal prefix/future/batch
   boundaries, exact resumed parameters/Adam state, incompatible checkpoint
   rejection, actual tiny-HF gradients with a frozen base, and MPS CPU transport.
