@@ -22,6 +22,41 @@ def summary_module():
     return module
 
 
+def test_gate_serialization_is_independent_of_libm_and_decimal_context(summary_module, monkeypatch):
+    from decimal import ROUND_DOWN, localcontext
+
+    def forbidden(_):
+        raise AssertionError("platform tanh must not enter the summary")
+
+    monkeypatch.setattr(summary_module.math, "tanh", forbidden)
+    with localcontext() as context:
+        context.prec = 3
+        context.rounding = ROUND_DOWN
+        assert summary_module.canonical_gate(-0.4858208894729614) == -0.450893236365
+        assert summary_module.canonical_gate(-0.46712788939476013) == -0.435875785093
+        assert summary_module.canonical_gate(0.047157686203718185) == 0.047122760106
+        for raw in (0.0, -0.0, -1e-20):
+            assert json.dumps(summary_module.canonical_gate(raw)) == "0.0"
+        for raw in (20.0, 1e308):
+            assert summary_module.canonical_gate(raw) == 1.0
+            assert summary_module.canonical_gate(-raw) == -1.0
+    for raw in (float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError, match="nonfinite"):
+            summary_module.canonical_gate(raw)
+
+
+def test_committed_gated_summary_rebuilds_byte_for_byte(summary_module, monkeypatch, tmp_path):
+    directory = Path(__file__).resolve().parents[3] / "benchmarks/results/2026-10-03-elliptic-gated-study"
+    output = tmp_path / "summary.json"
+    monkeypatch.setattr(sys, "argv", [
+        "summarize", "--plan", str(directory / "plan.json.gz"),
+        "--results", str(directory / "results.json.gz"),
+        "--journal", str(directory / "journal.json"), "--output", str(output),
+    ])
+    summary_module.main()
+    assert output.read_bytes() == (directory / "summary.json").read_bytes()
+
+
 def fixture():
     arms, seeds = ["tangent", "wave_gate_radius4"], [41, 43]
     plan = {
@@ -153,6 +188,54 @@ def test_factorial_contrasts_pair_seeds_and_preserve_opposing_effects(summary_mo
         assert observed["mean_ce_difference"] == sum(values) / 2
         assert observed["negative_seeds"] == sum(value < 0 for value in values)
     assert contrasts["interaction"]["paired_sample_sd"] == pytest.approx(0.883883476)
+
+
+def gated_fixture():
+    plan, result, journal = factorial_fixture()
+    plan["config"]["schema"] = "spiraltorch.elliptic_gated_protocol.v1"
+    plan["config"]["arms"] = [a.replace("causal_", "gated_") for a in plan["config"]["arms"]]
+    journal["runs"] = {k.replace("causal_", "gated_"): v for k, v in journal["runs"].items()}
+    for row in result["runs"]:
+        row["run_key"] = row["run_key"].replace("causal_", "gated_")
+        if "gated_" in row["run_key"]:
+            row["parameter_count"] += 1
+            row["initial_projection_sha256"] = row["initial_parameter_sha256"]
+            row["initial_parameter_sha256"] = "a" * 64
+            row["final_raw_mix"] = -0.2
+            for i, record in enumerate(row["records"]):
+                record.update(raw_mix_before_update=-0.1*i, raw_mix_after_update=-0.1*(i+1), raw_mix_gradient=0.3)
+    return plan, result, journal
+
+
+def test_gated_summary_pairs_projections_and_keeps_signed_trajectory(summary_module):
+    plan, result, journal = gated_fixture()
+    report = summary_module.summarize(plan, result, journal, "sealed")
+    assert report["paired_factorial_contrasts"]["tail"]["geometry_gated"]["mean_ce_difference"] == 0
+    gate = report["gate_trajectories"]["41:gated_elliptic"]
+    assert gate["final_raw_mix"] == -0.2 and gate["final_mix"] < 0
+    assert gate["min_raw_mix"] == -0.2 and gate["nonzero_gradient_steps"] == 2
+
+
+@pytest.mark.parametrize("corruption", ["projection", "gate_hash", "parameters", "missing", "endpoint", "discontinuous", "nan"])
+def test_gated_summary_rejects_invalid_pairing_or_trajectory(summary_module, corruption):
+    plan, result, journal = gated_fixture()
+    row = next(r for r in result["runs"] if "gated_" in r["run_key"])
+    if corruption == "projection":
+        row["initial_projection_sha256"] = "b" * 64
+    elif corruption == "gate_hash":
+        row["initial_parameter_sha256"] = "b" * 64
+    elif corruption == "parameters":
+        row["parameter_count"] -= 1
+    elif corruption == "missing":
+        del row["records"][0]["raw_mix_gradient"]
+    elif corruption == "endpoint":
+        row["final_raw_mix"] = 0.2
+    elif corruption == "discontinuous":
+        row["records"][1]["raw_mix_before_update"] = 0.2
+    else:
+        row["records"][0]["raw_mix_gradient"] = float("nan")
+    with pytest.raises(ValueError):
+        summary_module.summarize(plan, result, journal, "sealed")
 
 
 @pytest.mark.parametrize("corruption", ["hash", "missing_hash", "parameters", "arms"])

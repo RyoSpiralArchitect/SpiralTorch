@@ -215,6 +215,10 @@ def run_training(
                 continue
             adapter = make_adapter(arm, config, seed, adapter_factory)
             initial_hash = pilot.model_digest(adapter)
+            projection_hash = (
+                pilot.model_digest(adapter, exclude={"raw_mix"})
+                if hasattr(adapter, "raw_mix") else None
+            )
             optimizer = torch.optim.Adam(
                 adapter.parameters(), lr=config["learning_rate"]
             )
@@ -224,6 +228,11 @@ def run_training(
                     saved.get("initial_parameter_sha256") == initial_hash,
                     "resume initialization differs",
                 )
+                if projection_hash is not None:
+                    require(
+                        saved.get("initial_projection_sha256") == projection_hash,
+                        "resume projection initialization differs",
+                    )
                 adapter.load_state_dict(saved["adapter"])
                 optimizer.load_state_dict(saved["optimizer"])
                 cursor, records, development = (
@@ -303,6 +312,8 @@ def run_training(
                             "frozen_base_verified": True,
                             "initial_parameter_sha256": initial_hash,
                         }
+                        if projection_hash is not None:
+                            payload["initial_projection_sha256"] = projection_hash
                         receipt = save_checkpoint(directory, payload)
                         journal["runs"][key] = {
                             "status": "training",
@@ -392,7 +403,17 @@ def run_endpoints(
             saved.get("initial_parameter_sha256") == pilot.model_digest(adapter),
             "endpoint initialization differs",
         )
+        gated_metadata = {}
+        if hasattr(adapter, "raw_mix"):
+            require(
+                saved.get("initial_projection_sha256")
+                == pilot.model_digest(adapter, exclude={"raw_mix"}),
+                "endpoint projection initialization differs",
+            )
+            gated_metadata["initial_projection_sha256"] = saved["initial_projection_sha256"]
         adapter.load_state_dict(saved["adapter"])
+        if hasattr(adapter, "raw_mix"):
+            gated_metadata["final_raw_mix"] = float(adapter.raw_mix.detach())
         radius = getattr(adapter, "log_radius", None)
         parent.add_module(child, torch.nn.Sequential(original, adapter))
         try:
@@ -413,6 +434,7 @@ def run_endpoints(
                 "final_log_radius": None if radius is None else float(radius.detach()),
                 "initial_parameter_sha256": saved.get("initial_parameter_sha256"),
                 "resume_next_update_equal": entry["resume_next_update_equal"],
+                **gated_metadata,
             }
         )
         atomic_json(directory / "results.json", report)

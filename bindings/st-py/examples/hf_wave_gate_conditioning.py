@@ -26,9 +26,11 @@ def save_json(path, payload):
     path.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
 
 
-def model_digest(model):
+def model_digest(model, *, exclude=()):
     result = hashlib.sha256()
     for name, value in model.named_parameters():
+        if name in exclude:
+            continue
         result.update(name.encode())
         result.update(value.detach().cpu().contiguous().numpy().tobytes())
     return result.hexdigest()
@@ -153,12 +155,14 @@ def update(model, adapter, optimizer, batch):
             raise ValueError(f"invalid {name} gradient")
         record[f"{name}_gradient_l2"] = float(parameter.grad.norm())
         record[f"{name}_before_update_l2"] = float(parameter.detach().norm())
-        if name == "log_radius":
-            record["log_radius_gradient"] = float(parameter.grad)
-            record["log_radius_before_update"] = float(parameter.detach())
+        if name in {"log_radius", "raw_mix"}:
+            record[f"{name}_gradient"] = float(parameter.grad)
+            record[f"{name}_before_update"] = float(parameter.detach())
     optimizer.step()
     if not all(torch.isfinite(p).all() for p in adapter.parameters()):
         raise ValueError("nonfinite adapter update")
+    if hasattr(adapter, "raw_mix"):
+        record["raw_mix_after_update"] = float(adapter.raw_mix.detach())
     return record
 
 
