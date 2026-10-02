@@ -12,3 +12,4 @@ benchmarks/results/2026-10-02-attention-key-tiling/*.json linguist-generated=tru
 benchmarks/results/2026-10-02-attention-projection-kernels/*.json linguist-generated=true
 benchmarks/results/2026-10-02-attention-strided-inputs/*.json linguist-generated=true
 benchmarks/results/2026-10-02-attention-merged-output/*.json linguist-generated=true
+benchmarks/results/2026-10-02-attention-pass-optimization/*.json linguist-generated=true

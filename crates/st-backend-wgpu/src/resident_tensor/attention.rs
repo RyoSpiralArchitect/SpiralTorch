@@ -2,6 +2,7 @@
 //! online softmax, and inherited validity guards stay on the same GPU queue.
 
 use super::*;
+use crate::runtime::timestamps::PassTimestampCursor;
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 
 const SHADER_SOURCE: &str = include_str!("shaders/attention.wgsl");
@@ -118,7 +119,7 @@ impl AttentionKernels {
     ) -> &wgpu::ComputePipeline {
         let tile = key_tile(spec);
         let merged = u32::from(matches!(order, OutputOrder::MergedHeads));
-        self.pipelines[usize::from(tile == 4) * 2 + merged as usize].get_or_init(|| {
+        self.pipelines[usize::from(tile == 8) * 2 + merged as usize].get_or_init(|| {
             let constants = std::collections::HashMap::from([
                 ("KEY_TILE".to_owned(), f64::from(tile)),
                 ("MERGED_HEADS".to_owned(), f64::from(merged)),
@@ -141,7 +142,7 @@ fn key_tile(spec: AttentionSpec) -> u32 {
     // Matched full-chain measurements support this range, not short sequences
     // or wider heads. Keep their established reduction until measured too.
     if spec.keys() >= 128 && spec.head_dim() <= 32 {
-        4
+        8
     } else {
         1
     }
@@ -158,7 +159,7 @@ fn preflight(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<[u32; 2], Ten
         || limits.max_storage_buffers_per_shader_stage < 7
         || limits.max_uniform_buffers_per_shader_stage < 1
         || limits.max_uniform_buffer_binding_size < std::mem::size_of::<Params>() as u32
-        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 10) * 4
+        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 18) * 4
     {
         return Err(TensorError::Limit(
             "attention pipeline (head dimension <= 256)",
@@ -212,6 +213,7 @@ impl ResidentTensor {
             z_bias,
             pair_bias,
             OutputOrder::HeadMajor,
+            &mut PassTimestampCursor::default(),
         )
     }
 
@@ -237,6 +239,7 @@ impl ResidentTensor {
             z_bias,
             pair_bias,
             OutputOrder::MergedHeads,
+            &mut PassTimestampCursor::default(),
         )
     }
 
@@ -250,6 +253,7 @@ impl ResidentTensor {
         z_bias: Option<&Self>,
         pair_bias: Option<&Self>,
         order: OutputOrder,
+        timestamps: &mut PassTimestampCursor<'_>,
     ) -> Result<Self, TensorError> {
         let spec = AttentionSpec::new(
             self.layout.shape(),
@@ -369,7 +373,7 @@ impl ResidentTensor {
         if spec.contexts() != 0 && spec.queries() != 0 {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("attention.forward"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             pass.set_pipeline(kernels.pipeline(gpu, spec, order));
             pass.set_bind_group(0, &binding, &[]);
@@ -379,7 +383,7 @@ impl ResidentTensor {
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("attention.guard"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             kernels.guard.encode_in_pass(&mut pass, &binding);
         }
@@ -390,3 +394,6 @@ impl ResidentTensor {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod profile_probe;
