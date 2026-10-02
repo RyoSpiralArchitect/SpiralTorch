@@ -3,8 +3,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::IntoPyObjectExt;
 use st_core::theory::microlocal::{
-    EllipticCausalLearningBatch, EllipticGatedCausalLearningBatch, EllipticLearningBatch,
-    EllipticTelemetry, EllipticWarp,
+    EllipticAnchoredLearningBatch, EllipticCausalLearningBatch, EllipticGatedCausalLearningBatch,
+    EllipticLearningBatch, EllipticTelemetry, EllipticWarp,
 };
 
 type EllipticDifferential = (PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>);
@@ -22,6 +22,30 @@ pub struct PyEllipticLearningBatch {
 #[pyclass(name = "EllipticCausalLearningBatch", module = "spiraltorch", frozen)]
 pub struct PyEllipticCausalLearningBatch {
     inner: EllipticCausalLearningBatch,
+}
+
+#[pyclass(name = "EllipticAnchoredLearningBatch", module = "spiraltorch", frozen)]
+pub struct PyEllipticAnchoredLearningBatch {
+    inner: EllipticAnchoredLearningBatch,
+}
+
+#[pymethods]
+impl PyEllipticAnchoredLearningBatch {
+    #[getter]
+    fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    #[getter]
+    fn mix(&self) -> f32 {
+        self.inner.mix()
+    }
+
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, f32)> {
+        py.detach(|| self.inner.vjp(&upstream))
+            .map(|g| (g.orientations, g.raw_mix))
+            .map_err(value_error)
+    }
 }
 
 #[pyclass(
@@ -159,6 +183,22 @@ impl PyEllipticWarp {
         py.detach(|| self.warp.differentiate_batch(&orientations, max_rows))
             .map(|inner| PyEllipticLearningBatch { inner })
             .map_err(value_error)
+    }
+
+    #[pyo3(signature = (orientations, *, raw_mix, max_rows=65_536))]
+    fn map_anchored_batch(
+        &self,
+        py: Python<'_>,
+        orientations: Vec<f32>,
+        raw_mix: f32,
+        max_rows: usize,
+    ) -> PyResult<PyEllipticAnchoredLearningBatch> {
+        py.detach(|| {
+            self.warp
+                .differentiate_anchored_batch(&orientations, raw_mix, max_rows)
+        })
+        .map(|inner| PyEllipticAnchoredLearningBatch { inner })
+        .map_err(value_error)
     }
 
     #[pyo3(signature = (orientations, *, batch_size, sequence_length, max_rows=65_536, max_pairs=1_048_576))]
@@ -367,6 +407,7 @@ pub fn register(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyEllipticWarp>()?;
     module.add_class::<PyEllipticTelemetry>()?;
     module.add_class::<PyEllipticLearningBatch>()?;
+    module.add_class::<PyEllipticAnchoredLearningBatch>()?;
     module.add_class::<PyEllipticCausalLearningBatch>()?;
     module.add_class::<PyEllipticGatedCausalLearningBatch>()?;
     module.add("__doc__", "Elliptic microlocal warp helpers")?;

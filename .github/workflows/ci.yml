@@ -694,10 +694,12 @@ jobs:
         run: |
           python -m pip install "transformers==4.57.6"
           python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticGatedCausalLearningBatch"); assert hasattr(st, "EllipticGatedCausalResidualAdapter")'
+          python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticAnchoredLearningBatch"); assert hasattr(st, "EllipticAnchoredResidualAdapter")'
           python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "EllipticCausalLearningBatch"); assert hasattr(st, "EllipticCausalResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
             bindings/st-py/tests/test_elliptic_gated_causal.py \
+            bindings/st-py/tests/test_elliptic_anchored.py \
             bindings/st-py/tests/test_elliptic_gated_study.py \
             bindings/st-py/tests/test_elliptic_context_ablation.py \
             bindings/st-py/tests/test_elliptic_learning.py \
