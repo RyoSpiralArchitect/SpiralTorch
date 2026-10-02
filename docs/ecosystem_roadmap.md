@@ -214,12 +214,18 @@ controls rather than choosing between them:
    existing `Linear` and `ZRBFAttention` parameters and geometric bias without
    activation readback, with 12 matched full-chain controls on both clients.
    This is mean-only inference; uncertainty outputs, backward, KV-cache ownership
-   and complete decoder integration remain open. Performance is not yet measured.
+   and complete decoder integration remain open.
 3. **Measure the complete language path.** Require numerical agreement before
    transfer-inclusive throughput measurements, with resident-only timings
    labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are
    distinct observations, not interchangeable performance evidence. Learning
    quality remains a separate matched-model, matched-budget gate.
+   The [first full-chain comparison](../benchmarks/results/2026-10-02-attention-key-tiling/README.md)
+   now retains all plain/zero/Z-RBF controls, including a rejected unconditional
+   key-tiling rollout. A shape-selected tile improves the measured 128/256-token
+   regimes versus the previous ST kernel, but still trails PyTorch MPS; short
+   samples remain sensitive to warmup. Head packing and projection dispatch are
+   the next execution costs to isolate, not a reason to claim LLM quality gains.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

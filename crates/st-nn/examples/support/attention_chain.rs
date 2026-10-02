@@ -24,7 +24,7 @@ fn close(actual: &[f32], expected: &[f32], name: &str) -> Result<f32> {
     }
     let mut error = 0f32;
     for (index, (&a, &b)) in actual.iter().zip(expected).enumerate() {
-        if !a.is_finite() || (a - b).abs() > 3e-6 + 3e-5 * b.abs() {
+        if !a.is_finite() || !b.is_finite() || (a - b).abs() > 3e-6 + 3e-5 * b.abs() {
             return Err(format!("{name}[{index}]: {a} != {b}").into());
         }
         error = error.max((a - b).abs());
@@ -164,4 +164,14 @@ pub async fn run_fixture(fixture: serde_json::Value) -> Result<serde_json::Value
         "checks": checks, "geometry_checks": geometry_checks,
         "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim",
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn invalid_reference_values_never_pass_the_numerical_gate() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(super::close(&[0.], &[value], "invalid reference").is_err());
+        }
+    }
 }

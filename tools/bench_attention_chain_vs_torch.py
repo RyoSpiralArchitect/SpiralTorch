@@ -120,7 +120,8 @@ def main():
     parser.add_argument("--devices", nargs="+", choices=("cpu", "mps"), default=["cpu", "mps"])
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--samples", type=int, default=7)
-    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--warmup", type=int, default=50,
+                        help="warmup blocks per case/boundary; low counts are for scouts, not steady-state claims")
     parser.add_argument("--burst", type=int, default=4)
     parser.add_argument("--order-seed", type=int, default=23)
     parser.add_argument("--output", type=Path, required=True)

@@ -141,9 +141,9 @@ success and Naga validation alone did not catch the first browser issue: the
 decimal spelling of negative f32 MAX exceeded the browser compiler's accepted
 range. Both the resident and legacy fused shaders now use its exact bit pattern.
 
-The next performance gate is a matched complete QKV/attention/output-projection
-chain, separating resident-only timing from transfers and comparing like devices.
-This numerical slice establishes neither a speedup nor a learning-quality gain.
+Performance is measured separately on the complete QKV/attention/output-projection
+chain, distinguishing resident-only timing from transfers and execution routes.
+The numerical slice alone establishes neither a speedup nor a learning-quality gain.
 
 ## Full-Chain Verification
 
@@ -201,7 +201,7 @@ python3 -I tools/generate_attention_chain_torch_fixture.py --suite benchmark --o
 cargo build --locked --release -p st-nn --features wgpu --example resident_attention_chain_bench
 python3 -I tools/bench_attention_chain_vs_torch.py --fixture "$FIXTURE" \
   --native "st_candidate=target/release/examples/resident_attention_chain_bench" \
-  --devices cpu mps --rounds 3 --samples 7 --warmup 3 --burst 4 --output "$NEW_RESULT"
+  --devices cpu mps --rounds 3 --samples 7 --warmup 50 --burst 4 --output "$NEW_RESULT"
 ```
 
 Add `--native "st_baseline=$BASELINE_BINARY"` and use four rounds to rotate four
@@ -218,6 +218,10 @@ These are full-chain inference observations, not kernel timestamps. ST's
 non-finite guards remain enabled; Torch is not given equivalent guard kernels.
 CPU, Metal/WGPU and MPS are different routes even on one machine, and short
 wall-clock samples are noisy. No CUDA or training advantage follows from them.
+The default 50 warmup blocks follow a short-sequence sensitivity check; the
+earlier three-warmup measurements remain published rather than overwritten.
+Even this is not a proof of clock stability or statistically bounded regression.
+See the [comparison and rejected broad rollout](../benchmarks/results/2026-10-02-attention-key-tiling/README.md).
 
 To check both kernel specializations in the browser, build the WASM probe above,
 place the generated benchmark fixture at
