@@ -83,3 +83,15 @@ Preflight tests are `test_elliptic_gated_study.py` and the shared geometry/study
 suite. The miniature HF interrupt/resume test verifies full adapter/Adam/record
 equality, native gradients and signed gate endpoint records. This preflight is
 not itself the twelve-run pretrained-model study.
+
+## Completed Outcome
+
+The [completed twelve-run record](../benchmarks/results/2026-10-03-elliptic-gated-study/README.md)
+shows a modest mean gain for gated versus pointwise elliptic (Pride -0.009083 CE,
+Alice -0.009992), but no geometry advantage: gated elliptic still loses to gated
+tangent in every seed on both sets. Pride seed 43 is a retained elliptic regression.
+All elliptic gates finish negative, while ordinary tangent gates finish slightly
+positive. The role of local gain/centering versus true contextual benefit remains
+unresolved. The record includes actual interruption recovery, clean resumed
+completion, exact final resume, checkpoint checks and six exact historical
+pointwise replays; those replays are not independent confirmations.
