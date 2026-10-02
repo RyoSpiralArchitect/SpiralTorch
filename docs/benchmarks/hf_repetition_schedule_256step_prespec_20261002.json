@@ -1,0 +1,71 @@
+{
+  "schema": "spiraltorch.hf_repetition_schedule_study.v1",
+  "question": "Does decaying the periodic auxiliary objective prevent its late-horizon regression without sacrificing held-out causal-LM loss?",
+  "prior_result": "hf_periodic_gpt2_pride_full_corpus_256step_20260823.json remains ready_but_negative and is not pooled with this study.",
+  "model_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "corpus_sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+  "seeds": [137, 139, 149],
+  "milestones": [64, 128, 192, 256],
+  "training_args": [
+    "--train", "--training-use-cpu", "--model-train-dtype", "float32",
+    "--finetune-mode", "lora", "--lora-rank", "4", "--lora-alpha", "8",
+    "--lora-dropout", "0.05", "--lora-target-module", "c_attn", "--lora-target-module", "c_proj",
+    "--learning-rate", "0.00005", "--max-steps", "256", "--block-size", "128",
+    "--validation-fraction", "0.1", "--max-train-samples", "0", "--max-eval-samples", "0",
+    "--max-eval-blocks", "0", "--require-eval-dataset",
+    "--per-device-train-batch-size", "1", "--per-device-eval-batch-size", "2",
+    "--gradient-accumulation-steps", "16", "--save-steps", "64", "--save-total-limit", "4",
+    "--eval-steps", "64", "--logging-steps", "16", "--dataloader-num-workers", "0",
+    "--dataloader-pin-memory", "false", "--min-free-disk-gb", "8",
+    "--eval-before-train", "--eval-after-train-policy", "always",
+    "--zspace-optimizer-control", "off"
+  ],
+  "arms": [
+    {"name": "ordinary_ft", "args": ["--zspace-repetition-unlikelihood-strength", "0"]},
+    {"name": "periodic_constant", "args": [
+      "--zspace-repetition-unlikelihood-strength", "0.1",
+      "--zspace-repetition-unlikelihood-candidate-source", "model-topk-periodic",
+      "--zspace-repetition-unlikelihood-normalization", "active-positions"
+    ]},
+    {"name": "periodic_decay", "args": [
+      "--zspace-repetition-unlikelihood-strength", "0.1",
+      "--zspace-repetition-unlikelihood-candidate-source", "model-topk-periodic",
+      "--zspace-repetition-unlikelihood-normalization", "active-positions",
+      "--zspace-repetition-unlikelihood-decay-start-update", "0",
+      "--zspace-repetition-unlikelihood-decay-end-update", "256",
+      "--zspace-repetition-unlikelihood-decay-final-scale", "0"
+    ]}
+  ],
+  "generation": {
+    "prompt_path": "bindings/st-py/examples/hf_generation_evidence_pythia70m_alice_replication_prompts.json",
+    "prompt_sha256": "04058a58eeef1798de043b2023089a447db89c7d201a16f2a2ef166730b8c0b5",
+    "prompt_count": 12,
+    "max_new_tokens": 96,
+    "decoding": "greedy, natural EOS, no inference intervention",
+    "scope": "Prior frozen prompts are reused. Milestones are descriptive, never checkpoint selection. Inspect continuation text and generated lengths alongside loop scores; shorter output alone is not improved language quality."
+  },
+  "acceptance": {
+    "required_runs": 9,
+    "required_generation_reports": 36,
+    "final_update_slot": 256,
+    "before_train_eval_parity_tolerance": 0.0000001,
+    "mean_baseline_ce_delta_at_most": -0.05,
+    "every_baseline_ce_delta_negative": true,
+    "decay_minus_constant_mean_final_loop_score_less_than": 0.0,
+    "decay_vs_constant_minimum_seed_wins": 2,
+    "decay_minus_baseline_mean_final_loop_score_at_most": 0.0,
+    "decay_vs_baseline_minimum_seed_nonlosses": 2,
+    "decay_minus_baseline_mean_ce_at_most": 0.02,
+    "decay_minus_baseline_maximum_ce_at_most": 0.05,
+    "mechanism": "Every treatment run must have nonzero periodic candidates and finite losses; policy and final absolute slot must match."
+  },
+  "boundaries": [
+    "Single-factor treatment: same candidate planner, active-position normalization, base strength and training settings; only the decay schedule changes between treatment arms.",
+    "CPU float32 throughout; no GPU speed claim and no historical MPS result pooling.",
+    "Batch size one avoids partial-batch label-count imbalance; preflight checks every collated train/eval row has exactly 127 shifted labels. Accumulation is sixteen, including HF's smaller final epoch group.",
+    "All selected validation blocks are evaluated, not the two-block development smoke subset. Corpus rows are split with the same seed across arms; this is a same-book held-out split, not cross-book generalization.",
+    "Run order rotates across seeds. No early stopping, checkpoint selection or post-outcome retuning. No automatic restart into an existing output directory.",
+    "Prespecified seeds are distinct from the preceding 109/113/127 study and development seed 7. This is a small paired experiment, not statistical significance or general Z-space superiority.",
+    "Retain full raw artifacts locally; publish all conditions, derived results, hashes and reproduction instructions without private paths or model weights."
+  ]
+}

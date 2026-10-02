@@ -680,3 +680,6 @@ jobs:
           python -I tools/smoke_autograd.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_fft_numerics.py
           python -I tools/smoke_fft.py
+      - name: LLM schedule study orchestration and assessment
+        run: |
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_hf_repetition_schedule_study.py tools/test_assess_hf_repetition_schedule_study.py
