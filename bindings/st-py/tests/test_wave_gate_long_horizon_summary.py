@@ -105,6 +105,79 @@ def test_protocol_specific_notes_do_not_invent_radius_or_seed_claims(summary_mod
     )
 
 
+def factorial_fixture():
+    plan, result, journal = fixture()
+    arms = ["tangent", "elliptic", "causal_tangent", "causal_elliptic"]
+    plan["config"].update(
+        arms=arms,
+        features=8,
+        schema="spiraltorch.elliptic_causal_protocol.v1",
+        comparison_notes=["Paired factorial fixture."],
+    )
+    template = result["runs"][0]
+    journal_template = next(iter(journal["runs"].values()))
+    result["runs"], journal["runs"] = [], {}
+    losses = {41: [2.0, 2.5, 1.75, 1.5], 43: [3.0, 2.75, 2.5, 2.75]}
+    for seed, values in losses.items():
+        for arm, loss in zip(arms, values):
+            key = f"{seed}:{arm}"
+            row = copy.deepcopy(template)
+            row.update(
+                run_key=key,
+                initial_parameter_sha256=f"{seed:064x}",
+                parameter_count=90,
+            )
+            row["scores"]["tail"] = {
+                "mean": loss,
+                "block_losses": [loss - 0.5, loss + 0.5],
+            }
+            result["runs"].append(row)
+            journal["runs"][key] = copy.deepcopy(journal_template)
+    return plan, result, journal
+
+
+def test_factorial_contrasts_pair_seeds_and_preserve_opposing_effects(summary_module):
+    plan, result, journal = factorial_fixture()
+    summary = summary_module.summarize(plan, result, journal, "sealed")
+    contrasts = summary["paired_factorial_contrasts"]["tail"]
+    expected = {
+        "geometry_pointwise": [0.5, -0.25],
+        "geometry_causal": [-0.25, 0.25],
+        "mixing_tangent": [-0.25, -0.5],
+        "mixing_elliptic": [-1.0, 0.0],
+        "interaction": [-0.75, 0.5],
+    }
+    for name, values in expected.items():
+        observed = contrasts[name]
+        assert [row["ce_difference"] for row in observed["per_seed"]] == values
+        assert observed["mean_ce_difference"] == sum(values) / 2
+        assert observed["negative_seeds"] == sum(value < 0 for value in values)
+    assert contrasts["interaction"]["paired_sample_sd"] == pytest.approx(0.883883476)
+
+
+@pytest.mark.parametrize("corruption", ["hash", "missing_hash", "parameters", "arms"])
+def test_factorial_rejects_unpaired_or_incomplete_arms(summary_module, corruption):
+    plan, result, journal = factorial_fixture()
+    if corruption == "hash":
+        result["runs"][0]["initial_parameter_sha256"] = "a" * 64
+    elif corruption == "missing_hash":
+        del result["runs"][0]["initial_parameter_sha256"]
+    elif corruption == "parameters":
+        result["runs"][0]["parameter_count"] += 1
+    else:
+        plan["config"]["arms"].remove("elliptic")
+        result["runs"] = [
+            row for row in result["runs"] if not row["run_key"].endswith(":elliptic")
+        ]
+        journal["runs"] = {
+            key: value
+            for key, value in journal["runs"].items()
+            if not key.endswith(":elliptic")
+        }
+    with pytest.raises(ValueError):
+        summary_module.summarize(plan, result, journal, "sealed")
+
+
 @pytest.mark.parametrize(
     "corruption",
     [

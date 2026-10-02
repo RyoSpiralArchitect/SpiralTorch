@@ -15,6 +15,59 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def causal_factorial_contrasts(config, runs, measured, sets):
+    arms = {"tangent", "elliptic", "causal_tangent", "causal_elliptic"}
+    require(set(config["arms"]) == arms, "incomplete causal factorial design")
+    for seed in config["seeds"]:
+        rows = [runs[f"{seed}:{arm}"] for arm in arms]
+        hashes = {row.get("initial_parameter_sha256") for row in rows}
+        require(
+            len(hashes) == 1
+            and all(isinstance(value, str) and len(value) == 64 for value in hashes),
+            "factorial initial parameters are not paired",
+        )
+        require(
+            all(row["parameter_count"] == 11 * config["features"] + 2 for row in rows),
+            "factorial parameter counts differ",
+        )
+    contrasts = {
+        "geometry_pointwise": {"elliptic": 1, "tangent": -1},
+        "geometry_causal": {"causal_elliptic": 1, "causal_tangent": -1},
+        "mixing_tangent": {"causal_tangent": 1, "tangent": -1},
+        "mixing_elliptic": {"causal_elliptic": 1, "elliptic": -1},
+        "interaction": {
+            "causal_elliptic": 1,
+            "causal_tangent": -1,
+            "elliptic": -1,
+            "tangent": 1,
+        },
+    }
+    report = {}
+    for name in sets:
+        report[name] = {}
+        for label, weights in contrasts.items():
+            values = [
+                sum(
+                    weight * measured[f"{seed}:{arm}"][name]
+                    for arm, weight in weights.items()
+                )
+                for seed in config["seeds"]
+            ]
+            report[name][label] = {
+                "weights": weights,
+                "mean_ce_difference": statistics.fmean(values),
+                "paired_sample_sd": statistics.stdev(values)
+                if len(values) > 1
+                else None,
+                "negative_seeds": sum(value < 0 for value in values),
+                "per_seed": [
+                    {"seed": seed, "ce_difference": value}
+                    for seed, value in zip(config["seeds"], values)
+                ],
+            }
+    return report
+
+
 def summarize(plan, result, journal, result_sha256):
     require(
         result["status"] == journal["status"] == "completed",
@@ -129,7 +182,7 @@ def summarize(plan, result, journal, result_sha256):
         and all(isinstance(x, str) for x in comparison_notes),
         "invalid comparison notes",
     )
-    return {
+    summary = {
         "schema": config.get(
             "summary_schema", "spiraltorch.wave_gate_long_horizon_summary.v1"
         ),
@@ -149,6 +202,11 @@ def summarize(plan, result, journal, result_sha256):
             "No speed or pristine-corpus generalization claim.",
         ],
     }
+    if config.get("schema") == "spiraltorch.elliptic_causal_protocol.v1":
+        summary["paired_factorial_contrasts"] = causal_factorial_contrasts(
+            config, runs, measured, sets
+        )
+    return summary
 
 
 def main():
