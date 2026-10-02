@@ -1,6 +1,64 @@
 use st_core::theory::microlocal::{EllipticLearningError, EllipticWarp};
 
 #[test]
+fn causal_feature_attention_vjp_includes_tied_query_key_and_value_paths() {
+    let warp = EllipticWarp::for_learning(1.0, 3, 2).unwrap();
+    let x = [1., 0.2, 0.3, 1., -0.4, 0.2, 1., 0.5, -0.6, 1., -0.3, -0.2];
+    let seed = (0..36).map(|i| (i as f32 * 0.3).cos()).collect::<Vec<_>>();
+    let y = warp.differentiate_causal_batch(&x, 2, 2, 4, 8).unwrap();
+    let gradient = y.vjp(&seed).unwrap();
+    let loss = |x: &[f32]| {
+        warp.differentiate_causal_batch(x, 2, 2, 4, 8)
+            .unwrap()
+            .features()
+            .iter()
+            .zip(&seed)
+            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .sum::<f64>()
+    };
+    for i in 0..x.len() {
+        let mut plus = x;
+        let mut minus = x;
+        plus[i] += 0.001;
+        minus[i] -= 0.001;
+        let numeric = (loss(&plus) - loss(&minus)) / f64::from(plus[i] - minus[i]);
+        assert!(
+            (numeric - f64::from(gradient[i])).abs() < 0.002,
+            "i={i} numeric={numeric} actual={}",
+            gradient[i]
+        );
+    }
+    let mut first_seed = [0.; 36];
+    first_seed[..9].fill(1.);
+    let gradient = y.vjp(&first_seed).unwrap();
+    assert!(gradient[..3].iter().any(|&v| v != 0.));
+    assert_eq!(&gradient[3..], &[0.; 9]);
+    assert!(y.vjp(&[f32::NAN; 36]).is_err());
+}
+
+#[test]
+fn causal_shapes_and_budget_are_checked_before_geometry() {
+    let warp = EllipticWarp::for_learning(1., 2, 1).unwrap();
+    assert_eq!(
+        warp.differentiate_causal_batch(&[f32::NAN; 12], 1, 4, 4, 15)
+            .unwrap_err(),
+        EllipticLearningError::PairBudget
+    );
+    for (batch, sequence, rows, pairs) in [
+        (0, 4, 4, 16),
+        (2, 0, 4, 16),
+        (2, 2, 4, 0),
+        (3, 2, 4, 16),
+        (2, 2, 3, 16),
+        (usize::MAX, 2, 4, 16),
+    ] {
+        assert!(warp
+            .differentiate_causal_batch(&[1.; 12], batch, sequence, rows, pairs)
+            .is_err());
+    }
+}
+
+#[test]
 fn near_pole_angles_rotors_and_vjp_do_not_collapse() {
     let warp = EllipticWarp::for_learning(1.0, 4, 2).unwrap();
     let orientation = [1e-4, 2e-4, 1.0];

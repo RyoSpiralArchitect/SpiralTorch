@@ -20,6 +20,8 @@ __all__ = [
     "ToposResonatorAdapter",
     "topos_resonator_autograd",
     "EllipticResidualAdapter",
+    "EllipticCausalResidualAdapter",
+    "elliptic_causal_autograd",
     "WaveGateAdapter",
     "wave_gate_autograd",
 ]
@@ -57,6 +59,34 @@ def _values(tensor: Any) -> list[float]:
 
 
 if torch is not None:
+
+    class _EllipticCausalFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, warp: Any, orientation: Any, max_pairs: int) -> Any:
+            batch, sequence, _ = orientation.shape
+            ctx.snapshot = warp.map_causal_batch(
+                _values(orientation),
+                batch_size=batch,
+                sequence_length=sequence,
+                max_pairs=max_pairs,
+            )
+            ctx.save_for_backward(orientation)
+            return torch.tensor(
+                ctx.snapshot.features,
+                device=orientation.device,
+                dtype=orientation.dtype,
+            ).reshape(batch, sequence, 9)
+
+        @staticmethod
+        @torch.autograd.function.once_differentiable
+        def backward(ctx: Any, upstream: Any) -> tuple[Any, Any, None]:
+            (orientation,) = ctx.saved_tensors
+            gradient = torch.tensor(
+                ctx.snapshot.vjp(_values(upstream)),
+                device=orientation.device,
+                dtype=orientation.dtype,
+            ).reshape_as(orientation)
+            return None, gradient, None
 
     class _WaveGateFunction(torch.autograd.Function):
         @staticmethod
@@ -150,6 +180,34 @@ if torch is not None:
             )
 
 
+def elliptic_causal_autograd(
+    warp: Any, orientation: Any, *, max_pairs: int = 1_048_576
+) -> Any:
+    """Rust elliptic Q=K=V attention on unpadded [B,T,3] orientations.
+
+    Full contexts only, structurally causal within each batch item. Scale is
+    1/sqrt(9); no dropout, padding mask or KV cache. The complete first-order
+    chart/attention VJP lives in Rust. Device tensors use explicit CPU transport.
+    """
+    _input(orientation)
+    from . import EllipticWarp
+
+    if not isinstance(warp, EllipticWarp):
+        raise TypeError("warp must be a spiraltorch.EllipticWarp instance")
+    if type(max_pairs) is not int or max_pairs <= 0:
+        raise ValueError("max_pairs must be a positive integer")
+    if (
+        orientation.ndim != 3
+        or orientation.shape[-1] != 3
+        or min(orientation.shape[:2]) == 0
+    ):
+        raise ValueError("causal orientations require nonempty [batch, sequence, 3]")
+    batch, sequence, _ = orientation.shape
+    if batch * sequence > 65_536 or batch * sequence * sequence > max_pairs:
+        raise ValueError("causal orientations exceed the row or score-pair budget")
+    return _EllipticCausalFunction.apply(warp, orientation, max_pairs)
+
+
 def wave_gate_autograd(
     value: Any,
     gate: Any,
@@ -234,6 +292,10 @@ if torch is None:
             _require_torch()
 
     class EllipticResidualAdapter:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            _require_torch()
+
+    class EllipticCausalResidualAdapter:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             _require_torch()
 
@@ -421,14 +483,17 @@ else:
             strength = _strength(self.strength)
             if strength == 0.0:
                 return value
-            from .elliptic import elliptic_warp_autograd
-
             coordinates = self.orientation(value)
             orientation = torch.cat(
                 (torch.ones_like(coordinates[..., :1]), coordinates), dim=-1
             )
-            features = elliptic_warp_autograd(self._warp, orientation)
+            features = self._map_features(orientation)
             return value + strength * self.readout(features)
+
+        def _map_features(self, orientation: Any) -> Any:
+            from .elliptic import elliptic_warp_autograd
+
+            return elliptic_warp_autograd(self._warp, orientation)
 
         def get_extra_state(self) -> dict[str, Any]:
             return {
@@ -455,6 +520,47 @@ else:
             strength = _strength(state["strength"])
             warp = EllipticWarp(**state["warp"])
             self.strength, self._warp = strength, warp
+
+    class EllipticCausalResidualAdapter(EllipticResidualAdapter):
+        """Identity-start residual mixing preceding tokens via Rust elliptic features.
+
+        Same 11*F+2 trainable parameters as the pointwise adapter. Requires full,
+        unpadded [B,T,F] contexts; a cached single-token call is not equivalent.
+        At most 65536 rows and 1048576 potential score pairs per forward.
+        """
+
+        def forward(self, value: Any) -> Any:
+            _input(value)
+            if value.ndim != 3 or min(value.shape[:2]) == 0:
+                raise ValueError(
+                    "causal adapter requires nonempty [batch, sequence, features]"
+                )
+            if (
+                value.shape[0] * value.shape[1] > 65_536
+                or value.shape[0] * value.shape[1] ** 2 > 1_048_576
+            ):
+                raise ValueError("causal adapter exceeds the row or score-pair budget")
+            return super().forward(value)
+
+        def _map_features(self, orientation: Any) -> Any:
+            return elliptic_causal_autograd(self._warp, orientation)
+
+        def get_extra_state(self) -> dict[str, Any]:
+            return {
+                **super().get_extra_state(),
+                "schema": "spiraltorch.elliptic_causal_residual_adapter.v1",
+            }
+
+        def set_extra_state(self, state: dict[str, Any]) -> None:
+            if (
+                not isinstance(state, dict)
+                or state.get("schema")
+                != "spiraltorch.elliptic_causal_residual_adapter.v1"
+            ):
+                raise ValueError("incompatible causal elliptic adapter state")
+            super().set_extra_state(
+                {**state, "schema": "spiraltorch.elliptic_residual_adapter.v1"}
+            )
 
     class ToposResonatorAdapter(torch.nn.Module):
         """Pointwise causal residual: ``x + strength * resonance(x, gate)``.

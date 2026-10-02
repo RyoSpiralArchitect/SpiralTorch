@@ -614,6 +614,7 @@ jobs:
           python -P bindings/st-py/tests/test_native_binding_ownership.py
           python -P bindings/st-py/tests/test_tensor_out.py
           python -P bindings/st-py/tests/test_autograd_prepacked.py
+          python -P bindings/st-py/tests/test_geometry_optional_dependency.py
           python -P bindings/st-py/tests/test_gelu_host.py
           python -P tests/test_configure_pypi_token_secret.py
           python -P tests/test_llm_char_vae_context_guidance.py
@@ -692,10 +693,11 @@ jobs:
           OMP_NUM_THREADS: "2"
         run: |
           python -m pip install "transformers==4.57.6"
-          python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
+          python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "EllipticCausalLearningBatch"); assert hasattr(st, "EllipticCausalResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
             bindings/st-py/tests/test_elliptic_learning.py \
+            bindings/st-py/tests/test_elliptic_causal_learning.py \
             bindings/st-py/tests/test_wave_gate_vjp.py \
             bindings/st-py/tests/test_wave_gate_learning.py \
             bindings/st-py/tests/test_wave_gate_radius.py \

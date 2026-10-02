@@ -1,0 +1,75 @@
+{
+  "schema": "spiraltorch.elliptic_causal_bridge_validation.v1",
+  "scope": "Correctness and small learning, not pretrained quality or speed",
+  "rust_toolchain": "1.98.0",
+  "rust_kernel_tests": {
+    "passed": 47,
+    "failed": 0
+  },
+  "rust_elliptic_tests": {
+    "passed": 5,
+    "failed": 0
+  },
+  "python_geometry_tests": {
+    "passed": 75,
+    "failed": 0,
+    "skipped": 0,
+    "local_log_sha256": "fa9a04f7662a6180d421be2342d17fefa899965e087f543a20f4d8e40292dfd4"
+  },
+  "native_build": "passed default Python features including wgpu",
+  "wasm32_build": "passed",
+  "browser": {
+    "status": "passed",
+    "vjp_finite_difference_max_error": 0.0002564967558815745,
+    "coordinate_learning_steps": 100,
+    "initial_mse": 0.035304096406169536,
+    "final_mse": 0.00010489401735815008,
+    "execution": "Rust CPU mathematics compiled to WASM; no WebGPU claim"
+  },
+  "kernel_clippy": "passed with warnings denied",
+  "native_sha256": "36acfb9d2d4128a8a006c9fa5ba74f5ffb72c0a662bc11b2248ced5770201292",
+  "wasm_sha256": "7383eab935b6116bed464d1b16665da617ff6e67d0f3d9462c6806261443668d",
+  "source_sha256": {
+    "crates/st-kernel-contracts/src/attention.rs": "e5b35136bd172e7d52205de09f2cd994232c58a6fdeb7d5855a221745d6f7382",
+    "crates/st-kernel-contracts/src/attention/backward.rs": "a01385fe9500b0a2230cdebb79e4540277bfcb53e7320a83de3a8bf6231325dc",
+    "crates/st-core/src/theory/microlocal/elliptic_causal.rs": "4f30dd520bbe75a5cac211108675692b99fb93e163ba5d5ddba94e1cdedbf199",
+    "crates/st-core/src/theory/microlocal/elliptic_learning.rs": "b3fe01809b54bd53a650f8e7a1ff38cd5f56fe4d034d0b330f1d6c5fb86255b0",
+    "bindings/st-py/src/elliptic.rs": "01f67e083422c90718e2d8f98baf0fc1b9a052ed4f97a5172a6d214d57e753d4",
+    "bindings/st-wasm/src/elliptic_learning.rs": "fc0ef114c1eaa388846476d6828802b627a7ad461c9a17e68c617207a8bfd442",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "795e86e209c8437def9d3de02605ed6784dde6d6460d1c3c10006bfdc1ab0c9e",
+    "bindings/st-py/tests/test_elliptic_causal_learning.py": "99bcbcca0bd7132ea9e5488185a9c8b81eb9bdf8a9aa700ee5b2d9d7b6188e77",
+    "bindings/st-wasm/tests/elliptic_causal_learning.html": "f87e886d3dc7b2c8efc37bffc1296696c1c979fbed6478bcd159707cb061858b",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "ab84998db6c0f8eb1ef9940e703717c993e9df1acdaa958b56bd22a903b6a17a",
+    "bindings/st-wasm/tests/elliptic_causal_types.ts": "f09801ef6a8c8b18c8284fc084d401b9317ac2e462f6db5224d11f6a5c6f633c"
+  },
+  "limitations": [
+    "Tiny HF fixture, not pretrained LLM evaluation",
+    "Unpadded full contexts only; KV cache must be disabled",
+    "CPU transport for device tensors, not resident WGPU",
+    "First-order f32 outputs with wide gradient accumulation; tolerance parity, not bitwise Torch identity",
+    "No speed or empirical geometry advantage claim"
+  ],
+  "after_parent_rng_review_tests": {
+    "passed": 77,
+    "failed": 0,
+    "skipped": 0,
+    "local_log_sha256": "9d8859a0a5aa4fcfcb4309b12508aeb1e7c91a0c86a4ce50f8d935eba4575ce3"
+  },
+  "typescript_validation": "strict noEmit usage fixture passed; signatures match generated wasm-bindgen declarations",
+  "after_optional_dependency_fix": {
+    "python_tests": {
+      "passed": 78,
+      "failed": 0,
+      "skipped": 0
+    },
+    "regression": "Same corrected test fails on original client and passes after placeholder fix.",
+    "local_red_log_sha256": "3630d63de17904eab5399e07776c2a7e627f9475512760a77ac3e61ca2c76711",
+    "local_green_suite_log_sha256": "5689b73b5754c12369ae4a3b4da20e8700a7c3520916b49ede4cb77b62cfce65",
+    "source_sha256": {
+      "bindings/st-py/spiraltorch/geometry_autograd.py": "73b9702a71fb889882912817916e61412935639929baa237089bea59090400f6",
+      "bindings/st-py/tests/test_geometry_optional_dependency.py": "c43a351b253c5f0a839bf9fe3eb48eb195f75f4f625e000fbd6eb0b397e87e2a"
+    },
+    "native_rebuilt": false,
+    "frozen_learning_runtime_modified": false
+  }
+}

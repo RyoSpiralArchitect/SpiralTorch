@@ -11,6 +11,8 @@ from .geometry_autograd import (
     ToposResonatorAdapter as ToposResonatorAdapter,
     topos_resonator_autograd as topos_resonator_autograd,
     EllipticResidualAdapter as EllipticResidualAdapter,
+    EllipticCausalResidualAdapter as EllipticCausalResidualAdapter,
+    elliptic_causal_autograd as elliptic_causal_autograd,
     WaveGateAdapter as WaveGateAdapter,
     wave_gate_autograd as wave_gate_autograd,
 )
@@ -3173,6 +3175,11 @@ class EllipticLearningBatch:
     def telemetry(self) -> List[EllipticTelemetry]: ...
     def vjp(self, upstream: Sequence[float]) -> List[float]: ...
 
+class EllipticCausalLearningBatch:
+    @property
+    def features(self) -> List[float]: ...
+    def vjp(self, upstream: Sequence[float]) -> List[float]: ...
+
 class EllipticWarp:
     curvature_radius: float
     sheet_count: int
@@ -3195,6 +3202,7 @@ class EllipticWarp:
         orientation: Sequence[float],
     ) -> Tuple[EllipticTelemetry, List[float], List[List[float]]] | None: ...
     def map_orientations_batch(self, orientations: Sequence[float], *, max_rows: int = ...) -> EllipticLearningBatch: ...
+    def map_causal_batch(self, orientations: Sequence[float], *, batch_size: int, sequence_length: int, max_rows: int = ..., max_pairs: int = ...) -> EllipticCausalLearningBatch: ...
 
 def elliptic_warp_autograd(warp: EllipticWarp, orientation: Any, *, return_telemetry: bool = ...) -> Any: ...
 
