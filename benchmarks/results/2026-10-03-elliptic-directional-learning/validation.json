@@ -1,0 +1,83 @@
+{
+  "schema": "spiraltorch.elliptic_directional_validation.v1",
+  "source_revision": "d7abe0beeca216b5d2b09e496703656877cfc4f4",
+  "status": "passed",
+  "scope": "First-order native derivatives, client learning paths, and exploratory training-only conditioning; not LM-quality improvement or a speed comparison",
+  "environment": {
+    "platform": "Apple Silicon macOS",
+    "rust": "1.98.0",
+    "rustfmt": "nightly-2026-04-15",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  },
+  "rust": {
+    "passed": 16,
+    "skipped": 0,
+    "clippy": "passed with -D warnings",
+    "workspace_fmt": "passed"
+  },
+  "python": {
+    "passed": 189,
+    "skipped": 0,
+    "forward_ad": "pointwise and anchored JVP, input-only/gate-only/joint directions, reverse-mode preserved",
+    "adapter_loss": "after Adam updates, cross-entropy directional derivative matches reverse-mode contraction",
+    "limitations": "No torch.func, vmap, higher-order, or new resident-accelerator claim"
+  },
+  "wasm": {
+    "build": "passed",
+    "runtime": "actual wasm-bindgen nodejs module",
+    "typescript": "strict passed",
+    "max_directional_difference": 0.00014060735702514648,
+    "max_adjoint_error": 3.929001501923324e-8,
+    "synthetic_updates": 17,
+    "final_loss": 4.843714318525372e-11
+  },
+  "probe": {
+    "rows": 9,
+    "training_blocks": 16,
+    "training_tokens": 2048,
+    "endpoint_evaluations": 0,
+    "training_updates": 0,
+    "base_unchanged": true,
+    "study_receipts_unchanged": true,
+    "jvp_vjp_basis_exact": true,
+    "all_original_vjp_probe_metrics_exact": true,
+    "original_local_probe_sha256": "0ac79b316edbaa06d025ae3619e9d9fb13d7fdf50f8f3f4d78adac49ac56943f",
+    "published_probe_uncompressed_sha256": "b6c1915648b1be6317d38ec4840c274a6bf56e0b79a0d2edff9bc1cab4015a8d"
+  },
+  "source_sha256": {
+    "crates/st-core/src/theory/microlocal/elliptic.rs": "19d0cddfa2954c998b33958c68fe7ef74760971af3de26ee4d14d60ce2b62f6e",
+    "crates/st-core/src/theory/microlocal/elliptic_learning.rs": "6d51a9fddf77384ef9186649a5f6e121ff79d44959869eeb3579b286bd28bad4",
+    "crates/st-core/src/theory/microlocal/elliptic_anchored.rs": "8f14de6c80334ea27c6b7a91c478b12c9b945f9760186b846ba356a30980b688",
+    "crates/st-core/tests/elliptic_learning.rs": "3a70a0de259bc2177a72d2b45959bf2f04c9af2d422cf1bbc941e88e0e27e159",
+    "crates/st-core/tests/elliptic_anchored.rs": "a4d44a814143cb8c110e99ecde2d9f94b7c9bf70d6f37fe657e3b6f5d1f6ee83",
+    "bindings/st-py/src/elliptic.rs": "c274afce957df4fdcd3263c9128b1cbca1a068b84023bcfe7956ae3377289205",
+    "bindings/st-py/spiraltorch/elliptic.py": "02d6fff76d275d8aa793ea3cc1124ce3ccf637fccd0ef08afcecfacf671b9714",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "c95ce2b65f7c78906ce756926b9b19d0ed8ef7ea841e52577e44e26e61a52aaf",
+    "bindings/st-py/spiraltorch/__init__.pyi": "3b8d0c09627aec90269ba0010d246367385c4dcbafaaa59233870d9221778387",
+    "bindings/st-py/examples/elliptic_pullback_fit.py": "1f97d654adf7e67365bfb36283f4a7ac372206ba01789db05ebeda77cf8802e9",
+    "bindings/st-py/examples/hf_elliptic_chart_probe.py": "9e3f464ef18cf991548e4c149ea19717072e9c3712d282e3220d2b10d68dad89",
+    "bindings/st-py/tests/test_elliptic_directional.py": "0b221d4c272e72d5d3654104b735af8c39902b4a68412e7f2fa8b0dfd840f067",
+    "bindings/st-wasm/src/elliptic_learning.rs": "dfbb3863ced127f2d7ca89108f149ae8c58ca3d978e69ee6fd2f8be9d6921cc6",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "8a19ba529e03f75f7df74eba55372aadc003a9fd090ae0ee91068a556348b719",
+    "bindings/st-wasm/tests/elliptic_directional.mjs": "ff7effcfa84bfe91c68c97e7d7a578b479e4715c82d79a161080c2c9b4f700a4",
+    "bindings/st-wasm/tests/elliptic_directional_types.ts": "8385eabb798395b72a70e8667cb6e202b7c6173b53acbee45d521945669f4d2b",
+    ".github/workflows/ci.yml": "d44e73dea3ce3b316e62980430933bf3a842427788eff38a67095905e2138ee8"
+  },
+  "artifact_sha256": {
+    "native": "c881b013a3c0f4cf04313e88abd8ecf46d30ee20b978728faafd954961f623f3",
+    "wasm": "ecbef7cd32db5ea21aa650ec4cf1cf3e5dc454a29cb839f4607ed7db467e2322",
+    "wasm_js": "c229219dd167368638c339fd95efcb1bc972b329176845663556e7f33593e021"
+  },
+  "local_log_sha256": {
+    "jvp-rust-tests.log": "4d3007cd617358bdbc35b1c4c5379a94ca93abcf9eeacd41a4f01043e380aa8c",
+    "jvp-clippy.log": "f4a1e142419408cc583dc5f23780ab823a1bb683fd153ff1ac0ac2820778cc4f",
+    "jvp-native-build.log": "2921bf30846877a304d683a2684be105f8cb2a2d94fe6479f58944ecefd69db9",
+    "jvp-wasm-build.log": "fa5a4d213ee107d0269353c7f6c136879084ecd4b8cf0ed10e15c26be7dc6ee3",
+    "jvp-python-tests.log": "ff2a0a35e820115222a8bfe8af4fc98c12f9313e85a4fdb2db804e1e6615dc43",
+    "jvp-full-tests.log": "beb848fc5a96a6462d96c2c3b12a4bf135ff9c4072b70bb80827b66c21e2d41e",
+    "jvp-fit.log": "e6cf4ddc1c5e6e6bc94007e4ea5ed73da2bf6a86c11778138711a797a1d5e7f9",
+    "chart-probe-v2.log": "c6f1916bb2cc28521ba691a58b38174a47a1e3eaf91f350e26a4bdd490873817"
+  }
+}

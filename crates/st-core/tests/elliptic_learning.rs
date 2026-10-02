@@ -1,6 +1,85 @@
 use st_core::theory::microlocal::{EllipticLearningError, EllipticWarp};
 
 #[test]
+fn jvp_matches_directional_difference_and_is_the_adjoint_of_vjp() {
+    let x = [1.0, 0.3, -0.2, 0.6, -0.5, 0.8];
+    let direction = [0.1, -0.4, 0.7, -0.3, 0.6, -0.1];
+    let upstream = (0..18).map(|i| (i as f32 * 0.7).cos()).collect::<Vec<_>>();
+    for (radius, sheets, harmonics) in [(1.0, 1, 1), (1.7, 4, 3)] {
+        let warp = EllipticWarp::for_learning(radius, sheets, harmonics).unwrap();
+        let batch = warp.differentiate_batch(&x, 2).unwrap();
+        let jv = batch.jvp(&direction).unwrap();
+        let plus = x
+            .iter()
+            .zip(direction)
+            .map(|(&x, v)| x + 0.001 * v)
+            .collect::<Vec<_>>();
+        let minus = x
+            .iter()
+            .zip(direction)
+            .map(|(&x, v)| x - 0.001 * v)
+            .collect::<Vec<_>>();
+        let high = warp.differentiate_batch(&plus, 2).unwrap();
+        let low = warp.differentiate_batch(&minus, 2).unwrap();
+        for ((&actual, &high), &low) in jv.iter().zip(high.features()).zip(low.features()) {
+            let numeric = (high - low) / 0.002;
+            assert!((actual - numeric).abs() < 0.001, "{actual} != {numeric}");
+        }
+        let dot = |a: &[f32], b: &[f32]| {
+            a.iter()
+                .zip(b)
+                .map(|(&a, &b)| f64::from(a) * f64::from(b))
+                .sum::<f64>()
+        };
+        assert!(
+            (dot(&jv, &upstream) - dot(&direction, &batch.vjp(&upstream).unwrap())).abs() < 1e-6
+        );
+        // J^T J is the feature-space pullback metric, not a loss Hessian.
+        let gram_direction = batch.vjp(&jv).unwrap();
+        assert!((dot(&direction, &gram_direction) - dot(&jv, &jv)).abs() < 1e-6);
+        assert!(dot(&direction, &gram_direction) >= 0.0);
+    }
+}
+
+#[test]
+fn jvp_checks_shape_nonfinite_and_overflow_including_empty_batches() {
+    let warp = EllipticWarp::for_learning(1.0, 4, 2).unwrap();
+    let batch = warp.differentiate_batch(&[1.0, 0.3, 0.2], 1).unwrap();
+    for invalid in [
+        vec![],
+        vec![0.0; 2],
+        vec![0.0; 6],
+        vec![f32::NAN; 3],
+        vec![f32::INFINITY; 3],
+    ] {
+        assert_eq!(
+            batch.jvp(&invalid),
+            Err(EllipticLearningError::InvalidTangent)
+        );
+    }
+    assert_eq!(batch.jvp(&[0.0; 3]).unwrap(), [0.0; 9]);
+    let empty = warp.differentiate_batch(&[], 1).unwrap();
+    assert!(empty.jvp(&[]).unwrap().is_empty());
+    assert_eq!(
+        empty.jvp(&[0.0]),
+        Err(EllipticLearningError::InvalidTangent)
+    );
+    let near_pole = warp.differentiate_batch(&[1e-4, 2e-4, 1.0], 1).unwrap();
+    assert_eq!(
+        near_pole.jvp(&[f32::MAX, 0.0, 0.0]),
+        Err(EllipticLearningError::NonFiniteTangent)
+    );
+    // Normalization removes the radial direction, including at extreme scales.
+    let large = [1e20, 2e20, 3e20];
+    let radial = warp
+        .differentiate_batch(&large, 1)
+        .unwrap()
+        .jvp(&large)
+        .unwrap();
+    assert!(radial.iter().all(|v| v.abs() < 1e-6));
+}
+
+#[test]
 fn causal_feature_attention_vjp_includes_tied_query_key_and_value_paths() {
     let warp = EllipticWarp::for_learning(1.0, 3, 2).unwrap();
     let x = [1., 0.2, 0.3, 1., -0.4, 0.2, 1., 0.5, -0.6, 1., -0.3, -0.2];

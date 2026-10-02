@@ -12,6 +12,10 @@ pub enum EllipticLearningError {
     InvalidRow { row: usize },
     #[error("elliptic VJP needs nine finite upstream values per row")]
     InvalidUpstream,
+    #[error("elliptic JVP needs three finite tangent values per row and a finite gate tangent")]
+    InvalidTangent,
+    #[error("elliptic JVP result is not finite")]
+    NonFiniteTangent,
     #[error("elliptic VJP result is not finite")]
     NonFiniteGradient,
     #[error("elliptic learning output is not finite")]
@@ -22,7 +26,7 @@ pub enum EllipticLearningError {
     Attention(#[from] st_kernel_contracts::attention::AttentionError),
 }
 
-/// An immutable forward snapshot. Later warp reconfiguration cannot alter its VJP.
+/// An immutable forward snapshot. Later warp reconfiguration cannot alter its derivatives.
 #[derive(Clone, Debug)]
 pub struct EllipticLearningBatch {
     features: Vec<f32>,
@@ -37,6 +41,29 @@ impl EllipticLearningBatch {
 
     pub fn telemetry(&self) -> &[EllipticTelemetry] {
         &self.telemetry
+    }
+
+    /// Apply the saved differential to a 3D input direction per row. This is
+    /// first-order forward differentiation, not a derivative of the VJP.
+    pub fn jvp(&self, tangent: &[f32]) -> Result<Vec<f32>, EllipticLearningError> {
+        if tangent.len() != self.differentials.len() * 3 || tangent.iter().any(|v| !v.is_finite()) {
+            return Err(EllipticLearningError::InvalidTangent);
+        }
+        let mut output = Vec::with_capacity(self.features.len());
+        for (differential, direction) in self.differentials.iter().zip(tangent.as_chunks::<3>().0) {
+            for row in differential.jacobian() {
+                let value = row
+                    .iter()
+                    .zip(direction)
+                    .map(|(&j, &v)| f64::from(j) * f64::from(v))
+                    .sum::<f64>() as f32;
+                if !value.is_finite() {
+                    return Err(EllipticLearningError::NonFiniteTangent);
+                }
+                output.push(value);
+            }
+        }
+        Ok(output)
     }
 
     /// CPU f32 outputs with an f64 accumulation of the nine feature contributions.

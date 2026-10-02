@@ -69,6 +69,14 @@ independent confirmations. Before adding another mixer, inspect nonlinear chart
 feature/gradient conditioning against the ordinary control. The experiment does
 not establish that conditioning causes the remaining gap, nor any speed advantage.
 
+The [directional learning connection](elliptic_directional_learning.md) now adds
+native pointwise/anchored JVPs beside those VJPs, including Python forward-mode
+and a WASM client. A training-only frozen-checkpoint probe separates increased
+directional anisotropy from a uniform gradient-collapse claim. Composed JVP/VJP
+operators drive a bounded synthetic Gauss-Newton fit; no alternate gradient is
+silently inserted into the production adapter. Whether this helps actual LM
+optimization remains a matched-training question, not a concluded quality win.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:
