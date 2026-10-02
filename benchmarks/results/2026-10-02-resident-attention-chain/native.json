@@ -1,0 +1,67 @@
+{
+  "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "checks": [
+    {
+      "max_abs_error": 1.862645149230957e-9,
+      "name": "small_tail/unmasked/plain"
+    },
+    {
+      "max_abs_error": 1.862645149230957e-9,
+      "name": "small_tail/unmasked/zero_geometry"
+    },
+    {
+      "max_abs_error": 3.725290298461914e-9,
+      "name": "small_tail/unmasked/zrbf"
+    },
+    {
+      "max_abs_error": 3.725290298461914e-9,
+      "name": "small_tail/causal/plain"
+    },
+    {
+      "max_abs_error": 3.725290298461914e-9,
+      "name": "small_tail/causal/zero_geometry"
+    },
+    {
+      "max_abs_error": 3.725290298461914e-9,
+      "name": "small_tail/causal/zrbf"
+    },
+    {
+      "max_abs_error": 7.450580596923828e-9,
+      "name": "transformer_width/unmasked/plain"
+    },
+    {
+      "max_abs_error": 7.450580596923828e-9,
+      "name": "transformer_width/unmasked/zero_geometry"
+    },
+    {
+      "max_abs_error": 1.1175870895385742e-8,
+      "name": "transformer_width/unmasked/zrbf"
+    },
+    {
+      "max_abs_error": 1.30385160446167e-8,
+      "name": "transformer_width/causal/plain"
+    },
+    {
+      "max_abs_error": 1.30385160446167e-8,
+      "name": "transformer_width/causal/zero_geometry"
+    },
+    {
+      "max_abs_error": 1.30385160446167e-8,
+      "name": "transformer_width/causal/zrbf"
+    }
+  ],
+  "geometry_checks": [
+    {
+      "max_abs_error": 5.960464477539063e-8,
+      "name": "small_tail"
+    },
+    {
+      "max_abs_error": 5.960464477539063e-8,
+      "name": "transformer_width"
+    }
+  ],
+  "passed": true,
+  "reference_torch_version": "2.12.1",
+  "schema": "spiraltorch.attention_chain.v1",
+  "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+}
