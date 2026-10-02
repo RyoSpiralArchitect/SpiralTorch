@@ -21,6 +21,8 @@ try {
   if (report.schema !== "spiraltorch.attention_chain.v1" || !report.passed ||
       report.projection !== projection ||
       report.checks.length !== (benchmark ? 18 : 12) ||
+      report.output_paths?.join(",") !== "default_head_merge,direct_merged_heads" ||
+      report.checks.some(c => !Number.isFinite(c.merged_heads_max_abs_error)) ||
       report.geometry_checks.length !== (benchmark ? 3 : 2)) throw Error("Incomplete chain fixture");
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
