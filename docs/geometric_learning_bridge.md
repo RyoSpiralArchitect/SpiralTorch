@@ -121,8 +121,9 @@ updates, adapter/optimizer continuation, and browser/native forward/VJP agreemen
 The random tiny HF experiment is deliberately not pretrained FT evidence or a
 claim of improved language quality. It preserves adverse development-loss results.
 
-Next, audit the existing elliptic/Lie feature Jacobian bridge under the same
-learning/continuation tests, then expose the existing Rust WaveGate derivatives.
+The [elliptic/Lie bridge](elliptic_learning_bridge.md) now has numerical repairs,
+batched Rust VJPs and a bounded pretrained-model connection. Next expose the
+existing Rust WaveGate derivatives under the same learning/continuation tests.
 Only after those individually work should combinations be evaluated. Each needs
 an identity or disabled control, a simple parameter-count control, fixed data and
 seeds, saturation/gradient diagnostics and an explicitly priced execution boundary.

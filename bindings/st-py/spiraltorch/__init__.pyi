@@ -10,6 +10,7 @@ from .optim import Amegagrad, amegagrad
 from .geometry_autograd import (
     ToposResonatorAdapter as ToposResonatorAdapter,
     topos_resonator_autograd as topos_resonator_autograd,
+    EllipticResidualAdapter as EllipticResidualAdapter,
 )
 
 class ToposResonatorKernel:
@@ -3117,18 +3118,24 @@ class EllipticTelemetry:
     resonance_heat: float
     noise_density: float
     topological_sector: int
-    normal_bias: Tuple[float, ...]
+    normal_bias: float
     flow_vector: Tuple[float, ...]
     rotor_field: Tuple[float, ...]
     rotor_transport: Tuple[float, ...]
-    lie_quaternion: Tuple[float, ...]
-    lie_rotation: Tuple[float, ...]
     lie_log: Tuple[float, ...]
-    homology_index: Tuple[int, ...]
-    event_tags: Tuple[str, ...]
-    curvature_tensor: Tuple[float, ...]
+    homology_index: int
+    curvature_tensor: Sequence[Sequence[float]]
 
+    def lie_quaternion(self) -> Sequence[float]: ...
+    def lie_rotation(self) -> Sequence[float]: ...
+    def event_tags(self) -> List[str]: ...
     def as_dict(self) -> Dict[str, object]: ...
+
+class EllipticLearningBatch:
+    @property
+    def features(self) -> List[float]: ...
+    def telemetry(self) -> List[EllipticTelemetry]: ...
+    def vjp(self, upstream: Sequence[float]) -> List[float]: ...
 
 class EllipticWarp:
     curvature_radius: float
@@ -3146,11 +3153,14 @@ class EllipticWarp:
         sheet_count: int | None = ...,
         spin_harmonics: int | None = ...,
     ) -> None: ...
-    def map_orientation(self, orientation: Sequence[float]) -> Tuple[float, ...]: ...
+    def map_orientation(self, orientation: Sequence[float]) -> EllipticTelemetry | None: ...
     def map_orientation_differential(
         self,
         orientation: Sequence[float],
-    ) -> Tuple[float, ...]: ...
+    ) -> Tuple[EllipticTelemetry, List[float], List[List[float]]] | None: ...
+    def map_orientations_batch(self, orientations: Sequence[float], *, max_rows: int = ...) -> EllipticLearningBatch: ...
+
+def elliptic_warp_autograd(warp: EllipticWarp, orientation: Any, *, return_telemetry: bool = ...) -> Any: ...
 
 class ResonanceProfile:
     def __init__(self, grid: MellinLogGrid, pole: complex, residue: complex) -> None: ...

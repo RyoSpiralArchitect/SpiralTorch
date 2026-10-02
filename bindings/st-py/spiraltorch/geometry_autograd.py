@@ -16,7 +16,11 @@ try:
 except ImportError:  # Optional dependency; importing SpiralTorch remains valid.
     torch = None
 
-__all__ = ["ToposResonatorAdapter", "topos_resonator_autograd"]
+__all__ = [
+    "ToposResonatorAdapter",
+    "topos_resonator_autograd",
+    "EllipticResidualAdapter",
+]
 _SCHEMA = "spiraltorch.topos_resonator_adapter.v1"
 
 
@@ -120,7 +124,91 @@ if torch is None:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             _require_torch()
 
+    class EllipticResidualAdapter:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            _require_torch()
+
 else:
+
+    class EllipticResidualAdapter(torch.nn.Module):
+        """Identity-initialized residual through the Rust elliptic feature map.
+
+        A trainable F->2 projection supplies the local chart (1, u, v), which
+        avoids poles and the azimuth seam for finite coordinates. A zero-start
+        9->F readout restores hidden width. This is a pointwise hemisphere chart,
+        not a global spherical atlas or a resident GPU implementation.
+        """
+
+        def __init__(
+            self,
+            features: int,
+            *,
+            strength: float = 0.1,
+            curvature_radius: float = 1.0,
+            sheet_count: int = 2,
+            spin_harmonics: int = 1,
+        ) -> None:
+            super().__init__()
+            if (
+                isinstance(features, bool)
+                or not isinstance(features, int)
+                or features <= 0
+            ):
+                raise ValueError("features must be a positive integer")
+            from . import EllipticWarp
+
+            self.features = features
+            self.strength = _strength(strength)
+            self._warp = EllipticWarp(curvature_radius, sheet_count, spin_harmonics)
+            self.orientation = torch.nn.Linear(features, 2, dtype=torch.float32)
+            self.readout = torch.nn.Linear(9, features, bias=False, dtype=torch.float32)
+            torch.nn.init.zeros_(self.readout.weight)
+
+        @property
+        def execution_backend(self) -> str:
+            return "rust_f32_cpu"
+
+        def forward(self, value: Any) -> Any:
+            _input(value)
+            if value.shape[-1] != self.features:
+                raise ValueError("input feature width differs from the adapter")
+            strength = _strength(self.strength)
+            if strength == 0.0:
+                return value
+            from .elliptic import elliptic_warp_autograd
+
+            coordinates = self.orientation(value)
+            orientation = torch.cat(
+                (torch.ones_like(coordinates[..., :1]), coordinates), dim=-1
+            )
+            features = elliptic_warp_autograd(self._warp, orientation)
+            return value + strength * self.readout(features)
+
+        def get_extra_state(self) -> dict[str, Any]:
+            return {
+                "schema": "spiraltorch.elliptic_residual_adapter.v1",
+                "features": self.features,
+                "strength": _strength(self.strength),
+                "warp": {
+                    "curvature_radius": self._warp.curvature_radius,
+                    "sheet_count": self._warp.sheet_count,
+                    "spin_harmonics": self._warp.spin_harmonics,
+                },
+            }
+
+        def set_extra_state(self, state: dict[str, Any]) -> None:
+            if (
+                not isinstance(state, dict)
+                or set(state) != {"schema", "features", "strength", "warp"}
+                or state["schema"] != "spiraltorch.elliptic_residual_adapter.v1"
+                or state["features"] != self.features
+            ):
+                raise ValueError("incompatible elliptic adapter state")
+            from . import EllipticWarp
+
+            strength = _strength(state["strength"])
+            warp = EllipticWarp(**state["warp"])
+            self.strength, self._warp = strength, warp
 
     class ToposResonatorAdapter(torch.nn.Module):
         """Pointwise causal residual: ``x + strength * resonance(x, gate)``.

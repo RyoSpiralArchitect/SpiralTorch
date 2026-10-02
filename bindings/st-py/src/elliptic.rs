@@ -1,13 +1,44 @@
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::IntoPyObjectExt;
-use st_core::theory::microlocal::{EllipticTelemetry, EllipticWarp};
+use st_core::theory::microlocal::{EllipticLearningBatch, EllipticTelemetry, EllipticWarp};
 
 type EllipticDifferential = (PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>);
 
 #[pyclass(name = "EllipticWarp", module = "spiraltorch")]
 pub struct PyEllipticWarp {
     warp: EllipticWarp,
+}
+
+#[pyclass(name = "EllipticLearningBatch", module = "spiraltorch", frozen)]
+pub struct PyEllipticLearningBatch {
+    inner: EllipticLearningBatch,
+}
+
+fn value_error(error: impl std::fmt::Display) -> PyErr {
+    PyValueError::new_err(error.to_string())
+}
+
+#[pymethods]
+impl PyEllipticLearningBatch {
+    #[getter]
+    fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    fn telemetry(&self) -> Vec<PyEllipticTelemetry> {
+        self.inner
+            .telemetry()
+            .iter()
+            .cloned()
+            .map(PyEllipticTelemetry::from)
+            .collect()
+    }
+
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.vjp(&upstream)).map_err(value_error)
+    }
 }
 
 #[pyclass(name = "EllipticTelemetry", module = "spiraltorch")]
@@ -29,15 +60,14 @@ impl PyEllipticWarp {
         curvature_radius: f32,
         sheet_count: Option<usize>,
         spin_harmonics: Option<usize>,
-    ) -> Self {
-        let mut warp = EllipticWarp::new(curvature_radius);
-        if let Some(sheets) = sheet_count {
-            warp = warp.with_sheet_count(sheets);
-        }
-        if let Some(harmonics) = spin_harmonics {
-            warp = warp.with_spin_harmonics(harmonics);
-        }
-        Self { warp }
+    ) -> PyResult<Self> {
+        let warp = EllipticWarp::for_learning(
+            curvature_radius,
+            sheet_count.unwrap_or(2),
+            spin_harmonics.unwrap_or(1),
+        )
+        .map_err(value_error)?;
+        Ok(Self { warp })
     }
 
     #[getter]
@@ -56,13 +86,30 @@ impl PyEllipticWarp {
     }
 
     #[pyo3(signature = (sheet_count=None, spin_harmonics=None))]
-    fn configure(&mut self, sheet_count: Option<usize>, spin_harmonics: Option<usize>) {
-        if let Some(sheets) = sheet_count {
-            self.warp = self.warp.clone().with_sheet_count(sheets);
-        }
-        if let Some(harmonics) = spin_harmonics {
-            self.warp = self.warp.clone().with_spin_harmonics(harmonics);
-        }
+    fn configure(
+        &mut self,
+        sheet_count: Option<usize>,
+        spin_harmonics: Option<usize>,
+    ) -> PyResult<()> {
+        self.warp = EllipticWarp::for_learning(
+            self.warp.curvature_radius(),
+            sheet_count.unwrap_or(self.warp.sheet_count()),
+            spin_harmonics.unwrap_or(self.warp.spin_harmonics()),
+        )
+        .map_err(value_error)?;
+        Ok(())
+    }
+
+    #[pyo3(signature = (orientations, *, max_rows=65_536))]
+    fn map_orientations_batch(
+        &self,
+        py: Python<'_>,
+        orientations: Vec<f32>,
+        max_rows: usize,
+    ) -> PyResult<PyEllipticLearningBatch> {
+        py.detach(|| self.warp.differentiate_batch(&orientations, max_rows))
+            .map(|inner| PyEllipticLearningBatch { inner })
+            .map_err(value_error)
     }
 
     fn map_orientation(&self, orientation: Vec<f32>) -> PyResult<Option<PyEllipticTelemetry>> {
@@ -222,6 +269,7 @@ impl PyEllipticTelemetry {
 pub fn register(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyEllipticWarp>()?;
     module.add_class::<PyEllipticTelemetry>()?;
+    module.add_class::<PyEllipticLearningBatch>()?;
     module.add("__doc__", "Elliptic microlocal warp helpers")?;
     let _ = py;
     Ok(())
