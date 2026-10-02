@@ -620,6 +620,10 @@ impl ResidentTensor {
     pub fn narrow(&self, axis: usize, start: usize, length: usize) -> Result<Self, TensorError> {
         self.view(self.layout.narrow(axis, start, length)?)
     }
+    /// Remove a selected axis as an immutable view, without packing or copying.
+    pub fn select(&self, axis: usize, index: usize) -> Result<Self, TensorError> {
+        self.view(self.layout.select(axis, index)?)
+    }
     pub fn broadcast_to(&self, shape: &[usize]) -> Result<Self, TensorError> {
         self.view(self.layout.broadcast_to(shape)?)
     }

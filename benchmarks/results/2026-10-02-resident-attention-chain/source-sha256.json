@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.attention_chain_source.v1",
+  "execution_revision": "ab2fa7cef8e67a0f707d981aa1dab34040a7eeee",
+  "scope": "Selected implementation and oracle files; the Git revision identifies the complete source tree.",
+  "sha256": {
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "crates/st-nn/src/resident/attention.rs": "a9fcfc3e0468e19244914d699dd7a2d0fc0bffcfa3e8b9a10bcc3fd8ca709c91",
+    "crates/st-nn/src/resident/attention/tests.rs": "145e93ae3b4aa779423de9a9c133e8397193fcb39f7c9a233bec520cffd78cb3",
+    "crates/st-nn/src/resident.rs": "c851cb7bfa04a18ae81aef0fc81532a732468a2a091aa9d809e9eeb42fdde654",
+    "crates/st-nn/src/z_rba/attention.rs": "387b29d7487642f730912bcd1e39976e54a908a27ebc4d93bb8e36a9719b73f0",
+    "crates/st-kernel-contracts/src/layout.rs": "b938565997f3eb87d1cbeb8ed4215a868fdebd96583014ac20fd368bc03f1a95",
+    "crates/st-kernel-contracts/src/attention.rs": "2b8fcd9e72498e5100a82f12999008dd60414dac10aa5fd2d9b36984fcf07154",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "ed54d46e82c7072f7d0c7357f758aef34231d1c91bfd92a9041a868985d01f91",
+    "crates/st-backend-wgpu/src/resident_tensor/attention.rs": "f52268b12325cd8d72f3b38b08b2f2867faef87a70b4a3f8c117f41b98321552",
+    "crates/st-nn/examples/support/attention_chain.rs": "044608c0d7e187dc2de6b198ae54ca1d111d35acbafb7ab06d889c8f965d1f16",
+    "crates/st-nn/examples/resident_attention_chain.rs": "3f6d96d1ab4cb41dd310f4f536c186458928d475e8d2d7f0b85585f2425b5264",
+    "crates/st-nn/examples/resident_attention_chain_browser.rs": "0010de71154d1191a9a683061d0873b8e2665f56e74036348406233731e18e68",
+    "crates/st-nn/tests/resident_attention_chain.rs": "5ccef27311e2c586766b40e1e137e2ec4109e89e06cd1875c3092f8658d502a4",
+    "crates/st-nn/tests/attention_chain_browser.html": "e3bae4043e96d21b6baccf046d8cf7ccfed0d95bc00d6c12c8b846200ffb81e4",
+    "crates/st-nn/tests/fixtures/attention_chain_torch.json": "e7de80de892eb729cba79043d843658ff7354a523f9f4a9b01f7da195f4b09c3",
+    "tools/generate_attention_chain_torch_fixture.py": "e1b5dc46073c4c3224eec0492835415267c74097e2b72b14e27ec7a587f83e15"
+  }
+}

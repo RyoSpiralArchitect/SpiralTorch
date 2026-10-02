@@ -75,6 +75,11 @@ impl AttentionKernels {
     }
 }
 
+/// Validate this kernel's capabilities without creating GPU resources.
+pub fn validate_limits(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<(), TensorError> {
+    preflight(spec, limits).map(|_| ())
+}
+
 fn preflight(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<[u32; 2], TensorError> {
     if spec.head_dim() > MAX_HEAD_DIM
         || limits.max_bindings_per_bind_group < 8
