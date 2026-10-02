@@ -34,7 +34,13 @@ but the tangent control is slightly better in all three minibatch schedules.
 No logged training input reaches elementwise saturation; relaxing its threshold
 changes nothing. Rust-owned projection-gain observations instead motivate testing
 an explicitly parameterized, learnable projection radius with a preserved initial
-gain. That next mechanism still needs matched controls; the pilot is not a win.
+gain. The [radius pilot](../benchmarks/results/2026-10-02-wave-gate-pride-radius/README.md)
+now connects that scalar through Rust/Python/WASM and completes 18 conditions.
+All 15 active adapter/Adam continuations match exactly. Learning radius improves
+its fixed-radius controls very slightly, but tangent remains best in all seeds.
+Widening radius approaches the linear map, not proof of geometric advantage.
+Longer runs, fresh evaluation data and nonlinear controls remain open; this is
+an implemented learning mechanism, not a language-quality or speed win.
 
 ## Restarted execution slice: vision across Rust, Python, and browser
 

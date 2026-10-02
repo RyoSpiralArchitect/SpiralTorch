@@ -1,0 +1,60 @@
+{
+  "schema": "spiraltorch.wave_gate_radius_validation.v1",
+  "source_revision": "7564a2aeba2a84f437816d18543dc59f52a9f784",
+  "source_sha256": {
+    "crates/st-nn/src/layers/wave_gate/learning.rs": "8501b348cf12eabbc1f0ddf9b4566f778c5fb4ec5876365241a55530462ea93f",
+    "crates/st-nn/src/layers/wave_gate/learning/radius.rs": "f87e2aadcc0f0d45b3c65f0a955163d5a8eebdf01c3497f98297d1c3d6d6ba8d",
+    "bindings/st-py/src/wave_gate_learning.rs": "59ea4c031862db5b25582be0481c0a63b16132bbfd724efc42bf3cfa2082400a",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "1c80c4aa3527c7cc0b3626bde20b8dd3c2744c8797dbc71006797ffbd0d8e707",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "0a2b87308e1ea1ae1193b86f23bdc4a21e65c3b05098b729d4a29dc9d18f6814",
+    "bindings/st-py/examples/hf_wave_gate_pride_radius.json": "18d42621a6d5ccf728caba936aa73a1e651dbbb3d0a2a3d067544dffc72fc68c",
+    "bindings/st-wasm/src/wave_gate_learning.rs": "8265e32896c8117aa3910b3a69f8eae88d908078083f954773165c464b5859a9",
+    "bindings/st-wasm/tests/wave_gate_radius.html": "0b44c85647e432b90f82a4664db79f58d64a65b783891eb237e81397f8d97205"
+  },
+  "native_sha256": "ecbfe0cf6ca7551d6d667aab766645387cb185b3488421e007ecf832e737af8a",
+  "wasm_sha256": "a4b0bf3f5b982dd395e0cb7fa44b2d86513e8646cbc9f1f3bdc8eda147cebdd1",
+  "wasm_glue_sha256": "37d3b9f665ea800a87f2bf172485f776e9729c529a4ea17573b70c4ed82190e8",
+  "retained_log_sha256": {
+    "rust-198.log": "632d1f665f64090aa26874b79f5c4e3aa1950f61f1750d1116d1648ae0026217",
+    "native.log": "f085b1c04e206070ee6fddc16bb34f9a0b4fa684ad851e09333f9a4b757d5623",
+    "wasm.log": "f1f049d47331ee8b0169dc133c6fddbea9e559fa38caf626694041f4ce7bacf3",
+    "python-final.log": "400a54ee7eac0d7063895eed0ea4b81284934bf66da87a267cdcd8e27d08793c",
+    "imports-corrected.log": "f0b924ae0e5e8f0b7aad6b797dd57527914df9449c385597f106778a8fab9ece",
+    "minimal.log": "c1d9702f139cd216dab2b03e2b7b9165d4dee79e96ad25d4e10e34dd9e033db9",
+    "clippy.log": "8d11185cfcce6d8d7722b9c033a7bff0e3d7e1184b042e8759a116d0ce3d4b90",
+    "pride.log": "bf08d4a9229fbf4c1a613e9c5b3717b9c7327eaa6a040ae5467cea346c960e46"
+  },
+  "checks": {
+    "rust_nn": {
+      "passed": 759,
+      "failed": 0,
+      "ignored": 0
+    },
+    "python_geometry_and_protocol": {
+      "passed": 42,
+      "failed": 0,
+      "skipped": 0
+    },
+    "runtime_imports": {
+      "passed": 22
+    },
+    "native_build": "passed",
+    "wasm_nn_build": "passed",
+    "minimal_extension_module_text": "passed",
+    "pinned_format": "passed",
+    "targeted_ruff": "passed",
+    "clippy": "exited zero; 23 existing st-nn warnings, none in radius/learning module; not strict-clean",
+    "browser": "passed",
+    "completed_conditions": 18,
+    "checkpoint_hashes_verified": 18,
+    "exact_active_resumes": 15,
+    "source_and_native_frozen_during_training": true
+  },
+  "boundaries": [
+    "CPU/WASM scalar geometry, not resident WGPU or GPU speed evidence.",
+    "Radius keeps origin gain fixed; larger radius approaches the tangent map.",
+    "Learnable radius adds one parameter; tangent has 1536 while learnable arms have 1537.",
+    "Sparse previously used development probe, 32 updates, no generalization/significance claim.",
+    "Last logged radius is from before update 32; saved checkpoints are hashed locally."
+  ]
+}

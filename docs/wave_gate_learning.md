@@ -98,6 +98,41 @@ partition is held out from adapter training, not necessarily from GPT-2 pretrain
 
 ## Map And Chain Rule
 
+### Optional Learnable Radius
+
+`WaveGateKernel::forward_with_log_radius(..., log_radius)` captures an explicit
+shared scalar alongside input/gate/bias. Its `vjp_with_log_radius` returns the
+usual three gradients plus a sum-reduced log-radius derivative. Legacy `forward`
+and `vjp` remain unchanged; requesting a radius derivative on a legacy snapshot
+is an error. Python and WASM expose the same methods.
+
+```python
+adapter = WaveGateAdapter(768, learnable_radius=True, log_radius=0.0)
+optimizer = torch.optim.Adam(adapter.parameters(), lr=1e-3)
+```
+
+With `R = exp(log_radius)`, `s = sqrt(-curvature)`, and `z = S(affine)`, the map is
+`R * tanh(norm(z)/(s*R)) * z/norm(z)`. The limit at zero is zero and its input
+Jacobian there is `I/s` for every radius, not an adjustable initial gain. The
+radius derivative is zero at identity initialization; it can start learning
+after gate/bias move. Rust uses f64 intermediates and a small-argument series
+for the log-radius derivative to avoid subtractive cancellation.
+
+`log_radius=...` without `learnable_radius=True` creates a fixed buffer, useful
+for controls. Omitting both keeps legacy v1 checkpoints and 2F parameters.
+Radius adapters use v2 extra state and require a matching fixed/learnable mode
+when restoring; the scalar tensor and Adam state must both be saved. A learned
+radius adds one scalar parameter. Rust rejects nonfinite log-radius values or
+radii outside the positive normal f32 range rather than silently clipping them.
+
+This optional CPU/WASM path changes the coordinate output radius; it is not a
+claim about a fully covariant curvature-radius manifold implementation. It is
+not yet wired into the legacy `Module::backward` policy or resident WGPU kernels.
+The fixed-origin-gain design is a learning hypothesis, not evidence of an LLM
+quality advantage. The paired radius study uses a separately fixed protocol.
+
+### Existing Unit-Radius Map
+
 Let `S` be the existing open-topos porous saturation:
 
 ```text
