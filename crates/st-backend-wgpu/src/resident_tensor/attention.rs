@@ -2,10 +2,17 @@
 //! online softmax, and inherited validity guards stay on the same GPU queue.
 
 use super::*;
+use crate::runtime::timestamps::PassTimestampCursor;
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 
 const SHADER_SOURCE: &str = include_str!("shaders/attention.wgsl");
 const MAX_HEAD_DIM: usize = 256;
+
+#[derive(Clone, Copy)]
+enum OutputOrder {
+    HeadMajor,
+    MergedHeads,
+}
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -58,7 +65,7 @@ pub(crate) struct AttentionKernels {
     layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     module: wgpu::ShaderModule,
-    pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; 2],
+    pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; 4],
     guard: guard_capture::GuardCapture,
 }
 
@@ -104,11 +111,19 @@ impl AttentionKernels {
         }
     }
 
-    fn pipeline(&self, device: &wgpu::Device, spec: AttentionSpec) -> &wgpu::ComputePipeline {
+    fn pipeline(
+        &self,
+        device: &wgpu::Device,
+        spec: AttentionSpec,
+        order: OutputOrder,
+    ) -> &wgpu::ComputePipeline {
         let tile = key_tile(spec);
-        self.pipelines[usize::from(tile == 4)].get_or_init(|| {
-            let constants =
-                std::collections::HashMap::from([("KEY_TILE".to_owned(), f64::from(tile))]);
+        let merged = u32::from(matches!(order, OutputOrder::MergedHeads));
+        self.pipelines[usize::from(tile == 8) * 2 + merged as usize].get_or_init(|| {
+            let constants = std::collections::HashMap::from([
+                ("KEY_TILE".to_owned(), f64::from(tile)),
+                ("MERGED_HEADS".to_owned(), f64::from(merged)),
+            ]);
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("attention.forward"),
                 layout: Some(&self.pipeline_layout),
@@ -127,7 +142,7 @@ fn key_tile(spec: AttentionSpec) -> u32 {
     // Matched full-chain measurements support this range, not short sequences
     // or wider heads. Keep their established reduction until measured too.
     if spec.keys() >= 128 && spec.head_dim() <= 32 {
-        4
+        8
     } else {
         1
     }
@@ -144,7 +159,7 @@ fn preflight(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<[u32; 2], Ten
         || limits.max_storage_buffers_per_shader_stage < 7
         || limits.max_uniform_buffers_per_shader_stage < 1
         || limits.max_uniform_buffer_binding_size < std::mem::size_of::<Params>() as u32
-        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 10) * 4
+        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 18) * 4
     {
         return Err(TensorError::Limit(
             "attention pipeline (head dimension <= 256)",
@@ -177,6 +192,7 @@ impl ResidentTensor {
     /// must be finite; score/weighted-output overflow fails on readback and is
     /// inherited by downstream operations. Strided and broadcast inputs are
     /// read directly from their immutable storage, without intermediate packing.
+    /// Returns owned, contiguous head-major output [B,H,Q,D].
     ///
     /// This initial forward kernel supports D <= 256, no dropout or backward
     /// tape. Unsupported shapes/devices return errors, never a CPU fallback.
@@ -188,6 +204,56 @@ impl ResidentTensor {
         mask: AttentionMask,
         z_bias: Option<&Self>,
         pair_bias: Option<&Self>,
+    ) -> Result<Self, TensorError> {
+        self.attention_forward(
+            keys,
+            values,
+            scale,
+            mask,
+            z_bias,
+            pair_bias,
+            OutputOrder::HeadMajor,
+            &mut PassTimestampCursor::default(),
+        )
+    }
+
+    /// Same arithmetic, masks, input shapes and guards as
+    /// [Self::scaled_dot_attention], but returns owned, contiguous [B,Q,H*D].
+    /// Element (b,q,h*D+d) equals the head-major output (b,h,q,d).
+    /// The attention kernel writes this order directly: no head-merge dispatch,
+    /// intermediate output copy or host readback is needed before a Linear.
+    pub fn scaled_dot_attention_merged_heads(
+        &self,
+        keys: &Self,
+        values: &Self,
+        scale: f32,
+        mask: AttentionMask,
+        z_bias: Option<&Self>,
+        pair_bias: Option<&Self>,
+    ) -> Result<Self, TensorError> {
+        self.attention_forward(
+            keys,
+            values,
+            scale,
+            mask,
+            z_bias,
+            pair_bias,
+            OutputOrder::MergedHeads,
+            &mut PassTimestampCursor::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attention_forward(
+        &self,
+        keys: &Self,
+        values: &Self,
+        scale: f32,
+        mask: AttentionMask,
+        z_bias: Option<&Self>,
+        pair_bias: Option<&Self>,
+        order: OutputOrder,
+        timestamps: &mut PassTimestampCursor<'_>,
     ) -> Result<Self, TensorError> {
         let spec = AttentionSpec::new(
             self.layout.shape(),
@@ -215,13 +281,18 @@ impl ResidentTensor {
         }
         let gpu = context.device();
         let grid = preflight(spec, &gpu.limits())?;
+        let output_layout = match order {
+            OutputOrder::HeadMajor => NdLayout::contiguous(&spec.query_shape())?,
+            OutputOrder::MergedHeads => NdLayout::contiguous(&spec.merged_output_shape()?)?,
+        };
+        validate_view(&output_layout, output_layout.len(), &gpu.limits())?;
         let kernels = self
             .device
             .0
             .attention
             .get_or_init(|| AttentionKernels::new(gpu));
         let mut encoder = gpu.create_command_encoder(&Default::default());
-        let output = self.device.allocate_output(&self.layout)?;
+        let output = self.device.allocate_output(&output_layout)?;
         // Concatenate inherited guards, then reduce them into the owned output
         // guard. No host read or mutable shared guard is needed.
         let flag_words = inputs.iter().flatten().try_fold(1usize, |total, tensor| {
@@ -302,9 +373,9 @@ impl ResidentTensor {
         if spec.contexts() != 0 && spec.queries() != 0 {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("attention.forward"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
-            pass.set_pipeline(kernels.pipeline(gpu, spec));
+            pass.set_pipeline(kernels.pipeline(gpu, spec, order));
             pass.set_bind_group(0, &binding, &[]);
             pass.dispatch_workgroups(grid[0], grid[1], 1);
         }
@@ -312,7 +383,7 @@ impl ResidentTensor {
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("attention.guard"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             kernels.guard.encode_in_pass(&mut pass, &binding);
         }
@@ -323,3 +394,6 @@ impl ResidentTensor {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod profile_probe;
