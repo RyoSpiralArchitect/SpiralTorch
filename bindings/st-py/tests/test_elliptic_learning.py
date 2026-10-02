@@ -1,4 +1,5 @@
 import copy
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -94,6 +95,153 @@ def test_telemetry_is_local_to_the_calling_context():
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert list(pool.map(worker, [1, 3])) == [1, 3]
+
+
+@pytest.fixture
+def telemetry_calls(monkeypatch):
+    import spiraltorch.elliptic as elliptic
+
+    calls = []
+
+    class TrackedBatch:
+        def __init__(self, batch):
+            self.batch = batch
+
+        @property
+        def features(self):
+            return self.batch.features
+
+        def vjp(self, upstream):
+            return self.batch.vjp(upstream)
+
+        def telemetry(self):
+            calls.append(1)
+            return self.batch.telemetry()
+
+    class TrackedWarp:
+        def __init__(self, warp):
+            self.warp = warp
+
+        def map_orientations_batch(self, values):
+            return TrackedBatch(self.warp.map_orientations_batch(values))
+
+    monkeypatch.setattr(elliptic, "_EllipticWarp", TrackedWarp)
+    token = elliptic._LAST_TELEMETRY.set(None)
+    try:
+        yield calls, TrackedWarp
+    finally:
+        elliptic._LAST_TELEMETRY.reset(token)
+
+
+@pytest.mark.parametrize("shape", [(3,), (2, 3, 3), (2, 0, 3)])
+def test_telemetry_is_lazy_cached_and_bound_to_forward(telemetry_calls, shape):
+    from spiraltorch.elliptic import EllipticWarpFunction
+
+    calls, tracked = telemetry_calls
+    warp = st.EllipticWarp(1.0)
+    x = torch.ones(shape, requires_grad=True)
+    expected = warp.map_orientations_batch(x.detach().flatten().tolist())
+    features = EllipticWarpFunction.apply(tracked(warp), x)
+    warp.configure(spin_harmonics=4)
+    features.sum().backward()
+    assert calls == []
+    torch.testing.assert_close(
+        x.grad,
+        torch.tensor(expected.vjp([1.0] * features.numel())).reshape_as(x),
+        rtol=0,
+        atol=0,
+    )
+
+    telemetry = EllipticWarpFunction.last_telemetry()
+    again = EllipticWarpFunction.last_telemetry()
+    assert calls == [1]
+
+    def leaves(value):
+        if isinstance(value, list):
+            return [item for child in value for item in leaves(child)]
+        return [value]
+
+    assert all(a is b for a, b in zip(leaves(telemetry), leaves(again)))
+    assert [t.as_dict() for t in leaves(telemetry)] == [
+        t.as_dict() for t in expected.telemetry()
+    ]
+    as_dict = EllipticWarpFunction.last_telemetry(as_dict=True)
+    assert leaves(as_dict) == [t.as_dict() for t in expected.telemetry()]
+    assert calls == [1]
+    if shape == (2, 0, 3):
+        assert telemetry == [[], []]
+
+    _, requested = st.elliptic_warp_autograd(
+        tracked(warp), x.detach(), return_telemetry=True
+    )
+    assert calls == [1, 1]
+    assert leaves(requested) == leaves(EllipticWarpFunction.last_telemetry())
+
+
+def test_telemetry_requests_do_not_change_training_or_adam_state(telemetry_calls):
+    from spiraltorch.elliptic import EllipticWarpFunction
+
+    calls, tracked = telemetry_calls
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(317)
+        initial = st.EllipticResidualAdapter(4)
+        x = torch.randn(2, 3, 4)
+    target = x + 0.1 * x.sin()
+
+    def train(request_telemetry):
+        adapter = st.EllipticResidualAdapter(4)
+        adapter.load_state_dict(copy.deepcopy(initial.state_dict()))
+        adapter._warp = tracked(adapter._warp)
+        optimizer = torch.optim.Adam(adapter.parameters(), lr=0.01)
+        trace = []
+        for _ in range(4):
+            optimizer.zero_grad()
+            prediction = adapter(x)
+            if request_telemetry:
+                assert len(EllipticWarpFunction.last_telemetry()) == 2
+            loss = (prediction - target).square().mean()
+            loss.backward()
+            gradients = [p.grad.clone() for p in adapter.parameters()]
+            optimizer.step()
+            trace.append((prediction.detach(), loss.detach(), gradients))
+        return trace, list(adapter.parameters()), optimizer.state_dict()
+
+    lazy = train(False)
+    assert calls == []
+    eager = train(True)
+    assert calls == [1] * 4
+
+    def exact(a, b):
+        if isinstance(a, torch.Tensor):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
+        elif isinstance(a, dict):
+            assert a.keys() == b.keys()
+            for key in a:
+                exact(a[key], b[key])
+        elif isinstance(a, (list, tuple)):
+            assert len(a) == len(b)
+            for first, second in zip(a, b):
+                exact(first, second)
+        else:
+            assert a == b
+
+    exact(lazy, eager)
+
+
+def test_lazy_telemetry_releases_replaced_or_materialized_batch(telemetry_calls):
+    import spiraltorch.elliptic as elliptic
+
+    _, tracked = telemetry_calls
+    warp = tracked(st.EllipticWarp(1.0))
+    st.elliptic_warp_autograd(warp, torch.ones(3))
+    first = weakref.ref(elliptic._LAST_TELEMETRY.get()[1]._batch)
+    assert first() is not None
+    st.elliptic_warp_autograd(warp, torch.ones(3))
+    assert first() is None
+    second = weakref.ref(elliptic._LAST_TELEMETRY.get()[1]._batch)
+    assert second() is not None
+    elliptic.EllipticWarpFunction.last_telemetry()
+    assert second() is None
 
 
 def test_residual_identity_updates_both_projections_and_exact_resume():
