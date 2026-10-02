@@ -89,6 +89,15 @@ controls exactly reproduce their historical states; this is not independent
 replication. Keep the correction explicit and experimental rather than making
 it a default or claiming that a mean chart metric fixes the remaining gap.
 
+The [fractional memory bridge](fractional_learning.md) independently connects
+the existing `st-frac` causal GL map, input VJP and shared-order alpha derivative
+to Rust snapshots, optional Torch AD and a WASM learning client. A tiny HF loss
+updates the identity-start gate and alpha with exact Adam continuation; an
+actual wasm32 synthetic fit learns its target order. This is finite-history,
+host-f32 learning connectivity, not pretrained quality or resident performance.
+Matched pointwise/fixed-order/learned-order controls precede any combination
+with the geometric adapters above.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:

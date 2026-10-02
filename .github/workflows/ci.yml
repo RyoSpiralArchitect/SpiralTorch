@@ -350,6 +350,7 @@ jobs:
           node bindings/st-wasm/tests/tensor_mean.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
           node bindings/st-wasm/tests/rank_adaptation.cjs "$module"
+          node bindings/st-wasm/tests/fractional_learning.mjs "$module"
           node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
       - name: Portable NN plans without WebGPU
@@ -697,9 +698,11 @@ jobs:
           python -m pip install "transformers==4.57.6"
           python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticGatedCausalLearningBatch"); assert hasattr(st, "EllipticGatedCausalResidualAdapter")'
           python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticAnchoredLearningBatch"); assert hasattr(st, "EllipticAnchoredResidualAdapter")'
+          python -I -c 'import spiraltorch as st; assert hasattr(st, "FractionalGlKernel"); assert hasattr(st, "FractionalMemoryAdapter")'
           python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "EllipticCausalLearningBatch"); assert hasattr(st, "EllipticCausalResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
+            bindings/st-py/tests/test_fractional_learning.py \
             bindings/st-py/tests/test_elliptic_gated_causal.py \
             bindings/st-py/tests/test_elliptic_anchored.py \
             bindings/st-py/tests/test_elliptic_gated_study.py \

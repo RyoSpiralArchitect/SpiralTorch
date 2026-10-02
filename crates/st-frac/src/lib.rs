@@ -6,6 +6,7 @@
 pub mod cosmology;
 pub mod fft;
 pub mod fractal_field;
+pub mod learning;
 pub mod mellin;
 pub mod mellin_types;
 #[cfg(feature = "wgpu")]

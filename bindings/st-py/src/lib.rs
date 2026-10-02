@@ -12,6 +12,7 @@ mod dataset;
 mod elliptic;
 mod export;
 mod frac;
+mod fractional_learning;
 mod hpo;
 mod inference;
 mod introspect;
@@ -289,6 +290,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     hpo::register(py, m)?;
     inference::register(py, m)?;
     frac::register(py, m)?;
+    fractional_learning::register(m)?;
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;
@@ -458,6 +460,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "describe_wgpu_softmax_variants",
         "gl_coeffs_adaptive",
         "fracdiff_gl_1d",
+        "FractionalGlKernel",
+        "FractionalGlLearningBatch",
         "fft_radix2",
         "fft_radix4",
         "fft_complex32",
