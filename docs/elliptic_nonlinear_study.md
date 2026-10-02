@@ -74,3 +74,19 @@ code change is not a compatible resume; use the same frozen copies and `--resume
 only after confirming the original process ended. The existing summary tool
 handles this protocol's schema and explicit comparison limitations while keeping
 the previous WaveGate public summary byte-for-byte reproducible.
+
+## Completed Outcome
+
+The [complete nine-run record](../benchmarks/results/2026-10-02-elliptic-nonlinear-learning/README.md)
+contains all 4608 primary updates, exact adapter/Adam continuation checks and
+fixed-endpoint per-block losses. Every active arm improves the frozen baseline.
+Elliptic beats the tanh control in every seed on both sets, but tangent wins all
+paired comparisons. Mean elliptic-minus-tangent CE is +0.150571 on Pride and
++0.085750 on Alice; elliptic-minus-tanh is -0.037138 and -0.011554.
+
+Thus the directional Rust map learns in a real HF loss path, but it does not yet
+justify preferring geometry over the simpler linear adapter. Local differential
+matching did not equalize the maps' global optimization behavior. Token-to-token
+geometry remains a distinct, untested mechanism rather than an inference from
+this tokenwise result. These reused endpoints must not become a tuning oracle
+while being described as fresh confirmation.

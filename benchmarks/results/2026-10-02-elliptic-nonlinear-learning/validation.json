@@ -1,6 +1,6 @@
 {
   "schema": "spiraltorch.elliptic_nonlinear_validation.v1",
-  "status": "training_in_progress_not_an_outcome",
+  "status": "completed",
   "source_revision": "4227af8c36476eb4c85272dec0d5f379af1b0ec2",
   "study_id": "45779e67f9c688c2dff5d12f3b68a8a961630785c731b62bb55164ccc6d59d45",
   "python_tests": {
@@ -20,10 +20,41 @@
   "native_sha256": "ecbfe0cf6ca7551d6d667aab766645387cb185b3488421e007ecf832e737af8a",
   "protocol_sha256": "57f7d439b6da5b33db5807e6d970423d55cea3e47c2dab0c28b8a7aa5169c110",
   "notes": [
-    "The real 512-step experiment is running; these tests do not establish its completion or quality.",
+    "Structural tests and completed experiment evidence are separate; the completion record verifies actual process termination and sealed endpoints.",
     "Tests verify paired parameter initialization, RNG preservation, local anchor/Jacobian agreement and actual HF learning through both projections.",
     "A tiny HF interruption in the second arm reproduces uninterrupted parameters, Adam state, histories and completed endpoints exactly.",
     "Existing Rust math/native runtime reused without rebuild. Ordinary control math is explicitly labeled and does not replace the elliptic arm.",
     "Reused evaluation blocks, unequal feature rank/compute, and cross-family parameter differences are declared before the run."
-  ]
+  ],
+  "completion": {
+    "primary_process_exit_code": 0,
+    "completed_resume_process_exit_code": 0,
+    "runs": 9,
+    "primary_updates": 4608,
+    "extra_validation_updates": 18,
+    "all_endpoint_cursors": 512,
+    "all_parameter_counts": 8450,
+    "initial_parameters_paired_within_seed": true,
+    "all_frozen_bases_unchanged": true,
+    "all_next_adapter_and_adam_updates_equal": true,
+    "all_endpoint_checkpoint_hashes_reverified": true,
+    "all_training_losses_and_gradients_finite": true,
+    "all_runs_learn_both_projections": true,
+    "completed_resume_repeated_no_endpoints": true,
+    "result_hash_unchanged_after_completed_resume": true,
+    "results_sha256": "010b0da2303b8a3ba180ef86bd1d373022ee606c293b3905613df0b3dbf9c768",
+    "local_training_log_sha256": "d617de87d81736196ba3c5fe5af0d3295908be9c988959f4c1cc9ac5c8795abe",
+    "local_completed_resume_log_sha256": "80375b9750164f4ee2a0013dcd9970926b1dde261709f4e55743f126f58d2147",
+    "latest_python_tests": {
+      "passed": 68,
+      "failed": 0,
+      "skipped": 0,
+      "local_test_log_sha256": "eca55b408c82a03bcfc71c9e0dfa260fc54d367bea82af6b21ca9d8b0241c816",
+      "scope": "Frozen native package and current unchanged study sources; safe-path Python from the Git root, pytest importlib mode."
+    },
+    "aggregator_source_sha256": "843c2d6453b5cb2c983d7354a0c58d7d233adafeca8dc2e9dbd79082605bb7c8",
+    "public_reaggregation_byte_exact": true,
+    "local_originals_retained": true,
+    "interpretation": "Every active arm improves baseline. Elliptic beats the fixed tanh control in every seed on both sets, but tangent is best in every paired comparison. No geometric superiority, significance or speed claim."
+  }
 }
