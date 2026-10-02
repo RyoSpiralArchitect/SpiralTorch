@@ -10,6 +10,8 @@ from .optim import Amegagrad, amegagrad
 from .fractional_autograd import (
     FractionalMemoryAdapter as FractionalMemoryAdapter,
     fractional_gl_autograd as fractional_gl_autograd,
+    FractionalHistoryAdapter as FractionalHistoryAdapter,
+    fractional_gl_history_autograd as fractional_gl_history_autograd,
 )
 
 class FractionalGlKernel:
@@ -20,6 +22,8 @@ class FractionalGlKernel:
     def configuration_json(self) -> str: ...
     def forward(self, input: Sequence[float], shape: Sequence[int], axis: int,
                 alpha: float) -> FractionalGlLearningBatch: ...
+    def forward_history(self, input: Sequence[float], shape: Sequence[int], axis: int,
+                        alpha: float) -> FractionalGlLearningBatch: ...
 
 class FractionalGlLearningBatch:
     @property

@@ -64,6 +64,24 @@ impl FractionalGlKernel {
             .map(|inner| FractionalGlLearningBatch { inner })
             .map_err(js_error)
     }
+
+    pub fn forward_history(
+        &self,
+        input: &[f32],
+        shape: &[u32],
+        axis: Number,
+        alpha: Number,
+    ) -> Result<FractionalGlLearningBatch, JsValue> {
+        self.inner
+            .forward_history(
+                input,
+                &shape.iter().map(|&v| v as usize).collect::<Vec<_>>(),
+                js_u32(axis.as_ref(), "axis")? as usize,
+                number(&alpha, "alpha")?,
+            )
+            .map(|inner| FractionalGlLearningBatch { inner })
+            .map_err(js_error)
+    }
 }
 
 #[wasm_bindgen]

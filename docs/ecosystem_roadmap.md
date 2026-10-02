@@ -98,6 +98,15 @@ host-f32 learning connectivity, not pretrained quality or resident performance.
 Matched pointwise/fixed-order/learned-order controls precede any combination
 with the geometric adapters above.
 
+Its independent local/history follow-up keeps the ordinary pointwise gain
+separate from Rust's strictly-past fractional taps. The same snapshot and true
+input/order derivatives reach Rust, Python AD and WASM, without subtracting
+large rounded current values. `FractionalHistoryAdapter` is an experimental
+`2*F+1`-parameter alternative, not a replacement for the `F+1` full-GL adapter
+or a capacity-matched quality win. Its causal, joint-learning and resume
+fixtures precede a pretrained comparison with ordinary causal controls; do
+not mix different mathematics into the PyTorch speed track.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:
