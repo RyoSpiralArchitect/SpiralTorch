@@ -15,6 +15,7 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--suite", choices=("parity", "benchmark"), default="parity")
     args = parser.parse_args()
     for key in ("SPIRALTON_MAGIC", "SPIRALTON_TORCH", "SPIRALTON_MODEL_PATCHES", "SPIRALTON_NUMPY"):
         if os.environ.get(key) != "0":
@@ -34,10 +35,15 @@ def main():
         return t.flatten().tolist()
 
     scenarios = []
-    for name, b, t, inner, width, heads, out in [
+    shapes = [
         ("small_tail", 2, 5, 6, 6, 2, 4),
         ("transformer_width", 1, 17, 32, 32, 4, 32),
-    ]:
+    ] if args.suite == "parity" else [
+        ("short_prefill", 1, 32, 64, 64, 4, 64),
+        ("batched_prefill", 2, 128, 128, 128, 4, 128),
+        ("wide_prefill", 1, 256, 256, 256, 8, 256),
+    ]
+    for name, b, t, inner, width, heads, out in shapes:
         x = data((b, t, inner), 0.2, 0.5)
         weights = [data((inner if i < 3 else width, width if i < 3 else out), i * 0.7) for i in range(4)]
         biases = [data((width if i < 3 else out,), i * 0.3, 0.05) for i in range(4)]

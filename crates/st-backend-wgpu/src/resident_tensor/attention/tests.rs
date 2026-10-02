@@ -57,12 +57,17 @@ fn capabilities_and_portable_grid_fail_before_pipeline_creation() {
     assert_eq!(preflight(spec, &limits).unwrap(), [3, 2]);
     limits.max_bindings_per_bind_group = 7;
     assert!(preflight(spec, &limits).is_err());
+    limits.max_bindings_per_bind_group = 8;
+    limits.max_compute_workgroup_storage_size = (256 * 2 + 64 + 10) * 4 - 1;
+    assert!(preflight(spec, &limits).is_err());
+    limits.max_compute_workgroup_storage_size += 1;
+    assert!(preflight(spec, &limits).is_ok());
 }
 
 #[test]
 fn plain_and_biased_attention_match_rust_across_heads_and_dimension_tails() {
     let Some(device) = device() else { return };
-    for d in [1, 7, 64, 65, 127, 256] {
+    for d in [1, 7, 16, 17, 32, 33, 64, 65, 127, 256] {
         let q_shape = [2, 2, 3, d];
         let k_shape = [2, 2, 5, d];
         let q = data(12 * d, 0.1);
@@ -104,6 +109,74 @@ fn plain_and_biased_attention_match_rust_across_heads_and_dimension_tails() {
                 close(&read(&output), &expected);
             }
         }
+    }
+}
+
+#[test]
+fn tiled_key_tails_cached_offsets_and_late_overflow_preserve_semantics() {
+    let Some(device) = device() else { return };
+    for count in (1..=9).chain([127, 128, 129, 131]) {
+        let qs = [1, 1, 1, 17];
+        let ks = [1, 1, count, 17];
+        let q = data(17, 0.2);
+        let k = data(count * 17, 0.4);
+        let v = data(count * 17, -0.6);
+        let pair = data(count, -0.2);
+        let q_gpu = device.upload(&qs, &q).unwrap();
+        let k_gpu = device.upload(&ks, &k).unwrap();
+        let v_gpu = device.upload(&ks, &v).unwrap();
+        let pair_gpu = device.upload(&[1, 1, 1, count], &pair).unwrap();
+        for offset in (0..count).filter(|&v| v < 9 || v + 1 == count) {
+            let mask = AttentionMask::Causal {
+                query_offset: offset,
+            };
+            let spec = AttentionSpec::new(&qs, &ks, &ks, -0.25, mask).unwrap();
+            let expected = attention_reference(spec, &q, &k, &v, None, Some(&pair)).unwrap();
+            let result = q_gpu
+                .scaled_dot_attention(&k_gpu, &v_gpu, -0.25, mask, None, Some(&pair_gpu))
+                .unwrap();
+            close(&read(&result), &expected);
+        }
+    }
+    let q = device.upload(&[1, 1, 1, 1], &[2.]).unwrap();
+    let k = device
+        .upload(&[1, 1, 5, 1], &[0., 0., 0., 0., f32::MAX])
+        .unwrap();
+    let v = device.upload(&[1, 1, 5, 1], &[1.; 5]).unwrap();
+    let masked = q
+        .scaled_dot_attention(
+            &k,
+            &v,
+            1.,
+            AttentionMask::Causal { query_offset: 3 },
+            None,
+            None,
+        )
+        .unwrap();
+    close(&read(&masked), &[1.]);
+    let unmasked = q
+        .scaled_dot_attention(&k, &v, 1., AttentionMask::None, None, None)
+        .unwrap();
+    assert!(matches!(
+        unmasked.snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+}
+
+#[test]
+fn tile_selection_preserves_short_sequences_and_unmeasured_wide_heads() {
+    for (keys, dim, expected) in [
+        (32, 16, 1),
+        (127, 32, 1),
+        (128, 32, 4),
+        (129, 17, 4),
+        (256, 33, 1),
+        (256, 256, 1),
+    ] {
+        let q = [1, 1, 1, dim];
+        let k = [1, 1, keys, dim];
+        let spec = AttentionSpec::new(&q, &k, &k, 1., AttentionMask::None).unwrap();
+        assert_eq!(key_tile(spec), expected);
     }
 }
 

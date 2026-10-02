@@ -1,0 +1,95 @@
+{
+  "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+  "checks": [
+    {
+      "max_abs_error": 1.862645149230957e-8,
+      "name": "short_prefill/unmasked/plain"
+    },
+    {
+      "max_abs_error": 1.862645149230957e-8,
+      "name": "short_prefill/unmasked/zero_geometry"
+    },
+    {
+      "max_abs_error": 1.862645149230957e-8,
+      "name": "short_prefill/unmasked/zrbf"
+    },
+    {
+      "max_abs_error": 1.4901161193847656e-8,
+      "name": "short_prefill/causal/plain"
+    },
+    {
+      "max_abs_error": 1.4901161193847656e-8,
+      "name": "short_prefill/causal/zero_geometry"
+    },
+    {
+      "max_abs_error": 1.862645149230957e-8,
+      "name": "short_prefill/causal/zrbf"
+    },
+    {
+      "max_abs_error": 6.332993507385254e-8,
+      "name": "batched_prefill/unmasked/plain"
+    },
+    {
+      "max_abs_error": 6.332993507385254e-8,
+      "name": "batched_prefill/unmasked/zero_geometry"
+    },
+    {
+      "max_abs_error": 5.587935447692871e-8,
+      "name": "batched_prefill/unmasked/zrbf"
+    },
+    {
+      "max_abs_error": 4.842877388000488e-8,
+      "name": "batched_prefill/causal/plain"
+    },
+    {
+      "max_abs_error": 4.842877388000488e-8,
+      "name": "batched_prefill/causal/zero_geometry"
+    },
+    {
+      "max_abs_error": 4.470348358154297e-8,
+      "name": "batched_prefill/causal/zrbf"
+    },
+    {
+      "max_abs_error": 1.7136335372924805e-7,
+      "name": "wide_prefill/unmasked/plain"
+    },
+    {
+      "max_abs_error": 1.7136335372924805e-7,
+      "name": "wide_prefill/unmasked/zero_geometry"
+    },
+    {
+      "max_abs_error": 1.7881393432617188e-7,
+      "name": "wide_prefill/unmasked/zrbf"
+    },
+    {
+      "max_abs_error": 1.7136335372924805e-7,
+      "name": "wide_prefill/causal/plain"
+    },
+    {
+      "max_abs_error": 1.7136335372924805e-7,
+      "name": "wide_prefill/causal/zero_geometry"
+    },
+    {
+      "max_abs_error": 1.341104507446289e-7,
+      "name": "wide_prefill/causal/zrbf"
+    }
+  ],
+  "geometry_checks": [
+    {
+      "max_abs_error": 0,
+      "name": "short_prefill"
+    },
+    {
+      "max_abs_error": 0,
+      "name": "batched_prefill"
+    },
+    {
+      "max_abs_error": 5.960464477539063e-8,
+      "name": "wide_prefill"
+    }
+  ],
+  "passed": true,
+  "reference_torch_version": "2.12.1",
+  "schema": "spiraltorch.attention_chain.v1",
+  "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+}

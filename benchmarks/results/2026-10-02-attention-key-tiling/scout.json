@@ -1,0 +1,4308 @@
+{
+  "schema": "spiraltorch.attention_chain_comparison.v1",
+  "status": "passed",
+  "fixture_sha256": "988a61d591a15fcf3baec7ea648a49040bc3008fc4661aa528c9bb22c8dc244d",
+  "binary_sha256": {
+    "st_baseline": "47b120df07b21103cae29a7c0493cb86f11c20eaf75fa0506018da203d715e15"
+  },
+  "python_version": "3.12.6",
+  "torch_version": "2.12.1",
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "recipe": {
+    "rounds": 1,
+    "samples": 3,
+    "warmup": 2,
+    "burst": 4,
+    "order_seed": 23,
+    "orders": [
+      [
+        "torch_mps",
+        "st_baseline",
+        "torch_cpu"
+      ]
+    ]
+  },
+  "runs": [
+    {
+      "round": 0,
+      "engine": "torch_mps",
+      "report": {
+        "schema": "spiraltorch.attention_chain_bench.v1",
+        "status": "passed",
+        "engine": "torch_mps",
+        "torch_version": "2.12.1",
+        "warmup": 2,
+        "samples_per_route": 3,
+        "burst": 4,
+        "cases": [
+          {
+            "name": "short_prefill/unmasked/plain",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.2480000004870817,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0670419978850987,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0602500005916227,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1654999980237335,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.7824999995355029,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.130167001974769,
+                "max_abs_error": 7.450580596923828e-09
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/unmasked/zero_geometry",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1107919999631122,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.1330829984217416,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.3497079999069683,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1577919976843987,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.176875000965083,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8816250010568183,
+                "max_abs_error": 7.450580596923828e-09
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/unmasked/zrbf",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0840830000233836,
+                "max_abs_error": 1.1175870895385742e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.4323340001283213,
+                "max_abs_error": 1.1175870895385742e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9030000001075678,
+                "max_abs_error": 1.1175870895385742e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1664999983622693,
+                "max_abs_error": 1.1175870895385742e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.9761670007719658,
+                "max_abs_error": 1.1175870895385742e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.153541001258418,
+                "max_abs_error": 1.1175870895385742e-08
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/causal/plain",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1365840000507887,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.6116669974289834,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.6242919989745133,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1047920015698764,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1317079988657497,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.6790419975004625,
+                "max_abs_error": 7.450580596923828e-09
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/causal/zero_geometry",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.2520410020661075,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 2.1024169982410967,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 2.350250000745291,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.1622079984808806,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.4945830009528436,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.8976669998664875,
+                "max_abs_error": 7.450580596923828e-09
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/causal/zrbf",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.1652499999618158,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 2.055124998150859,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.3663749996339902,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.0287080005800817,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.3545000001613516,
+                "max_abs_error": 7.450580596923828e-09
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.3497090003511403,
+                "max_abs_error": 7.450580596923828e-09
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/unmasked/plain",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.2842079995607492,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.6338329985737801,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9506659989710897,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0670409974409267,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.274916998227127,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.6694580006296746,
+                "max_abs_error": 1.862645149230957e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/unmasked/zero_geometry",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.6433329983556177,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9217910010193009,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.3392500004556496,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.2417920006555505,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.004707999731181,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.859750001836801,
+                "max_abs_error": 1.862645149230957e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/unmasked/zrbf",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.044833999912953,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7983329996932298,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7639579998794943,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.06824999966193,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1051660003431607,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7649170001968741,
+                "max_abs_error": 1.4901161193847656e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/causal/plain",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.0782920000783633,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9787090020836331,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0333749996789265,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.101333000609884,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.9703750003827736,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.1772500001825392,
+                "max_abs_error": 2.2351741790771484e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/causal/zero_geometry",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.7898340008978266,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7395420034299605,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.736250000045402,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.8055830003286246,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.809041997854365,
+                "max_abs_error": 2.2351741790771484e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7475829988834448,
+                "max_abs_error": 2.2351741790771484e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/causal/zrbf",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.7945840006868821,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7491670003219042,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7549999972980004,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.7585409985040314,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.8448750013485551,
+                "max_abs_error": 1.862645149230957e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7630830004927702,
+                "max_abs_error": 1.862645149230957e-08
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/unmasked/plain",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.3450420012522954,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.874165998538956,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0172080001211725,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.9768330021179281,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.9822089998342562,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8745000013732351,
+                "max_abs_error": 5.587935447692871e-08
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/unmasked/zero_geometry",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.5058329993044026,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.218625002366025,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.3321250007720664,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.2974999992584344,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.5134160023299046,
+                "max_abs_error": 5.587935447692871e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.2857920009992085,
+                "max_abs_error": 5.587935447692871e-08
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/unmasked/zrbf",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.5307920002669562,
+                "max_abs_error": 6.891787052154541e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.072708997526206,
+                "max_abs_error": 6.891787052154541e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0712909970607143,
+                "max_abs_error": 6.891787052154541e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.4829589999862947,
+                "max_abs_error": 6.891787052154541e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.494457999797305,
+                "max_abs_error": 6.891787052154541e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0346669987484347,
+                "max_abs_error": 6.891787052154541e-08
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/causal/plain",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.833624999766471,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9801659980439581,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0524169993004762,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.624790999107063,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.476375000696862,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0348329997214023,
+                "max_abs_error": 9.685754776000977e-08
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/causal/zero_geometry",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.4588329977414105,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.088834000256611,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0978750033245888,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.4786669999011792,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.4737919991603121,
+                "max_abs_error": 9.685754776000977e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0766669984150212,
+                "max_abs_error": 9.685754776000977e-08
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/causal/zrbf",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.480124999943655,
+                "max_abs_error": 1.341104507446289e-07
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.703874997474486,
+                "max_abs_error": 1.341104507446289e-07
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.105957999243401,
+                "max_abs_error": 1.341104507446289e-07
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.2892080014571548,
+                "max_abs_error": 1.341104507446289e-07
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.4371670004038606,
+                "max_abs_error": 1.341104507446289e-07
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0526249971007928,
+                "max_abs_error": 1.341104507446289e-07
+              }
+            ]
+          }
+        ],
+        "boundary": "Resident: fixed input/bias/weights, burst forwards and completion sync; reads/checks excluded. Host-to-host: fresh input/bias copies and owning host output, weights resident. CPU copies are included too. Setup and mask/geometry preparation excluded. Eager SDPA default dispatch; not a forced math kernel or kernel timestamp."
+      }
+    },
+    {
+      "round": 0,
+      "engine": "st_baseline",
+      "report": {
+        "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "boundary": "Resident: fixed input/bias/weights, burst forwards, queue completion included, reads/checks excluded. Host-to-host: fresh input and bias upload plus owning output read each forward, weights remain resident. Setup, compile and geometry construction excluded. This is a host-timed inference comparison, not kernel timestamps or training.",
+        "burst": 4,
+        "cases": [
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "short_prefill/unmasked/plain",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 2.285459,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 0.979875,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 0.9805,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 2.19725,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 2.50825,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 0.867459,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "width": 64
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "short_prefill/unmasked/zero_geometry",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 2.369833,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 0.8548330000000001,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 0.885375,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 2.355209,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 2.3130830000000002,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 0.874625,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "width": 64
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "short_prefill/unmasked/zrbf",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 2.3097090000000002,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 0.8652500000000001,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 0.856583,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 2.234375,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 2.17375,
+                "forwards": 4,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 0.85075,
+                "forwards": 1,
+                "max_abs_error": 1.862645149230957e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "width": 64
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "short_prefill/causal/plain",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 2.3558749999999997,
+                "forwards": 4,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 0.8518749999999999,
+                "forwards": 1,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 0.843459,
+                "forwards": 1,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 2.285125,
+                "forwards": 4,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 2.7225,
+                "forwards": 4,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 0.6062500000000001,
+                "forwards": 1,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "width": 64
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "short_prefill/causal/zero_geometry",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 1.535042,
+                "forwards": 4,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 0.588792,
+                "forwards": 1,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 0.580792,
+                "forwards": 1,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 1.682958,
+                "forwards": 4,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 2.086084,
+                "forwards": 4,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 0.829917,
+                "forwards": 1,
+                "max_abs_error": 1.4901161193847656e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "width": 64
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "short_prefill/causal/zrbf",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 2.347417,
+                "forwards": 4,
+                "max_abs_error": 1.6763806343078613e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 0.871625,
+                "forwards": 1,
+                "max_abs_error": 1.6763806343078613e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 0.699459,
+                "forwards": 1,
+                "max_abs_error": 1.6763806343078613e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 1.631375,
+                "forwards": 4,
+                "max_abs_error": 1.6763806343078613e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 1.6295000000000002,
+                "forwards": 4,
+                "max_abs_error": 1.6763806343078613e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 0.6040000000000001,
+                "forwards": 1,
+                "max_abs_error": 1.6763806343078613e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "width": 64
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "batched_prefill/unmasked/plain",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 6.916958,
+                "forwards": 4,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 2.137833,
+                "forwards": 1,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 2.047166,
+                "forwards": 1,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 7.056541999999999,
+                "forwards": 4,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 7.0304590000000005,
+                "forwards": 4,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 1.91025,
+                "forwards": 1,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "width": 128
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "batched_prefill/unmasked/zero_geometry",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 6.952208,
+                "forwards": 4,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 2.146375,
+                "forwards": 1,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 2.128625,
+                "forwards": 1,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 7.2915,
+                "forwards": 4,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 6.350625,
+                "forwards": 4,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 2.1940839999999997,
+                "forwards": 1,
+                "max_abs_error": 6.332993507385254e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "width": 128
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "batched_prefill/unmasked/zrbf",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 6.311959,
+                "forwards": 4,
+                "max_abs_error": 5.21540641784668e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 1.894167,
+                "forwards": 1,
+                "max_abs_error": 5.21540641784668e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 1.960209,
+                "forwards": 1,
+                "max_abs_error": 5.21540641784668e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 6.305083000000001,
+                "forwards": 4,
+                "max_abs_error": 5.21540641784668e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 6.310708,
+                "forwards": 4,
+                "max_abs_error": 5.21540641784668e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 1.966,
+                "forwards": 1,
+                "max_abs_error": 5.21540641784668e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "width": 128
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "batched_prefill/causal/plain",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 4.081708,
+                "forwards": 4,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 1.352709,
+                "forwards": 1,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 1.431542,
+                "forwards": 1,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 4.242667,
+                "forwards": 4,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 4.113417,
+                "forwards": 4,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 1.527458,
+                "forwards": 1,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "width": 128
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "batched_prefill/causal/zero_geometry",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 4.6281669999999995,
+                "forwards": 4,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 1.4205,
+                "forwards": 1,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 1.450542,
+                "forwards": 1,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 4.4545829999999995,
+                "forwards": 4,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 4.524125000000001,
+                "forwards": 4,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 1.4461249999999999,
+                "forwards": 1,
+                "max_abs_error": 4.842877388000488e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "width": 128
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 4,
+            "name": "batched_prefill/causal/zrbf",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 4.481,
+                "forwards": 4,
+                "max_abs_error": 4.0978193283081055e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 1.45725,
+                "forwards": 1,
+                "max_abs_error": 4.0978193283081055e-08,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 1.43875,
+                "forwards": 1,
+                "max_abs_error": 4.0978193283081055e-08,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 4.335041,
+                "forwards": 4,
+                "max_abs_error": 4.0978193283081055e-08,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 4.376833,
+                "forwards": 4,
+                "max_abs_error": 4.0978193283081055e-08,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 1.4766670000000002,
+                "forwards": 1,
+                "max_abs_error": 4.0978193283081055e-08,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "width": 128
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 8,
+            "name": "wide_prefill/unmasked/plain",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 19.903042,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 5.361042,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 5.349583,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 19.438457999999997,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 19.408333,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 5.432583,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "width": 256
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 8,
+            "name": "wide_prefill/unmasked/zero_geometry",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 20.001583999999998,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 5.813750000000001,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 6.579708,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 19.965625,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 20.6605,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 5.877292,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "width": 256
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 8,
+            "name": "wide_prefill/unmasked/zrbf",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 21.183666,
+                "forwards": 4,
+                "max_abs_error": 1.7881393432617188e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 6.616917,
+                "forwards": 1,
+                "max_abs_error": 1.7881393432617188e-07,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 6.915209,
+                "forwards": 1,
+                "max_abs_error": 1.7881393432617188e-07,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 19.987875,
+                "forwards": 4,
+                "max_abs_error": 1.7881393432617188e-07,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 19.998625,
+                "forwards": 4,
+                "max_abs_error": 1.7881393432617188e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 6.122958000000001,
+                "forwards": 1,
+                "max_abs_error": 1.7881393432617188e-07,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "width": 256
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 8,
+            "name": "wide_prefill/causal/plain",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 14.449874999999999,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 4.0765,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 3.978875,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 14.126584,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 13.959249999999999,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 3.866,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "width": 256
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 8,
+            "name": "wide_prefill/causal/zero_geometry",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 13.962417,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 4.326917,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 4.3030409999999994,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 14.216334,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 13.786041,
+                "forwards": 4,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 4.274,
+                "forwards": 1,
+                "max_abs_error": 1.7136335372924805e-07,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "width": 256
+          },
+          {
+            "geometry_max_abs_error": 5.960464477539063e-08,
+            "heads": 8,
+            "name": "wide_prefill/causal/zrbf",
+            "samples": [
+              {
+                "block": 0,
+                "elapsed_ms": 13.920125,
+                "forwards": 4,
+                "max_abs_error": 1.4156103134155273e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 0,
+                "elapsed_ms": 4.327916999999999,
+                "forwards": 1,
+                "max_abs_error": 1.4156103134155273e-07,
+                "route": "host_to_host",
+                "slot": 1
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 4.436083,
+                "forwards": 1,
+                "max_abs_error": 1.4156103134155273e-07,
+                "route": "host_to_host",
+                "slot": 0
+              },
+              {
+                "block": 1,
+                "elapsed_ms": 14.018083,
+                "forwards": 4,
+                "max_abs_error": 1.4156103134155273e-07,
+                "route": "resident",
+                "slot": 1
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 14.111291,
+                "forwards": 4,
+                "max_abs_error": 1.4156103134155273e-07,
+                "route": "resident",
+                "slot": 0
+              },
+              {
+                "block": 2,
+                "elapsed_ms": 4.232208,
+                "forwards": 1,
+                "max_abs_error": 1.4156103134155273e-07,
+                "route": "host_to_host",
+                "slot": 1
+              }
+            ],
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "width": 256
+          }
+        ],
+        "engine": "st_wgpu",
+        "samples_per_route": 3,
+        "schema": "spiraltorch.attention_chain_bench.v1",
+        "status": "passed",
+        "warmup": 2
+      }
+    },
+    {
+      "round": 0,
+      "engine": "torch_cpu",
+      "report": {
+        "schema": "spiraltorch.attention_chain_bench.v1",
+        "status": "passed",
+        "engine": "torch_cpu",
+        "torch_version": "2.12.1",
+        "warmup": 2,
+        "samples_per_route": 3,
+        "burst": 4,
+        "cases": [
+          {
+            "name": "short_prefill/unmasked/plain",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.10016699889092706,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.028166999982204288,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.027542002499103546,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.09537499863654375,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.09874999886960723,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.02800000220304355,
+                "max_abs_error": 1.6763806343078613e-08
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/unmasked/zero_geometry",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.10220900003332645,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.02954199953819625,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.029083999834256247,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.09837499965215102,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.22404199989978224,
+                "max_abs_error": 1.6763806343078613e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.02995799877680838,
+                "max_abs_error": 1.6763806343078613e-08
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/unmasked/zrbf",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.09824999870033935,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.029791000997647643,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.02891700205509551,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.09783299901755527,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.09758399755810387,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.02933300129370764,
+                "max_abs_error": 1.4901161193847656e-08
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/causal/plain",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.10641699918778613,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.030332997994264588,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.029499999072868377,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.14062500122236088,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.11704200005624443,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.03316700167488307,
+                "max_abs_error": 1.4901161193847656e-08
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/causal/zero_geometry",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.1083329989342019,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.03212500087101944,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.03154200021526776,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.10454100265633315,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.10433400166220963,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.03154200021526776,
+                "max_abs_error": 1.4901161193847656e-08
+              }
+            ]
+          },
+          {
+            "name": "short_prefill/causal/zrbf",
+            "shape": [
+              1,
+              32,
+              64
+            ],
+            "heads": 4,
+            "width": 64,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.10387499787611887,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.0318750026053749,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.031458999728783965,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.10449999899719842,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.1034580018313136,
+                "max_abs_error": 1.4901161193847656e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.03149999974993989,
+                "max_abs_error": 1.4901161193847656e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/unmasked/plain",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.8887500007404014,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.24141699759638868,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.2657080003700685,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.947832999372622,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0217920025752392,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.24474999736412428,
+                "max_abs_error": 4.470348358154297e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/unmasked/zero_geometry",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.9649999992689118,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.25262500275857747,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.26987499950337224,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.9590420013410039,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.9281250022468157,
+                "max_abs_error": 4.470348358154297e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.2561670007708017,
+                "max_abs_error": 4.470348358154297e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/unmasked/zrbf",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.9327909974672366,
+                "max_abs_error": 4.6566128730773926e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.25591699886717834,
+                "max_abs_error": 4.6566128730773926e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.26954100030707195,
+                "max_abs_error": 4.6566128730773926e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 0.9163340000668541,
+                "max_abs_error": 4.6566128730773926e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0144580010091886,
+                "max_abs_error": 4.6566128730773926e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.24774999837973155,
+                "max_abs_error": 4.6566128730773926e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/causal/plain",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0414170028525405,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.26095800058101304,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.2630829985719174,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0463340004207566,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0549580001679715,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.2451249965815805,
+                "max_abs_error": 4.842877388000488e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/causal/zero_geometry",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1419999973441008,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.38866699833306484,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.32841600113897584,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.0685420020308811,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1072910019720439,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.2940829981525894,
+                "max_abs_error": 4.842877388000488e-08
+              }
+            ]
+          },
+          {
+            "name": "batched_prefill/causal/zrbf",
+            "shape": [
+              2,
+              128,
+              128
+            ],
+            "heads": 4,
+            "width": 128,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1341249992256053,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.28787499832105823,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.3073330008191988,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1336659990774933,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 1.1169170029461384,
+                "max_abs_error": 4.842877388000488e-08
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.2785840006254148,
+                "max_abs_error": 4.842877388000488e-08
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/unmasked/plain",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.44412500251201,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7049579980957787,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7138330001907889,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.648541998496512,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.5678749989310745,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.6262080023589078,
+                "max_abs_error": 1.0803341865539551e-07
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/unmasked/zero_geometry",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.6809999981196597,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8189580003090668,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8580419998907018,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.7263750016572885,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.7031249992433004,
+                "max_abs_error": 1.0803341865539551e-07
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8309580007335171,
+                "max_abs_error": 1.0803341865539551e-07
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/unmasked/zrbf",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.6146249983867165,
+                "max_abs_error": 1.1548399925231934e-07
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8125829990603961,
+                "max_abs_error": 1.1548399925231934e-07
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7827080007700715,
+                "max_abs_error": 1.1548399925231934e-07
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.865916001610458,
+                "max_abs_error": 1.1548399925231934e-07
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 2.7047920011682436,
+                "max_abs_error": 1.1548399925231934e-07
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8387909983866848,
+                "max_abs_error": 1.1548399925231934e-07
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/causal/plain",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.34145800297847,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.7952499981911387,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.8185410006262828,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.344625001773238,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.3090420001826715,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9185000017168932,
+                "max_abs_error": 1.2665987014770508e-07
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/causal/zero_geometry",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.548791999492096,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0212920024059713,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 1.0823339980561286,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.41120899975067,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.3341660018777475,
+                "max_abs_error": 1.2665987014770508e-07
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9463749993301462,
+                "max_abs_error": 1.2665987014770508e-07
+              }
+            ]
+          },
+          {
+            "name": "wide_prefill/causal/zrbf",
+            "shape": [
+              1,
+              256,
+              256
+            ],
+            "heads": 8,
+            "width": 256,
+            "samples": [
+              {
+                "block": 0,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.342874999361811,
+                "max_abs_error": 1.1175870895385742e-07
+              },
+              {
+                "block": 0,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9368749997520354,
+                "max_abs_error": 1.1175870895385742e-07
+              },
+              {
+                "block": 1,
+                "slot": 0,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9667080012150109,
+                "max_abs_error": 1.1175870895385742e-07
+              },
+              {
+                "block": 1,
+                "slot": 1,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.2228340023721103,
+                "max_abs_error": 1.1175870895385742e-07
+              },
+              {
+                "block": 2,
+                "slot": 0,
+                "route": "resident",
+                "forwards": 4,
+                "elapsed_ms": 3.3575000015844125,
+                "max_abs_error": 1.1175870895385742e-07
+              },
+              {
+                "block": 2,
+                "slot": 1,
+                "route": "host_to_host",
+                "forwards": 1,
+                "elapsed_ms": 0.9299580015067477,
+                "max_abs_error": 1.1175870895385742e-07
+              }
+            ]
+          }
+        ],
+        "boundary": "Resident: fixed input/bias/weights, burst forwards and completion sync; reads/checks excluded. Host-to-host: fresh input/bias copies and owning host output, weights resident. CPU copies are included too. Setup and mask/geometry preparation excluded. Eager SDPA default dispatch; not a forced math kernel or kernel timestamp."
+      }
+    }
+  ],
+  "scope": "Host-observed full-chain forward latency; fixed parameters/geometry, no backward, learning or CUDA evidence. CPU/MPS/native WGPU are separate execution routes; resident timings are not kernel-only timings.",
+  "summary": [
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.3120000001217704,
+      "min_ms": 0.2913749995059334,
+      "max_ms": 0.4456249998838757
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.0670419978850987,
+      "min_ms": 1.0602500005916227,
+      "max_ms": 1.130167001974769
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.28944799942109967,
+      "min_ms": 0.27769799999077804,
+      "max_ms": 0.29421875024127075
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.1330829984217416,
+      "min_ms": 0.8816250010568183,
+      "max_ms": 1.3497079999069683
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.2710207500058459,
+      "min_ms": 0.24404175019299146,
+      "max_ms": 0.2916249995905673
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.153541001258418,
+      "min_ms": 0.9030000001075678,
+      "max_ms": 1.4323340001283213
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.2829269997164374,
+      "min_ms": 0.2761980003924691,
+      "max_ms": 0.2841460000126972
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.6242919989745133,
+      "min_ms": 0.6116669974289834,
+      "max_ms": 0.6790419975004625
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.5630102505165269,
+      "min_ms": 0.5405519996202202,
+      "max_ms": 0.6236457502382109
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 2.1024169982410967,
+      "min_ms": 1.8976669998664875,
+      "max_ms": 2.350250000745291
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.5071770001450204,
+      "min_ms": 0.3386250000403379,
+      "max_ms": 0.5413124999904539
+    },
+    {
+      "engine": "torch_mps",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.3663749996339902,
+      "min_ms": 1.3497090003511403,
+      "max_ms": 2.055124998150859
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.3187292495567817,
+      "min_ms": 0.2667602493602317,
+      "max_ms": 0.3210519998901873
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.6694580006296746,
+      "min_ms": 0.6338329985737801,
+      "max_ms": 0.9506659989710897
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.41083324958890444,
+      "min_ms": 0.3104480001638876,
+      "max_ms": 0.5011769999327953
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.9217910010193009,
+      "min_ms": 0.859750001836801,
+      "max_ms": 1.3392500004556496
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.2670624999154825,
+      "min_ms": 0.26120849997823825,
+      "max_ms": 0.2762915000857902
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.7649170001968741,
+      "min_ms": 0.7639579998794943,
+      "max_ms": 0.7983329996932298
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.5195730000195908,
+      "min_ms": 0.4925937500956934,
+      "max_ms": 0.525333250152471
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.0333749996789265,
+      "min_ms": 0.9787090020836331,
+      "max_ms": 1.1772500001825392
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.20139575008215616,
+      "min_ms": 0.19745850022445666,
+      "max_ms": 0.20226049946359126
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.7395420034299605,
+      "min_ms": 0.736250000045402,
+      "max_ms": 0.7475829988834448
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.19864600017172052,
+      "min_ms": 0.18963524962600786,
+      "max_ms": 0.21121875033713877
+    },
+    {
+      "engine": "torch_mps",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.7549999972980004,
+      "min_ms": 0.7491670003219042,
+      "max_ms": 0.7630830004927702
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.49555224995856406,
+      "min_ms": 0.49420825052948203,
+      "max_ms": 0.5862605003130739
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.8745000013732351,
+      "min_ms": 0.874165998538956,
+      "max_ms": 1.0172080001211725
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.6264582498261007,
+      "min_ms": 0.5743749998146086,
+      "max_ms": 0.6283540005824761
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.2857920009992085,
+      "min_ms": 1.218625002366025,
+      "max_ms": 1.3321250007720664
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.3736144999493263,
+      "min_ms": 0.37073974999657366,
+      "max_ms": 0.38269800006673904
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.0712909970607143,
+      "min_ms": 1.0346669987484347,
+      "max_ms": 1.072708997526206
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.6561977497767657,
+      "min_ms": 0.6190937501742155,
+      "max_ms": 0.7084062499416177
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.0348329997214023,
+      "min_ms": 0.9801659980439581,
+      "max_ms": 1.0524169993004762
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.36844799979007803,
+      "min_ms": 0.3647082494353526,
+      "max_ms": 0.3696667499752948
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.088834000256611,
+      "min_ms": 1.0766669984150212,
+      "max_ms": 1.0978750033245888
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.37003124998591375,
+      "min_ms": 0.35929175010096515,
+      "max_ms": 0.5723020003642887
+    },
+    {
+      "engine": "torch_mps",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.105957999243401,
+      "min_ms": 1.0526249971007928,
+      "max_ms": 1.703874997474486
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.57136475,
+      "min_ms": 0.5493125,
+      "max_ms": 0.6270625
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.979875,
+      "min_ms": 0.867459,
+      "max_ms": 0.9805
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.58880225,
+      "min_ms": 0.5782707500000001,
+      "max_ms": 0.59245825
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.874625,
+      "min_ms": 0.8548330000000001,
+      "max_ms": 0.885375
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.55859375,
+      "min_ms": 0.5434375,
+      "max_ms": 0.5774272500000001
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.856583,
+      "min_ms": 0.85075,
+      "max_ms": 0.8652500000000001
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.5889687499999999,
+      "min_ms": 0.57128125,
+      "max_ms": 0.680625
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.843459,
+      "min_ms": 0.6062500000000001,
+      "max_ms": 0.8518749999999999
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.4207395,
+      "min_ms": 0.3837605,
+      "max_ms": 0.521521
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.588792,
+      "min_ms": 0.580792,
+      "max_ms": 0.829917
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.40784375,
+      "min_ms": 0.40737500000000004,
+      "max_ms": 0.58685425
+    },
+    {
+      "engine": "st_baseline",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.699459,
+      "min_ms": 0.6040000000000001,
+      "max_ms": 0.871625
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 1.7576147500000001,
+      "min_ms": 1.7292395,
+      "max_ms": 1.7641354999999999
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 2.047166,
+      "min_ms": 1.91025,
+      "max_ms": 2.137833
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 1.738052,
+      "min_ms": 1.58765625,
+      "max_ms": 1.822875
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 2.146375,
+      "min_ms": 2.128625,
+      "max_ms": 2.1940839999999997
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 1.577677,
+      "min_ms": 1.5762707500000002,
+      "max_ms": 1.57798975
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.960209,
+      "min_ms": 1.894167,
+      "max_ms": 1.966
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 1.02835425,
+      "min_ms": 1.020427,
+      "max_ms": 1.06066675
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.431542,
+      "min_ms": 1.352709,
+      "max_ms": 1.527458
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 1.1310312500000002,
+      "min_ms": 1.1136457499999999,
+      "max_ms": 1.1570417499999999
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.4461249999999999,
+      "min_ms": 1.4205,
+      "max_ms": 1.450542
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 1.09420825,
+      "min_ms": 1.08376025,
+      "max_ms": 1.12025
+    },
+    {
+      "engine": "st_baseline",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.45725,
+      "min_ms": 1.43875,
+      "max_ms": 1.4766670000000002
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 4.859614499999999,
+      "min_ms": 4.85208325,
+      "max_ms": 4.9757605
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 5.361042,
+      "min_ms": 5.349583,
+      "max_ms": 5.432583
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 5.000395999999999,
+      "min_ms": 4.99140625,
+      "max_ms": 5.165125
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 5.877292,
+      "min_ms": 5.813750000000001,
+      "max_ms": 6.579708
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 4.99965625,
+      "min_ms": 4.99696875,
+      "max_ms": 5.2959165
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 6.616917,
+      "min_ms": 6.122958000000001,
+      "max_ms": 6.915209
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 3.531646,
+      "min_ms": 3.4898124999999998,
+      "max_ms": 3.6124687499999997
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 3.978875,
+      "min_ms": 3.866,
+      "max_ms": 4.0765
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 3.49060425,
+      "min_ms": 3.44651025,
+      "max_ms": 3.5540835
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 4.3030409999999994,
+      "min_ms": 4.274,
+      "max_ms": 4.326917
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 3.50452075,
+      "min_ms": 3.48003125,
+      "max_ms": 3.52782275
+    },
+    {
+      "engine": "st_baseline",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 4.327916999999999,
+      "min_ms": 4.232208,
+      "max_ms": 4.436083
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.024687499717401806,
+      "min_ms": 0.023843749659135938,
+      "max_ms": 0.025041749722731765
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.02800000220304355,
+      "min_ms": 0.027542002499103546,
+      "max_ms": 0.028166999982204288
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.025552250008331612,
+      "min_ms": 0.024593749913037755,
+      "max_ms": 0.05601049997494556
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.02954199953819625,
+      "min_ms": 0.029083999834256247,
+      "max_ms": 0.02995799877680838
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.024458249754388817,
+      "min_ms": 0.02439599938952597,
+      "max_ms": 0.024562499675084837
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.02933300129370764,
+      "min_ms": 0.02891700205509551,
+      "max_ms": 0.029791000997647643
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.029260500014061108,
+      "min_ms": 0.026604249796946533,
+      "max_ms": 0.03515625030559022
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.030332997994264588,
+      "min_ms": 0.029499999072868377,
+      "max_ms": 0.03316700167488307
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.026135250664083287,
+      "min_ms": 0.026083500415552408,
+      "max_ms": 0.027083249733550474
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.03154200021526776,
+      "min_ms": 0.03154200021526776,
+      "max_ms": 0.03212500087101944
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.025968749469029717,
+      "min_ms": 0.0258645004578284,
+      "max_ms": 0.026124999749299604
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.03149999974993989,
+      "min_ms": 0.031458999728783965,
+      "max_ms": 0.0318750026053749
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.2369582498431555,
+      "min_ms": 0.22218750018510036,
+      "max_ms": 0.2554480006438098
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.24474999736412428,
+      "min_ms": 0.24141699759638868,
+      "max_ms": 0.2657080003700685
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.23976050033525098,
+      "min_ms": 0.23203125056170393,
+      "max_ms": 0.24124999981722794
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.2561670007708017,
+      "min_ms": 0.25262500275857747,
+      "max_ms": 0.26987499950337224
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.23319774936680915,
+      "min_ms": 0.22908350001671351,
+      "max_ms": 0.25361450025229715
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.25591699886717834,
+      "min_ms": 0.24774999837973155,
+      "max_ms": 0.26954100030707195
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.26158350010518916,
+      "min_ms": 0.2603542507131351,
+      "max_ms": 0.26373950004199287
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.26095800058101304,
+      "min_ms": 0.2451249965815805,
+      "max_ms": 0.2630829985719174
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.27682275049301097,
+      "min_ms": 0.2671355005077203,
+      "max_ms": 0.2854999993360252
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.32841600113897584,
+      "min_ms": 0.2940829981525894,
+      "max_ms": 0.38866699833306484
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.28341649976937333,
+      "min_ms": 0.2792292507365346,
+      "max_ms": 0.2835312498064013
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.28787499832105823,
+      "min_ms": 0.2785840006254148,
+      "max_ms": 0.3073330008191988
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.6419687497327686,
+      "min_ms": 0.6110312506280025,
+      "max_ms": 0.662135499624128
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.7049579980957787,
+      "min_ms": 0.6262080023589078,
+      "max_ms": 0.7138330001907889
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.6757812498108251,
+      "min_ms": 0.6702499995299149,
+      "max_ms": 0.6815937504143221
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.8309580007335171,
+      "min_ms": 0.8189580003090668,
+      "max_ms": 0.8580419998907018
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.6761980002920609,
+      "min_ms": 0.6536562495966791,
+      "max_ms": 0.7164790004026145
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.8125829990603961,
+      "min_ms": 0.7827080007700715,
+      "max_ms": 0.8387909983866848
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.8353645007446175,
+      "min_ms": 0.8272605000456679,
+      "max_ms": 0.8361562504433095
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.8185410006262828,
+      "min_ms": 0.7952499981911387,
+      "max_ms": 0.9185000017168932
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.8528022499376675,
+      "min_ms": 0.8335415004694369,
+      "max_ms": 0.887197999873024
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 1.0212920024059713,
+      "min_ms": 0.9463749993301462,
+      "max_ms": 1.0823339980561286
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "count": 3,
+      "median_ms": 0.8357187498404528,
+      "min_ms": 0.8057085005930276,
+      "max_ms": 0.8393750003961031
+    },
+    {
+      "engine": "torch_cpu",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "count": 3,
+      "median_ms": 0.9368749997520354,
+      "min_ms": 0.9299580015067477,
+      "max_ms": 0.9667080012150109
+    }
+  ]
+}

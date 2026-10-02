@@ -24,7 +24,7 @@ fn close(actual: &[f32], expected: &[f32], name: &str) -> Result<f32> {
     }
     let mut error = 0f32;
     for (index, (&a, &b)) in actual.iter().zip(expected).enumerate() {
-        if !a.is_finite() || (a - b).abs() > 3e-6 + 3e-5 * b.abs() {
+        if !a.is_finite() || !b.is_finite() || (a - b).abs() > 3e-6 + 3e-5 * b.abs() {
             return Err(format!("{name}[{index}]: {a} != {b}").into());
         }
         error = error.max((a - b).abs());
@@ -36,15 +36,32 @@ fn close(actual: &[f32], expected: &[f32], name: &str) -> Result<f32> {
 /// Geometry is prepared once on the host; no activation is read back until
 /// after the output projection. No timing or quality claim is made by this probe.
 pub async fn run() -> Result<serde_json::Value> {
+    run_fixture(serde_json::from_str(include_str!(
+        "../../tests/fixtures/attention_chain_torch.json"
+    ))?)
+    .await
+}
+
+/// Test-only supplied fixture lets the browser exercise larger kernel regimes
+/// without embedding benchmark arrays into the library or duplicating the math.
+pub async fn run_fixture(fixture: serde_json::Value) -> Result<serde_json::Value> {
+    if fixture["schema"] != "spiraltorch.attention_chain_torch.v1" {
+        return Err("wrong fixture schema".into());
+    }
+    let scenarios = fixture["scenarios"].as_array().ok_or("missing scenarios")?;
+    let expected_checks = scenarios
+        .iter()
+        .map(|s| s["cases"].as_array().map_or(0, Vec::len))
+        .sum::<usize>();
+    if scenarios.is_empty() || expected_checks == 0 {
+        return Err("empty fixture".into());
+    }
     let runtime = WgpuRuntime::request_headless("nn.attention.chain.fixture").await?;
     #[cfg(not(target_arch = "wasm32"))]
     if format!("{:?}", runtime.adapter_info().device_type) == "Cpu" {
         return Err("a real GPU is required for the native fixture".into());
     }
     let device = TensorDevice::new(runtime.clone())?;
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/attention_chain_torch.json"
-    ))?;
     let mut checks = Vec::new();
     let mut geometry_checks = Vec::new();
     for scenario in fixture["scenarios"].as_array().unwrap() {
@@ -137,7 +154,7 @@ pub async fn run() -> Result<serde_json::Value> {
             }
         }
     }
-    if checks.len() != 12 || geometry_checks.len() != 2 {
+    if checks.len() != expected_checks || geometry_checks.len() != scenarios.len() {
         return Err("incomplete attention-chain fixture".into());
     }
     Ok(serde_json::json!({
@@ -147,4 +164,14 @@ pub async fn run() -> Result<serde_json::Value> {
         "checks": checks, "geometry_checks": geometry_checks,
         "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim",
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn invalid_reference_values_never_pass_the_numerical_gate() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(super::close(&[0.], &[value], "invalid reference").is_err());
+        }
+    }
 }

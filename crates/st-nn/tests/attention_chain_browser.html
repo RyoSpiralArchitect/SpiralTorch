@@ -4,13 +4,22 @@
 <title>Resident Projection and Z-RBF Attention Chain</title>
 <pre id="result" data-status="running">Checking resident projection/attention chain...</pre>
 <script type="module">
-import init, {run_attention_chain_checks} from "../../../target/attention-chain-web/resident_attention_chain_browser.js";
+import init, {run_attention_chain_checks, run_attention_chain_fixture} from "../../../target/attention-chain-web/resident_attention_chain_browser.js";
 const result = document.querySelector("#result");
 try {
   await init();
-  const report = JSON.parse(await run_attention_chain_checks());
+  const benchmark = new URLSearchParams(location.search).get("suite") === "benchmark";
+  let report;
+  if (benchmark) {
+    const response = await fetch("../../../target/attention-chain-web/benchmark-fixture.json");
+    if (!response.ok) throw Error("Generate and place benchmark-fixture.json in target/attention-chain-web first");
+    report = JSON.parse(await run_attention_chain_fixture(await response.text()));
+  } else {
+    report = JSON.parse(await run_attention_chain_checks());
+  }
   if (report.schema !== "spiraltorch.attention_chain.v1" || !report.passed ||
-      report.checks.length !== 12 || report.geometry_checks.length !== 2) throw Error("Incomplete chain fixture");
+      report.checks.length !== (benchmark ? 18 : 12) ||
+      report.geometry_checks.length !== (benchmark ? 3 : 2)) throw Error("Incomplete chain fixture");
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
 } catch (error) {

@@ -35,6 +35,17 @@ and broadcast views are packed on GPU if needed. Online normalized softmax
 does not allocate the quadratic score/probability matrix. A caller-supplied
 pairwise bias is still quadratic. Only explicit snapshots read values back.
 
+For at least 128 keys and head dimension at most 32, the portable 64-thread kernel
+computes four key dot products in parallel with 16 lanes each, amortizing
+workgroup barriers. Short sequences and unmeasured wider heads retain one key
+per tile with 64 lanes. Each pipeline specialization is cached lazily. This
+bounded policy follows full-chain measurements, not a universal speed claim.
+Online normalization and value
+accumulation still visit keys in order; dot-product reduction order changes, so
+agreement is tolerance-based, not bitwise. Tail tiles and causal visibility
+must not load masked keys. This uses core WGSL, not subgroups or native-only
+instructions, and is exercised by the browser probe as well as native tests.
+
 All inputs must be finite. Non-finite score/weighted-output arithmetic sets an
 owned failure guard, inherited by downstream operations and checked on readback.
 Even a masked-out invalid input retains its upstream failure. Different floating
@@ -130,9 +141,9 @@ success and Naga validation alone did not catch the first browser issue: the
 decimal spelling of negative f32 MAX exceeded the browser compiler's accepted
 range. Both the resident and legacy fused shaders now use its exact bit pattern.
 
-The next performance gate is a matched complete QKV/attention/output-projection
-chain, separating resident-only timing from transfers and comparing like devices.
-This numerical slice establishes neither a speedup nor a learning-quality gain.
+Performance is measured separately on the complete QKV/attention/output-projection
+chain, distinguishing resident-only timing from transfers and execution routes.
+The numerical slice alone establishes neither a speedup nor a learning-quality gain.
 
 ## Full-Chain Verification
 
@@ -173,3 +184,47 @@ tests also compare the full chain with the original `ZRBFAttention` mean and
 exercise frozen parameters, noncontiguous inputs, retained outputs and inherited
 non-finite guards. The GPU CI lane runs the full-chain fixture; the recorded
 browser probe was run locally, not by that CI lane.
+
+## Bounded Performance Comparison
+
+`resident_attention_chain_bench` consumes the independent fixture with three
+larger shapes. `bench_attention_chain_vs_torch.py` rotates native executables and
+eager PyTorch CPU/MPS runs, requires complete numerical/sample coverage, and
+records every sample rather than just favorable medians. Build native executables
+in release mode, and keep baseline/candidate binaries separate for paired runs.
+
+```bash
+export SPIRALTON_MAGIC=0 SPIRALTON_TORCH=0 SPIRALTON_MODEL_PATCHES=0 SPIRALTON_NUMPY=0
+export PYTORCH_ENABLE_MPS_FALLBACK=0 PYTORCH_MPS_FAST_MATH=0
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+python3 -I tools/generate_attention_chain_torch_fixture.py --suite benchmark --output "$FIXTURE"
+cargo build --locked --release -p st-nn --features wgpu --example resident_attention_chain_bench
+python3 -I tools/bench_attention_chain_vs_torch.py --fixture "$FIXTURE" \
+  --native "st_candidate=target/release/examples/resident_attention_chain_bench" \
+  --devices cpu mps --rounds 3 --samples 7 --warmup 50 --burst 4 --output "$NEW_RESULT"
+```
+
+Add `--native "st_baseline=$BASELINE_BINARY"` and use four rounds to rotate four
+engines through every order position. Resident timings include CPU encoding,
+allocation and GPU completion of a burst, but no output readback. Host-to-host
+timings include fresh input/bias uploads and an owning output readback; weights
+remain resident. Compilation, fixed geometry/mask preparation and numerical
+checks are outside both timers. All burst outputs are checked after timing.
+PyTorch uses its default eager SDPA dispatch, not a forced CPU math backend for
+GPU timing; its own outputs must pass the frozen CPU math reference. MPS fallback
+and optional global patches must be disabled before Python starts.
+
+These are full-chain inference observations, not kernel timestamps. ST's
+non-finite guards remain enabled; Torch is not given equivalent guard kernels.
+CPU, Metal/WGPU and MPS are different routes even on one machine, and short
+wall-clock samples are noisy. No CUDA or training advantage follows from them.
+The default 50 warmup blocks follow a short-sequence sensitivity check; the
+earlier three-warmup measurements remain published rather than overwritten.
+Even this is not a proof of clock stability or statistically bounded regression.
+See the [comparison and rejected broad rollout](../benchmarks/results/2026-10-02-attention-key-tiling/README.md).
+
+To check both kernel specializations in the browser, build the WASM probe above,
+place the generated benchmark fixture at
+`target/attention-chain-web/benchmark-fixture.json`, and open the same local page
+with `?suite=benchmark`. Require 18 output checks and three geometry checks. This
+larger browser run is numerical validation, not a browser timing benchmark.
