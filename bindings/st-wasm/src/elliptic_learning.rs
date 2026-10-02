@@ -6,7 +6,7 @@ use js_sys::Number;
 use st_core::theory::microlocal::{
     EllipticAnchoredGradients as CoreAnchoredGradients,
     EllipticAnchoredLearningBatch as CoreAnchoredBatch,
-    EllipticCausalLearningBatch as CoreCausalBatch,
+    EllipticCausalLearningBatch as CoreCausalBatch, EllipticChartStep as CoreChartStep,
     EllipticGatedCausalGradients as CoreGatedGradients,
     EllipticGatedCausalLearningBatch as CoreGatedBatch, EllipticLearningBatch as CoreBatch,
     EllipticWarp,
@@ -25,6 +25,41 @@ pub struct EllipticWarpKernel {
 #[wasm_bindgen]
 pub struct EllipticLearningBatch {
     inner: CoreBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct EllipticChartStep {
+    inner: CoreChartStep,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl EllipticChartStep {
+    #[wasm_bindgen(getter)]
+    pub fn values(&self) -> Vec<f32> {
+        self.inner.values.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn metric(&self) -> Vec<f64> {
+        self.inner.metric.to_vec()
+    }
+    #[wasm_bindgen(getter, js_name = dampedCondition)]
+    pub fn damped_condition(&self) -> f64 {
+        self.inner.damped_condition
+    }
+    #[wasm_bindgen(getter, js_name = proposalL2)]
+    pub fn proposal_l2(&self) -> f64 {
+        self.inner.proposal_l2
+    }
+    #[wasm_bindgen(getter, js_name = stepL2)]
+    pub fn step_l2(&self) -> f64 {
+        self.inner.step_l2
+    }
+    #[wasm_bindgen(getter)]
+    pub fn cosine(&self) -> Option<f64> {
+        self.inner.cosine
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -245,6 +280,21 @@ impl EllipticWarpKernel {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl EllipticLearningBatch {
+    #[wasm_bindgen(js_name = chartStep)]
+    pub fn chart_step(
+        &self,
+        proposal: &[f32],
+        relative_damping: Number,
+    ) -> Result<EllipticChartStep, JsValue> {
+        let raw: &JsValue = relative_damping.as_ref();
+        let damping =
+            raw.as_f64()
+                .ok_or_else(|| js_error("relative_damping must be a number"))? as f32;
+        self.inner
+            .chart_step(proposal, damping)
+            .map(|inner| EllipticChartStep { inner })
+            .map_err(js_error)
+    }
     #[wasm_bindgen(getter)]
     pub fn features(&self) -> Vec<f32> {
         self.inner.features().to_vec()
