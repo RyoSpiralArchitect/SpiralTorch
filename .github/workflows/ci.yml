@@ -699,6 +699,7 @@ jobs:
             bindings/st-py/tests/test_geometry_autograd.py \
             bindings/st-py/tests/test_elliptic_gated_causal.py \
             bindings/st-py/tests/test_elliptic_gated_study.py \
+            bindings/st-py/tests/test_elliptic_context_ablation.py \
             bindings/st-py/tests/test_elliptic_learning.py \
             bindings/st-py/tests/test_elliptic_causal_learning.py \
             bindings/st-py/tests/test_wave_gate_vjp.py \

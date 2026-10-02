@@ -1,0 +1,450 @@
+{
+  "schema": "spiraltorch.elliptic_context_ablation.v1",
+  "ablation_id": "cf2fead3f192d61eadc6d08bc1b18c24ab8e6782501a4b5a0aadb0e4c501514b",
+  "contrasts": {
+    "gated_tangent": {
+      "native": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.5703635732332866,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.571027773618698,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.568267132838567,
+              "delta_from_native": 0.0
+            }
+          ],
+          "mean_cross_entropy": 3.5698861598968503,
+          "mean_delta_from_native": 0.0
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7005913704633713,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.6554426476359367,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.6593596041202545,
+              "delta_from_native": 0.0
+            }
+          ],
+          "mean_cross_entropy": 3.6717978740731874,
+          "mean_delta_from_native": 0.0
+        }
+      },
+      "local": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.5721727927525837,
+              "delta_from_native": 0.0018092195192971339
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.5760620057582857,
+              "delta_from_native": 0.005034232139587758
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.5709983428319294,
+              "delta_from_native": 0.0027312099933625156
+            }
+          ],
+          "mean_cross_entropy": 3.5730777137809326,
+          "mean_delta_from_native": 0.003191553884082469
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.6833713352680206,
+              "delta_from_native": -0.017220035195350647
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.6361766532063484,
+              "delta_from_native": -0.019265994429588318
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.6343570351600647,
+              "delta_from_native": -0.02500256896018982
+            }
+          ],
+          "mean_cross_entropy": 3.6513016745448112,
+          "mean_delta_from_native": -0.020496199528376263
+        }
+      },
+      "gain_only": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.575746750831604,
+              "delta_from_native": 0.005383177598317523
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.58635839621226,
+              "delta_from_native": 0.015330622593562104
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.5775984088579813,
+              "delta_from_native": 0.009331276019414414
+            }
+          ],
+          "mean_cross_entropy": 3.5799011853006153,
+          "mean_delta_from_native": 0.01001502540376468
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.682533361017704,
+              "delta_from_native": -0.018058009445667267
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.6446376591920853,
+              "delta_from_native": -0.010804988443851471
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.635014086961746,
+              "delta_from_native": -0.0243455171585083
+            }
+          ],
+          "mean_cross_entropy": 3.654061702390512,
+          "mean_delta_from_native": -0.01773617168267568
+        }
+      },
+      "anchor": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.5756126662095387,
+              "delta_from_native": 0.00524909297625209
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.585846984386444,
+              "delta_from_native": 0.01481921076774606
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.5771867831548056,
+              "delta_from_native": 0.008919650316238759
+            }
+          ],
+          "mean_cross_entropy": 3.5795488112502625,
+          "mean_delta_from_native": 0.009662651353412302
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.6827628016471863,
+              "delta_from_native": -0.017828568816184998
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.6445412188768387,
+              "delta_from_native": -0.010901428759098053
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.6355178356170654,
+              "delta_from_native": -0.023841768503189087
+            }
+          ],
+          "mean_cross_entropy": 3.65427395204703,
+          "mean_delta_from_native": -0.01752392202615738
+        }
+      },
+      "prefix_mean": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.572834825515747,
+              "delta_from_native": 0.00247125228246059
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.578468257188797,
+              "delta_from_native": 0.007440483570098966
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.571162207921346,
+              "delta_from_native": 0.002895075082779197
+            }
+          ],
+          "mean_cross_entropy": 3.574155096875297,
+          "mean_delta_from_native": 0.004268936978446251
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.6890535056591034,
+              "delta_from_native": -0.011537864804267883
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.6473843157291412,
+              "delta_from_native": -0.008058331906795502
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.642443723976612,
+              "delta_from_native": -0.016915880143642426
+            }
+          ],
+          "mean_cross_entropy": 3.6596271817882857,
+          "mean_delta_from_native": -0.012170692284901937
+        }
+      }
+    },
+    "gated_elliptic": {
+      "native": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7153897047042848,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.706479525566101,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.703042318423589,
+              "delta_from_native": 0.0
+            }
+          ],
+          "mean_cross_entropy": 3.708303849564658,
+          "mean_delta_from_native": 0.0
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7547348514199257,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.7448758110404015,
+              "delta_from_native": 0.0
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.7488490492105484,
+              "delta_from_native": 0.0
+            }
+          ],
+          "mean_cross_entropy": 3.7494865705569587,
+          "mean_delta_from_native": 0.0
+        }
+      },
+      "local": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.727573917309443,
+              "delta_from_native": 0.01218421260515834
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.711082907517751,
+              "delta_from_native": 0.0046033819516497765
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.706875898440679,
+              "delta_from_native": 0.003833580017089666
+            }
+          ],
+          "mean_cross_entropy": 3.7151775744226243,
+          "mean_delta_from_native": 0.006873724857965928
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7678375244140625,
+              "delta_from_native": 0.01310267299413681
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.756188690662384,
+              "delta_from_native": 0.011312879621982574
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.760072574019432,
+              "delta_from_native": 0.011223524808883667
+            }
+          ],
+          "mean_cross_entropy": 3.7613662630319595,
+          "mean_delta_from_native": 0.011879692475001017
+        }
+      },
+      "gain_only": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7212544004122416,
+              "delta_from_native": 0.005864695707956891
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.7120852430661517,
+              "delta_from_native": 0.005605717500050567
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.6998921473821005,
+              "delta_from_native": -0.0031501710414887363
+            }
+          ],
+          "mean_cross_entropy": 3.7110772636201648,
+          "mean_delta_from_native": 0.0027734140555062403
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7510216161608696,
+              "delta_from_native": -0.0037132352590560913
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.761648714542389,
+              "delta_from_native": 0.016772903501987457
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.752969056367874,
+              "delta_from_native": 0.004120007157325745
+            }
+          ],
+          "mean_cross_entropy": 3.7552131290237107,
+          "mean_delta_from_native": 0.00572655846675237
+        }
+      },
+      "anchor": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7127501626809436,
+              "delta_from_native": -0.002639542023341157
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.7053367535273236,
+              "delta_from_native": -0.0011427720387775508
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.69709597826004,
+              "delta_from_native": -0.005946340163549113
+            }
+          ],
+          "mean_cross_entropy": 3.7050609648227693,
+          "mean_delta_from_native": -0.0032428847418892737
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.730149209499359,
+              "delta_from_native": -0.02458564192056656
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.7391191497445107,
+              "delta_from_native": -0.005756661295890808
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.7373960241675377,
+              "delta_from_native": -0.011453025043010712
+            }
+          ],
+          "mean_cross_entropy": 3.735554794470469,
+          "mean_delta_from_native": -0.013931776086489359
+        }
+      },
+      "prefix_mean": {
+        "pride_unused_tail": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.7157978316148124,
+              "delta_from_native": 0.0004081269105276064
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.7073012133439383,
+              "delta_from_native": 0.0008216877778370879
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.7027321497599286,
+              "delta_from_native": -0.000310168663660626
+            }
+          ],
+          "mean_cross_entropy": 3.7086103982395593,
+          "mean_delta_from_native": 0.0003065486749013561
+        },
+        "alice_transfer": {
+          "per_seed": [
+            {
+              "seed": 41,
+              "cross_entropy": 3.728674903512001,
+              "delta_from_native": -0.026059947907924652
+            },
+            {
+              "seed": 43,
+              "cross_entropy": 3.7233817353844643,
+              "delta_from_native": -0.021494075655937195
+            },
+            {
+              "seed": 47,
+              "cross_entropy": 3.7241362556815147,
+              "delta_from_native": -0.02471279352903366
+            }
+          ],
+          "mean_cross_entropy": 3.7253976315259933,
+          "mean_delta_from_native": -0.024088939030965168
+        }
+      }
+    }
+  }
+}

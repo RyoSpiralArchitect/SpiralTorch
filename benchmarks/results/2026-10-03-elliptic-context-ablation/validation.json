@@ -1,0 +1,114 @@
+{
+  "schema": "spiraltorch.elliptic_context_ablation_validation.v1",
+  "status": "completed",
+  "ablation_id": "cf2fead3f192d61eadc6d08bc1b18c24ab8e6782501a4b5a0aadb0e4c501514b",
+  "executed_source_revision": "5e515c34bda5e073f3c68ce83d7bdd1d09267264",
+  "source_sha256": {
+    "hf_elliptic_context_ablation.py": "6ea30dda699d03b14003eec0e1b8497407f40227b4a054958fdcc03dd8fb5c5d",
+    "hf_elliptic_gated_study.py": "2be932d2fbcfebf23770895d9d8382a9f98670af7a9aa27f85a4267f505b3d54",
+    "hf_elliptic_causal_study.py": "39456844f9e59169cc4fd901853c78bc4f2b0dfdfb53f4c870808699ad807813",
+    "hf_elliptic_nonlinear_study.py": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "hf_wave_gate_long_horizon.py": "91b3175f5b72a35c27e31acf09d0edf4ab87d462cd6bd012f9c99acbb34b1d31",
+    "hf_wave_gate_conditioning.py": "752009289edeb9748dcf8fa8f544f7f8ffe5039793a791247522ca037f2c736f"
+  },
+  "parent_file_sha256": {
+    "plan.json": "971c7951254c8db9e5658aa153a62435c7d10a5a030a8b0e124b4328a134061e",
+    "journal.json": "e930b2f20f3700e8a765199c1d89a2db03ced6d7d5d13558953536bebd72bf33",
+    "results.json": "872607e20dc52105837ae82963ec35cfde4dc52d51fd25d08ea1d03295780a3d"
+  },
+  "result_sha256": {
+    "plan.json": "326aa0fe902f8347679f6627f69a88f0c2da7e89d6df647f49791455da8d8c14",
+    "results.json": "790ab8866b9e575753f9ecb7f0e442459e59c9a6dcf780019848e28400026b09",
+    "summary.json": "ba7c22d39fbd77394e1c26b7ca94b80f1bd85e082d79b70cb1cb8b61eaf43062"
+  },
+  "planned_conditions": 30,
+  "completed_conditions": 30,
+  "scored_blocks": 4560,
+  "training_updates": 0,
+  "evaluation_exit_code": 0,
+  "completed_resume_exit_code": 0,
+  "completed_resume_preserved_plan_results_summary_bytes": true,
+  "all_six_native_replays_exact": true,
+  "base_weight_digest_unchanged": true,
+  "all_adapter_states_unchanged": true,
+  "checkpoints": [
+    {
+      "run_key": "41:gated_tangent",
+      "checkpoint": {
+        "filename": "checkpoint-4_cygs_2.pt",
+        "sha256": "c82720641ad79b76f6d8718f1ab75d152e91ea097f43088a00d7e685a03b9959"
+      },
+      "unchanged": true,
+      "raw_mix": 0.047157686203718185,
+      "native_block_losses_exact": true
+    },
+    {
+      "run_key": "41:gated_elliptic",
+      "checkpoint": {
+        "filename": "checkpoint-lq166_tm.pt",
+        "sha256": "a0129ad900d5c7125513f08be3a54d62b23c4c61832e9db44cc75306d06883f6"
+      },
+      "unchanged": true,
+      "raw_mix": -0.575985848903656,
+      "native_block_losses_exact": true
+    },
+    {
+      "run_key": "43:gated_tangent",
+      "checkpoint": {
+        "filename": "checkpoint-02k3sbmu.pt",
+        "sha256": "660568792ad5c7ae23db889a8fb95fa8114802f35eb1eb2010031a3bcf2d5d51"
+      },
+      "unchanged": true,
+      "raw_mix": 0.09179260581731796,
+      "native_block_losses_exact": true
+    },
+    {
+      "run_key": "43:gated_elliptic",
+      "checkpoint": {
+        "filename": "checkpoint-s332ndt0.pt",
+        "sha256": "1e06b60e5d48cad2cea1267d25766a24ff593fcde294c04fd4966a13c0bd4ac1"
+      },
+      "unchanged": true,
+      "raw_mix": -0.4858208894729614,
+      "native_block_losses_exact": true
+    },
+    {
+      "run_key": "47:gated_tangent",
+      "checkpoint": {
+        "filename": "checkpoint-hsjg8x4z.pt",
+        "sha256": "779f7a42cdf146cfc3fe91080c785eac9e6d7d085e4f3ef2293743df751cd71f"
+      },
+      "unchanged": true,
+      "raw_mix": 0.09268250316381454,
+      "native_block_losses_exact": true
+    },
+    {
+      "run_key": "47:gated_elliptic",
+      "checkpoint": {
+        "filename": "checkpoint-lhos38tv.pt",
+        "sha256": "68cfbd6292fa4345df227bc0e944478ed07ae56f5a7485a2dd2f1329d3351f0e"
+      },
+      "unchanged": true,
+      "raw_mix": -0.46712788939476013,
+      "native_block_losses_exact": true
+    }
+  ],
+  "tests": {
+    "preflight_passed": 130,
+    "combined_passed": 132,
+    "skipped": 0,
+    "exit_code": 0
+  },
+  "logs_sha256": {
+    "evaluation.log": "192dfa5a6685c33ceb6249b674811990474672be5e67d05f727897b5ea843435",
+    "completed-resume-verified.log": "113f51a55440b0a87702b30e563b79afdb54a8ffd34d8b1fde213e0d4eadbc02",
+    "preflight-tests.log": "0461bd6d09527cff92333cddb7dbc98f7b57fb41f13f8bbaeaf9ef50915eea2a",
+    "combined-tests.log": "4b20d88fee83f3bd3fbf1588406f51b659632473b5c6469feb2ba9fdb633d711"
+  },
+  "limitations": [
+    "Fixed-weight inference interventions, not retrained competitors or training-causal proof",
+    "Reused Pride/Alice endpoints and three shared seeds; no significance or independent replication claim",
+    "Replacement terms are experimental controls; production geometry remains Rust-owned",
+    "No speed or resident GPU claim"
+  ]
+}

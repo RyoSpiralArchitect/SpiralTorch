@@ -1,0 +1,26 @@
+{
+  "schema": "spiraltorch.elliptic_context_ablation_preflight.v1",
+  "status": "passed_preflight_evaluation_not_complete",
+  "executed_source_revision": "5e515c34bda5e073f3c68ce83d7bdd1d09267264",
+  "tests": {
+    "passed": 130,
+    "skipped": 0,
+    "exit_code": 0,
+    "log_sha256": "0461bd6d09527cff92333cddb7dbc98f7b57fb41f13f8bbaeaf9ef50915eea2a"
+  },
+  "source_sha256": {
+    "hf_elliptic_context_ablation.py": "6ea30dda699d03b14003eec0e1b8497407f40227b4a054958fdcc03dd8fb5c5d",
+    "hf_elliptic_gated_study.py": "2be932d2fbcfebf23770895d9d8382a9f98670af7a9aa27f85a4267f505b3d54",
+    "hf_elliptic_causal_study.py": "39456844f9e59169cc4fd901853c78bc4f2b0dfdfb53f4c870808699ad807813",
+    "hf_elliptic_nonlinear_study.py": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "hf_wave_gate_long_horizon.py": "91b3175f5b72a35c27e31acf09d0edf4ab87d462cd6bd012f9c99acbb34b1d31",
+    "hf_wave_gate_conditioning.py": "752009289edeb9748dcf8fa8f544f7f8ffe5039793a791247522ca037f2c736f"
+  },
+  "parent_file_sha256": {
+    "plan.json": "971c7951254c8db9e5658aa153a62435c7d10a5a030a8b0e124b4328a134061e",
+    "journal.json": "e930b2f20f3700e8a765199c1d89a2db03ced6d7d5d13558953536bebd72bf33",
+    "results.json": "872607e20dc52105837ae82963ec35cfde4dc52d51fd25d08ea1d03295780a3d"
+  },
+  "planned_conditions": 30,
+  "training_updates": 0
+}
