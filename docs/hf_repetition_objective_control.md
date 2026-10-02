@@ -98,6 +98,10 @@ implementations of the schedule.
 
 ## Resume And Verification
 
+The [bounded validation record](../benchmarks/results/2026-10-02-llm-objective-control.md)
+includes actual Trainer/LoRA checks, cross-runtime replay and a pretrained GPT-2
+execution smoke. None is a long-horizon efficacy result.
+
 Controlled Trainer checkpoints include `spiraltorch-repetition-objective.json`.
 Before loading model weights, resume checks the canonical objective recipe,
 the saved Trainer clock, accumulation count, per-device batch size and world
