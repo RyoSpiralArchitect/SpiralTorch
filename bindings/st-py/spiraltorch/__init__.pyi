@@ -7,6 +7,26 @@ from typing import Any, Callable, ContextManager, Dict, Iterable, Iterator, List
 from types import ModuleType
 
 from .optim import Amegagrad, amegagrad
+from .fractional_autograd import (
+    FractionalMemoryAdapter as FractionalMemoryAdapter,
+    fractional_gl_autograd as fractional_gl_autograd,
+)
+
+class FractionalGlKernel:
+    def __init__(self, *, kernel_len: int = ..., step: float = ...,
+                 max_values: int = ..., max_products: int = ...) -> None: ...
+    @property
+    def execution_backend(self) -> Literal["rust_f32_cpu"]: ...
+    def configuration_json(self) -> str: ...
+    def forward(self, input: Sequence[float], shape: Sequence[int], axis: int,
+                alpha: float) -> FractionalGlLearningBatch: ...
+
+class FractionalGlLearningBatch:
+    @property
+    def output(self) -> List[float]: ...
+    def vjp(self, upstream: Sequence[float]) -> Tuple[List[float], float]: ...
+    def jvp(self, input_tangent: Sequence[float], alpha_tangent: float) -> List[float]: ...
+
 from .geometry_autograd import (
     ToposResonatorAdapter as ToposResonatorAdapter,
     topos_resonator_autograd as topos_resonator_autograd,

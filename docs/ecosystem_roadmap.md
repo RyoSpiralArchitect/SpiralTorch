@@ -69,6 +69,15 @@ independent confirmations. Before adding another mixer, inspect nonlinear chart
 feature/gradient conditioning against the ordinary control. The experiment does
 not establish that conditioning causes the remaining gap, nor any speed advantage.
 
+The [fractional memory bridge](fractional_learning.md) independently connects
+the existing `st-frac` causal GL map, input VJP and shared-order alpha derivative
+to Rust snapshots, optional Torch AD and a WASM learning client. A tiny HF loss
+updates the identity-start gate and alpha with exact Adam continuation; an
+actual wasm32 synthetic fit learns its target order. This is finite-history,
+host-f32 learning connectivity, not pretrained quality or resident performance.
+Matched pointwise/fixed-order/learned-order controls precede any combination
+with the geometric adapters above.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:

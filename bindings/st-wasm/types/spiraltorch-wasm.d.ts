@@ -9,6 +9,25 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Causal zero-padded GL, Rust f32 host execution; no WebGPU claim. */
+    export class FractionalGlKernel {
+        constructor(kernel_len: number, step: number, max_values: number, max_products: number);
+        forward(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
+        free(): void;
+    }
+    export class FractionalGlLearningBatch {
+        private constructor();
+        readonly output: Float32Array;
+        vjp(upstream: Float32Array): FractionalGlGradients;
+        jvp(input_tangent: Float32Array, alpha_tangent: number): Float32Array;
+        free(): void;
+    }
+    export class FractionalGlGradients {
+        private constructor();
+        readonly input: Float32Array;
+        readonly alpha: number;
+        free(): void;
+    }
     /** Rust f32 CPU feature map and first-order snapshots; not resident WebGPU. */
     export class EllipticWarpKernel {
         constructor(radius: number, sheets: number, harmonics: number, max_rows: number);

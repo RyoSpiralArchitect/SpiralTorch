@@ -34,6 +34,22 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                     assert 'PyTorch is required' in str(error), (name, error)
                 else:
                     raise AssertionError(name + ' did not reject missing PyTorch')
+            from spiraltorch import fractional_autograd as fractional
+            assert fractional.torch is None
+            for name in fractional.__all__:
+                assert name in st.__all__ and name in namespace, name
+                assert namespace[name] is getattr(fractional, name), name
+                try:
+                    if name.endswith('Adapter'):
+                        namespace[name](8)
+                    else:
+                        namespace[name](None, None, axis=1)
+                except RuntimeError as error:
+                    assert 'PyTorch is required' in str(error), (name, error)
+                else:
+                    raise AssertionError(name + ' did not reject missing PyTorch')
+            # Native snapshots remain usable without the optional AD client.
+            assert st.FractionalGlKernel().forward([1.0], [1], 0, 0.5).output == [1.0]
         """)
         completed = subprocess.run(
             [
