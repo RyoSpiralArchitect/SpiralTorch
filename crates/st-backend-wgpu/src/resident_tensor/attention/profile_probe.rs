@@ -246,7 +246,7 @@ fn profile_fixture_attention_passes() -> Result<()> {
                     return Err("timestamp coverage".into());
                 }
                 for ((sample, slot, direct, tensor), times_pair) in
-                    retained.into_iter().zip(times.passes.chunks_exact(2))
+                    retained.into_iter().zip(times.passes.as_chunks::<2>().0)
                 {
                     let result = output.forward_tensor(&merge(tensor, q_shape, direct)?)?;
                     let error = close(&result.snapshot()?.read()?, &expected)?;
