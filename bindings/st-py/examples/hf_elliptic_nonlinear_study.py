@@ -59,9 +59,9 @@ def adapter_for(arm, config, seed):
     if arm not in ARMS:
         raise ValueError("unrecognized elliptic study arm")
     options = {"strength": config["strength"], **config["warp"]}
-    # Pair both projections within each seed without changing the caller's RNG.
-    with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(seed)
+    # This CPU study must neither seed nor draw from accelerator generators.
+    with torch.random.fork_rng(devices=[]), torch.device("cpu"):
+        torch.random.default_generator.manual_seed(seed)
         if arm == "elliptic":
             return st.EllipticResidualAdapter(config["features"], **options)
         return ChartControl(config["features"], control=arm, **options)

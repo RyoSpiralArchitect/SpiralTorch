@@ -56,5 +56,21 @@
     "public_reaggregation_byte_exact": true,
     "local_originals_retained": true,
     "interpretation": "Every active arm improves baseline. Elliptic beats the fixed tanh control in every seed on both sets, but tangent is best in every paired comparison. No geometric superiority, significance or speed claim."
+  },
+  "post_run_rng_guard": {
+    "pre_fix_regressions_failed": 2,
+    "post_fix_tests": {
+      "passed": 70,
+      "failed": 0,
+      "skipped": 0
+    },
+    "accelerator_seed_calls": "none in instrumented CUDA/MPS tests",
+    "explicit_cpu_construction_under_meta_default": true,
+    "all_nine_original_initial_parameter_hashes_match": true,
+    "pre_fix_log_sha256": "399d1c9784b89f7c8cdb262d2a03004552329da7949eff64ef1f72b33102f685",
+    "post_fix_log_sha256": "ab639e53de56f9a0c36700ef5c8a09c23d0df0c3c8104140b007447c604f6bde",
+    "initialization_check_log_sha256": "91a307bf2fa71ef14c96871a53c2fe827af91f3b02aa54770ebf6cc82db904fd",
+    "current_factory_sha256": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "scope": "Post-run factory isolation only. The original frozen source and completed numerical results remain unchanged."
   }
 }

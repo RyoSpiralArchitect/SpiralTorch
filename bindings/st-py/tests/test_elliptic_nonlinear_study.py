@@ -81,6 +81,27 @@ def test_controls_pair_parameters_preserve_rng_and_identity(client):
     assert hashes[0] != hashes[1]
 
 
+def test_factory_does_not_seed_accelerator_generators(client, monkeypatch):
+    calls = []
+    for module, method in ((torch.cuda, "manual_seed_all"), (torch.mps, "manual_seed")):
+        monkeypatch.setattr(module, "_is_in_bad_fork", lambda: False)
+        monkeypatch.setattr(module, method, lambda seed: calls.append(seed))
+    state = torch.get_rng_state().clone()
+    for arm in client.ARMS:
+        client.adapter_for(arm, config(client), 41)
+    assert calls == []
+    assert torch.equal(state, torch.get_rng_state())
+
+
+def test_factory_constructs_on_cpu_without_changing_callers_default_device(client):
+    with torch.device("meta"):
+        for arm in client.ARMS:
+            adapter = client.adapter_for(arm, config(client), 41)
+            assert all(p.device.type == "cpu" for p in adapter.parameters())
+            assert all(b.device.type == "cpu" for b in adapter.buffers())
+        assert torch.empty(1).device.type == "meta"
+
+
 def test_entrypoint_binds_factory_and_geometry_bridge_sources(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
