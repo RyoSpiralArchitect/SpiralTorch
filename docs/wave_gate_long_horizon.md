@@ -62,6 +62,11 @@ Tests exercise an intentional mid-arm interruption against an uninterrupted
 tiny HF model, exact optimizer/parameter/history equality, changed-protocol
 rejection, checkpoint corruption, single-writer exclusion, frozen-base mutation,
 causal target alignment and blocked evaluation before all arms complete.
+The existing Python CI job now runs this suite alongside the Topos, elliptic and
+WaveGate gradient tests using the newly built wheel, CPU Torch and Transformers
+4.57.6. Model access is offline; tiny models are constructed from configurations.
+Required native exports are asserted before pytest so a missing NN build cannot
+silently turn the entire geometry suite into skips.
 
 ## Run
 

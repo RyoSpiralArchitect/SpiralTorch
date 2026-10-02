@@ -37,5 +37,14 @@
     "test_file_sha256": "0a7c1247ee3751438a969cc7a141f24a089acbd9e92b0882060e9c058f35104d",
     "targeted_ruff": "passed",
     "scope": "Post-training receipt aggregation only. Frozen live training source and protocol unchanged."
+  },
+  "ci_import_mode_local_validation": {
+    "passed": 58,
+    "failed": 0,
+    "skipped": 0,
+    "local_test_log_sha256": "f4e4ab6b4ee45dd8c1c937cb92c528629b51942cb830c733a4b83f4305c598a5",
+    "workflow_yaml": "parsed",
+    "native_exports": "required before pytest collection",
+    "scope": "Local macOS run with Python -I and pytest importlib mode, explicitly selecting the frozen native package. This is not remote Ubuntu CI completion."
   }
 }
