@@ -12,6 +12,12 @@ see the [invalidation record](../benchmarks/results/2026-10-02-llm-schedule-v1-i
 It is neither resumed nor pooled with v2. The horizon and acceptance gates did
 not change.
 
+The [completed v2 result](../benchmarks/results/2026-10-02-llm-schedule-v2/README.md)
+retains all nine runs and 432 continuations. Its fixed final assessment is
+`ready_but_negative`: decay loses to both constant intervention and ordinary FT
+on the loop score in every seed. Preserve the default; this schedule is not an
+evidence-backed repetition improvement.
+
 ## Fixed Comparison
 
 - Cached pretrained GPT-2, the existing complete *Pride and Prejudice* text,
