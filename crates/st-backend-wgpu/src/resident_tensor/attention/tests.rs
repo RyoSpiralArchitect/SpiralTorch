@@ -171,7 +171,7 @@ fn capabilities_and_portable_grid_fail_before_pipeline_creation() {
     limits.max_bindings_per_bind_group = 7;
     assert!(preflight(spec, &limits).is_err());
     limits.max_bindings_per_bind_group = 8;
-    limits.max_compute_workgroup_storage_size = (256 * 2 + 64 + 10) * 4 - 1;
+    limits.max_compute_workgroup_storage_size = (256 * 2 + 64 + 18) * 4 - 1;
     assert!(preflight(spec, &limits).is_err());
     limits.max_compute_workgroup_storage_size += 1;
     assert!(preflight(spec, &limits).is_ok());
@@ -245,7 +245,7 @@ fn plain_and_biased_attention_match_rust_across_heads_and_dimension_tails() {
 #[test]
 fn tiled_key_tails_cached_offsets_and_late_overflow_preserve_semantics() {
     let Some(device) = device() else { return };
-    for count in (1..=9).chain([127, 128, 129, 131]) {
+    for count in (1..=9).chain(127..=137) {
         let qs = [1, 1, 1, 17];
         let ks = [1, 1, count, 17];
         let q = data(17, 0.2);
@@ -402,8 +402,8 @@ fn tile_selection_preserves_short_sequences_and_unmeasured_wide_heads() {
     for (keys, dim, expected) in [
         (32, 16, 1),
         (127, 32, 1),
-        (128, 32, 4),
-        (129, 17, 4),
+        (128, 32, 8),
+        (129, 17, 8),
         (256, 33, 1),
         (256, 256, 1),
     ] {

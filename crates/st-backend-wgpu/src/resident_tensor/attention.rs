@@ -119,7 +119,7 @@ impl AttentionKernels {
     ) -> &wgpu::ComputePipeline {
         let tile = key_tile(spec);
         let merged = u32::from(matches!(order, OutputOrder::MergedHeads));
-        self.pipelines[usize::from(tile == 4) * 2 + merged as usize].get_or_init(|| {
+        self.pipelines[usize::from(tile == 8) * 2 + merged as usize].get_or_init(|| {
             let constants = std::collections::HashMap::from([
                 ("KEY_TILE".to_owned(), f64::from(tile)),
                 ("MERGED_HEADS".to_owned(), f64::from(merged)),
@@ -142,7 +142,7 @@ fn key_tile(spec: AttentionSpec) -> u32 {
     // Matched full-chain measurements support this range, not short sequences
     // or wider heads. Keep their established reduction until measured too.
     if spec.keys() >= 128 && spec.head_dim() <= 32 {
-        4
+        8
     } else {
         1
     }
@@ -159,7 +159,7 @@ fn preflight(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<[u32; 2], Ten
         || limits.max_storage_buffers_per_shader_stage < 7
         || limits.max_uniform_buffers_per_shader_stage < 1
         || limits.max_uniform_buffer_binding_size < std::mem::size_of::<Params>() as u32
-        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 10) * 4
+        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 18) * 4
     {
         return Err(TensorError::Limit(
             "attention pipeline (head dimension <= 256)",
