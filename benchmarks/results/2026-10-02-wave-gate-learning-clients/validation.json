@@ -1,0 +1,77 @@
+{
+  "schema": "spiraltorch.wave_gate_learning_validation.v1",
+  "source_revision": "ecf0e8ac345d50e358cf41caa9cc06c69f5109ac",
+  "implementation_revision": "03e0e820cf4520c5b9f529b1c77c5a1bf6ddc3c0",
+  "parent_wave_gate_revision": "5148482cd79b7f257aeb5915e71b17ed25455d5c",
+  "source_sha256": {
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "crates/st-nn/src/layers/wave_gate.rs": "21b5c7cf3b8cf17db801d5fde71e6ff92a58c2bf2ccd1c833c4201f2027d5b4e",
+    "crates/st-nn/src/layers/wave_gate/learning.rs": "2afdb933b1f93d6eea25b6d457de12e51505a0143b8c1a7fd9057ee071dc62b6",
+    "crates/st-tensor/src/pure.rs": "624668bc766278e17d014b488511f76098cf235f37226d9a21ba14875a11a1af",
+    "crates/st-tensor/src/pure/topos.rs": "8b1fe13fe8b02f9edc65c8249d35aa063d0348e7d1a3c3b015c3942ad357d4f3",
+    "bindings/st-py/src/wave_gate_learning.rs": "7009da6a49f434c4b757977c958b46386c8ac955a012f2bdcfc69fdd3f65d2b4",
+    "bindings/st-py/src/lib.rs": "db95ac00767e4a24411fce783730c8665a714feb39966576fa4b0d40ed33963d",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "d5df8920b28ccc165467ed8f9accf2cd797fd266b05200a28b18f101f3d33823",
+    "bindings/st-py/spiraltorch/__init__.py": "c25b377cb7464facc1f7683bf2252b3dbd8f1ef85455397621efce9e1f3d05eb",
+    "bindings/st-py/spiraltorch/__init__.pyi": "e4e3b9bcc61048622102025a99ed1508e25ab16e8aff477333d96be018a49c1d",
+    "bindings/st-py/tests/test_wave_gate_learning.py": "4d25deebc3cd32f1d7597442569f773d1e76aef51c4341477e646912e5201939",
+    "bindings/st-py/examples/hf_elliptic_learning.py": "ecd488abac3efc5d5ab71dadf01dbbfac2f8ac85371d9d3080f6407cb42734a1",
+    "bindings/st-wasm/src/wave_gate_learning.rs": "2dd8feb6c100e39ddf9fcf2a98c01ec6a89c169fc65ad42e9f4482ccf40a2633",
+    "bindings/st-wasm/src/lib.rs": "1506434c25696c34c4fcb9a98370f507172651da83b192af50b15744ee602e06",
+    "bindings/st-wasm/tests/wave_gate_learning.html": "c547091b23aeea0da05366f58a42e86b7f5f002d47d2a259393d061e45c27566"
+  },
+  "binaries": {
+    "native_sha256": "27481307ce596d9530f037d461755c844d70baf324adf1a33d629f549b816b0a",
+    "wasm_sha256": "bbf9d12c9931347497532eddd1bca6148fc745a272b3bddd22ef4e99992d07c4",
+    "wasm_glue_sha256": "0854249fa97d3a6534460def75c5a4fcb6e1ff2f5b3df7439d37d002d0e1c5d5"
+  },
+  "retained_local_log_sha256": {
+    "imports-final.log": "98cb97572198609fbd62255adb89c2e03c7a7174420f7737c757297fbb0f21d1",
+    "imports.log": "37f355a16de52a6db92a05565bd997489d2f0d40bb7378083d70bdabec049c25",
+    "native-build.log": "c22c79dd50731d8a20900f31ea1900db6814072d913aed08c1eed150065d85e5",
+    "native-final-build.log": "9a21a6758913b3e8b75f6d4e5fbd4e6339ecd41db17f3715825289c9ae0520c6",
+    "pretrained-final.log": "3ee99f7d7710c7ef72d01c59f98dedf9de2fa2092f330cd581819d75a5896aa5",
+    "pretrained.log": "3ee99f7d7710c7ef72d01c59f98dedf9de2fa2092f330cd581819d75a5896aa5",
+    "python-final.log": "619b4e39b289dc7b2cf2e0687d81d397b70f3416b07a222a6e77b3a38595fcfd",
+    "python-initial.log": "4388e77f673e670439ad8f78274fcf1600b9c7466cf231c49178d892796596d5",
+    "python.log": "180520c1d75e8b65a83c38a51a6f7bbec993df309d25f241a3b1cc093bed87bd",
+    "rust-nn-final.log": "7e424fda97cd3ce063a15863096cafb4cdd5c7ba46c10d06139cdf62154b5fd7",
+    "rust-nn.log": "38916d9b5d8a96c37867af7df997afcf93c79c9225482c3743fa36903959ed81",
+    "wasm-build.log": "267fd132c98555b02f6dc10c80b2c4915611cfb07318fe2e3609df8a6d3e34a8",
+    "wasm-final-build.log": "21670fa6edac8a1e78e7b4763c54ab29756ee611d20eae4ab1c9a9e17f2271ff"
+  },
+  "validation": {
+    "rust_nn": {
+      "passed": 755,
+      "failed": 0,
+      "ignored": 0
+    },
+    "python_geometry": {
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "mps_transport_exercised": true
+    },
+    "public_imports": {
+      "passed": 22
+    },
+    "native_build": "passed",
+    "wasm_nn_build": "passed",
+    "pinned_format": "passed",
+    "targeted_ruff": "passed",
+    "browser_status": "passed",
+    "browser_forward_max_error": 0,
+    "browser_vjp_max_error": 0,
+    "browser_resume_next_update_equal": true,
+    "pretrained_base_unchanged": true,
+    "pretrained_numerics_unchanged_after_integration": true,
+    "browser_numerics_unchanged_after_integration": true
+  },
+  "caveats": [
+    "CPU transport only; MPS tests are not a resident GPU geometry path.",
+    "One deterministic pretrained trajectory, tiny authored corpus; tangent control was slightly better.",
+    "No speed advantage, generalization or long-FT stability claim.",
+    "Existing strict Clippy failures from parent are not superseded.",
+    "Initial Python public-export omission and incorrect test-oracle porosity factor were repaired before final validation."
+  ]
+}
