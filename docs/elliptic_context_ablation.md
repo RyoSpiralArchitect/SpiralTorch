@@ -58,3 +58,13 @@ Publish numeric block losses, paired deltas, hashes and verification; keep model
 corpora and checkpoints local. Reused endpoints and three seeds are exploratory.
 An inference intervention can expose the saved model's dependence on a term, but
 its distribution shift does not establish the causal reason for a training gain.
+
+## Completed Probe
+
+The [30-condition result](../benchmarks/results/2026-10-03-elliptic-context-ablation/README.md)
+exactly replays all native losses. On the frozen elliptic checkpoints, a fixed
+chart-anchor replacement improves both sets in all three seeds, while removing
+the entire correction hurts all three seeds. Prefix averaging improves Alice in
+all seeds but is mixed/slightly worse on Pride. This motivates testing anchored
+feature conditioning in the Rust learning path before adding more attention
+machinery. It does not establish a geometry advantage or a retraining outcome.
