@@ -77,6 +77,13 @@ operators drive a bounded synthetic Gauss-Newton fit; no alternate gradient is
 silently inserted into the production adapter. Whether this helps actual LM
 optimization remains a matched-training question, not a concluded quality win.
 
+The [chart-step study](../benchmarks/results/2026-10-03-elliptic-chart-step-study/README.md)
+has now launched four matched arms across three seeds. Rust's mean two-coordinate
+metric corrects an explicit Adam proposal while preserving that proposal's norm;
+ordinary tangent receives the same optimizer treatment as the geometric arm.
+The code/native runtime and 512-update protocol are frozen before training.
+Preflight passes, but training outcomes and a quality conclusion remain pending.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:
