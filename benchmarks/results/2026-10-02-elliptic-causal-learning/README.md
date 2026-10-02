@@ -26,6 +26,11 @@ modified by this implementation.
 - Kernel-contract Clippy, targeted Python Ruff and source whitespace checks pass.
 - Strict TypeScript checks pass for the public WASM declarations and usage fixture;
   the new signatures agree with the generated wasm-bindgen declarations.
+- CI caught a missing optional-PyTorch causal adapter placeholder. The regression
+  fails before the fix and passes afterward in an isolated no-Torch process;
+  public star imports succeed and use raises the intended dependency error.
+  The full post-fix geometry suite passes 78 tests with no skips. This only changes
+  the no-Torch import path; frozen learning runtimes and native binaries stay intact.
 
 `browser-report.json` contains the visible browser result and all learning losses.
 `validation.json` records runtime/source hashes and the verification scope.

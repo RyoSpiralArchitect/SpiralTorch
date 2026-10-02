@@ -295,6 +295,10 @@ if torch is None:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             _require_torch()
 
+    class EllipticCausalResidualAdapter:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            _require_torch()
+
     class WaveGateAdapter:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             _require_torch()

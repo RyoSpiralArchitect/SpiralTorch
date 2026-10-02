@@ -55,5 +55,21 @@
     "skipped": 0,
     "local_log_sha256": "9d8859a0a5aa4fcfcb4309b12508aeb1e7c91a0c86a4ce50f8d935eba4575ce3"
   },
-  "typescript_validation": "strict noEmit usage fixture passed; signatures match generated wasm-bindgen declarations"
+  "typescript_validation": "strict noEmit usage fixture passed; signatures match generated wasm-bindgen declarations",
+  "after_optional_dependency_fix": {
+    "python_tests": {
+      "passed": 78,
+      "failed": 0,
+      "skipped": 0
+    },
+    "regression": "Same corrected test fails on original client and passes after placeholder fix.",
+    "local_red_log_sha256": "3630d63de17904eab5399e07776c2a7e627f9475512760a77ac3e61ca2c76711",
+    "local_green_suite_log_sha256": "5689b73b5754c12369ae4a3b4da20e8700a7c3520916b49ede4cb77b62cfce65",
+    "source_sha256": {
+      "bindings/st-py/spiraltorch/geometry_autograd.py": "73b9702a71fb889882912817916e61412935639929baa237089bea59090400f6",
+      "bindings/st-py/tests/test_geometry_optional_dependency.py": "c43a351b253c5f0a839bf9fe3eb48eb195f75f4f625e000fbd6eb0b397e87e2a"
+    },
+    "native_rebuilt": false,
+    "frozen_learning_runtime_modified": false
+  }
 }
