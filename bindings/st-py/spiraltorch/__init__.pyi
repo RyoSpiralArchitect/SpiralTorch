@@ -5543,6 +5543,12 @@ class HfRepetitionUnlikelihoodBatchPlan:
     report: Mapping[str, object] | None
     sequences: tuple[Mapping[str, object], ...] | None
 
+class HfCausalLabelAlignmentCollator:
+    def __init__(
+        self, base_collator: Callable[[List[Dict[str, Any]]], Mapping[str, Any]],
+    ) -> None: ...
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]: ...
+
 class HfRepetitionUnlikelihoodCollator:
     config: Dict[str, object]
     def __init__(
@@ -5569,6 +5575,7 @@ def hf_repetition_unlikelihood_recipe_contract(
     max_candidates_per_position: int,
     candidate_source: str | Mapping[str, object] = ...,
     proposal_top_k: int = ...,
+    objective_control: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
 def hf_repetition_unlikelihood_trainer_class(
     base_trainer_class: type[Any],
@@ -5760,6 +5767,14 @@ def validate_zspace_semantic_review_unblind(
 def validate_zspace_semantic_review_unblind_trusted_legacy_replay(
     report: Dict[str, object],
 ) -> Dict[str, object]: ...
+def zspace_repetition_objective_control(
+    *,
+    config: Dict[str, object],
+    base_strength: float,
+    completed_update_slots: int,
+    active_position_count: int,
+    eligible_target_count: int,
+) -> Dict[str, Any]: ...
 def zspace_repetition_unlikelihood_plan(
     *,
     sequences: List[Dict[str, object]] | Tuple[Dict[str, object], ...],
@@ -13050,6 +13065,7 @@ __all__ = [
     "HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA",
     "HfRepetitionUnlikelihoodBatchPlan",
     "HfRepetitionUnlikelihoodCollator",
+    "HfCausalLabelAlignmentCollator",
     "hf_repetition_unlikelihood_recipe_contract",
     "hf_repetition_unlikelihood_trainer_class",
     "validate_zspace_parameter_trajectory",
@@ -13128,6 +13144,7 @@ __all__ = [
     "zspace_stochastic_schrodinger_complex_step",
     "validate_zspace_stochastic_schrodinger_complex",
     "zspace_repetition_unlikelihood_plan",
+    "zspace_repetition_objective_control",
     "zspace_imaginary_time_schrodinger",
     "zspace_temperature_control",
     "inference_to_mapping",

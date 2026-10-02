@@ -765,6 +765,8 @@ from .semantic_review import (
     zspace_semantic_review_map_id,
     zspace_semantic_review_map_id_trusted_legacy_replay,
 )
+from .repetition_objective import zspace_repetition_objective_control
+from .hf_causal_labels import HfCausalLabelAlignmentCollator
 from .hf_repetition_unlikelihood import (
     HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY,
     HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA,
@@ -8812,8 +8814,10 @@ _EXTRAS.extend(
         "HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA",
         "HfRepetitionUnlikelihoodBatchPlan",
         "HfRepetitionUnlikelihoodCollator",
+        "HfCausalLabelAlignmentCollator",
         "hf_repetition_unlikelihood_recipe_contract",
         "hf_repetition_unlikelihood_trainer_class",
+        "zspace_repetition_objective_control",
         "ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE",
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
         "ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER",

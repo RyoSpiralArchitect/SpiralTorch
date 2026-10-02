@@ -1173,6 +1173,43 @@ declare module "spiraltorch-wasm" {
     };
 
     /** Plan in Rust within shared work/output budgets and bounded browser ingress. */
+    export type ZSpaceRepetitionObjectiveConfig = {
+        normalization: "active_positions" | "eligible_targets";
+        schedule: { kind: "constant" } | {
+            kind: "linear_decay";
+            start_update: number;
+            end_update: number;
+            final_scale: number;
+        };
+    };
+    export type ZSpaceRepetitionObjectiveRequest = {
+        config: ZSpaceRepetitionObjectiveConfig;
+        base_strength: number;
+        completed_update_slots: number;
+        active_position_count: number;
+        eligible_target_count: number;
+    };
+    export type ZSpaceRepetitionObjectiveControl = {
+        policy: {
+            contract_version: "spiraltorch.zspace_repetition_objective.v1";
+            semantic_owner: "st-core::runtime::zspace_repetition_objective";
+            clock_rule: string;
+            objective_rule: string;
+            config: ZSpaceRepetitionObjectiveConfig;
+            base_strength: number;
+            policy_id: string;
+        };
+        completed_update_slots: number;
+        active_position_count: number;
+        eligible_target_count: number;
+        schedule_scale: number;
+        normalization_scale: number;
+        effective_strength: number;
+    };
+    /** Per-microbatch scaling of the active-position mean; not a global token mean. */
+    export function zspaceRepetitionObjectiveControlObject(request: ZSpaceRepetitionObjectiveRequest): ZSpaceRepetitionObjectiveControl;
+    export function zspaceRepetitionObjectiveControlJson(requestJson: string): string;
+
     export function zspaceRepetitionUnlikelihoodPlanJson(requestJson: string): string;
     export function zspaceRepetitionUnlikelihoodPlanObject(
         request: ZSpaceRepetitionUnlikelihoodRequest,

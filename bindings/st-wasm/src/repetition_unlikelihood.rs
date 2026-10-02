@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use serde_json::Value;
+use st_core::runtime::zspace_repetition_objective::{
+    zspace_repetition_objective_control, ZSpaceRepetitionObjectiveRequest,
+};
 use st_core::runtime::zspace_repetition_unlikelihood::{
     plan_zspace_repetition_unlikelihood, validate_zspace_repetition_unlikelihood_value,
     ZSpaceRepetitionUnlikelihoodError, ZSpaceRepetitionUnlikelihoodRequest,
@@ -155,6 +158,39 @@ pub fn validate_zspace_repetition_unlikelihood_plan_object(
     to_json_compatible_js(&plan)
 }
 
+pub fn zspace_repetition_objective_control_value(request: Value) -> Result<Value, String> {
+    let request: ZSpaceRepetitionObjectiveRequest =
+        serde_json::from_value(request).map_err(|error| error.to_string())?;
+    let control =
+        zspace_repetition_objective_control(request).map_err(|error| error.to_string())?;
+    serde_json::to_value(control).map_err(|error| error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceRepetitionObjectiveControlJson)]
+pub fn zspace_repetition_objective_control_json(
+    request_json: &JsString,
+) -> Result<String, JsValue> {
+    let request_json = bounded_json_string_from_js(
+        request_json,
+        ZSPACE_REPETITION_UNLIKELIHOOD_MAX_INGRESS_BYTES,
+        "repetition objective request JSON",
+    )?;
+    let request =
+        bounded_json_value(&request_json, "repetition objective request").map_err(js_error)?;
+    let control = zspace_repetition_objective_control_value(request).map_err(js_error)?;
+    serde_json::to_string(&control).map_err(js_error)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = zspaceRepetitionObjectiveControlObject)]
+pub fn zspace_repetition_objective_control_object(request: &JsValue) -> Result<JsValue, JsValue> {
+    let request = snapshot_repetition_js_value(request, "repetition objective request")?;
+    let request = serde_wasm_bindgen::from_value::<Value>(request).map_err(js_error)?;
+    let control = zspace_repetition_objective_control_value(request).map_err(js_error)?;
+    to_json_compatible_js(&control)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +201,32 @@ mod tests {
         ZSPACE_REPETITION_UNLIKELIHOOD_MAX_MATERIALIZED_PLAN_BYTES,
         ZSPACE_REPETITION_UNLIKELIHOOD_MAX_WORK_UNITS,
     };
+
+    #[test]
+    fn objective_control_is_the_shared_rust_calculation() {
+        let request = json!({
+            "config": {"normalization": "eligible_targets", "schedule": {
+                "kind": "linear_decay", "start_update": 0, "end_update": 4, "final_scale": 0.0
+            }},
+            "base_strength": 0.2, "completed_update_slots": 2,
+            "active_position_count": 1, "eligible_target_count": 4
+        });
+        let result = zspace_repetition_objective_control_value(request.clone()).unwrap();
+        assert_eq!(result["effective_strength"], json!(0.025));
+        assert_eq!(
+            result,
+            serde_json::to_value(
+                zspace_repetition_objective_control(
+                    serde_json::from_value(request.clone()).unwrap()
+                )
+                .unwrap()
+            )
+            .unwrap()
+        );
+        let mut invalid = request;
+        invalid["completed_update_slots"] = json!(1.5);
+        assert!(zspace_repetition_objective_control_value(invalid).is_err());
+    }
 
     fn request() -> ZSpaceRepetitionUnlikelihoodRequest {
         serde_json::from_value(json!({
