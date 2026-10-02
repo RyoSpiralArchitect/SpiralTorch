@@ -98,6 +98,29 @@ def test_protocol_binds_real_bridge_and_separates_extra_scalar(client, monkeypat
     assert config["kernel"]["kernel_len"] == 32 and config["kernel"]["step"] == 1
 
 
+@pytest.mark.parametrize("order", [0.5, 1.0])
+def test_training_shape_matches_independent_torch_causal_convolution(client, order):
+    generator = torch.Generator().manual_seed(211)
+    x = torch.randn(2, 128, 768, generator=generator, requires_grad=True)
+    alpha = torch.tensor(order, requires_grad=True)
+    upstream = torch.randn(x.shape, generator=generator)
+    actual = client.st.fractional_gl_autograd(
+        x, alpha, axis=1, kernel=client.st.FractionalGlKernel(kernel_len=32))
+    # Independent f64 polynomial plus grouped Torch correlation, not a production path.
+    a = alpha.double()
+    coefficients = [torch.ones_like(a)]
+    for k in range(1, 32):
+        coefficients.append(coefficients[-1] * (k - 1 - a) / k)
+    weight = torch.stack(coefficients).flip(0).reshape(1, 1, 32).repeat(768, 1, 1)
+    padded = torch.nn.functional.pad(x.double().transpose(1, 2), (31, 0))
+    reference = torch.nn.functional.conv1d(padded, weight, groups=768).transpose(1, 2).float()
+    torch.testing.assert_close(actual, reference, rtol=3e-6, atol=3e-6)
+    actual_gradients = torch.autograd.grad(actual, (x, alpha), upstream)
+    reference_gradients = torch.autograd.grad(reference, (x, alpha), upstream)
+    for actual_gradient, reference_gradient in zip(actual_gradients, reference_gradients):
+        torch.testing.assert_close(actual_gradient, reference_gradient, rtol=3e-5, atol=3e-5)
+
+
 def test_real_hf_all_arms_preserve_frozen_order_and_resume_exactly(client, summary_module, tmp_path):
     driver = client.study
     config = recipe(client)
