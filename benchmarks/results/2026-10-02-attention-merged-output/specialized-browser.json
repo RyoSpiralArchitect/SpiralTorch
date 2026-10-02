@@ -1,0 +1,1020 @@
+{
+  "standalone": {
+    "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+    "checks": [
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "rectangular/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "rectangular/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "rectangular/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "rectangular/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "rectangular/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "prefill/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "prefill/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "prefill/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "prefill/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "prefill/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "prefill/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "prefill/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "prefill/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "prefill/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_decode/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_decode/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_decode/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_decode/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.60770320892334e-8,
+        "name": "cached_decode/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.60770320892334e-8,
+        "name": "cached_decode/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.60770320892334e-8,
+        "name": "cached_decode/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.60770320892334e-8,
+        "name": "cached_decode/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 3.725290298461914e-8,
+        "name": "cached_decode/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_chunk/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_chunk/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_chunk/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "cached_chunk/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "cached_chunk/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 8.940696716308594e-8,
+        "name": "head_tail/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 8.940696716308594e-8,
+        "name": "head_tail/plain",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 8.940696716308594e-8,
+        "name": "head_tail/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 8.940696716308594e-8,
+        "name": "head_tail/plain",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "head_tail/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "head_tail/z_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "head_tail/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 4.470348358154297e-8,
+        "name": "head_tail/z_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "head_tail/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "head_tail/pair_bias",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "head_tail/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 2.9802322387695312e-8,
+        "name": "head_tail/pair_bias",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "head_tail/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "head_tail/both_biases",
+        "output_order": "head_major"
+      },
+      {
+        "layout": "canonical",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "head_tail/both_biases",
+        "output_order": "merged_heads"
+      },
+      {
+        "layout": "strided",
+        "max_abs_error": 5.960464477539063e-8,
+        "name": "head_tail/both_biases",
+        "output_order": "merged_heads"
+      }
+    ],
+    "constant_checks": [
+      {
+        "actual": 2,
+        "expected": 2,
+        "name": "defaults"
+      },
+      {
+        "actual": 14.5,
+        "expected": 14.5,
+        "name": "named_and_numeric"
+      },
+      {
+        "actual": 13.5,
+        "expected": 13.5,
+        "name": "second_pipeline"
+      }
+    ],
+    "passed": true,
+    "reference_torch_version": "2.12.1",
+    "schema": "spiraltorch.resident_attention.browser.v1",
+    "scope": "forward numerical parity only; no speed or learning claim"
+  },
+  "chains": [
+    {
+      "suite": "parity",
+      "report": {
+        "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+        "checks": [
+          {
+            "max_abs_error": 1.862645149230957e-9,
+            "name": "small_tail/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-9,
+            "name": "small_tail/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/plain"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/zrbf"
+          },
+          {
+            "max_abs_error": 7.450580596923828e-9,
+            "name": "transformer_width/unmasked/plain"
+          },
+          {
+            "max_abs_error": 7.450580596923828e-9,
+            "name": "transformer_width/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.1175870895385742e-8,
+            "name": "transformer_width/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.30385160446167e-8,
+            "name": "transformer_width/causal/plain"
+          },
+          {
+            "max_abs_error": 1.30385160446167e-8,
+            "name": "transformer_width/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.6763806343078613e-8,
+            "name": "transformer_width/causal/zrbf"
+          }
+        ],
+        "geometry_checks": [
+          {
+            "max_abs_error": 0,
+            "name": "small_tail"
+          },
+          {
+            "max_abs_error": 0,
+            "name": "transformer_width"
+          }
+        ],
+        "passed": true,
+        "projection": "scalar",
+        "reference_torch_version": "2.12.1",
+        "schema": "spiraltorch.attention_chain.v1",
+        "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+      }
+    },
+    {
+      "suite": "parity",
+      "report": {
+        "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+        "checks": [
+          {
+            "max_abs_error": 1.862645149230957e-9,
+            "name": "small_tail/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-9,
+            "name": "small_tail/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/plain"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/zrbf"
+          },
+          {
+            "max_abs_error": 7.450580596923828e-9,
+            "name": "transformer_width/unmasked/plain"
+          },
+          {
+            "max_abs_error": 7.450580596923828e-9,
+            "name": "transformer_width/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.1175870895385742e-8,
+            "name": "transformer_width/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.30385160446167e-8,
+            "name": "transformer_width/causal/plain"
+          },
+          {
+            "max_abs_error": 1.30385160446167e-8,
+            "name": "transformer_width/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.6763806343078613e-8,
+            "name": "transformer_width/causal/zrbf"
+          }
+        ],
+        "geometry_checks": [
+          {
+            "max_abs_error": 0,
+            "name": "small_tail"
+          },
+          {
+            "max_abs_error": 0,
+            "name": "transformer_width"
+          }
+        ],
+        "passed": true,
+        "projection": "register8",
+        "reference_torch_version": "2.12.1",
+        "schema": "spiraltorch.attention_chain.v1",
+        "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+      }
+    },
+    {
+      "suite": "parity",
+      "report": {
+        "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+        "checks": [
+          {
+            "max_abs_error": 1.862645149230957e-9,
+            "name": "small_tail/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-9,
+            "name": "small_tail/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/plain"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 3.725290298461914e-9,
+            "name": "small_tail/causal/zrbf"
+          },
+          {
+            "max_abs_error": 7.450580596923828e-9,
+            "name": "transformer_width/unmasked/plain"
+          },
+          {
+            "max_abs_error": 7.450580596923828e-9,
+            "name": "transformer_width/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.1175870895385742e-8,
+            "name": "transformer_width/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.30385160446167e-8,
+            "name": "transformer_width/causal/plain"
+          },
+          {
+            "max_abs_error": 1.30385160446167e-8,
+            "name": "transformer_width/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.6763806343078613e-8,
+            "name": "transformer_width/causal/zrbf"
+          }
+        ],
+        "geometry_checks": [
+          {
+            "max_abs_error": 0,
+            "name": "small_tail"
+          },
+          {
+            "max_abs_error": 0,
+            "name": "transformer_width"
+          }
+        ],
+        "passed": true,
+        "projection": "register16",
+        "reference_torch_version": "2.12.1",
+        "schema": "spiraltorch.attention_chain.v1",
+        "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+      }
+    },
+    {
+      "suite": "benchmark",
+      "report": {
+        "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+        "checks": [
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.4901161193847656e-8,
+            "name": "short_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 1.4901161193847656e-8,
+            "name": "short_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/causal/zrbf"
+          },
+          {
+            "max_abs_error": 6.332993507385254e-8,
+            "name": "batched_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 6.332993507385254e-8,
+            "name": "batched_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 5.587935447692871e-8,
+            "name": "batched_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 4.842877388000488e-8,
+            "name": "batched_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 4.842877388000488e-8,
+            "name": "batched_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 4.470348358154297e-8,
+            "name": "batched_prefill/causal/zrbf"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.7881393432617188e-7,
+            "name": "wide_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.341104507446289e-7,
+            "name": "wide_prefill/causal/zrbf"
+          }
+        ],
+        "geometry_checks": [
+          {
+            "max_abs_error": 0,
+            "name": "short_prefill"
+          },
+          {
+            "max_abs_error": 0,
+            "name": "batched_prefill"
+          },
+          {
+            "max_abs_error": 5.960464477539063e-8,
+            "name": "wide_prefill"
+          }
+        ],
+        "passed": true,
+        "projection": "scalar",
+        "reference_torch_version": "2.12.1",
+        "schema": "spiraltorch.attention_chain.v1",
+        "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+      }
+    },
+    {
+      "suite": "benchmark",
+      "report": {
+        "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+        "checks": [
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.4901161193847656e-8,
+            "name": "short_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 1.4901161193847656e-8,
+            "name": "short_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/causal/zrbf"
+          },
+          {
+            "max_abs_error": 6.332993507385254e-8,
+            "name": "batched_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 6.332993507385254e-8,
+            "name": "batched_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 5.587935447692871e-8,
+            "name": "batched_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 4.842877388000488e-8,
+            "name": "batched_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 4.842877388000488e-8,
+            "name": "batched_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 4.470348358154297e-8,
+            "name": "batched_prefill/causal/zrbf"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.7881393432617188e-7,
+            "name": "wide_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.341104507446289e-7,
+            "name": "wide_prefill/causal/zrbf"
+          }
+        ],
+        "geometry_checks": [
+          {
+            "max_abs_error": 0,
+            "name": "short_prefill"
+          },
+          {
+            "max_abs_error": 0,
+            "name": "batched_prefill"
+          },
+          {
+            "max_abs_error": 5.960464477539063e-8,
+            "name": "wide_prefill"
+          }
+        ],
+        "passed": true,
+        "projection": "register8",
+        "reference_torch_version": "2.12.1",
+        "schema": "spiraltorch.attention_chain.v1",
+        "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+      }
+    },
+    {
+      "suite": "benchmark",
+      "report": {
+        "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+        "checks": [
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.4901161193847656e-8,
+            "name": "short_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 1.4901161193847656e-8,
+            "name": "short_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.862645149230957e-8,
+            "name": "short_prefill/causal/zrbf"
+          },
+          {
+            "max_abs_error": 6.332993507385254e-8,
+            "name": "batched_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 6.332993507385254e-8,
+            "name": "batched_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 5.587935447692871e-8,
+            "name": "batched_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 4.842877388000488e-8,
+            "name": "batched_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 4.842877388000488e-8,
+            "name": "batched_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 4.470348358154297e-8,
+            "name": "batched_prefill/causal/zrbf"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/unmasked/plain"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/unmasked/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.7881393432617188e-7,
+            "name": "wide_prefill/unmasked/zrbf"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/causal/plain"
+          },
+          {
+            "max_abs_error": 1.7136335372924805e-7,
+            "name": "wide_prefill/causal/zero_geometry"
+          },
+          {
+            "max_abs_error": 1.341104507446289e-7,
+            "name": "wide_prefill/causal/zrbf"
+          }
+        ],
+        "geometry_checks": [
+          {
+            "max_abs_error": 0,
+            "name": "short_prefill"
+          },
+          {
+            "max_abs_error": 0,
+            "name": "batched_prefill"
+          },
+          {
+            "max_abs_error": 5.960464477539063e-8,
+            "name": "wide_prefill"
+          }
+        ],
+        "passed": true,
+        "projection": "register16",
+        "reference_torch_version": "2.12.1",
+        "schema": "spiraltorch.attention_chain.v1",
+        "scope": "full projection/attention forward and independent geometry parity; no speed or quality claim"
+      }
+    }
+  ]
+}

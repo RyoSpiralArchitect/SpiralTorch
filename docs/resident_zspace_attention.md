@@ -213,7 +213,8 @@ python3 -m http.server 8782 --bind 127.0.0.1
 ```
 
 Open `http://127.0.0.1:8782/crates/st-nn/tests/attention_chain_browser.html` and
-require `passed: true`, 12 output checks and two geometry checks. Native runtime
+require `passed: true`, 12 condition pairs (ordinary and direct merged-head
+outputs) and two geometry checks. Native runtime
 tests also compare the full chain with the original `ZRBFAttention` mean and
 exercise frozen parameters, noncontiguous inputs, retained outputs and inherited
 non-finite guards. The GPU CI lane runs the full-chain fixture; the recorded
@@ -222,7 +223,9 @@ browser probe was run locally, not by that CI lane.
 ## Bounded Performance Comparison
 
 `resident_attention_chain_bench` consumes the independent fixture with three
-larger shapes. `bench_attention_chain_vs_torch.py` rotates native executables and
+larger shapes. It explicitly measures `forward_merged_heads`, not the default
+NN forwarding path, and labels this `output_path=direct_merged_heads`.
+`bench_attention_chain_vs_torch.py` rotates native executables and
 eager PyTorch CPU/MPS runs, requires complete numerical/sample coverage, and
 records every sample rather than just favorable medians. Build native executables
 in release mode, and keep baseline/candidate binaries separate for paired runs.
