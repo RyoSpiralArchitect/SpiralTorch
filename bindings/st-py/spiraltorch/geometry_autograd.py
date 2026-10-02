@@ -60,7 +60,9 @@ if torch is not None:
 
     class _WaveGateFunction(torch.autograd.Function):
         @staticmethod
-        def forward(ctx: Any, value: Any, gate: Any, bias: Any, kernel: Any) -> Any:
+        def forward(
+            ctx: Any, value: Any, gate: Any, bias: Any, kernel: Any, conditioning: Any
+        ) -> Any:
             features = value.shape[-1]
             ctx.snapshot = kernel.forward(
                 _values(value),
@@ -72,13 +74,15 @@ if torch is not None:
             # Keep Torch's version checks, but the mathematical pullback reads
             # only the owned Rust snapshot, never current adapter parameters.
             ctx.save_for_backward(value, gate, bias)
+            if conditioning is not None:
+                conditioning.update(json.loads(ctx.snapshot.conditioning_json()))
             return torch.tensor(
                 ctx.snapshot.output, device=value.device, dtype=value.dtype
             ).reshape(value.shape)
 
         @staticmethod
         @torch.autograd.function.once_differentiable
-        def backward(ctx: Any, grad_output: Any) -> tuple[Any, Any, Any, None]:
+        def backward(ctx: Any, grad_output: Any) -> tuple[Any, Any, Any, None, None]:
             value, gate, bias = ctx.saved_tensors
             gradients = ctx.snapshot.vjp(_values(grad_output))
             return tuple(
@@ -86,7 +90,7 @@ if torch is not None:
                     gradient, device=parameter.device, dtype=parameter.dtype
                 ).reshape(parameter.shape)
                 for gradient, parameter in zip(gradients, (value, gate, bias))
-            ) + (None,)
+            ) + (None, None)
 
     class _ToposResonatorFunction(torch.autograd.Function):
         @staticmethod
@@ -124,12 +128,21 @@ if torch is not None:
             )
 
 
-def wave_gate_autograd(value: Any, gate: Any, bias: Any, *, kernel: Any = None) -> Any:
+def wave_gate_autograd(
+    value: Any,
+    gate: Any,
+    bias: Any,
+    *,
+    kernel: Any = None,
+    return_conditioning: bool = False,
+) -> Any:
     """Rust WaveGate with shared feature vectors and sum-reduced parameter VJPs.
 
     Leading axes are independent rows; the final feature axis is coupled by the
     radial projection. Float32 CPU transport only, with first-order gradients.
     No parameter-gradient averaging or training-policy rewrite is applied.
+    When requested, return (output, Rust scalar conditioning) from this same
+    forward snapshot. It measures local projection gains, not full loss gradients.
     """
     _input(value)
     for name, parameter in (("gate", gate), ("bias", bias)):
@@ -149,7 +162,9 @@ def wave_gate_autograd(value: Any, gate: Any, bias: Any, *, kernel: Any = None) 
         raise TypeError("kernel must be an immutable Rust WaveGateKernel")
     if max(value.numel(), value.shape[-1]) > kernel.max_values:
         raise ValueError("input exceeds the geometric kernel's value budget")
-    return _WaveGateFunction.apply(value, gate, bias, kernel)
+    conditioning = {} if return_conditioning else None
+    output = _WaveGateFunction.apply(value, gate, bias, kernel, conditioning)
+    return (output, conditioning) if return_conditioning else output
 
 
 def topos_resonator_autograd(value: Any, gate: Any, *, kernel: Any = None) -> Any:
@@ -227,15 +242,30 @@ else:
             return self._kernel.execution_backend
 
         def forward(self, value: Any) -> Any:
+            return self._forward(value, return_conditioning=False)
+
+        def forward_with_conditioning(self, value: Any) -> Any:
+            """Return (residual output, local Rust conditioning); bypass has None."""
+            return self._forward(value, return_conditioning=True)
+
+        def _forward(self, value: Any, *, return_conditioning: bool) -> Any:
             _input(value)
             if value.shape[-1] != self.features:
                 raise ValueError("input feature width differs from the adapter")
             strength = _strength(self.strength)
             if strength == 0.0:
-                return value
-            return value + strength * wave_gate_autograd(
-                value, self.gate, self.bias, kernel=self._kernel
+                return (value, None) if return_conditioning else value
+            result = wave_gate_autograd(
+                value,
+                self.gate,
+                self.bias,
+                kernel=self._kernel,
+                return_conditioning=return_conditioning,
             )
+            if return_conditioning:
+                output, conditioning = result
+                return value + strength * output, conditioning
+            return value + strength * result
 
         def get_extra_state(self) -> dict[str, Any]:
             return {

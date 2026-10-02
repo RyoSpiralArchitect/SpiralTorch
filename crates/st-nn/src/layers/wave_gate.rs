@@ -15,7 +15,7 @@ use st_tensor::{
 };
 
 mod learning;
-pub use learning::{WaveGateKernel, WaveGateLearningBatch};
+pub use learning::{WaveGateConditioning, WaveGateKernel, WaveGateLearningBatch};
 
 #[allow(clippy::too_many_arguments)]
 fn emit_wave_gate_forward_meta(

@@ -18,6 +18,25 @@ pub struct WaveGateLearningBatch {
     output: Tensor,
 }
 
+/// Local conditioning of the captured map, not a full loss-gradient estimate.
+/// Projection gains are relative to its zero-norm Jacobian (I / sqrt(-k)).
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct WaveGateConditioning {
+    pub schema: &'static str,
+    pub rows: usize,
+    pub features: usize,
+    pub gate_outside_values: usize,
+    pub affine_outside_values: usize,
+    pub affine_nonfinite_values: usize,
+    pub affine_abs_slope_mean: Option<f64>,
+    pub dimensionless_norm_mean: Option<f64>,
+    pub dimensionless_norm_max: Option<f64>,
+    pub relative_radial_gain_mean: Option<f64>,
+    pub relative_radial_gain_min: Option<f64>,
+    pub relative_tangential_gain_mean: Option<f64>,
+    pub relative_tangential_gain_min: Option<f64>,
+}
+
 impl WaveGateKernel {
     pub fn new(
         curvature: f32,
@@ -90,6 +109,69 @@ impl WaveGateLearningBatch {
         &self.output
     }
 
+    /// Computes scalar diagnostics on demand; it never changes the saved VJP.
+    pub fn conditioning(&self) -> WaveGateConditioning {
+        let (rows, features) = self.input.shape();
+        let topos = &self.kernel.topos;
+        let scale = f64::from((-topos.curvature()).sqrt());
+        let gate: Vec<_> = self
+            .gate
+            .data()
+            .iter()
+            .map(|&v| topos.saturate(v))
+            .collect();
+        let mut affine_outside_values = 0;
+        let mut affine_nonfinite_values = 0;
+        let mut slope_sum = 0.0;
+        let mut norm_sum = 0.0;
+        let mut norm_max = 0.0f64;
+        let mut radial_sum = 0.0;
+        let mut radial_min = f64::INFINITY;
+        let mut tangent_sum = 0.0;
+        let mut tangent_min = f64::INFINITY;
+        for row in self.input.data().chunks_exact(features) {
+            let mut norm_sq = 0.0;
+            for col in 0..features {
+                let affine = row[col] * gate[col] + self.bias.data()[col];
+                affine_outside_values += usize::from(affine.abs() > topos.saturation());
+                affine_nonfinite_values += usize::from(!affine.is_finite());
+                let (z, slope) = topos.saturate_with_slope(affine);
+                slope_sum += f64::from(slope.abs());
+                norm_sq += f64::from(z).powi(2);
+            }
+            let ratio = norm_sq.sqrt() / scale;
+            let tanh = ratio.tanh();
+            let radial = 1.0 - tanh * tanh;
+            let tangent = if ratio == 0.0 { 1.0 } else { tanh / ratio };
+            norm_sum += ratio;
+            norm_max = norm_max.max(ratio);
+            radial_sum += radial;
+            radial_min = radial_min.min(radial);
+            tangent_sum += tangent;
+            tangent_min = tangent_min.min(tangent);
+        }
+        WaveGateConditioning {
+            schema: "spiraltorch.wave_gate_conditioning.v1",
+            rows,
+            features,
+            gate_outside_values: self
+                .gate
+                .data()
+                .iter()
+                .filter(|v| v.abs() > topos.saturation())
+                .count(),
+            affine_outside_values,
+            affine_nonfinite_values,
+            affine_abs_slope_mean: (rows > 0).then(|| slope_sum / (rows * features) as f64),
+            dimensionless_norm_mean: (rows > 0).then(|| norm_sum / rows as f64),
+            dimensionless_norm_max: (rows > 0).then_some(norm_max),
+            relative_radial_gain_mean: (rows > 0).then(|| radial_sum / rows as f64),
+            relative_radial_gain_min: (rows > 0).then_some(radial_min),
+            relative_tangential_gain_mean: (rows > 0).then(|| tangent_sum / rows as f64),
+            relative_tangential_gain_min: (rows > 0).then_some(tangent_min),
+        }
+    }
+
     /// Sum-reduced parameter derivatives, without mutation or optimizer policy.
     pub fn vjp(&self, upstream: &[f32]) -> PureResult<WaveGateVjp> {
         let (rows, cols) = self.input.shape();
@@ -104,6 +186,47 @@ impl WaveGateLearningBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditioning_matches_radial_and_tangential_vjps_without_mutation() {
+        let kernel = WaveGateKernel::new(-1.0, 10.0, 0.2, 4).unwrap();
+        let batch = kernel
+            .forward(&[0.3, 0.4], &[1.0; 2], &[0.0; 2], 1, 2)
+            .unwrap();
+        let report = batch.conditioning();
+        assert_eq!(report.affine_outside_values, 0);
+        assert_eq!(report.affine_abs_slope_mean, Some(1.0));
+        for (seed, gain) in [
+            ([0.6, 0.8], report.relative_radial_gain_mean.unwrap()),
+            ([-0.8, 0.6], report.relative_tangential_gain_mean.unwrap()),
+        ] {
+            let actual = batch.vjp(&seed).unwrap();
+            for (&v, s) in actual.grad_input.data().iter().zip(seed) {
+                assert!((f64::from(v) - f64::from(s) * gain).abs() < 1e-7);
+            }
+        }
+        let empty = kernel
+            .forward(&[], &[1.0; 2], &[0.0; 2], 0, 2)
+            .unwrap()
+            .conditioning();
+        assert!(empty.dimensionless_norm_mean.is_none());
+        assert!(empty.relative_radial_gain_min.is_none());
+        assert!(serde_json::to_string(&empty).is_ok());
+        let zero = kernel
+            .forward(&[0.0; 2], &[0.0; 2], &[0.0; 2], 1, 2)
+            .unwrap()
+            .conditioning();
+        assert_eq!(zero.relative_radial_gain_mean, Some(1.0));
+        assert_eq!(zero.relative_tangential_gain_mean, Some(1.0));
+        let saturated = WaveGateKernel::new(-1.0, 1.0, 0.2, 4)
+            .unwrap()
+            .forward(&[4.0; 2], &[2.0; 2], &[0.0; 2], 1, 2)
+            .unwrap()
+            .conditioning();
+        assert_eq!(saturated.gate_outside_values, 2);
+        assert_eq!(saturated.affine_outside_values, 2);
+        assert!(saturated.affine_abs_slope_mean.unwrap() < 1.0);
+    }
 
     #[test]
     fn snapshot_owns_inputs_and_matches_native_parameter_sum() {

@@ -1,0 +1,55 @@
+{
+  "schema": "spiraltorch.wave_gate_conditioning_summary.v1",
+  "source_result_sha256": "a4be3d34c15116757208d4a93045e2f1bba7b4f0fe74df096de5454030e9ba78",
+  "status": "completed",
+  "baseline_development_loss": 3.982235014438629,
+  "baseline_train_probe_loss": 4.088549911975861,
+  "paired": [
+    {
+      "seed": 41,
+      "tangentDev": 3.9778005480766296,
+      "waveDev": 3.9785041213035583,
+      "waveMinusTangent": 0.0007035732269287109,
+      "tangentTrain": 4.084915280342102,
+      "waveTrain": 4.085460543632507,
+      "wideNumericallyIdentical": true,
+      "anySaturation": false,
+      "radialGain": 0.7149598342410547,
+      "tangentialGain": 0.8963332724540077,
+      "dimensionlessNorm": 0.5954246509255362,
+      "allResume": true
+    },
+    {
+      "seed": 43,
+      "tangentDev": 3.9778837263584137,
+      "waveDev": 3.9786026775836945,
+      "waveMinusTangent": 0.0007189512252807617,
+      "tangentTrain": 4.084812164306641,
+      "waveTrain": 4.085412263870239,
+      "wideNumericallyIdentical": true,
+      "anySaturation": false,
+      "radialGain": 0.6884407191142691,
+      "tangentialGain": 0.8856292570763478,
+      "dimensionlessNorm": 0.6301181585821131,
+      "allResume": true
+    },
+    {
+      "seed": 47,
+      "tangentDev": 3.978056848049164,
+      "waveDev": 3.9786638021469116,
+      "waveMinusTangent": 0.0006069540977478027,
+      "tangentTrain": 4.084929585456848,
+      "waveTrain": 4.085449039936066,
+      "wideNumericallyIdentical": true,
+      "anySaturation": false,
+      "radialGain": 0.7115128357116497,
+      "tangentialGain": 0.8949608818482939,
+      "dimensionlessNorm": 0.5999621190446627,
+      "allResume": true
+    }
+  ],
+  "mean_wave_minus_tangent": 0.0006764928499857584,
+  "total_primary_updates": 288,
+  "total_validation_updates": 18,
+  "all_base_weights_unchanged": true
+}

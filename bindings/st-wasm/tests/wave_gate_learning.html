@@ -34,6 +34,14 @@ try {
   const upstream = new Float32Array(fixture.upstream);
   snapshot = kernel.forward(x, gate, bias, 2, 2);
   report.forward_max_error = compare(snapshot.output, fixture.output);
+  const conditioning = JSON.parse(snapshot.conditioning_json());
+  assert(Object.keys(conditioning).length === Object.keys(fixture.conditioning).length, "conditioning fields");
+  report.conditioning_max_error = 0;
+  for (const [key, expected] of Object.entries(fixture.conditioning)) {
+    if (typeof expected === "number")
+      report.conditioning_max_error = Math.max(report.conditioning_max_error, compare([conditioning[key]], [expected]));
+    else assert(conditioning[key] === expected, `conditioning ${key}`);
+  }
   let gradient = snapshot.vjp(upstream);
   try {
     report.vjp_max_error = Math.max(...["grad_input", "grad_gate", "grad_bias"].map(
