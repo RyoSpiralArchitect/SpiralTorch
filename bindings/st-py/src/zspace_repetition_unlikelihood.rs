@@ -2,6 +2,9 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pyo3::wrap_pyfunction;
+use st_core::runtime::zspace_repetition_objective::{
+    zspace_repetition_objective_control, ZSpaceRepetitionObjectiveRequest,
+};
 use st_core::runtime::zspace_repetition_unlikelihood::{
     plan_zspace_repetition_unlikelihood, validate_zspace_repetition_unlikelihood_value,
     validate_zspace_repetition_unlikelihood_value_trusted_legacy_replay,
@@ -125,7 +128,25 @@ fn _zspace_repetition_unlikelihood_validate_trusted_legacy_replay(
     )
 }
 
+#[pyfunction]
+fn _zspace_repetition_objective_control(
+    py: Python<'_>,
+    request: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let request = mapping_value(request, "Z-space repetition objective request")?;
+    let request: ZSpaceRepetitionObjectiveRequest = serde_json::from_value(request)
+        .map_err(|error| json_error("invalid repetition objective request", error))?;
+    let control = py
+        .detach(|| zspace_repetition_objective_control(request))
+        .map_err(|error| json_error("repetition objective control failed", error))?;
+    response_to_py(py, &control, "repetition objective encoding failed")
+}
+
 pub(crate) fn register(_py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    parent.add_function(wrap_pyfunction!(
+        _zspace_repetition_objective_control,
+        parent
+    )?)?;
     for (name, value) in [
         (
             "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",

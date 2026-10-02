@@ -399,6 +399,9 @@ jobs:
           node bindings/st-wasm/tests/zspace_feedback_window.cjs \
             "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
             "$RUNNER_TEMP/vision-input-checkpoint-python/feedback-window.json"
+          node bindings/st-wasm/tests/repetition_objective.cjs \
+            "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
+            "$RUNNER_TEMP/vision-input-checkpoint-python/repetition-objective.json"
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
@@ -461,6 +464,10 @@ jobs:
         env:
           SPIRALTORCH_FEEDBACK_WINDOW_HANDOFF: ${{ runner.temp }}/feedback-window.json
         run: python -I bindings/st-py/tests/test_zspace_feedback_window.py
+      - name: Native repetition objective replay fixture
+        run: |
+          python -I tools/verify_repetition_objective_clients.py \
+            --output-fixture "$RUNNER_TEMP/repetition-objective.json"
       - name: Share fresh Python input checkpoint for WASM replay
         uses: actions/upload-artifact@v7
         with:
@@ -468,6 +475,7 @@ jobs:
           path: |
             ${{ runner.temp }}/vision-input-checkpoint.json
             ${{ runner.temp }}/feedback-window.json
+            ${{ runner.temp }}/repetition-objective.json
           if-no-files-found: error
           retention-days: 1
       - name: Sanity-check packaged stubs

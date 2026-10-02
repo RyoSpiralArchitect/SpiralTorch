@@ -503,3 +503,104 @@ def test_hf_recipe_contract_rejects_noncanonical_numeric_types() -> None:
             context_window=16,
             max_candidates_per_position=8,
         )
+
+
+def _controlled_recipe(normalization="eligible_targets"):
+    return st.hf_repetition_unlikelihood_recipe_contract(
+        strength=0.1,
+        ngram_order=3,
+        context_window=16,
+        max_candidates_per_position=8,
+        objective_control={
+            "normalization": normalization,
+            "schedule": {
+                "kind": "linear_decay",
+                "start_update": 0,
+                "end_update": 4,
+                "final_scale": 0.0,
+            },
+        },
+    )
+
+
+def test_controlled_hf_loss_and_gradient_use_rust_counts_and_update_slot():
+    from types import SimpleNamespace
+
+    model = _Model()
+    trainer = st.hf_repetition_unlikelihood_trainer_class(_BaseTrainer)(
+        model=model,
+        zspace_repetition_unlikelihood_recipe=_controlled_recipe(),
+    )
+    trainer.state = SimpleNamespace(global_step=2)
+    loss = trainer.compute_loss(model, _inputs())
+    auxiliary = -math.log(1.0 - 3.0 / 7.0)
+    # One active position, four eligible targets, and half schedule strength.
+    assert loss.item() == pytest.approx(2.0 + 0.1 * 0.5 / 4 * auxiliary)
+    loss.backward()
+    controlled_grad = model.logits.grad.clone()
+    legacy, legacy_model = _trainer()
+    legacy.compute_loss(legacy_model, _inputs()).backward()
+    torch.testing.assert_close(controlled_grad, legacy_model.logits.grad / 8)
+    trainer.state.global_step = 4
+    trainer.compute_loss(model, _inputs())
+    receipt = trainer.zspace_repetition_unlikelihood_receipt()
+    assert receipt["schema"].endswith("v4")
+    assert receipt["mean_weighted_auxiliary_loss"] == pytest.approx(
+        0.1 * 0.5 / 4 * auxiliary / 2
+    )
+    assert receipt["first_completed_update_slots"] == 2
+    assert receipt["last_objective_control"]["completed_update_slots"] == 4
+    assert receipt["last_objective_control"]["effective_strength"] == 0
+
+
+def test_controlled_recipe_is_canonical_and_legacy_default_is_unchanged():
+    recipe = _recipe()
+    assert recipe["schema"].endswith("v4")
+    assert "objective_control" not in recipe
+    controlled = _controlled_recipe()
+    controlled["objective_control"]["policy_id"] = "sha256:" + "0" * 64
+    with pytest.raises(ValueError, match="Rust contract"):
+        st.hf_repetition_unlikelihood_trainer_class(_BaseTrainer)(
+            model=_Model(),
+            zspace_repetition_unlikelihood_recipe=controlled,
+        )
+
+
+def test_empty_auxiliary_loss_does_not_reduce_overflowing_logits():
+    logits = torch.full((1, 6, 5), 60000.0, dtype=torch.float16, requires_grad=True)
+    assert not torch.isfinite(logits.sum())
+    result = hf_repetition_unlikelihood._HfRepetitionUnlikelihoodTrainerMixin._spiraltorch_auxiliary_loss(
+        logits, {"positions": []}
+    )
+    assert result.item() == 0.0
+    result.backward()
+    assert torch.count_nonzero(logits.grad).item() == 0
+
+
+def test_bridge_seals_explicit_objective_control_and_rejects_incomplete_decay():
+    bridge = _load_bridge()
+    common = [
+        "--training-recipe-only",
+        "--zspace-repetition-unlikelihood-strength",
+        "0.1",
+    ]
+    args = bridge.parse_args(
+        common
+        + [
+            "--zspace-repetition-unlikelihood-normalization",
+            "eligible-targets",
+            "--zspace-repetition-unlikelihood-decay-end-update",
+            "256",
+        ]
+    )
+    recipe = args._hf_repetition_unlikelihood_recipe
+    assert recipe["schema"].endswith("v5")
+    assert recipe["objective_control"]["config"]["schedule"]["end_update"] == 256
+    assert (
+        bridge._training_recipe_trainer_contract(args)["zspace_repetition_unlikelihood"]
+        == recipe
+    )
+    with pytest.raises(SystemExit):
+        bridge.parse_args(
+            common + ["--zspace-repetition-unlikelihood-decay-start-update", "2"]
+        )
