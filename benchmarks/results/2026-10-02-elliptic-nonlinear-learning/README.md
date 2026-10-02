@@ -80,6 +80,15 @@ The final local suite again passed 68 tests, with no skips; that is separate fro
 remote CI completion. The later lazy-telemetry optimization was not part of this
 frozen experiment and is not retroactively included in its source identity.
 
+Post-run review found that the adapter factory used global `torch.manual_seed`
+inside a CPU-only RNG fork, which could seed an unrelated accelerator generator.
+The current factory seeds only the CPU generator and explicitly constructs on
+CPU, even when the caller has another default device. Both new regression cases
+fail before the fix; the full suite now passes 70 tests. All nine initial CPU
+parameter hashes still match this recorded study. The frozen executable source,
+raw results and completed-resume evidence remain unchanged; use the original
+frozen source for resuming this historical run, not the newer factory file.
+
 `results.json.gz` retains every arm/seed's numerical training history and final
 per-block losses, compressed from 2.73 MB to 0.40 MB. `journal.json` preserves
 completed cursors, checkpoint receipts and the uncompressed result hash.

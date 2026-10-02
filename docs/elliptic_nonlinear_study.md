@@ -54,7 +54,8 @@ It supplies a seed-aware adapter factory to the existing long-horizon loop,
 rather than copying its checkpoint, optimizer, cursor or evaluation logic.
 The protocol binds the factory source, elliptic bridge, shared driver/helper,
 native binary, configuration, model, tokens and batch schedules. Factory
-construction preserves the caller's RNG. The same initial-parameter hash is
+construction explicitly uses CPU, restores its RNG, and does not seed accelerator
+generators or change the caller's default device. The same initial-parameter hash is
 stored in checkpoints and rechecked on resume before loading their learned state.
 
 Each saved endpoint must preserve frozen base weights and reproduce its next
