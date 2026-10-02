@@ -10,6 +10,96 @@ mod browser {
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+    async fn check_compute_constants(runtime: &WgpuRuntime) -> Result<Vec<serde_json::Value>> {
+        let context = runtime.context();
+        let gpu = context.device();
+        gpu.push_error_scope(wgpu::ErrorFilter::Validation);
+        let shader = gpu.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("attention.constant_probe"),
+            source: wgpu::ShaderSource::Wgsl(
+                "override VALUE: f32 = 1.0;
+                 override COUNT: u32 = 1u;
+                 @id(7) override SHIFT: u32 = 0u;
+                 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
+                 @compute @workgroup_size(1) fn main() {
+                     output[0] = VALUE + f32(COUNT) + f32(SHIFT);
+                 }"
+                .into(),
+            ),
+        });
+        let mut checks = Vec::new();
+        for (name, constants, expected) in [
+            ("defaults", std::collections::HashMap::new(), 2f32),
+            (
+                "named_and_numeric",
+                std::collections::HashMap::from([
+                    ("VALUE".to_owned(), 3.5),
+                    ("COUNT".to_owned(), 4.),
+                    ("7".to_owned(), 7.),
+                ]),
+                14.5,
+            ),
+            (
+                "second_pipeline",
+                std::collections::HashMap::from([
+                    ("VALUE".to_owned(), -2.5),
+                    ("COUNT".to_owned(), 5.),
+                    ("7".to_owned(), 11.),
+                ]),
+                13.5,
+            ),
+        ] {
+            let pipeline = gpu.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(name),
+                layout: None,
+                module: &shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
+            });
+            let output = gpu.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(name),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let binding = gpu.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(name),
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: output.as_entire_binding(),
+                }],
+            });
+            let mut encoder = gpu.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&pipeline);
+                pass.set_bind_group(0, &binding, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            context.queue().submit(Some(encoder.finish()));
+            let actual = st_backend_wgpu::runtime::read_buffer_async::<f32>(
+                context.clone(),
+                &output,
+                1,
+                "constant_probe",
+            )
+            .await?;
+            if actual != [expected] {
+                return Err(format!("compute constants {name}: {actual:?} != {expected}").into());
+            }
+            checks
+                .push(serde_json::json!({"name": name, "actual": actual[0], "expected": expected}));
+        }
+        if let Some(error) = gpu.pop_error_scope().await {
+            return Err(format!("compute constants WebGPU validation: {error}").into());
+        }
+        Ok(checks)
+    }
+
     // Materialize the same oracle values into a reversed, padded storage layout.
     // Only this test setup rearranges host data; attention must read the view.
     fn upload_view(
@@ -44,6 +134,7 @@ mod browser {
     pub async fn run() -> Result<String> {
         let runtime = WgpuRuntime::request_headless("resident.attention.browser").await?;
         let device = TensorDevice::new(runtime.clone())?;
+        let constant_checks = check_compute_constants(&runtime).await?;
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../tests/fixtures/resident_attention_torch.json"
         ))?;
@@ -155,6 +246,7 @@ mod browser {
             "adapter": format!("{:?}", runtime.adapter_info()),
             "reference_torch_version": fixture["torch_version"],
             "checks": checks,
+            "constant_checks": constant_checks,
             "scope": "forward numerical parity only; no speed or learning claim",
         }))?)
     }
