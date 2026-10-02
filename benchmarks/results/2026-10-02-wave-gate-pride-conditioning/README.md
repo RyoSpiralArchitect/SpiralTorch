@@ -128,7 +128,9 @@ cargo check --locked -p spiraltorch-py --no-default-features --features extensio
 python -m pytest bindings/st-py/tests/test_wave_gate_learning.py bindings/st-py/tests/test_wave_gate_vjp.py bindings/st-py/tests/test_geometry_autograd.py bindings/st-py/tests/test_elliptic_learning.py bindings/st-py/tests/test_wave_gate_conditioning_example.py -v -rs
 ```
 
-For the browser, first generate its separate native reference fixture:
+For the browser, the published `results.json` already includes `native_fixture`
+and can be served directly at `/pretrained.json`. To regenerate a reference
+against a newly built native extension instead, run:
 
 ```bash
 python bindings/st-py/examples/hf_elliptic_learning.py --geometry wave_gate --model-dir "$LOCAL_GPT2" --block transformer.h.0.mlp --features 768 --steps 2 --seeds 17 > "$NEW_BROWSER_FIXTURE"
@@ -136,10 +138,11 @@ python bindings/st-py/examples/hf_elliptic_learning.py --geometry wave_gate --mo
 
 Build `spiraltorch-wasm --features nn` for wasm32, run matching wasm-bindgen
 with target web, serve the generated module/snippets at `/module/`,
-the newly generated fixture at `/pretrained.json` and
+either the published result or the newly generated reference at `/pretrained.json` and
 `bindings/st-wasm/tests/wave_gate_learning.html` at `/` using loopback HTTP.
-Require the page's visible status to be passed. The novel study's `results.json`
-does not contain this browser fixture and must not be substituted for it.
+Require the page's visible status to be passed. A fresh reference checks native
+and WASM agreement; the published reference additionally detects drift from the
+frozen study's mathematics.
 
 Recorded environment: Rust 1.98.0; formatter nightly-2026-04-15; Python 3.12.6;
 Torch 2.12.1; Transformers 4.57.6; wasm-bindgen 0.2.104; macOS aarch64;
