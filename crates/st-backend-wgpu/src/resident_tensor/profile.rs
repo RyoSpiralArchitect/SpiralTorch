@@ -84,11 +84,21 @@ struct CapturePermit(Shared<ProfileSlot>);
 
 impl CapturePermit {
     fn acquire(slot: Shared<ProfileSlot>) -> Result<Self, TensorError> {
-        slot.1
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                (count < MAX_PENDING_CAPTURES).then_some(count + 1)
-            })
-            .map_err(|_| TensorError::Limit("unread convolution profile budget"))?;
+        let mut count = slot.1.load(Ordering::Acquire);
+        loop {
+            if count >= MAX_PENDING_CAPTURES {
+                return Err(TensorError::Limit("unread convolution profile budget"));
+            }
+            match slot.1.compare_exchange_weak(
+                count,
+                count + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(observed) => count = observed,
+            }
+        }
         Ok(Self(slot))
     }
 }
