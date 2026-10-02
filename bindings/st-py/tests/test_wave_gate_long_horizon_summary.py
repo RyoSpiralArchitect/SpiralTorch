@@ -87,6 +87,24 @@ def test_paired_summary_keeps_losing_seeds_and_baseline_separate(summary_module)
     assert (plan, result, journal) == before
 
 
+def test_protocol_specific_notes_do_not_invent_radius_or_seed_claims(summary_module):
+    plan, result, journal = fixture()
+    plan["config"]["summary_schema"] = "spiraltorch.elliptic_nonlinear_summary.v1"
+    plan["config"]["comparison_notes"] = [
+        "Paired projection initialization and data order.",
+        "Equal parameter counts, unequal feature rank.",
+    ]
+    summary = summary_module.summarize(plan, result, journal, "sealed")
+    assert summary["schema"] == "spiraltorch.elliptic_nonlinear_summary.v1"
+    assert all(
+        note in summary["interpretation"] for note in plan["config"]["comparison_notes"]
+    )
+    assert not any(
+        "radius 4" in note or "not the frozen model" in note
+        for note in summary["interpretation"]
+    )
+
+
 @pytest.mark.parametrize(
     "corruption",
     [
