@@ -8,6 +8,7 @@ use st_kernel_contracts::{
 };
 use thiserror::Error;
 
+pub mod attention;
 pub(crate) mod capture;
 mod checked_import;
 pub mod classification;
@@ -23,6 +24,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    Attention(#[from] st_kernel_contracts::attention::AttentionError),
     #[error(transparent)]
     LayerNorm(#[from] st_kernel_contracts::normalization::LayerNormError),
     #[error(transparent)]
@@ -60,6 +63,7 @@ struct Kernels {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
     runtime: WgpuRuntime,
+    attention: std::sync::OnceLock<attention::AttentionKernels>,
     mse: std::sync::OnceLock<loss::MseKernels>,
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
@@ -215,6 +219,7 @@ impl TensorDevice {
             layout,
             pipeline,
             runtime,
+            attention: std::sync::OnceLock::new(),
             mse: std::sync::OnceLock::new(),
             classification: std::sync::OnceLock::new(),
             normalization: std::sync::OnceLock::new(),
