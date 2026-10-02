@@ -16,28 +16,44 @@ def require(condition, message):
 
 
 def causal_factorial_contrasts(config, runs, measured, sets):
-    arms = {"tangent", "elliptic", "causal_tangent", "causal_elliptic"}
+    gated = config.get("schema") == "spiraltorch.elliptic_gated_protocol.v1"
+    prefix = "gated" if gated else "causal"
+    tangent, elliptic = f"{prefix}_tangent", f"{prefix}_elliptic"
+    arms = {"tangent", "elliptic", tangent, elliptic}
     require(set(config["arms"]) == arms, "incomplete causal factorial design")
     for seed in config["seeds"]:
-        rows = [runs[f"{seed}:{arm}"] for arm in arms]
-        hashes = {row.get("initial_parameter_sha256") for row in rows}
+        rows = {arm: runs[f"{seed}:{arm}"] for arm in arms}
+        hashes = {
+            row.get("initial_projection_sha256" if gated and arm.startswith("gated_")
+                    else "initial_parameter_sha256")
+            for arm, row in rows.items()
+        }
         require(
             len(hashes) == 1
             and all(isinstance(value, str) and len(value) == 64 for value in hashes),
             "factorial initial parameters are not paired",
         )
         require(
-            all(row["parameter_count"] == 11 * config["features"] + 2 for row in rows),
+            all(row["parameter_count"] == 11 * config["features"] + 2
+                + int(gated and arm.startswith("gated_"))
+                for arm, row in rows.items()),
             "factorial parameter counts differ",
         )
+        if gated:
+            gated_hashes = {rows[arm].get("initial_parameter_sha256") for arm in (tangent, elliptic)}
+            require(
+                len(gated_hashes) == 1
+                and all(isinstance(value, str) and len(value) == 64 for value in gated_hashes),
+                "gated initial parameters are not paired",
+            )
     contrasts = {
         "geometry_pointwise": {"elliptic": 1, "tangent": -1},
-        "geometry_causal": {"causal_elliptic": 1, "causal_tangent": -1},
-        "mixing_tangent": {"causal_tangent": 1, "tangent": -1},
-        "mixing_elliptic": {"causal_elliptic": 1, "elliptic": -1},
+        f"geometry_{prefix}": {elliptic: 1, tangent: -1},
+        "mixing_tangent": {tangent: 1, "tangent": -1},
+        "mixing_elliptic": {elliptic: 1, "elliptic": -1},
         "interaction": {
-            "causal_elliptic": 1,
-            "causal_tangent": -1,
+            elliptic: 1,
+            tangent: -1,
             "elliptic": -1,
             "tangent": 1,
         },
@@ -64,6 +80,36 @@ def causal_factorial_contrasts(config, runs, measured, sets):
                     {"seed": seed, "ce_difference": value}
                     for seed, value in zip(config["seeds"], values)
                 ],
+            }
+    return report
+
+
+def gated_trajectories(config, runs):
+    report = {}
+    for seed in config["seeds"]:
+        for arm in ("gated_tangent", "gated_elliptic"):
+            key = f"{seed}:{arm}"
+            row = runs[key]
+            before = [r.get("raw_mix_before_update") for r in row["records"]]
+            after = [r.get("raw_mix_after_update") for r in row["records"]]
+            gradients = [r.get("raw_mix_gradient") for r in row["records"]]
+            values = before + after + gradients + [row.get("final_raw_mix")]
+            require(
+                all(type(v) in (int, float) and math.isfinite(v) for v in values),
+                "missing or nonfinite gate trajectory",
+            )
+            require(
+                before[0] == 0.0 and after[:-1] == before[1:]
+                and after[-1] == row["final_raw_mix"],
+                "gate trajectory is not continuous or endpoint differs",
+            )
+            report[key] = {
+                "initial_raw_mix": before[0],
+                "final_raw_mix": after[-1],
+                "final_mix": math.tanh(after[-1]),
+                "min_raw_mix": min(before + after),
+                "max_raw_mix": max(before + after),
+                "nonzero_gradient_steps": sum(v != 0 for v in gradients),
             }
     return report
 
@@ -202,10 +248,14 @@ def summarize(plan, result, journal, result_sha256):
             "No speed or pristine-corpus generalization claim.",
         ],
     }
-    if config.get("schema") == "spiraltorch.elliptic_causal_protocol.v1":
+    if config.get("schema") in {
+        "spiraltorch.elliptic_causal_protocol.v1", "spiraltorch.elliptic_gated_protocol.v1"
+    }:
         summary["paired_factorial_contrasts"] = causal_factorial_contrasts(
             config, runs, measured, sets
         )
+    if config.get("schema") == "spiraltorch.elliptic_gated_protocol.v1":
+        summary["gate_trajectories"] = gated_trajectories(config, runs)
     return summary
 
 

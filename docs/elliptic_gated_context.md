@@ -108,3 +108,6 @@ ordinary tangent control**, including the extra scalar, initialization, optimize
 batch order and budgets. Keep pointwise controls and report the learned gate
 trajectory. Gate sign or movement alone is not evidence of improved language
 quality. Reused Pride/Alice endpoints remain exploratory.
+
+The [paired learned-context study](elliptic_gated_study.md) implements that
+comparison using the shared restartable HF loop and a fixed four-arm recipe.
