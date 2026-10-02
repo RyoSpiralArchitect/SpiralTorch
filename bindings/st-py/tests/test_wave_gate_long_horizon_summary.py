@@ -45,7 +45,7 @@ def test_gate_serialization_is_independent_of_libm_and_decimal_context(summary_m
             summary_module.canonical_gate(raw)
 
 
-@pytest.mark.parametrize("study", ["elliptic-gated-study", "elliptic-anchored-study", "elliptic-chart-step-study"])
+@pytest.mark.parametrize("study", ["elliptic-gated-study", "elliptic-anchored-study", "elliptic-chart-step-study", "fractional-memory-study"])
 def test_committed_summary_rebuilds_byte_for_byte(summary_module, monkeypatch, tmp_path, study):
     directory = Path(__file__).resolve().parents[3] / f"benchmarks/results/2026-10-03-{study}"
     output = tmp_path / "summary.json"

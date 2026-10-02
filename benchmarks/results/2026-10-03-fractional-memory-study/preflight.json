@@ -1,0 +1,60 @@
+{
+  "schema": "spiraltorch.fractional_memory_preflight.v1",
+  "status": "running",
+  "scope": "Historical launch/preflight record, not a completion or quality claim",
+  "study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+  "source_revision": "21121092b6e5ecbe7ba4464046f1a02d7021d3a4",
+  "native_integration_revision": "727d31c7ca80ea348e8d6623ff95aa0ff64d5651",
+  "tests": {
+    "python_passed": 218,
+    "skipped": 0,
+    "exit_code": 0
+  },
+  "design": {
+    "active_runs": 9,
+    "seeds": [
+      41,
+      43,
+      47
+    ],
+    "updates_per_run": 512,
+    "primary_updates_planned": 4608,
+    "continuation_only_updates_planned": 18,
+    "shared_frozen_baseline": true,
+    "train_blocks": 1204,
+    "evaluation_blocks": {
+      "pride_unused_tail": 120,
+      "alice_transfer": 32
+    }
+  },
+  "runtime": {
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "device": "cpu",
+    "dtype": "float32",
+    "native_sha256": "d35e9645230c3f3406d411ef31535c226b4c14c63de33f7b7f270120f202579c",
+    "client_files": 4,
+    "package_files": 67,
+    "client_manifest_sha256": "9e3aab912bdab92b0fe6ec77366c0e7bc4a3e04a559c6b08e4ff4834ca1cffae"
+  },
+  "plan_sha256": "1cf159e438bf0451e8bf0f6df2398e8851dc2ae65200d209dc5e5363ccc0e8b3",
+  "source_sha256": {
+    "bindings/st-py/examples/hf_fractional_memory_study.py": "405dfdc7d51095b5e07cc3155d3f87ba5a4ec265c9b5ab965f5330052f4a8037",
+    "bindings/st-py/examples/hf_wave_gate_long_horizon.py": "dc8ba20563a8f00bbb9900c9e0efa6dbb2a0f42bc29b06cf11b7d077bea2db61",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "949e974bb53c3f9637fbde25b4e0d461a0d6c54f8a4e147c088960886fb9a4d2",
+    "bindings/st-py/tests/test_fractional_memory_study.py": "d08b9ed728964fd7b9c9fcbe8f4d4073ddad1704cedcc647c72731ab867d676f",
+    "tools/summarize_wave_gate_long_horizon.py": "be2ffe42d067a6069042155554d6c74808e1428b9b6c3e48cd9dc03d8c8fabde",
+    "crates/st-frac/src/lib.rs": "91efd0fedd53cd65be5036cacdd61503e253b4e91a1bbd103b5c094038f68c8e",
+    "crates/st-frac/src/learning.rs": "eaca5110174eef0478d1e1baa2cf7a3f9a7b0e43726c8cf150d53b7b9f76a328",
+    "bindings/st-py/src/fractional_learning.rs": "859112706cb339a60df54983906ffc4833fcb88f848170e78acf6f968f0f2f17",
+    "bindings/st-py/spiraltorch/fractional_autograd.py": "b516390ba8330e082b6ff57072429631287808542310d0927752d443a47ad54e"
+  },
+  "local_test_log_sha256": "a5fb6806fe506ecb068c2b60ed4c4248f2d4f535481515b2333b68574101ab5b",
+  "limits": [
+    "Running is not completion; all nine runs and exact continuation must finish before endpoint scoring",
+    "Minibatch seeds vary shuffle order and the finite-budget training subset; active arms are paired within each seed",
+    "Learned GL has one extra trainable scalar; no matched-compute or speed claim",
+    "Pride/Alice are reused exploratory data, not untouched confirmation",
+    "No raw text, model weights, checkpoints or raw logs are published"
+  ]
+}

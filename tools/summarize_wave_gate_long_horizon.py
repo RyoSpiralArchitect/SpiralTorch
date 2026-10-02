@@ -136,6 +136,74 @@ def contrast_report(config, measured, sets, contrasts):
     return report
 
 
+def fractional_report(config, runs, measured, sets):
+    arms = {"pointwise", "fractional_fixed", "fractional_learned"}
+    require(set(config["arms"]) == arms and config.get("reference_arm") == "pointwise",
+            "incomplete fractional design")
+    require(type(config.get("features")) is int and config["features"] > 0,
+            "invalid fractional feature count")
+    initial = config.get("initial_alpha")
+    require(type(initial) in (int, float) and math.isfinite(initial) and initial > 0,
+            "invalid initial alpha")
+    trajectories = {}
+    for seed in config["seeds"]:
+        hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256")
+                  for arm in arms if arm != "pointwise"}
+        require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
+                "fractional initial parameters are not paired")
+        for arm in config["arms"]:
+            row = runs[f"{seed}:{arm}"]
+            learned = arm == "fractional_learned"
+            require(type(row.get("parameter_count")) is int
+                    and type(row.get("trainable_parameter_count")) is int
+                    and row["parameter_count"] == config["features"] + int(arm != "pointwise")
+                    and row.get("trainable_parameter_count") == config["features"] + int(learned),
+                    "fractional parameter counts differ")
+            if arm == "pointwise":
+                continue
+            records = row["records"]
+            before = [r.get("log_alpha_before_update") for r in records]
+            after = [r.get("log_alpha_after_update") for r in records]
+            alpha_before = [r.get("alpha_before_update") for r in records]
+            alpha_after = [r.get("alpha_after_update") for r in records]
+            final_log, final_alpha = row.get("final_log_alpha"), row.get("final_alpha")
+            require(all(type(v) in (int, float) and math.isfinite(v)
+                        for v in before + after + alpha_before + alpha_after + [final_log, final_alpha]),
+                    "missing or nonfinite order trajectory")
+            for log_alpha, alpha in zip(before + after, alpha_before + alpha_after):
+                try:
+                    expected = math.exp(log_alpha)
+                except OverflowError:
+                    expected = math.inf
+                require(alpha > 0 and math.isfinite(expected)
+                        and math.isclose(alpha, expected, rel_tol=2e-6, abs_tol=2**-149),
+                        "alpha does not match positive f32 order")
+            require(math.isclose(alpha_before[0], initial, rel_tol=2e-6)
+                    and before[1:] == after[:-1] and alpha_before[1:] == alpha_after[:-1]
+                    and final_log == after[-1] and final_alpha == alpha_after[-1],
+                    "order trajectory or endpoint differs")
+            require(all(r.get("log_alpha_trainable") is learned for r in records),
+                    "order training mode differs")
+            gradients = [r.get("log_alpha_gradient") for r in records]
+            if learned:
+                require(all(type(v) in (int, float) and math.isfinite(v) for v in gradients)
+                        and gradients[0] == 0, "invalid learned order gradients")
+            else:
+                require(all(v is None for v in gradients) and all(v == before[0] for v in before + after),
+                        "fixed fractional order changed")
+            trajectories[f"{seed}:{arm}"] = {
+                "learnable_order": learned, "initial_alpha": alpha_before[0],
+                "final_alpha": final_alpha, "final_log_alpha": final_log,
+                "min_alpha": min(alpha_before + alpha_after),
+                "max_alpha": max(alpha_before + alpha_after),
+                "nonzero_order_gradient_steps": sum(v not in (None, 0) for v in gradients),
+            }
+    contrasts = {"fixed_minus_pointwise": {"fractional_fixed": 1, "pointwise": -1},
+                 "learned_minus_fixed": {"fractional_learned": 1, "fractional_fixed": -1},
+                 "learned_minus_pointwise": {"fractional_learned": 1, "pointwise": -1}}
+    return contrast_report(config, measured, sets, contrasts), trajectories
+
+
 def chart_step_report(config, runs, measured, sets):
     arms = {"adam_tangent", "adam_elliptic", "chart_tangent", "chart_elliptic"}
     require(set(config["arms"]) == arms and config.get("reference_arm") == "adam_tangent", "incomplete chart factorial design")
@@ -377,6 +445,11 @@ def summarize(plan, result, journal, result_sha256):
             config, runs, measured, sets
         )
         summary["gate_trajectories"] = gated_trajectories(config, runs, arms)
+    if config.get("schema") == "spiraltorch.fractional_memory_protocol.v1":
+        summary["reference_arm"] = reference
+        summary["paired_fractional_contrasts"], summary["order_trajectories"] = fractional_report(
+            config, runs, measured, sets
+        )
     if config.get("schema") == "spiraltorch.elliptic_chart_step_protocol.v1":
         summary["reference_arm"] = reference
         summary["paired_factorial_contrasts"], summary["chart_step_trajectories"] = chart_step_report(config, runs, measured, sets)

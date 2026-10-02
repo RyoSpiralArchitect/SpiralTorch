@@ -97,6 +97,14 @@ actual wasm32 synthetic fit learns its target order. This is finite-history,
 host-f32 learning connectivity, not pretrained quality or resident performance.
 Matched pointwise/fixed-order/learned-order controls precede any combination
 with the geometric adapters above.
+The [fractional LM protocol](fractional_memory_study.md) now makes these three
+active controls executable with paired schedules, a shared frozen baseline,
+fixed/learned-order receipts and exact interruption/resume tests. The
+[completed nine-run result](../benchmarks/results/2026-10-03-fractional-memory-study/README.md)
+verifies all 4608 updates and continuations. Learned alpha reaches 0.7733-0.8269;
+it slightly improves fixed GL on Pride and slightly worsens it on Alice. The
+pointwise control remains best in every seed on both sets, so the shared Rust
+learning connection is established without claiming a quality or speed win.
 
 ## Restarted execution slice: vision across Rust, Python, and browser
 
