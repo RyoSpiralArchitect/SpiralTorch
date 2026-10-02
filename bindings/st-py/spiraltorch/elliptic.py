@@ -137,9 +137,20 @@ else:
             )
             feature_tensor = torch.tensor(batch.features, device=device, dtype=dtype)
             ctx.save_for_backward(orientation)
+            ctx.save_for_forward(orientation)
             ctx.batch = batch
             _LAST_TELEMETRY.set((orientation.shape[:-1], _LazyTelemetry(batch)))
             return feature_tensor.reshape(*orientation.shape[:-1], 9)
+
+        @staticmethod
+        def jvp(ctx, _warp, tangent):
+            (orientation,) = ctx.saved_tensors
+            if tangent is None:
+                tangent = torch.zeros_like(orientation)
+            values = ctx.batch.jvp(tangent.detach().cpu().reshape(-1).tolist())
+            return torch.tensor(
+                values, device=orientation.device, dtype=orientation.dtype
+            ).reshape(*orientation.shape[:-1], 9)
 
         @staticmethod
         @torch.autograd.function.once_differentiable
@@ -178,10 +189,11 @@ def elliptic_warp_autograd(
     *,
     return_telemetry: bool = False,
 ) -> Any:
-    """Apply the Rust batched f32 map and first-order VJP (CPU transport).
+    """Apply the Rust batched f32 map and first-order VJP/JVP (CPU transport).
 
     Degenerate rows, chart poles and the azimuth cut raise rather than silently
-    replacing features/gradients by zero. Higher-order gradients are unsupported.
+    replacing features/gradients by zero. ``torch.autograd.forward_ad`` uses the
+    native JVP. Higher-order gradients and ``torch.func`` transforms are unsupported.
     Python telemetry objects are materialized only when requested, including via
     ``EllipticWarpFunction.last_telemetry()``; the Rust map and VJP are unchanged.
 

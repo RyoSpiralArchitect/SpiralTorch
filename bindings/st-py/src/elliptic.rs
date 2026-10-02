@@ -41,6 +41,11 @@ impl PyEllipticAnchoredLearningBatch {
         self.inner.mix()
     }
 
+    fn jvp(&self, py: Python<'_>, orientations: Vec<f32>, raw_mix: f32) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.jvp(&orientations, raw_mix))
+            .map_err(value_error)
+    }
+
     fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, f32)> {
         py.detach(|| self.inner.vjp(&upstream))
             .map(|g| (g.orientations, g.raw_mix))
@@ -111,6 +116,10 @@ impl PyEllipticLearningBatch {
 
     fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<Vec<f32>> {
         py.detach(|| self.inner.vjp(&upstream)).map_err(value_error)
+    }
+
+    fn jvp(&self, py: Python<'_>, tangent: Vec<f32>) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.jvp(&tangent)).map_err(value_error)
     }
 }
 

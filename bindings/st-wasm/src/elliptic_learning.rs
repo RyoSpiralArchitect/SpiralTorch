@@ -66,6 +66,14 @@ impl EllipticAnchoredLearningBatch {
         self.inner.mix()
     }
 
+    pub fn jvp(&self, orientations: &[f32], raw_mix: Number) -> Result<Vec<f32>, JsValue> {
+        let raw: &JsValue = raw_mix.as_ref();
+        let raw_mix =
+            raw.as_f64()
+                .ok_or_else(|| js_error("raw_mix tangent must be a number"))? as f32;
+        self.inner.jvp(orientations, raw_mix).map_err(js_error)
+    }
+
     pub fn vjp(&self, upstream: &[f32]) -> Result<EllipticAnchoredGradients, JsValue> {
         self.inner
             .vjp(upstream)
@@ -244,5 +252,9 @@ impl EllipticLearningBatch {
 
     pub fn vjp(&self, upstream: &[f32]) -> Result<Vec<f32>, JsValue> {
         self.inner.vjp(upstream).map_err(js_error)
+    }
+
+    pub fn jvp(&self, tangent: &[f32]) -> Result<Vec<f32>, JsValue> {
+        self.inner.jvp(tangent).map_err(js_error)
     }
 }

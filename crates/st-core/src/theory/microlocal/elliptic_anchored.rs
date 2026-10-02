@@ -36,6 +36,38 @@ impl EllipticAnchoredLearningBatch {
         self.mix as f32
     }
 
+    /// Joint input/gate direction. The fixed anchor contributes no input
+    /// derivative, but it must contribute to the shared raw-gate derivative.
+    pub fn jvp(
+        &self,
+        orientations: &[f32],
+        raw_mix: f32,
+    ) -> Result<Vec<f32>, EllipticLearningError> {
+        if !raw_mix.is_finite() {
+            return Err(EllipticLearningError::InvalidTangent);
+        }
+        let local = self.local.jvp(orientations)?;
+        if self.mix == 0.0 && raw_mix == 0.0 {
+            return Ok(local);
+        }
+        let gate_direction = (1.0 - self.mix * self.mix) * f64::from(raw_mix);
+        local
+            .iter()
+            .zip(self.local.features())
+            .zip(self.anchor.iter().cycle())
+            .map(|((&df, &f), &a)| {
+                let value = ((1.0 - self.mix) * f64::from(df)
+                    + gate_direction * (f64::from(a) - f64::from(f)))
+                    as f32;
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(EllipticLearningError::NonFiniteTangent)
+                }
+            })
+            .collect()
+    }
+
     /// The fixed anchor has no trainable coordinates. Both input and shared
     /// raw-gate derivatives are computed from this immutable forward snapshot.
     pub fn vjp(
