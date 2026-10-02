@@ -2,6 +2,7 @@
 //! online softmax, and inherited validity guards stay on the same GPU queue.
 
 use super::*;
+use crate::runtime::timestamps::PassTimestampCursor;
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 
 const SHADER_SOURCE: &str = include_str!("shaders/attention.wgsl");
@@ -212,6 +213,7 @@ impl ResidentTensor {
             z_bias,
             pair_bias,
             OutputOrder::HeadMajor,
+            &mut PassTimestampCursor::default(),
         )
     }
 
@@ -237,6 +239,7 @@ impl ResidentTensor {
             z_bias,
             pair_bias,
             OutputOrder::MergedHeads,
+            &mut PassTimestampCursor::default(),
         )
     }
 
@@ -250,6 +253,7 @@ impl ResidentTensor {
         z_bias: Option<&Self>,
         pair_bias: Option<&Self>,
         order: OutputOrder,
+        timestamps: &mut PassTimestampCursor<'_>,
     ) -> Result<Self, TensorError> {
         let spec = AttentionSpec::new(
             self.layout.shape(),
@@ -369,7 +373,7 @@ impl ResidentTensor {
         if spec.contexts() != 0 && spec.queries() != 0 {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("attention.forward"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             pass.set_pipeline(kernels.pipeline(gpu, spec, order));
             pass.set_bind_group(0, &binding, &[]);
@@ -379,7 +383,7 @@ impl ResidentTensor {
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("attention.guard"),
-                timestamp_writes: None,
+                timestamp_writes: timestamps.next(),
             });
             kernels.guard.encode_in_pass(&mut pass, &binding);
         }
@@ -390,3 +394,6 @@ impl ResidentTensor {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod profile_probe;
