@@ -31,7 +31,8 @@ The query range must fit in the key sequence. Biases cannot expose future keys.
 This API consumes existing keys/values; it is not a KV-cache manager.
 
 Q/K/V, biases and output stay on the owning device and queue. Permuted, sliced
-and broadcast views are packed on GPU if needed. Online normalized softmax
+and broadcast views are read directly through validated strides/offsets, without
+input packing. Online normalized softmax
 does not allocate the quadratic score/probability matrix. A caller-supplied
 pairwise bias is still quadratic. Only explicit snapshots read values back.
 
@@ -81,9 +82,10 @@ input [B,T,I]
   -> output Linear [B,T,O]
 ```
 
-The split is a storage-sharing N-D view. Noncontiguous heads are subsequently
-packed on GPU for the attention kernel. Head merge and projection outputs also
-remain on GPU. This uses multiple submissions and GPU copies, not a single
+The split is a storage-sharing N-D view. Attention reads the noncontiguous heads
+and broadcast score biases directly from their original immutable storage.
+Head merge and projection outputs still remain on GPU. This uses multiple
+submissions and a head-merge copy, not a single
 fused dispatch. There are no intermediate activation readbacks or CPU fallbacks;
 only the caller's final snapshot materializes the output. Inputs, biases and
 both graphs must share the owning device and queue. Outputs retain their own
@@ -118,8 +120,13 @@ parameter training, an autograd tape, or a new competing Z-space policy.
 
 See the [dated numerical evidence](../benchmarks/results/2026-10-02-resident-zspace-attention/README.md).
 The same 20 frozen PyTorch SDPA cases are checked by the Rust oracle, native
-resident kernel and browser example. Native tests additionally cover head widths
-through 256, GPU view packing, ownership, invalid inputs and inherited guards.
+resident kernel and browser example. The browser now runs each case in canonical
+and reversed/padded strided storage, for 40 checks against the same oracle.
+Native tests additionally cover head widths through 256, direct strided reads,
+independent broadcast inputs, ownership, invalid inputs and inherited guards,
+including failed storage hidden by a crop and empty-query failure propagation.
+The 208-byte uniform descriptor is checked against WGSL member offsets/size;
+storage bounds and device limits are validated before dispatch.
 
 ```bash
 cargo test --locked -p st-kernel-contracts

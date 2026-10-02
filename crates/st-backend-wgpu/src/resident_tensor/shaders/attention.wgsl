@@ -1,3 +1,10 @@
+struct View {
+    strides: vec4<u32>,
+    offset: u32,
+    padding0: u32,
+    padding1: u32,
+    padding2: u32,
+};
 struct Params {
     contexts: u32,
     queries: u32,
@@ -7,6 +14,15 @@ struct Params {
     flags: u32,
     query_offset: u32,
     groups_x: u32,
+    heads: u32,
+    padding0: u32,
+    padding1: u32,
+    padding2: u32,
+    query: View,
+    key: View,
+    value: View,
+    z_bias: View,
+    pair_bias: View,
 };
 override KEY_TILE: u32 = 1u;
 
@@ -41,9 +57,16 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     if (row >= params.contexts * params.queries) { return; }
     let context = row / params.queries;
     let query = row % params.queries;
+    let batch = context / params.heads;
+    let head = context % params.heads;
+    let query_base = params.query.offset + batch * params.query.strides.x + head * params.query.strides.y + query * params.query.strides.z;
+    let key_base = params.key.offset + batch * params.key.strides.x + head * params.key.strides.y;
+    let value_base = params.value.offset + batch * params.value.strides.x + head * params.value.strides.y;
+    let z_base = params.z_bias.offset + batch * params.z_bias.strides.x + head * params.z_bias.strides.y;
+    let pair_base = params.pair_bias.offset + batch * params.pair_bias.strides.x + head * params.pair_bias.strides.y + query * params.pair_bias.strides.z;
     let d = params.head_dim;
     for (var i = lane; i < d; i += 64u) {
-        shared_q[i] = queries[row * d + i];
+        shared_q[i] = queries[query_base + i * params.query.strides.w];
         accum[i] = 0.0;
     }
     if (lane == 0u) {
@@ -60,11 +83,11 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     let dot_lane = lane % dot_lanes;
     for (var first = 0u; first < visible; first += KEY_TILE) {
         let k = first + key_slot;
-        let key_row = context * params.keys + k;
         var dot = 0.0;
         if (k < visible) {
+            let key_row = key_base + k * params.key.strides.z;
             for (var i = dot_lane; i < d; i += dot_lanes) {
-                dot = checked(dot + checked(shared_q[i] * keys[key_row * d + i]));
+                dot = checked(dot + checked(shared_q[i] * keys[key_row + i * params.key.strides.w]));
             }
         }
         partials[lane] = dot;
@@ -77,8 +100,8 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
             for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
                 let key_index = first + slot;
                 var score = checked(partials[slot * dot_lanes] * params.scale);
-                if ((params.flags & 1u) != 0u) { score = checked(score + z_bias[context * params.keys + key_index]); }
-                if ((params.flags & 2u) != 0u) { score = checked(score + pair_bias[row * params.keys + key_index]); }
+                if ((params.flags & 1u) != 0u) { score = checked(score + z_bias[z_base + key_index * params.z_bias.strides.w]); }
+                if ((params.flags & 2u) != 0u) { score = checked(score + pair_bias[pair_base + key_index * params.pair_bias.strides.w]); }
                 let next_max = max(running_max, score);
                 let previous = running_sum * exp(running_max - next_max);
                 let current = exp(score - next_max);
@@ -92,8 +115,8 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
         workgroupBarrier();
         for (var i = lane; i < d; i += 64u) {
             for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
-                let value_row = context * params.keys + first + slot;
-                accum[i] = checked(accum[i] * alpha[slot] + values[value_row * d + i] * weight[slot]);
+                let value_row = value_base + (first + slot) * params.value.strides.z;
+                accum[i] = checked(accum[i] * alpha[slot] + values[value_row + i * params.value.strides.w] * weight[slot]);
             }
         }
         workgroupBarrier();

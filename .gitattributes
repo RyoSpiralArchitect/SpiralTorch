@@ -10,3 +10,4 @@ crates/st-backend-wgpu/tests/fixtures/resident_attention_torch.json linguist-gen
 crates/st-nn/tests/fixtures/attention_chain_torch.json linguist-generated=true
 benchmarks/results/2026-10-02-attention-key-tiling/*.json linguist-generated=true
 benchmarks/results/2026-10-02-attention-projection-kernels/*.json linguist-generated=true
+benchmarks/results/2026-10-02-attention-strided-inputs/*.json linguist-generated=true

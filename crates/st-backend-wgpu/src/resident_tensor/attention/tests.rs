@@ -40,7 +40,110 @@ fn shader_parses_and_validates_without_a_runtime() {
     )
     .validate(&module)
     .unwrap();
-    assert_eq!(std::mem::size_of::<Params>(), 32);
+    assert_eq!(std::mem::size_of::<View>(), 32);
+    assert_eq!(std::mem::size_of::<Params>(), 208);
+    let params = module
+        .types
+        .iter()
+        .find(|(_, t)| t.name.as_deref() == Some("Params"))
+        .unwrap()
+        .1;
+    let naga::TypeInner::Struct { members, span } = &params.inner else {
+        panic!("Params must be a struct")
+    };
+    assert_eq!(*span as usize, std::mem::size_of::<Params>());
+    assert_eq!(
+        members
+            .iter()
+            .find(|m| m.name.as_deref() == Some("query"))
+            .unwrap()
+            .offset as usize,
+        std::mem::offset_of!(Params, query)
+    );
+    assert_eq!(
+        members
+            .iter()
+            .find(|m| m.name.as_deref() == Some("pair_bias"))
+            .unwrap()
+            .offset as usize,
+        std::mem::offset_of!(Params, pair_bias)
+    );
+}
+
+#[test]
+fn descriptors_preserve_offsets_strides_broadcasts_and_storage_bounds() {
+    let limits = wgpu::Limits::default();
+    let packed = NdLayout::contiguous(&[2, 5, 3, 2, 7]).unwrap();
+    let mut layouts: Vec<_> = (0..3)
+        .map(|i| {
+            packed
+                .select(2, i)
+                .unwrap()
+                .permute(&[0, 2, 1, 3])
+                .unwrap()
+                .narrow(2, 1, 3)
+                .unwrap()
+        })
+        .collect();
+    layouts.push(
+        NdLayout::contiguous(&[2, 2, 7, 5])
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap(),
+    );
+    layouts.push(
+        NdLayout::contiguous(&[7])
+            .unwrap()
+            .narrow(0, 1, 5)
+            .unwrap()
+            .broadcast_to(&[2, 2, 5])
+            .unwrap(),
+    );
+    layouts.push(
+        NdLayout::contiguous(&[5, 3])
+            .unwrap()
+            .permute(&[1, 0])
+            .unwrap()
+            .broadcast_to(&[2, 2, 3, 5])
+            .unwrap(),
+    );
+    for layout in layouts {
+        let required = layout.required_storage_len().unwrap();
+        let view = view_descriptor(&layout, required, &limits).unwrap();
+        for logical in 0..layout.len() {
+            let mut left = logical;
+            let mut coordinates = vec![0; layout.rank()];
+            for axis in (0..layout.rank()).rev() {
+                coordinates[axis] = left % layout.shape()[axis];
+                left /= layout.shape()[axis];
+            }
+            if layout.rank() == 3 {
+                coordinates.insert(2, 0);
+            }
+            let address = view.offset as usize
+                + coordinates
+                    .iter()
+                    .zip(view.strides)
+                    .map(|(i, stride)| i * stride as usize)
+                    .sum::<usize>();
+            assert_eq!(Some(address), layout.storage_index(logical));
+        }
+        assert!(matches!(
+            view_descriptor(&layout, required - 1, &limits),
+            Err(TensorError::StorageBounds)
+        ));
+    }
+    #[cfg(target_pointer_width = "64")]
+    {
+        let overflow = NdLayout::contiguous(&[1, 2, 1, u32::MAX as usize])
+            .unwrap()
+            .narrow(3, 0, 1)
+            .unwrap();
+        assert!(matches!(
+            view_descriptor(&overflow, usize::MAX, &limits),
+            Err(TensorError::Limit("layout address"))
+        ));
+    }
 }
 
 #[test]
@@ -62,6 +165,8 @@ fn capabilities_and_portable_grid_fail_before_pipeline_creation() {
     assert!(preflight(spec, &limits).is_err());
     limits.max_compute_workgroup_storage_size += 1;
     assert!(preflight(spec, &limits).is_ok());
+    limits.max_uniform_buffer_binding_size = std::mem::size_of::<Params>() as u32 - 1;
+    assert!(preflight(spec, &limits).is_err());
 }
 
 #[test]
@@ -181,7 +286,7 @@ fn tile_selection_preserves_short_sequences_and_unmeasured_wide_heads() {
 }
 
 #[test]
-fn strided_qkv_and_broadcast_bias_are_packed_on_gpu_and_outputs_are_owned() {
+fn strided_qkv_and_broadcast_bias_read_directly_and_outputs_are_owned() {
     let Some(device) = device() else { return };
     let q = device
         .upload(&[1, 3, 2, 3], &data(18, 0.1))
@@ -236,6 +341,128 @@ fn strided_qkv_and_broadcast_bias_are_packed_on_gpu_and_outputs_are_owned() {
     close(&read(&output), &expected);
     assert!(read(&next).iter().all(|value| value.is_finite()));
     close(&read(&output), &expected);
+}
+
+#[test]
+fn strided_columns_offsets_and_independently_broadcast_inputs_match_reference() {
+    let Some(device) = device() else { return };
+    for count in [5, 129] {
+        let d = 17;
+        let q = device
+            .upload(&[2, 2, d, 5], &data(4 * d * 5, 0.2))
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap()
+            .narrow(2, 1, 3)
+            .unwrap();
+        let k = device
+            .upload(&[2, 1, d, count + 2], &data(2 * d * (count + 2), 0.4))
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap()
+            .narrow(2, 1, count)
+            .unwrap()
+            .broadcast_to(&[2, 2, count, d])
+            .unwrap();
+        let v = device
+            .upload(&[1, 2, d, count + 3], &data(2 * d * (count + 3), -0.6))
+            .unwrap()
+            .permute(&[0, 1, 3, 2])
+            .unwrap()
+            .narrow(2, 2, count)
+            .unwrap()
+            .broadcast_to(&[2, 2, count, d])
+            .unwrap();
+        let z = device
+            .upload(&[count + 2], &data(count + 2, 0.9))
+            .unwrap()
+            .narrow(0, 1, count)
+            .unwrap()
+            .broadcast_to(&[2, 2, count])
+            .unwrap();
+        let pair = device
+            .upload(&[count, 3], &data(count * 3, -0.3))
+            .unwrap()
+            .permute(&[1, 0])
+            .unwrap()
+            .broadcast_to(&[2, 2, 3, count])
+            .unwrap();
+        for mask in [
+            AttentionMask::None,
+            AttentionMask::Causal {
+                query_offset: count - 3,
+            },
+        ] {
+            let spec = AttentionSpec::new(
+                q.layout.shape(),
+                k.layout.shape(),
+                v.layout.shape(),
+                0.375,
+                mask,
+            )
+            .unwrap();
+            let expected = attention_reference(
+                spec,
+                &read(&q),
+                &read(&k),
+                &read(&v),
+                Some(&read(&z)),
+                Some(&read(&pair)),
+            )
+            .unwrap();
+            let output = q
+                .scaled_dot_attention(&k, &v, 0.375, mask, Some(&z), Some(&pair))
+                .unwrap();
+            close(&read(&output), &expected);
+        }
+    }
+}
+
+#[test]
+fn cropped_failed_storage_keeps_guards_for_every_direct_operand_and_empty_query() {
+    let Some(device) = device() else { return };
+    let failed = device
+        .upload(&[2], &[0., f32::MAX])
+        .unwrap()
+        .mul(&device.upload(&[2], &[1., 2.]).unwrap())
+        .unwrap()
+        .narrow(0, 0, 1)
+        .unwrap();
+    let good = device.upload(&[1], &[0.]).unwrap();
+    for slot in 0..5 {
+        let input = |which, shape: &[usize]| {
+            (if slot == which { &failed } else { &good })
+                .broadcast_to(shape)
+                .unwrap()
+        };
+        let output = input(0, &[2, 2, 1, 1])
+            .scaled_dot_attention(
+                &input(1, &[2, 2, 3, 1]),
+                &input(2, &[2, 2, 3, 1]),
+                1.,
+                AttentionMask::Causal { query_offset: 0 },
+                Some(&input(3, &[2, 2, 3])),
+                Some(&input(4, &[2, 2, 1, 3])),
+            )
+            .unwrap();
+        assert!(matches!(
+            output.snapshot().unwrap().read(),
+            Err(TensorError::NonFinite)
+        ));
+        assert!(matches!(
+            output.gelu().unwrap().snapshot().unwrap().read(),
+            Err(TensorError::NonFinite)
+        ));
+    }
+    let empty = device.upload(&[2, 2, 0, 1], &[]).unwrap();
+    let failed = failed.broadcast_to(&[2, 2, 3, 1]).unwrap();
+    let output = empty
+        .scaled_dot_attention(&failed, &failed, 1., AttentionMask::None, None, None)
+        .unwrap();
+    assert!(matches!(
+        output.snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
 }
 
 #[test]

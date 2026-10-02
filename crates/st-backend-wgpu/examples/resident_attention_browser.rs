@@ -3,12 +3,43 @@
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use st_backend_wgpu::{
-        resident_tensor::{attention::AttentionMask, TensorDevice},
+        resident_tensor::{attention::AttentionMask, ResidentTensor, TensorDevice},
         runtime::WgpuRuntime,
     };
-    use st_kernel_contracts::attention::AttentionSpec;
+    use st_kernel_contracts::{attention::AttentionSpec, layout::NdLayout};
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+    // Materialize the same oracle values into a reversed, padded storage layout.
+    // Only this test setup rearranges host data; attention must read the view.
+    fn upload_view(
+        device: &TensorDevice,
+        shape: &[usize],
+        values: &[f32],
+        strided: bool,
+    ) -> Result<ResidentTensor> {
+        if !strided {
+            return Ok(device.upload(shape, values)?);
+        }
+        let axes: Vec<_> = (0..shape.len()).rev().collect();
+        let mut storage_shape: Vec<_> = shape.iter().rev().copied().collect();
+        storage_shape[0] += 2;
+        let storage = NdLayout::contiguous(&storage_shape)?;
+        let view = storage
+            .narrow(0, 1, shape[shape.len() - 1])?
+            .permute(&axes)?;
+        if values.len() != view.len() {
+            return Err("fixture length".into());
+        }
+        let mut data = vec![0.; storage.len()];
+        for (i, &value) in values.iter().enumerate() {
+            data[view.storage_index(i).ok_or("fixture length")?] = value;
+        }
+        Ok(device
+            .upload(&storage_shape, &data)?
+            .narrow(0, 1, shape[shape.len() - 1])?
+            .permute(&axes)?)
+    }
 
     pub async fn run() -> Result<String> {
         let runtime = WgpuRuntime::request_headless("resident.attention.browser").await?;
@@ -41,43 +72,56 @@ mod browser {
                     query_offset: offset as usize,
                 });
             let spec = AttentionSpec::new(&q_shape, &k_shape, &k_shape, scale, mask)?;
-            let q = device.upload(&q_shape, &floats(&case["query"]))?;
-            let k = device.upload(&k_shape, &floats(&case["key"]))?;
-            let v = device.upload(&k_shape, &floats(&case["value"]))?;
-            let z = if case["z_bias"].is_null() {
-                None
-            } else {
-                Some(device.upload(&spec.z_bias_shape(), &floats(&case["z_bias"]))?)
-            };
-            let pair = if case["pair_bias"].is_null() {
-                None
-            } else {
-                Some(device.upload(&spec.pair_bias_shape(), &floats(&case["pair_bias"]))?)
-            };
-            runtime
-                .context()
-                .device()
-                .push_error_scope(wgpu::ErrorFilter::Validation);
-            let output = q.scaled_dot_attention(&k, &v, scale, mask, z.as_ref(), pair.as_ref())?;
-            if let Some(error) = runtime.context().device().pop_error_scope().await {
-                return Err(format!("{}: WebGPU validation: {error}", case["name"]).into());
-            }
-            drop((q, k, v, z, pair));
-            let actual = output.snapshot()?.read_async().await?;
-            let expected = floats(&case["expected"]);
-            if actual.len() != expected.len() {
-                return Err("attention output length".into());
-            }
-            let mut max_error = 0f32;
-            for (&a, &b) in actual.iter().zip(&expected) {
-                if !a.is_finite() || (a - b).abs() > 3e-6 + 3e-5 * b.abs() {
-                    return Err(format!("{}: {a} != {b}", case["name"]).into());
+            for strided in [false, true] {
+                let q = upload_view(&device, &q_shape, &floats(&case["query"]), strided)?;
+                let k = upload_view(&device, &k_shape, &floats(&case["key"]), strided)?;
+                let v = upload_view(&device, &k_shape, &floats(&case["value"]), strided)?;
+                let z = if case["z_bias"].is_null() {
+                    None
+                } else {
+                    Some(upload_view(
+                        &device,
+                        &spec.z_bias_shape(),
+                        &floats(&case["z_bias"]),
+                        strided,
+                    )?)
+                };
+                let pair = if case["pair_bias"].is_null() {
+                    None
+                } else {
+                    Some(upload_view(
+                        &device,
+                        &spec.pair_bias_shape(),
+                        &floats(&case["pair_bias"]),
+                        strided,
+                    )?)
+                };
+                runtime
+                    .context()
+                    .device()
+                    .push_error_scope(wgpu::ErrorFilter::Validation);
+                let output =
+                    q.scaled_dot_attention(&k, &v, scale, mask, z.as_ref(), pair.as_ref())?;
+                if let Some(error) = runtime.context().device().pop_error_scope().await {
+                    return Err(format!("{}: WebGPU validation: {error}", case["name"]).into());
                 }
-                max_error = max_error.max((a - b).abs());
+                drop((q, k, v, z, pair));
+                let actual = output.snapshot()?.read_async().await?;
+                let expected = floats(&case["expected"]);
+                if actual.len() != expected.len() {
+                    return Err("attention output length".into());
+                }
+                let mut max_error = 0f32;
+                for (&a, &b) in actual.iter().zip(&expected) {
+                    if !a.is_finite() || !b.is_finite() || (a - b).abs() > 3e-6 + 3e-5 * b.abs() {
+                        return Err(format!("{}: {a} != {b}", case["name"]).into());
+                    }
+                    max_error = max_error.max((a - b).abs());
+                }
+                checks.push(serde_json::json!({"name": case["name"], "layout": if strided {"strided"} else {"canonical"}, "max_abs_error": max_error}));
             }
-            checks.push(serde_json::json!({"name": case["name"], "max_abs_error": max_error}));
         }
-        if checks.len() != 20 {
+        if checks.len() != 40 {
             return Err("incomplete attention fixture".into());
         }
         Ok(serde_json::to_string(&serde_json::json!({

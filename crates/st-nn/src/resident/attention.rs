@@ -180,8 +180,9 @@ impl ResidentAttentionBlock {
     }
 
     /// Fused QKV projection -> head views -> attention -> output projection.
-    /// No host activation transfer or CPU fallback occurs. Only head packing
-    /// and merging copy values on GPU; graph outputs are owned immutable versions.
+    /// No host activation transfer or CPU fallback occurs. Attention reads head
+    /// views directly; head merging still copies values on GPU. Graph outputs
+    /// are owned immutable versions.
     /// This is several submissions, not a claimed single-dispatch fused kernel.
     pub fn forward(
         &mut self,

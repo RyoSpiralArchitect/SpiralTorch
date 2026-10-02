@@ -1,4 +1,4 @@
-//! Owning, forward-only attention. Q/K/V, optional score biases, view packing,
+//! Owning, forward-only attention. Q/K/V, optional score biases, strided reads,
 //! online softmax, and inherited validity guards stay on the same GPU queue.
 
 use super::*;
@@ -6,6 +6,32 @@ pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 
 const SHADER_SOURCE: &str = include_str!("shaders/attention.wgsl");
 const MAX_HEAD_DIM: usize = 256;
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
+struct View {
+    strides: [u32; 4],
+    offset: u32,
+    padding: [u32; 3],
+}
+
+fn view_descriptor(
+    layout: &NdLayout,
+    storage_len: usize,
+    limits: &wgpu::Limits,
+) -> Result<View, TensorError> {
+    validate_view(layout, storage_len, limits)?;
+    let axes = match layout.rank() {
+        3 => [Some(0), Some(1), None, Some(2)], // Z bias [B,H,K].
+        4 => [Some(0), Some(1), Some(2), Some(3)],
+        _ => return Err(TensorError::Limit("attention view rank")),
+    };
+    Ok(View {
+        strides: axes.map(|axis| axis.map_or(0, |i| layout.strides()[i] as u32)),
+        offset: layout.offset() as u32,
+        padding: [0; 3],
+    })
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -18,6 +44,13 @@ struct Params {
     flags: u32,
     query_offset: u32,
     groups_x: u32,
+    heads: u32,
+    padding: [u32; 3],
+    query: View,
+    key: View,
+    value: View,
+    z_bias: View,
+    pair_bias: View,
 }
 
 #[derive(Debug)]
@@ -110,7 +143,7 @@ fn preflight(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<[u32; 2], Ten
         || limits.max_bindings_per_bind_group < 8
         || limits.max_storage_buffers_per_shader_stage < 7
         || limits.max_uniform_buffers_per_shader_stage < 1
-        || limits.max_uniform_buffer_binding_size < 32
+        || limits.max_uniform_buffer_binding_size < std::mem::size_of::<Params>() as u32
         || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 10) * 4
     {
         return Err(TensorError::Limit(
@@ -142,7 +175,8 @@ impl ResidentTensor {
     /// Q has shape `[B,H,Q,D]`, K/V `[B,H,K,D]`, Z-bias `[B,H,K]`, and
     /// pairwise bias `[B,H,Q,K]`. Broadcast explicitly using views. All values
     /// must be finite; score/weighted-output overflow fails on readback and is
-    /// inherited by downstream operations. Arbitrary views are packed on GPU.
+    /// inherited by downstream operations. Strided and broadcast inputs are
+    /// read directly from their immutable storage, without intermediate packing.
     ///
     /// This initial forward kernel supports D <= 256, no dropout or backward
     /// tape. Unsupported shapes/devices return errors, never a CPU fallback.
@@ -167,12 +201,17 @@ impl ResidentTensor {
             pair_bias.map(|bias| bias.layout.shape()),
         )?;
         let context = self.device.runtime().context();
-        for tensor in [Some(keys), Some(values), z_bias, pair_bias]
-            .into_iter()
-            .flatten()
-        {
+        let inputs = [Some(self), Some(keys), Some(values), z_bias, pair_bias];
+        let mut views = [View::default(); 5];
+        for (tensor, view) in inputs.iter().zip(&mut views) {
+            let Some(tensor) = tensor else { continue };
             tensor.require_context(context)?;
             storage_limit(tensor.layout.len(), &context.device().limits())?;
+            *view = view_descriptor(
+                &tensor.layout,
+                (tensor.values().size() / 4) as usize,
+                &context.device().limits(),
+            )?;
         }
         let gpu = context.device();
         let grid = preflight(spec, &gpu.limits())?;
@@ -182,29 +221,10 @@ impl ResidentTensor {
             .attention
             .get_or_init(|| AttentionKernels::new(gpu));
         let mut encoder = gpu.create_command_encoder(&Default::default());
-        let query = self.contiguous_into(&mut encoder)?;
-        let keys = keys.contiguous_into(&mut encoder)?;
-        let values = values.contiguous_into(&mut encoder)?;
-        let z_bias = z_bias
-            .map(|bias| bias.contiguous_into(&mut encoder))
-            .transpose()?;
-        let pair_bias = pair_bias
-            .map(|bias| bias.contiguous_into(&mut encoder))
-            .transpose()?;
         let output = self.device.allocate_output(&self.layout)?;
-        let inputs: Vec<_> = [
-            Some(&query),
-            Some(&keys),
-            Some(&values),
-            z_bias.as_ref(),
-            pair_bias.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
         // Concatenate inherited guards, then reduce them into the owned output
         // guard. No host read or mutable shared guard is needed.
-        let flag_words = inputs.iter().try_fold(1usize, |total, tensor| {
+        let flag_words = inputs.iter().flatten().try_fold(1usize, |total, tensor| {
             let bytes = tensor.flags().size();
             if bytes % 4 != 0 {
                 return Err(TensorError::Limit("attention guard alignment"));
@@ -224,7 +244,7 @@ impl ResidentTensor {
         )?;
         encoder.clear_buffer(&flags, 0, None);
         let mut offset = 4;
-        for input in inputs {
+        for input in inputs.into_iter().flatten() {
             encoder.copy_buffer_to_buffer(input.flags(), 0, &flags, offset, input.flags().size());
             offset += input.flags().size();
         }
@@ -244,17 +264,24 @@ impl ResidentTensor {
                 flags: u32::from(z_bias.is_some()) | (u32::from(pair_bias.is_some()) << 1) | causal,
                 query_offset,
                 groups_x: grid[0],
+                heads: spec.query_shape()[1] as u32,
+                padding: [0; 3],
+                query: views[0],
+                key: views[1],
+                value: views[2],
+                z_bias: views[3],
+                pair_bias: views[4],
             }],
             wgpu::BufferUsages::UNIFORM,
         )?;
         let dummy =
             runtime::empty_buffer::<f32>(gpu, "attention.no_bias", 1, wgpu::BufferUsages::STORAGE)?;
         let buffers = [
-            query.values(),
+            self.values(),
             keys.values(),
             values.values(),
-            z_bias.as_ref().map_or(&dummy, ResidentTensor::values),
-            pair_bias.as_ref().map_or(&dummy, ResidentTensor::values),
+            z_bias.map_or(&dummy, ResidentTensor::values),
+            pair_bias.map_or(&dummy, ResidentTensor::values),
             output.values(),
             &flags,
             &params,
