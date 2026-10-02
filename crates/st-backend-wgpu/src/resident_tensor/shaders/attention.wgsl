@@ -89,7 +89,7 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     var visible = params.keys;
     if ((params.flags & 4u) != 0u) { visible = params.query_offset + query + 1u; }
     // Specialized to one 64-lane or four 16-lane dot products.
-    // The online normalization and value accumulation retain key order.
+    // Normalize one key tile at a time without a quadratic score buffer.
     let dot_lanes = 64u / KEY_TILE;
     let key_slot = lane / dot_lanes;
     let dot_lane = lane % dot_lanes;
@@ -109,27 +109,36 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
             workgroupBarrier();
         }
         if (lane == 0u) {
+            var next_max = running_max;
             for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
                 let key_index = first + slot;
                 var score = checked(partials[slot * dot_lanes] * params.scale);
                 if ((params.flags & 1u) != 0u) { score = checked(score + z_bias[z_base + key_index * params.z_bias.strides.w]); }
                 if ((params.flags & 2u) != 0u) { score = checked(score + pair_bias[pair_base + key_index * params.pair_bias.strides.w]); }
-                let next_max = max(running_max, score);
-                let previous = running_sum * exp(running_max - next_max);
-                let current = exp(score - next_max);
-                let sum = checked(previous + current);
-                alpha[slot] = checked(previous / sum);
-                weight[slot] = checked(current / sum);
-                running_sum = sum;
-                running_max = next_max;
+                weight[slot] = score;
+                next_max = max(next_max, score);
             }
+            let previous = running_sum * exp(running_max - next_max);
+            var sum = previous;
+            for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
+                weight[slot] = exp(weight[slot] - next_max);
+                sum = checked(sum + weight[slot]);
+            }
+            alpha[0] = checked(previous / sum);
+            for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
+                weight[slot] = checked(weight[slot] / sum);
+            }
+            running_sum = sum;
+            running_max = next_max;
         }
         workgroupBarrier();
         for (var i = lane; i < d; i += 64u) {
+            var next = checked(accum[i] * alpha[0]);
             for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
                 let value_row = value_base + (first + slot) * params.value.strides.z;
-                accum[i] = checked(accum[i] * alpha[slot] + values[value_row + i * params.value.strides.w] * weight[slot]);
+                next = checked(next + checked(values[value_row + i * params.value.strides.w] * weight[slot]));
             }
+            accum[i] = next;
         }
         workgroupBarrier();
     }

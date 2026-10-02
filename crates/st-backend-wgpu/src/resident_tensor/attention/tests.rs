@@ -294,6 +294,110 @@ fn tiled_key_tails_cached_offsets_and_late_overflow_preserve_semantics() {
 }
 
 #[test]
+fn tiled_normalization_preserves_flat_and_sharp_biased_distributions() {
+    let Some(device) = device() else { return };
+    let qs = [2, 2, 3, 17];
+    let ks = [2, 2, 131, 17];
+    let q = vec![0.; 12 * 17];
+    let k = vec![0.; 4 * 131 * 17];
+    let v = data(4 * 131 * 17, -0.6);
+    let q_gpu = device.upload(&qs, &q).unwrap();
+    let k_gpu = device.upload(&ks, &k).unwrap();
+    let v_gpu = device.upload(&ks, &v).unwrap();
+    for sharp in [false, true] {
+        let z: Vec<_> = (0..4 * 131)
+            .map(|i| if sharp && i % 131 == 3 { 1000. } else { -1000. })
+            .collect();
+        let pair: Vec<_> = (0..12 * 131)
+            .map(|i| {
+                if sharp && matches!(i % 131, 4 | 127 | 128 | 130) {
+                    2000. + (i / 131) as f32 * 0.125
+                } else {
+                    0.
+                }
+            })
+            .collect();
+        let z_gpu = device.upload(&[2, 2, 131], &z).unwrap();
+        let pair_gpu = device.upload(&[2, 2, 3, 131], &pair).unwrap();
+        for mask in [
+            AttentionMask::None,
+            AttentionMask::Causal { query_offset: 126 },
+            AttentionMask::Causal { query_offset: 128 },
+        ] {
+            let spec = AttentionSpec::new(&qs, &ks, &ks, 0.25, mask).unwrap();
+            let expected = attention_reference(spec, &q, &k, &v, Some(&z), Some(&pair)).unwrap();
+            for direct in [false, true] {
+                let result = q_gpu
+                    .attention_forward(
+                        &k_gpu,
+                        &v_gpu,
+                        0.25,
+                        mask,
+                        Some(&z_gpu),
+                        Some(&pair_gpu),
+                        if direct {
+                            OutputOrder::MergedHeads
+                        } else {
+                            OutputOrder::HeadMajor
+                        },
+                        &mut PassTimestampCursor::default(),
+                    )
+                    .unwrap();
+                close(
+                    &read(&result),
+                    &if direct {
+                        merge_heads(qs, &expected)
+                    } else {
+                        expected.clone()
+                    },
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tiled_final_key_overflow_is_rejected_but_causal_tail_is_not_evaluated() {
+    let Some(device) = device() else { return };
+    let q = device.upload(&[1, 1, 1, 1], &[2.]).unwrap();
+    let mut keys = vec![0.; 129];
+    keys[128] = f32::MAX;
+    let k = device.upload(&[1, 1, 129, 1], &keys).unwrap();
+    let v = device.upload(&[1, 1, 129, 1], &[1.; 129]).unwrap();
+    for direct in [false, true] {
+        for mask in [
+            AttentionMask::None,
+            AttentionMask::Causal { query_offset: 127 },
+        ] {
+            let result = q
+                .attention_forward(
+                    &k,
+                    &v,
+                    1.,
+                    mask,
+                    None,
+                    None,
+                    if direct {
+                        OutputOrder::MergedHeads
+                    } else {
+                        OutputOrder::HeadMajor
+                    },
+                    &mut PassTimestampCursor::default(),
+                )
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .read();
+            if mask == AttentionMask::None {
+                assert!(matches!(result, Err(TensorError::NonFinite)));
+            } else {
+                close(&result.unwrap(), &[1.]);
+            }
+        }
+    }
+}
+
+#[test]
 fn tile_selection_preserves_short_sequences_and_unmeasured_wide_heads() {
     for (keys, dim, expected) in [
         (32, 16, 1),
