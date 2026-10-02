@@ -1,0 +1,114 @@
+{
+  "schema": "spiraltorch.elliptic_chart_step_study_validation.v1",
+  "status": "completed",
+  "study_id": "0a1066fd9a2ccad1e004de37d6d55849d8a15d75eb6e048ae95587717c8d12bb",
+  "training_source_revision": "76ccee3649bcadd407539de6e14b832cc1e480e0",
+  "integration_source_revision": "cb6e7c92aad81a3b5a57d816f8a84d32ff7af3f9",
+  "process": {
+    "training_and_evaluation_exit_code": 0,
+    "uninterrupted": true,
+    "completed_runs": 12,
+    "primary_updates": 6144,
+    "extra_continuation_updates": 24
+  },
+  "completed_resume": {
+    "exit_code": 0,
+    "endpoints_rerun": false,
+    "plan_journal_results_byte_unchanged": true,
+    "sha256_before_and_after": {
+      "plan.json": "8e9b5e2781b7b04854e87195f6eba2eac301dec7f47dac1d0f8f0fdc73b2ed8e",
+      "journal.json": "8f97c5f5f683d440a077119823dffde6865143ce5748b2acbd1bb59fde8c3d8e",
+      "results.json": "45502457d0fc20ee93b2569d2538ecf5b8a98be8cccb6c7555ff834a6b4c497b"
+    }
+  },
+  "checkpoints": {
+    "verification_exit_code": 0,
+    "public_receipt": "checkpoint-verification.json",
+    "sha256": "3d0e091e01019bbf8f223121e1a3c612743ba6ac33cc6a73a2789fa373468321",
+    "all_twelve_finite_and_paired": true,
+    "all_twelve_exact_continuation_and_frozen_base": true,
+    "all_optimizer_recipes_restore_exactly": true,
+    "verification_source_sha256": "df15dd9d99ac7b4727046bf3842c07af87c655a33cf2b6e375122c4b0f1f0372",
+    "incomplete_study_rejected_before_output": true,
+    "scope": "Saved contents were loaded locally. Original training executed the frozen-base and continuation checks before unlocking endpoints."
+  },
+  "tests": {
+    "preflight_passed": 204,
+    "integrated_parent_passed": 194,
+    "integrated_child_passed": 209,
+    "postrun_ci_subset_passed": 198,
+    "postrun_full_passed": 209,
+    "skipped": 0,
+    "postrun_exit_code": 0,
+    "test_package_separate_from_frozen_training_package": true
+  },
+  "summary": {
+    "exit_code": 0,
+    "public_inputs_reproduce_byte_for_byte": true,
+    "sha256": "40c87968f165b0de7f8734892e2fe1c85c526d5ac53cf1a844ba038a5d41f7a9",
+    "summarizer_sha256": "b5388e82dda0702b4f236ab5f641f994c416536abe717c83fb8426c374055b8a"
+  },
+  "historical_replays": {
+    "baseline_exact": true,
+    "all_six_adam_controls_exact": true,
+    "includes_adapter_and_adam_states": true,
+    "excluded_new_fields": [
+      "optimizer.chart_recipe",
+      "records[].optimizer_step"
+    ],
+    "independent_replications": false
+  },
+  "preserved_launch_artifacts": {
+    "plan.json.gz": "878a21dcdbc8d9c830d734241d06e1692afefffa2f5ecfeb3f3a2c4cadd03f1d",
+    "preflight.json": "ccf277a674e5a9a493524dda7b796c85f19e6486d8e8e227560604c0a2e33d99"
+  },
+  "runtime": {
+    "native_sha256": "0ceb95f8dc34673c3e4d3a4bcf925f2d45ded92e86977e3cfab107c13c75d0f5",
+    "bridge_sha256": "c95ce2b65f7c78906ce756926b9b19d0ed8ef7ea841e52577e44e26e61a52aaf",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "device": "cpu",
+    "dtype": "float32",
+    "frozen_transitive_client_files": 63,
+    "all_frozen_transitive_client_hashes_unchanged": true,
+    "client_manifest_sha256": "f950613c6e5dfd9348f9e7929f538436607e076a73a230af7eb7c114207df614"
+  },
+  "source_sha256": {
+    "crates/st-core/src/theory/microlocal/elliptic_learning.rs": "606246adc07ce1b5a166a11d45ba157cecc105137b48f065cc7801528c2a7962",
+    "crates/st-core/src/theory/microlocal.rs": "e6c63b2d66ffc5d959d57a1c249467b77157330b1c8fa57d6ba8e418fe25c82a",
+    "crates/st-core/tests/elliptic_chart_step.rs": "95064a80accfdbccb967b745d20ae4025975a5b882d48bba3777dd4c9f2bb92e",
+    "bindings/st-py/src/elliptic.rs": "cab65c5da268ac519d23520c20939784fea6dcc274ff759b08f853c67ffca665",
+    "bindings/st-py/spiraltorch/__init__.pyi": "29fa2d8a56b427cf322301923e8c17c7d9602deca30599003489675ee971f03d",
+    "bindings/st-py/examples/hf_elliptic_chart_step_study.py": "2487bd9226945d171b1e55f414446fc40bb1fe4f8bbe4f9abe2801a22ca4ebf8",
+    "bindings/st-py/examples/hf_elliptic_pride_chart_step.json": "04d466fe8e78eee394c0c5882c04ef28818e48296df9ab32b7d9411216b12cfc",
+    "bindings/st-py/examples/hf_wave_gate_long_horizon.py": "aac1f365b82fd33ab0006499390357231650d8353840e3eef8327fd1660ac774",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "1d31668debf444d9b23c342979c9e4a4052c760b850aa7b08d1c7f2aeda3a8ae",
+    "bindings/st-py/tests/test_elliptic_chart_step.py": "e79ee8c8b9c5a1a32d5adffb71fe369441245fe49869642fa750f613186d0447",
+    "bindings/st-wasm/src/elliptic_learning.rs": "886e91eeb39ee2d8c802332170519c0b7c5843ed92d0cff7a56aeae249c87629",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "26f22724f4d3acd0e6adbdd895e646bf5a451567e247b787f3d503e45b143104",
+    "bindings/st-wasm/tests/elliptic_chart_step.mjs": "796d2c323666b749d633010a1c778054aaaadc72b60c30352670ca797a29ecc6",
+    "bindings/st-wasm/tests/elliptic_directional_types.ts": "29cb731f2bde30edb411c2616bac18b878b2bb14d44419ebb63b330498dd49a1",
+    "tools/summarize_wave_gate_long_horizon.py": "b5388e82dda0702b4f236ab5f641f994c416536abe717c83fb8426c374055b8a",
+    "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "576205c853e1e1eac466ab87572ccf42bf347fe25f074e9cd9238b00fab6c00c"
+  },
+  "local_log_sha256": {
+    "training.log": "a0768eb70f2a9927649b171fd1897b2d09d97090b6d210f683b4b3b1b7467bfb",
+    "checkpoint-verification.log": "fb4ca8ac264a105b5647164d8a4b25b21f9a9d1da21dcde632044100e57fc549",
+    "completed-resume.log": "d7daa78c308a58488be734ec3edd4067193f61a04b1480952c2a16c9f1f2b748",
+    "incomplete-verification-rejection.log": "2d5183eef4daea1e962f73e69d35aacdf507530ca2a739f98e8ab941655ad2f8",
+    "postrun-tests.log": "12c529d684d3c3e7e1ce3d4947c1f96aa7d4853bd22ed87d3f2c9996b91ce4ba",
+    "postrun-full-tests.log": "31c1ae9f0cb863db04bd643d92f02c70ac9e6ac5ed31ee00c64b5777d1c50bab",
+    "public-summary-reproduction.log": "61b87d26a6651cc6dd1a81b72bd98d2a886b87e1f0c8e996e9e4216fc7db8888",
+    "parent-merge-tests.log": "d7bc312279d40c8db36ee716a705b422d9e3f47849817798e8af104439304a00",
+    "child-merge-tests.log": "2410a23487e1d8f8c9468f6ab2069c521c5d2b6d28aa9ba44aadbc63890104c0"
+  },
+  "limitations": [
+    "Chart correction has mixed effects and does not close the tangent geometry gap; not promoted to a default optimizer",
+    "Pride/Alice and the protocol are exploratory reuse, not untouched confirmation",
+    "Three seeds share evaluation blocks; no significance or broad generalization claim",
+    "Mean chart feature metric omits hidden-input covariance and downstream readout/loss curvature",
+    "Per-proposal norms match within rounding, not cumulative trajectories or computation",
+    "No speed, resident WGPU, AMP or cross-model compatibility claim",
+    "Raw text, weights, checkpoints, packages and raw logs stay local"
+  ]
+}

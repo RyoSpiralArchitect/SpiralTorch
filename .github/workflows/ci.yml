@@ -352,6 +352,7 @@ jobs:
           node bindings/st-wasm/tests/rank_adaptation.cjs "$module"
           node bindings/st-wasm/tests/fractional_learning.mjs "$module"
           node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
+          node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
       - name: Portable NN plans without WebGPU
         run: |
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features nn
@@ -709,6 +710,7 @@ jobs:
             bindings/st-py/tests/test_elliptic_context_ablation.py \
             bindings/st-py/tests/test_elliptic_learning.py \
             bindings/st-py/tests/test_elliptic_directional.py \
+            bindings/st-py/tests/test_elliptic_chart_step.py \
             bindings/st-py/tests/test_elliptic_causal_learning.py \
             bindings/st-py/tests/test_wave_gate_vjp.py \
             bindings/st-py/tests/test_wave_gate_learning.py \

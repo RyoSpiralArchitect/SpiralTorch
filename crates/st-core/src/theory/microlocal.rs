@@ -41,7 +41,7 @@ pub use elliptic_anchored::{EllipticAnchoredGradients, EllipticAnchoredLearningB
 pub use elliptic_causal::{
     EllipticCausalLearningBatch, EllipticGatedCausalGradients, EllipticGatedCausalLearningBatch,
 };
-pub use elliptic_learning::{EllipticLearningBatch, EllipticLearningError};
+pub use elliptic_learning::{EllipticChartStep, EllipticLearningBatch, EllipticLearningError};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.
 #[derive(Debug, Clone)]
