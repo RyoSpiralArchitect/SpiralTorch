@@ -105,6 +105,19 @@ pub(crate) fn backward(
     ];
     let batch =
         u32::try_from(output_shape[0]).map_err(|_| TensorError::Limit("convolution VJP batch"))?;
+    let profile =
+        input
+            .device
+            .profile_slot()
+            .begin(|| super::super::profile::ConvolutionVjpGeometry {
+                kind: "dense",
+                input: input.layout.shape().to_vec(),
+                weights: weights.layout.shape().to_vec(),
+                upstream: upstream.layout.shape().to_vec(),
+                stride,
+                padding,
+                dilation,
+            })?;
     let guard = Shared::new(runtime::empty_buffer::<u32>(
         gpu,
         "tensor.conv2d_vjp.guard",
@@ -176,7 +189,7 @@ pub(crate) fn backward(
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("tensor.conv2d_vjp.pass"),
-                timestamp_writes: None,
+                timestamp_writes: profile.as_ref().map(|p| p.writes(index)),
             });
             pass.set_pipeline(&kernels.pipelines[index]);
             pass.set_bind_group(0, &binding, &[]);
@@ -184,6 +197,9 @@ pub(crate) fn backward(
         }
     }
     context.queue().submit(Some(encoder.finish()));
+    if let Some(profile) = profile {
+        profile.finish(&outputs[0]);
+    }
     Ok(outputs)
 }
 

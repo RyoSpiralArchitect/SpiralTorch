@@ -16,6 +16,7 @@ pub(crate) mod guard_capture;
 pub mod loss;
 pub mod normalization;
 pub mod pointwise;
+pub mod profile;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
 pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;

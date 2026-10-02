@@ -453,6 +453,7 @@ jobs:
           python -I tools/test_vision_feedback_stationarity.py
           python -I tools/test_vision_feedback_windows.py
           python -I tools/test_vision_training_timing.py
+          python -I tools/test_vision_gpu_profile.py
       - name: Public vision input checkpoint and native replay fixture
         env:
           SPIRALTORCH_INPUT_CHECKPOINT_HANDOFF: ${{ runner.temp }}/vision-input-checkpoint.json

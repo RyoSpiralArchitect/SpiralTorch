@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Convolution VJP GPU profiles</title>
+<pre id="result" data-status="running">Checking explicit GPU profiles...</pre>
+<script type="module">
+import init, {run_convolution_profile_checks} from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+try {
+  await init();
+  const report = JSON.parse(await run_convolution_profile_checks());
+  if (report.schema !== "spiraltorch.convolution_profile_fixture.v1" || !report.passed ||
+      report.checks.length !== 9 || report.profile.operations.length !== 2 ||
+      report.profile.operations.some(op => op.passes.length !== 3)) throw Error("Incomplete profile fixture");
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({passed: false, error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

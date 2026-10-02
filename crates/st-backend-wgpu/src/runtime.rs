@@ -43,11 +43,16 @@ pub type WeakShared<T> = std::rc::Weak<T>;
 pub struct WgpuContext {
     device: Shared<wgpu::Device>,
     queue: Shared<wgpu::Queue>,
+    pub(crate) tensor_profile: Shared<crate::resident_tensor::profile::ProfileSlot>,
 }
 
 impl WgpuContext {
     pub fn new(device: Shared<wgpu::Device>, queue: Shared<wgpu::Queue>) -> Self {
-        Self { device, queue }
+        Self {
+            device,
+            queue,
+            tensor_profile: Shared::new(Default::default()),
+        }
     }
 
     pub fn device(&self) -> &wgpu::Device {

@@ -277,6 +277,28 @@ impl PassTimestampRecorder {
         }
     }
 
+    /// Resolve only initialized pass pairs from a bounded diagnostic capture.
+    pub(crate) fn resolve_prefix(
+        mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        passes: u32,
+    ) -> Result<TimestampReadback, WgpuRuntimeError> {
+        let count = query_count(passes)?;
+        if count > self.count {
+            return Err(invalid("written prefix exceeds timestamp allocation"));
+        }
+        if count != self.count {
+            self.staging = ReadbackLease::unpooled(empty_buffer::<u64>(
+                self.context.device(),
+                "profile.timestamp.prefix_readback",
+                count as usize,
+                wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            )?);
+        }
+        self.count = count;
+        Ok(self.resolve(encoder))
+    }
+
     pub(crate) fn resolve(self, encoder: &mut wgpu::CommandEncoder) -> TimestampReadback {
         encoder.resolve_query_set(
             &self.allocation.queries,

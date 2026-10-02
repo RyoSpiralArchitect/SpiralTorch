@@ -37,6 +37,7 @@ st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu"
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
+sha2 = "0.10"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 pollster = "0.3"
@@ -70,6 +71,10 @@ required-features = ["nn", "wgpu"]
 
 [[example]]
 name = "depthwise_resident_vjp_bench"
+required-features = ["nn", "wgpu"]
+
+[[example]]
+name = "vision_trainer_gpu_profile"
 required-features = ["nn", "wgpu"]
 
 [[example]]
