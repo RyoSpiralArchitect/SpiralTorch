@@ -1255,8 +1255,12 @@ fn row_l2_projection_stats(data: &[f32], rows: usize, cols: usize) -> (usize, f3
     for r in 0..rows {
         let start = r * cols;
         let end = start + cols;
-        let norm: f32 = data[start..end].iter().map(|v| v * v).sum::<f32>().sqrt();
-        max_row_l2 = max_row_l2.max(norm);
+        let norm = data[start..end]
+            .iter()
+            .map(|&v| f64::from(v).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        max_row_l2 = max_row_l2.max(norm as f32);
         if norm > 0.0 {
             nonzero_rows = nonzero_rows.saturating_add(1);
         }
@@ -7620,7 +7624,7 @@ impl Tensor {
         curvature: f32,
         _backend: TensorUtilBackend,
     ) -> PureResult<Tensor> {
-        if curvature >= 0.0 {
+        if !curvature.is_finite() || curvature >= 0.0 {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
         let scale = (-curvature).sqrt();
@@ -7691,14 +7695,18 @@ impl Tensor {
             let start = r * self.cols;
             let end = start + self.cols;
             let chunk = &self.data[start..end];
-            let norm: f32 = chunk.iter().map(|v| v * v).sum::<f32>().sqrt();
-            max_row_l2 = max_row_l2.max(norm);
+            let norm = chunk
+                .iter()
+                .map(|&v| f64::from(v).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            max_row_l2 = max_row_l2.max(norm as f32);
             if norm > 0.0 {
                 nonzero_rows = nonzero_rows.saturating_add(1);
-                let clip = (norm / scale).tanh();
+                let clip = (norm / f64::from(scale)).tanh();
                 let factor = clip / norm;
                 for v in chunk {
-                    data.push(v * factor);
+                    data.push((f64::from(*v) * factor) as f32);
                 }
             } else {
                 data.extend_from_slice(chunk);
@@ -7751,7 +7759,7 @@ impl Tensor {
         porosity: f32,
         _backend: TensorUtilBackend,
     ) -> PureResult<Tensor> {
-        if curvature >= 0.0 {
+        if !curvature.is_finite() || curvature >= 0.0 {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
         if gate.len() != self.cols {
@@ -7845,12 +7853,16 @@ impl Tensor {
             let start = r * self.cols;
             let end = start + self.cols;
             let chunk = &gated[start..end];
-            let norm: f32 = chunk.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let norm = chunk
+                .iter()
+                .map(|&v| f64::from(v).powi(2))
+                .sum::<f64>()
+                .sqrt();
             if norm > 0.0 {
-                let clip = (norm / scale).tanh();
+                let clip = (norm / f64::from(scale)).tanh();
                 let factor = clip / norm;
                 for v in chunk {
-                    data.push(v * factor);
+                    data.push((f64::from(*v) * factor) as f32);
                 }
             } else {
                 data.extend_from_slice(chunk);
@@ -14014,6 +14026,58 @@ mod tests {
         for (expected, actual) in expected.iter().zip(output.data()) {
             assert!((expected - actual).abs() < 1.0e-6);
         }
+    }
+
+    #[test]
+    fn poincare_projection_preserves_extreme_finite_scales() {
+        let tensor = Tensor::from_vec(3, 2, vec![1e-30, 2e-30, 1e20, -2e20, 0.0, 0.0]).unwrap();
+        let projected = tensor
+            .project_to_poincare_with_backend(-1e-30, TensorUtilBackend::Cpu)
+            .unwrap();
+        let expected = [
+            1e-15,
+            2e-15,
+            1.0 / 5.0f32.sqrt(),
+            -2.0 / 5.0f32.sqrt(),
+            0.0,
+            0.0,
+        ];
+        for (&actual, expected) in projected.data().iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() <= 2e-6 * expected.abs(),
+                "actual={actual} expected={expected}"
+            );
+        }
+        for curvature in [f32::NAN, f32::NEG_INFINITY, 0.0] {
+            assert!(tensor
+                .project_to_poincare_with_backend(curvature, TensorUtilBackend::Cpu)
+                .is_err());
+        }
+    }
+
+    #[cfg(feature = "wgpu_dense")]
+    #[test]
+    fn poincare_projection_extreme_scales_wgpu_matches_cpu() {
+        if !wgpu_dense::is_available() {
+            eprintln!("WGPU extreme-scale projection not exercised: adapter unavailable");
+            return;
+        }
+        let tensor = Tensor::from_vec(3, 2, vec![1e-30, 2e-30, 1e20, -2e20, 0.0, 0.0]).unwrap();
+        let expected = tensor
+            .project_to_poincare_with_backend(-1e-30, TensorUtilBackend::Cpu)
+            .unwrap();
+        let actual = wgpu_dense::project_to_poincare(tensor.data(), 3, 2, -1e-30).unwrap();
+        println!(
+            "projection expected={:?} actual={actual:?}",
+            expected.data()
+        );
+        for (&actual, &expected) in actual.iter().zip(expected.data()) {
+            assert!(
+                (actual - expected).abs() <= 3e-5 * expected.abs(),
+                "actual={actual} expected={expected}"
+            );
+        }
+        println!("WGPU extreme-scale projection exercised successfully");
     }
 
     #[cfg(feature = "wgpu_dense")]

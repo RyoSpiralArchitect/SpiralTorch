@@ -68,6 +68,7 @@ fn emit_wave_gate_forward_meta(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_wave_gate_backward_meta(
     rows: usize,
     cols: usize,
@@ -81,6 +82,7 @@ fn emit_wave_gate_backward_meta(
     effective_gate_rewrite: bool,
     projection_gradient: bool,
     gradient_scale: Option<f32>,
+    parameter_gradient_rewrite: bool,
     fallback_message: Option<&str>,
 ) {
     emit_tensor_op(
@@ -117,8 +119,10 @@ fn emit_wave_gate_backward_meta(
             "saturation": saturation,
             "porosity": porosity,
             "effective_gate_rewrite": effective_gate_rewrite,
+            "effective_gate_gradient": "porous_mix_exact",
             "projection_gradient": projection_gradient,
             "saturation_gradient": "porous_mix_exact",
+            "parameter_gradient_rewrite": parameter_gradient_rewrite,
             "estimated_broadcast_ops": values,
             "estimated_gate_gradient_ops": values.saturating_mul(2),
             "estimated_bias_gradient_ops": values,
@@ -187,36 +191,40 @@ fn poincare_projection_backward(
             right: grad_projected.shape(),
         });
     }
-    if curvature >= 0.0 {
+    if !curvature.is_finite() || curvature >= 0.0 {
         return Err(TensorError::NonHyperbolicCurvature { curvature });
     }
     let (rows, cols) = preprojected.shape();
-    let scale = (-curvature).sqrt();
+    let scale = f64::from((-curvature).sqrt());
     let mut data = vec![0.0f32; rows.saturating_mul(cols)];
     for row in 0..rows {
         let start = row * cols;
         let end = start + cols;
         let x = &preprojected.data()[start..end];
         let grad = &grad_projected.data()[start..end];
-        let norm = x.iter().map(|value| value * value).sum::<f32>().sqrt();
-        if !norm.is_finite() || norm <= f32::EPSILON {
-            let factor = if scale > 0.0 { 1.0 / scale } else { 1.0 };
+        let norm = x
+            .iter()
+            .map(|&value| f64::from(value).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if norm == 0.0 {
             for col in 0..cols {
-                data[start + col] = grad[col] * factor;
+                data[start + col] = (f64::from(grad[col]) / scale) as f32;
             }
             continue;
         }
         let tanh = (norm / scale).tanh();
         let factor = tanh / norm;
         let sech2 = 1.0 - tanh * tanh;
-        let radial = ((sech2 * norm / scale) - tanh) / (norm * norm * norm);
         let dot = x
             .iter()
             .zip(grad.iter())
-            .map(|(&value, &grad)| value * grad)
-            .sum::<f32>();
+            .map(|(&value, &grad)| f64::from(value) / norm * f64::from(grad))
+            .sum::<f64>();
         for col in 0..cols {
-            data[start + col] = factor * grad[col] + radial * x[col] * dot;
+            let radial = f64::from(x[col]) / norm * dot;
+            data[start + col] =
+                (factor * (f64::from(grad[col]) - radial) + radial * sech2 / scale) as f32;
         }
     }
     Tensor::from_vec(rows, cols, data)
@@ -229,6 +237,14 @@ pub struct WaveGate {
     bias: Parameter,
     topos: OpenCartesianTopos,
     encoder: LanguageWaveEncoder,
+}
+
+/// First-order pullback, before parameter averaging, rewriting or accumulation.
+#[derive(Debug)]
+pub struct WaveGateVjp {
+    pub grad_input: Tensor,
+    pub grad_gate: Tensor,
+    pub grad_bias: Tensor,
 }
 
 impl WaveGate {
@@ -331,6 +347,62 @@ impl WaveGate {
         grad_output: &Tensor,
         parameter_gradient_scale: Option<f32>,
     ) -> PureResult<Tensor> {
+        let gradients = self.pullback(input, grad_output, parameter_gradient_scale, true)?;
+        if input.shape().0 != 0 {
+            self.gate.accumulate_euclidean(&gradients.grad_gate)?;
+            self.bias.accumulate_euclidean(&gradients.grad_bias)?;
+        }
+        Ok(gradients.grad_input)
+    }
+
+    /// Differentiates the current forward map without updating accumulators.
+    ///
+    /// Parameter gradients sum over rows. Unlike `Module::backward`, this does
+    /// not average or apply the training-policy saturation to those gradients.
+    /// Call before changing parameters; this method is not a saved forward tape.
+    pub fn vjp(&self, input: &Tensor, grad_output: &Tensor) -> PureResult<WaveGateVjp> {
+        self.pullback(input, grad_output, Some(1.0), false)
+    }
+
+    fn finish_pullback(
+        &self,
+        grad_input: Tensor,
+        mut grad_gate: Tensor,
+        mut grad_bias: Tensor,
+        rewrite_parameters: bool,
+    ) -> PureResult<WaveGateVjp> {
+        for (gradient, &raw_gate) in grad_gate
+            .data_mut()
+            .iter_mut()
+            .zip(self.gate.value().data())
+        {
+            *gradient *= self.topos.saturate_with_slope(raw_gate).1;
+        }
+        // Validate the actual derivative before a training-policy rewrite can
+        // hide a nonfinite result, and before mutating either accumulator.
+        self.topos
+            .guard_tensor("wave_gate_backward_out", &grad_input)?;
+        self.topos.guard_tensor("wave_gate_grad_gate", &grad_gate)?;
+        self.topos.guard_tensor("wave_gate_grad_bias", &grad_bias)?;
+        if rewrite_parameters {
+            let monad = RewriteMonad::new(&self.topos);
+            monad.rewrite_tensor("wave_gate_grad_gate", &mut grad_gate)?;
+            monad.rewrite_tensor("wave_gate_grad_bias", &mut grad_bias)?;
+        }
+        Ok(WaveGateVjp {
+            grad_input,
+            grad_gate,
+            grad_bias,
+        })
+    }
+
+    fn pullback(
+        &self,
+        input: &Tensor,
+        grad_output: &Tensor,
+        parameter_gradient_scale: Option<f32>,
+        rewrite_parameters: bool,
+    ) -> PureResult<WaveGateVjp> {
         let (rows, cols) = input.shape();
         if grad_output.shape() != (rows, cols) {
             return Err(TensorError::ShapeMismatch {
@@ -344,6 +416,13 @@ impl WaveGate {
                 right: self.gate.value().shape(),
             });
         }
+        self.topos.guard_tensor("wave_gate_backward_in", input)?;
+        self.topos
+            .guard_tensor("wave_gate_backward_upstream", grad_output)?;
+        self.topos
+            .guard_tensor("wave_gate_backward_gate", self.gate.value())?;
+        self.topos
+            .guard_tensor("wave_gate_backward_bias", self.bias.value())?;
         let requested_backend = current_tensor_util_backend();
         let reduction_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let requested_backend = tensor_util_backend_label(requested_backend);
@@ -362,9 +441,14 @@ impl WaveGate {
                 true,
                 true,
                 None,
+                rewrite_parameters,
                 None,
             );
-            return Ok(grad_input);
+            return Ok(WaveGateVjp {
+                grad_input,
+                grad_gate: Tensor::zeros(1, cols)?,
+                grad_bias: Tensor::zeros(1, cols)?,
+            });
         }
         let mut gate = self.gate.value().clone();
         let monad = RewriteMonad::new(&self.topos);
@@ -394,7 +478,7 @@ impl WaveGate {
                         let gradient_scale = parameter_gradient_scale.unwrap_or(1.0 / rows as f32);
                         let grad_gate_product =
                             grad_affine.hadamard_with_backend(input, reduction_backend)?;
-                        let mut grad_gate = Tensor::from_vec(
+                        let grad_gate = Tensor::from_vec(
                             1,
                             cols,
                             grad_gate_product.try_sum_axis0_scaled_with_backend(
@@ -402,7 +486,7 @@ impl WaveGate {
                                 reduction_backend,
                             )?,
                         )?;
-                        let mut grad_bias = Tensor::from_vec(
+                        let grad_bias = Tensor::from_vec(
                             1,
                             cols,
                             grad_affine.try_sum_axis0_scaled_with_backend(
@@ -411,12 +495,12 @@ impl WaveGate {
                             )?,
                         )?;
                         let grad_input = Tensor::from_vec(rows, cols, grad_input_data)?;
-                        monad.rewrite_tensor("wave_gate_grad_gate", &mut grad_gate)?;
-                        monad.rewrite_tensor("wave_gate_grad_bias", &mut grad_bias)?;
-                        self.gate.accumulate_euclidean(&grad_gate)?;
-                        self.bias.accumulate_euclidean(&grad_bias)?;
-                        self.topos
-                            .guard_tensor("wave_gate_backward_out", &grad_input)?;
+                        let result = self.finish_pullback(
+                            grad_input,
+                            grad_gate,
+                            grad_bias,
+                            rewrite_parameters,
+                        )?;
                         emit_wave_gate_backward_meta(
                             rows,
                             cols,
@@ -430,9 +514,10 @@ impl WaveGate {
                             true,
                             true,
                             Some(gradient_scale),
+                            rewrite_parameters,
                             None,
                         );
-                        return Ok(grad_input);
+                        return Ok(result);
                     }
                     Err(message) if strict_gpu_path() => {
                         return Err(wave_gate_wgpu_error("wave_gate_backward", message));
@@ -441,6 +526,14 @@ impl WaveGate {
                         wgpu_failure = Some(message);
                     }
                 }
+            } else if matches!(reduction_backend, TensorUtilBackend::GpuWgpu) {
+                if strict_gpu_path() {
+                    return Err(wave_gate_wgpu_error(
+                        "wave_gate_backward",
+                        "WGPU backend not available".to_string(),
+                    ));
+                }
+                wgpu_failure = Some("WGPU backend not available".to_string());
             }
         }
 
@@ -463,13 +556,13 @@ impl WaveGate {
             porous_saturation_backward(&pre_saturation, &grad_saturated, &self.topos)?;
         let gradient_scale = parameter_gradient_scale.unwrap_or(1.0 / (rows as f32));
         let grad_gate_product = grad_affine.hadamard_with_backend(input, reduction_backend)?;
-        let mut grad_gate = Tensor::from_vec(
+        let grad_gate = Tensor::from_vec(
             1,
             cols,
             grad_gate_product
                 .try_sum_axis0_scaled_with_backend(gradient_scale, reduction_backend)?,
         )?;
-        let mut grad_bias = Tensor::from_vec(
+        let grad_bias = Tensor::from_vec(
             1,
             cols,
             grad_affine.try_sum_axis0_scaled_with_backend(gradient_scale, reduction_backend)?,
@@ -486,12 +579,7 @@ impl WaveGate {
                 }
             }
         }
-        monad.rewrite_tensor("wave_gate_grad_gate", &mut grad_gate)?;
-        monad.rewrite_tensor("wave_gate_grad_bias", &mut grad_bias)?;
-        self.gate.accumulate_euclidean(&grad_gate)?;
-        self.bias.accumulate_euclidean(&grad_bias)?;
-        self.topos
-            .guard_tensor("wave_gate_backward_out", &grad_input)?;
+        let result = self.finish_pullback(grad_input, grad_gate, grad_bias, rewrite_parameters)?;
         emit_wave_gate_backward_meta(
             rows,
             cols,
@@ -505,6 +593,7 @@ impl WaveGate {
             true,
             true,
             Some(gradient_scale),
+            rewrite_parameters,
             {
                 #[cfg(feature = "wgpu")]
                 {
@@ -516,7 +605,7 @@ impl WaveGate {
                 }
             },
         );
-        Ok(grad_input)
+        Ok(result)
     }
 }
 
@@ -1084,6 +1173,255 @@ mod tests {
             (analytic - finite_difference).abs() < 3.5e-3,
             "analytic={analytic} finite_difference={finite_difference}"
         );
+    }
+
+    #[test]
+    fn wave_gate_parameter_pullback_includes_effective_gate_slope() {
+        let encoder = LanguageWaveEncoder::new(-1.0, 0.7).unwrap();
+        let topos = OpenCartesianTopos::new(-1.0, 1e-6, 0.5, 64, 1024)
+            .unwrap()
+            .with_porosity(0.8)
+            .unwrap();
+        let mut gate = WaveGate::with_topos("pullback", 2, encoder, topos).unwrap();
+        gate.gate
+            .value_mut()
+            .data_mut()
+            .copy_from_slice(&[1.4, -1.1]);
+        gate.bias
+            .value_mut()
+            .data_mut()
+            .copy_from_slice(&[0.05, -0.02]);
+        let input = Tensor::from_vec(2, 2, vec![0.9, -0.75, 0.3, 0.6]).unwrap();
+        let upstream = Tensor::from_vec(2, 2, vec![0.035, -0.02, -0.01, 0.03]).unwrap();
+        gate.backward_with_parameter_gradient_scale(&input, &upstream, 1.0)
+            .unwrap();
+        let analytic = gate.gate.gradient().unwrap().data().to_vec();
+        for col in 0..2 {
+            let original = gate.gate.value().data()[col];
+            let mut loss = |value: f32| {
+                gate.gate.value_mut().data_mut()[col] = value;
+                gate.forward(&input)
+                    .unwrap()
+                    .data()
+                    .iter()
+                    .zip(upstream.data())
+                    .map(|(&y, &dy)| f64::from(y) * f64::from(dy))
+                    .sum::<f64>()
+            };
+            let numeric = (loss(original + 1e-3) - loss(original - 1e-3)) / 2e-3;
+            gate.gate.value_mut().data_mut()[col] = original;
+            println!(
+                "gate pullback {col}: analytic={} numeric={numeric}",
+                analytic[col]
+            );
+            assert!(
+                (f64::from(analytic[col]) - numeric).abs() < 2e-5,
+                "gate {col}: analytic={} numeric={numeric}",
+                analytic[col]
+            );
+        }
+    }
+
+    #[test]
+    fn wave_gate_vjp_is_unscaled_linear_and_does_not_accumulate() {
+        let mut gate = WaveGate::new("vjp", 2, -1.0, 0.5).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 0.4, 0.5]).unwrap();
+        let seed = Tensor::from_vec(2, 2, vec![2e4, -3e4, 4e4, 5e4]).unwrap();
+        let raw = gate.vjp(&input, &seed).unwrap();
+        assert!(gate.gate.gradient().is_none() && gate.bias.gradient().is_none());
+        assert!(raw
+            .grad_bias
+            .data()
+            .iter()
+            .any(|v| v.abs() > gate.topos.saturation()));
+        let doubled =
+            Tensor::from_vec(2, 2, seed.data().iter().map(|v| v * 2.0).collect()).unwrap();
+        let twice = gate.vjp(&input, &doubled).unwrap();
+        for (one, two) in [
+            (&raw.grad_input, &twice.grad_input),
+            (&raw.grad_gate, &twice.grad_gate),
+            (&raw.grad_bias, &twice.grad_bias),
+        ] {
+            for (&a, &b) in one.data().iter().zip(two.data()) {
+                assert_eq!(a * 2.0, b);
+            }
+        }
+        let dx = gate.backward(&input, &seed).unwrap();
+        assert_eq!(dx, raw.grad_input);
+        for (&raw, &applied) in raw
+            .grad_gate
+            .data()
+            .iter()
+            .zip(gate.gate.gradient().unwrap().data())
+        {
+            assert!((gate.topos.saturate(raw * 0.5) - applied).abs() < 1e-3);
+        }
+        let empty = Tensor::zeros(0, 2).unwrap();
+        let empty_vjp = gate.vjp(&empty, &empty).unwrap();
+        assert_eq!(empty_vjp.grad_gate.data(), &[0.0, 0.0]);
+        assert_eq!(empty_vjp.grad_bias.data(), &[0.0, 0.0]);
+    }
+
+    #[test]
+    fn wave_gate_saturated_parameter_training_reduces_loss() {
+        let make = |values: [f32; 2]| {
+            let encoder = LanguageWaveEncoder::new(-1.0, 0.5).unwrap();
+            let topos = OpenCartesianTopos::new(-1.0, 1e-6, 0.5, 64, 1024)
+                .unwrap()
+                .with_porosity(0.8)
+                .unwrap();
+            let mut layer = WaveGate::with_topos("fit", 2, encoder, topos).unwrap();
+            layer.gate.value_mut().data_mut().copy_from_slice(&values);
+            layer
+        };
+        let x = Tensor::from_vec(2, 2, vec![0.9, -0.75, 0.3, 0.6]).unwrap();
+        let target = make([1.0, -0.8]).forward(&x).unwrap();
+        let mut learner = make([1.4, -1.1]);
+        let mut losses = Vec::new();
+        for step in 0..=200 {
+            let output = learner.forward(&x).unwrap();
+            let delta: Vec<f32> = output
+                .data()
+                .iter()
+                .zip(target.data())
+                .map(|(a, b)| a - b)
+                .collect();
+            losses.push(delta.iter().map(|d| d * d).sum::<f32>() / 4.0);
+            if step == 200 {
+                break;
+            }
+            let seed = Tensor::from_vec(2, 2, delta.iter().map(|d| d * 0.5).collect()).unwrap();
+            learner.zero_accumulators().unwrap();
+            learner
+                .backward_with_parameter_gradient_scale(&x, &seed, 1.0)
+                .unwrap();
+            learner.bias.zero_gradient(); // Isolate the gate's saturated pullback.
+            learner.apply_step(50.0).unwrap();
+        }
+        assert!(
+            losses[200] < losses[0] * 0.1,
+            "first={} final={}",
+            losses[0],
+            losses[200]
+        );
+        println!(
+            "saturated gate fit: first={} final={}",
+            losses[0], losses[200]
+        );
+    }
+
+    #[test]
+    fn wave_gate_invalid_pullback_leaves_both_accumulators_unchanged() {
+        let mut gate = WaveGate::new("invalid", 2, -1.0, 0.5).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![0.2, -0.3]).unwrap();
+        let valid = Tensor::from_vec(1, 2, vec![0.4, 0.5]).unwrap();
+        gate.backward(&input, &valid).unwrap();
+        let before_gate = gate.gate.gradient().unwrap().clone();
+        let before_bias = gate.bias.gradient().unwrap().clone();
+        for bad in [f32::NAN, f32::INFINITY] {
+            let seed = Tensor::from_vec(1, 2, vec![bad, 0.5]).unwrap();
+            assert!(gate.backward(&input, &seed).is_err());
+            assert_eq!(gate.gate.gradient(), Some(&before_gate));
+            assert_eq!(gate.bias.gradient(), Some(&before_bias));
+        }
+        let mut tiny_curvature = WaveGate::new("overflow", 2, -1e-30, 0.5).unwrap();
+        let zero = Tensor::zeros(1, 2).unwrap();
+        let finite_seed = Tensor::from_vec(1, 2, vec![f32::MAX; 2]).unwrap();
+        assert!(tiny_curvature.backward(&zero, &finite_seed).is_err());
+        assert!(tiny_curvature.gate.gradient().is_none());
+        assert!(tiny_curvature.bias.gradient().is_none());
+    }
+
+    #[test]
+    fn wave_gate_projection_vjp_tracks_curvature_at_tiny_norms() {
+        let x = Tensor::from_vec(1, 2, vec![4e-8, -6e-8]).unwrap();
+        let seed = Tensor::from_vec(1, 2, vec![0.3, 0.2]).unwrap();
+        let derivative = poincare_projection_backward(&x, &seed, -1e-16).unwrap();
+        for col in 0..2 {
+            let loss = |delta: f32| {
+                let mut value = x.clone();
+                value.data_mut()[col] += delta;
+                value
+                    .project_to_poincare_with_backend(-1e-16, TensorUtilBackend::Cpu)
+                    .unwrap()
+                    .data()
+                    .iter()
+                    .zip(seed.data())
+                    .map(|(&y, &dy)| f64::from(y) * f64::from(dy))
+                    .sum::<f64>()
+            };
+            let numeric = (loss(1e-10) - loss(-1e-10)) / 2e-10;
+            let analytic = f64::from(derivative.data()[col]);
+            assert!(
+                (analytic - numeric).abs() < 1e-3 * numeric.abs(),
+                "analytic={analytic} numeric={numeric}"
+            );
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wave_gate_vjp_wgpu_covers_saturation_and_tiny_curvature() {
+        let _lock = observer_lock();
+        if !wgpu_dense::is_available() {
+            eprintln!("WGPU WaveGate VJP not exercised: adapter unavailable");
+            return;
+        }
+        for (curvature, saturation, input_values, gate_values) in [
+            (-1.0, 0.5, vec![0.9, -0.75, 0.3, 0.6], [1.4, -1.1]),
+            (-1e-16, 1.0, vec![1e-7, -2e-7, 0.0, 0.0], [0.2, -0.3]),
+            (-1e-30, 1e30, vec![1e-20, -2e-20, 1e20, 2e20], [0.2, -0.3]),
+        ] {
+            let encoder = LanguageWaveEncoder::new(curvature, 0.5).unwrap();
+            let topos = OpenCartesianTopos::new(curvature, 1e-6, saturation, 64, 1024)
+                .unwrap()
+                .with_porosity(0.8)
+                .unwrap();
+            let mut gate = WaveGate::with_topos("wgpu_vjp", 2, encoder, topos).unwrap();
+            gate.gate
+                .value_mut()
+                .data_mut()
+                .copy_from_slice(&gate_values);
+            let input = Tensor::from_vec(2, 2, input_values).unwrap();
+            let seed = Tensor::from_vec(2, 2, vec![0.035, -0.02, -0.01, 0.03]).unwrap();
+            let (expected_forward, expected) = {
+                let _scope = push_backend_policy(cpu_policy(0));
+                (
+                    gate.forward(&input).unwrap(),
+                    gate.vjp(&input, &seed).unwrap(),
+                )
+            };
+            let (actual_forward, actual) = {
+                let strict = BackendPolicy::explicit_with_config(
+                    BackendKind::Wgpu.default_caps(),
+                    ExecutionConfig::new(AcceleratorFallback::Forbid, 0),
+                    MatmulBackend::GpuWgpu,
+                    MatmulBackend::GpuWgpu,
+                    LayerNormBackend::Cpu,
+                    AttentionBackend::Cpu,
+                    SoftmaxBackend::Cpu,
+                );
+                let _scope = push_backend_policy(strict);
+                (
+                    gate.forward(&input).unwrap(),
+                    gate.vjp(&input, &seed).unwrap(),
+                )
+            };
+            for (expected, actual) in [
+                (&expected_forward, &actual_forward),
+                (&expected.grad_input, &actual.grad_input),
+                (&expected.grad_gate, &actual.grad_gate),
+                (&expected.grad_bias, &actual.grad_bias),
+            ] {
+                for (&expected, &actual) in expected.data().iter().zip(actual.data()) {
+                    assert!(
+                        (actual - expected).abs() <= 2e-4 * expected.abs() + 1e-7,
+                        "curvature={curvature}: expected={expected} actual={actual}"
+                    );
+                }
+            }
+        }
+        println!("WGPU WaveGate VJP exercised successfully");
     }
 
     #[cfg(feature = "wgpu")]

@@ -42,7 +42,7 @@ fn schrodinger_partner_col(col: u32, cols: u32) -> u32 {
 }
 
 fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
-    if (value != value || saturation <= 0.0) {
+    if (!(abs(value) <= 3.402823466e38) || saturation <= 0.0) {
         return 0.0;
     }
     let limit = abs(saturation);
@@ -54,14 +54,15 @@ fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     if (porosity <= 0.00000011920929) {
         return sign * limit;
     }
-    let bleed = (magnitude - limit) / (magnitude + limit);
+    let relative_limit = limit / magnitude;
+    let bleed = (1.0 - relative_limit) / (1.0 + relative_limit);
     let absorb = min(porosity * 0.25, 1.0);
     let softened = limit * max(1.0 - absorb * min(bleed, 1.0), 0.0);
     return sign * softened;
 }
 
 fn porous_mix_backward_factor(value: f32, saturation: f32, porosity: f32) -> f32 {
-    if (value != value || saturation <= 0.0) {
+    if (!(abs(value) <= 3.402823466e38) || saturation <= 0.0) {
         return 0.0;
     }
     let limit = abs(saturation);
@@ -73,11 +74,9 @@ fn porous_mix_backward_factor(value: f32, saturation: f32, porosity: f32) -> f32
         return 0.0;
     }
     let absorb = min(porosity * 0.25, 1.0);
-    let denom = magnitude + limit;
-    if (denom <= 0.00000011920929) {
-        return 0.0;
-    }
-    return -2.0 * limit * limit * absorb / (denom * denom);
+    let relative_limit = limit / magnitude;
+    let ratio = relative_limit / (1.0 + relative_limit);
+    return -2.0 * absorb * ratio * ratio;
 }
 
 @compute @workgroup_size(256)
@@ -1664,27 +1663,59 @@ fn max_axis0_backward(
     }
 }
 
-@compute @workgroup_size(256)
-fn project_to_poincare(
-    @builtin(workgroup_id) workgroup_id: vec3<u32>,
-    @builtin(local_invocation_id) local_id: vec3<u32>,
-) {
-    let row_index = workgroup_id.x;
-    let lane = local_id.x;
-    var sum_sq = 0.0;
+// kind: 0 = direct projection, 1 = gated forward, 2 = gated backward.
+fn projection_value(row: u32, col: u32, kind: u32) -> f32 {
+    let value = input[row * params.cols + col];
+    if (kind == 0u) {
+        return value;
+    }
+    let base = select(0u, params.values, kind == 2u);
+    return porous_mix(value * aux[base + col] + aux[base + params.cols + col],
+                      params.saturation, params.porosity);
+}
+
+// Keep magnitude separate from the scaled norm: raw squares can overflow or
+// underflow even when the projected value and derivative are representable.
+fn projection_row_shape(row: u32, lane: u32, kind: u32) -> vec2<f32> {
+    var maximum = 0.0;
     var col = lane;
     loop {
         if (col >= params.cols) {
             break;
         }
-        let value = input[row_index * params.cols + col];
-        sum_sq = sum_sq + value * value;
+        maximum = max(maximum, abs(projection_value(row, col, kind)));
+        col = col + 256u;
+    }
+    scratch[lane] = maximum;
+    workgroupBarrier();
+    var stride = 128u;
+    loop {
+        if (stride == 0u) {
+            break;
+        }
+        if (lane < stride) {
+            scratch[lane] = max(scratch[lane], scratch[lane + stride]);
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    maximum = scratch[0];
+    workgroupBarrier();
+    var sum_sq = 0.0;
+    col = lane;
+    loop {
+        if (col >= params.cols) {
+            break;
+        }
+        if (maximum > 0.0) {
+            let scaled = projection_value(row, col, kind) / maximum;
+            sum_sq = sum_sq + scaled * scaled;
+        }
         col = col + 256u;
     }
     scratch[lane] = sum_sq;
     workgroupBarrier();
-
-    var stride = 128u;
+    stride = 128u;
     loop {
         if (stride == 0u) {
             break;
@@ -1696,19 +1727,51 @@ fn project_to_poincare(
         stride = stride / 2u;
     }
 
-    let norm = sqrt(scratch[0]);
-    var factor = 1.0;
-    if (norm > 0.0) {
-        factor = tanh(norm / params.scalar) / norm;
-    }
+    let scaled_norm = sqrt(scratch[0]);
+    workgroupBarrier();
+    return vec2<f32>(maximum, scaled_norm);
+}
 
-    col = lane;
+fn projection_small_ratio(argument: f32) -> f32 {
+    let square = argument * argument;
+    return 1.0 - square / 3.0 + 2.0 * square * square / 15.0;
+}
+
+fn projection_radius(shape: vec2<f32>) -> f32 {
+    // tanh is already one to f32 accuracy here; avoid an overflowing ratio.
+    if (shape.x > 10.0 * params.scalar) {
+        return 1.0;
+    }
+    let argument = (shape.x / params.scalar) * shape.y;
+    // Some shader tanh implementations lose relative accuracy near zero.
+    if (argument < 0.01) {
+        return argument * projection_small_ratio(argument);
+    }
+    return tanh(argument);
+}
+
+fn projection_output(value: f32, shape: vec2<f32>) -> f32 {
+    if (shape.x == 0.0) { return value; }
+    let argument = (shape.x / params.scalar) * shape.y;
+    if (argument < 0.01) {
+        // Avoid a compiler-reassociated value * tiny_radius intermediate.
+        return (value / params.scalar) * projection_small_ratio(argument);
+    }
+    return (value / shape.x / shape.y) * projection_radius(shape);
+}
+
+@compute @workgroup_size(256)
+fn project_to_poincare(
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+) {
+    let row = workgroup_id.x;
+    let shape = projection_row_shape(row, local_id.x, 0u);
+    var col = local_id.x;
     loop {
-        if (col >= params.cols) {
-            break;
-        }
-        let idx = row_index * params.cols + col;
-        output[idx] = input[idx] * factor;
+        if (col >= params.cols) { break; }
+        let idx = row * params.cols + col;
+        output[idx] = projection_output(input[idx], shape);
         col = col + 256u;
     }
 }
@@ -1718,49 +1781,12 @@ fn wave_gate_project(
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let row_index = workgroup_id.x;
-    let lane = local_id.x;
-    var sum_sq = 0.0;
-    var col = lane;
+    let row = workgroup_id.x;
+    let shape = projection_row_shape(row, local_id.x, 1u);
+    var col = local_id.x;
     loop {
-        if (col >= params.cols) {
-            break;
-        }
-        let raw = input[row_index * params.cols + col] * aux[col] + aux[params.cols + col];
-        let value = porous_mix(raw, params.saturation, params.porosity);
-        sum_sq = sum_sq + value * value;
-        col = col + 256u;
-    }
-    scratch[lane] = sum_sq;
-    workgroupBarrier();
-
-    var stride = 128u;
-    loop {
-        if (stride == 0u) {
-            break;
-        }
-        if (lane < stride) {
-            scratch[lane] = scratch[lane] + scratch[lane + stride];
-        }
-        workgroupBarrier();
-        stride = stride / 2u;
-    }
-
-    let norm = sqrt(scratch[0]);
-    var factor = 1.0;
-    if (norm > 0.0) {
-        factor = tanh(norm / params.scalar) / norm;
-    }
-
-    col = lane;
-    loop {
-        if (col >= params.cols) {
-            break;
-        }
-        let idx = row_index * params.cols + col;
-        let raw = input[idx] * aux[col] + aux[params.cols + col];
-        let value = porous_mix(raw, params.saturation, params.porosity);
-        output[idx] = value * factor;
+        if (col >= params.cols) { break; }
+        output[row * params.cols + col] = projection_output(projection_value(row, col, 1u), shape);
         col = col + 256u;
     }
 }
@@ -1772,7 +1798,7 @@ fn wave_gate_backward(
 ) {
     let row_index = workgroup_id.x;
     let lane = local_id.x;
-    var sum_sq = 0.0;
+    let shape = projection_row_shape(row_index, lane, 2u);
     var dot = 0.0;
     var col = lane;
     loop {
@@ -1780,31 +1806,16 @@ fn wave_gate_backward(
             break;
         }
         let idx = row_index * params.cols + col;
-        let raw = input[idx] * aux[params.values + col] + aux[params.values + params.cols + col];
-        let preprojected = porous_mix(raw, params.saturation, params.porosity);
-        sum_sq = sum_sq + preprojected * preprojected;
-        dot = dot + preprojected * aux[idx];
+        if (shape.x > 0.0) {
+            let unit = projection_value(row_index, col, 2u) / shape.x / shape.y;
+            dot = dot + unit * aux[idx];
+        }
         col = col + 256u;
     }
-    scratch[lane] = sum_sq;
+    scratch[lane] = dot;
     workgroupBarrier();
 
     var stride = 128u;
-    loop {
-        if (stride == 0u) {
-            break;
-        }
-        if (lane < stride) {
-            scratch[lane] = scratch[lane] + scratch[lane + stride];
-        }
-        workgroupBarrier();
-        stride = stride / 2u;
-    }
-    let norm = sqrt(scratch[0]);
-
-    scratch[lane] = dot;
-    workgroupBarrier();
-    stride = 128u;
     loop {
         if (stride == 0u) {
             break;
@@ -1827,14 +1838,18 @@ fn wave_gate_backward(
         let raw = input[idx] * gate + aux[params.values + params.cols + col];
         let preprojected = porous_mix(raw, params.saturation, params.porosity);
         var grad_saturated = aux[idx];
-        if (norm <= params._pad2 || norm != norm) {
+        if (shape.x == 0.0) {
             grad_saturated = aux[idx] / params.scalar;
         } else {
-            let t = tanh(norm / params.scalar);
-            let factor = t / norm;
+            let t = projection_radius(shape);
+            var factor = (t / shape.x) / shape.y;
+            let argument = (shape.x / params.scalar) * shape.y;
+            if (argument < 0.01) {
+                factor = projection_small_ratio(argument) / params.scalar;
+            }
             let sech2 = 1.0 - t * t;
-            let radial = ((sech2 * norm / params.scalar) - t) / (norm * norm * norm);
-            grad_saturated = factor * aux[idx] + radial * preprojected * row_dot;
+            let radial = (preprojected / shape.x / shape.y) * row_dot;
+            grad_saturated = factor * (aux[idx] - radial) + radial * sech2 / params.scalar;
         }
         let grad_affine =
             grad_saturated * porous_mix_backward_factor(raw, params.saturation, params.porosity);

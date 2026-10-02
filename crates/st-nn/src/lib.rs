@@ -115,7 +115,7 @@ pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv3d, Conv4d, Conv6da, MaxPo
 pub use layers::linear::Linear;
 pub use layers::lora_linear::LoraLinear;
 pub use layers::sequential::Sequential;
-pub use layers::wave_gate::WaveGate;
+pub use layers::wave_gate::{WaveGate, WaveGateVjp};
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{
