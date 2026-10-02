@@ -229,8 +229,13 @@ controls rather than choosing between them:
    connects existing Register2x2 kernels to both projections, with native/WASM
    parity. The explicit 16x16 preset improves the measured larger inputs, while
    Scalar remains the default because short/device behavior is not settled.
-   Head packing and submission costs remain optimization targets; these are
-   inference measurements, not a reason to claim LLM quality gains.
+   Attention now reads Q/K/V and broadcast biases directly from N-D views,
+   removing their temporary materializations while preserving inherited guards.
+   The [direct-view comparison](../benchmarks/results/2026-10-02-attention-strided-inputs/README.md)
+   finds short-input gains but mixed/noisy wide-input timings; negative results
+   and a post-hoc sensitivity run are retained. Output head merging and
+   submission costs remain optimization targets. These are inference
+   measurements, not a reason to claim LLM quality gains.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the
