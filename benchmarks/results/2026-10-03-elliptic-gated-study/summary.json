@@ -469,7 +469,7 @@
     "41:gated_tangent": {
       "initial_raw_mix": 0.0,
       "final_raw_mix": 0.047157686203718185,
-      "final_mix": 0.047122760106063595,
+      "final_mix": 0.047122760106,
       "min_raw_mix": 0.0,
       "max_raw_mix": 0.08757632225751877,
       "nonzero_gradient_steps": 511
@@ -477,7 +477,7 @@
     "41:gated_elliptic": {
       "initial_raw_mix": 0.0,
       "final_raw_mix": -0.575985848903656,
-      "final_mix": -0.5197417426179626,
+      "final_mix": -0.519741742618,
       "min_raw_mix": -0.575985848903656,
       "max_raw_mix": 0.005563954822719097,
       "nonzero_gradient_steps": 511
@@ -485,7 +485,7 @@
     "43:gated_tangent": {
       "initial_raw_mix": 0.0,
       "final_raw_mix": 0.09179260581731796,
-      "final_mix": 0.09153566054239391,
+      "final_mix": 0.091535660542,
       "min_raw_mix": -0.008733789436519146,
       "max_raw_mix": 0.11032532900571823,
       "nonzero_gradient_steps": 511
@@ -493,7 +493,7 @@
     "43:gated_elliptic": {
       "initial_raw_mix": 0.0,
       "final_raw_mix": -0.4858208894729614,
-      "final_mix": -0.4508932363653563,
+      "final_mix": -0.450893236365,
       "min_raw_mix": -0.4858208894729614,
       "max_raw_mix": 0.0,
       "nonzero_gradient_steps": 511
@@ -501,7 +501,7 @@
     "47:gated_tangent": {
       "initial_raw_mix": 0.0,
       "final_raw_mix": 0.09268250316381454,
-      "final_mix": 0.09241802952898412,
+      "final_mix": 0.092418029529,
       "min_raw_mix": 0.0,
       "max_raw_mix": 0.11123716831207275,
       "nonzero_gradient_steps": 511
@@ -509,7 +509,7 @@
     "47:gated_elliptic": {
       "initial_raw_mix": 0.0,
       "final_raw_mix": -0.46712788939476013,
-      "final_mix": -0.43587578509305575,
+      "final_mix": -0.435875785093,
       "min_raw_mix": -0.46712788939476013,
       "max_raw_mix": 0.0007435285951942205,
       "nonzero_gradient_steps": 511

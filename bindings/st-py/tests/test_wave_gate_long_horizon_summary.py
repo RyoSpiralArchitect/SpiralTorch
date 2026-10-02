@@ -22,6 +22,41 @@ def summary_module():
     return module
 
 
+def test_gate_serialization_is_independent_of_libm_and_decimal_context(summary_module, monkeypatch):
+    from decimal import ROUND_DOWN, localcontext
+
+    def forbidden(_):
+        raise AssertionError("platform tanh must not enter the summary")
+
+    monkeypatch.setattr(summary_module.math, "tanh", forbidden)
+    with localcontext() as context:
+        context.prec = 3
+        context.rounding = ROUND_DOWN
+        assert summary_module.canonical_gate(-0.4858208894729614) == -0.450893236365
+        assert summary_module.canonical_gate(-0.46712788939476013) == -0.435875785093
+        assert summary_module.canonical_gate(0.047157686203718185) == 0.047122760106
+        for raw in (0.0, -0.0, -1e-20):
+            assert json.dumps(summary_module.canonical_gate(raw)) == "0.0"
+        for raw in (20.0, 1e308):
+            assert summary_module.canonical_gate(raw) == 1.0
+            assert summary_module.canonical_gate(-raw) == -1.0
+    for raw in (float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError, match="nonfinite"):
+            summary_module.canonical_gate(raw)
+
+
+def test_committed_gated_summary_rebuilds_byte_for_byte(summary_module, monkeypatch, tmp_path):
+    directory = Path(__file__).resolve().parents[3] / "benchmarks/results/2026-10-03-elliptic-gated-study"
+    output = tmp_path / "summary.json"
+    monkeypatch.setattr(sys, "argv", [
+        "summarize", "--plan", str(directory / "plan.json.gz"),
+        "--results", str(directory / "results.json.gz"),
+        "--journal", str(directory / "journal.json"), "--output", str(output),
+    ])
+    summary_module.main()
+    assert output.read_bytes() == (directory / "summary.json").read_bytes()
+
+
 def fixture():
     arms, seeds = ["tangent", "wave_gate_radius4"], [41, 43]
     plan = {

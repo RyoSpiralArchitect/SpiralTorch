@@ -45,6 +45,8 @@ before/after values and existing gradient norms. Endpoint reports record the
 saved final raw gate. The offline summarizer rejects missing/nonfinite values,
 discontinuous trajectories, endpoint mismatches, and unpaired initialization.
 It reports the final effective `tanh(raw_mix)` descriptively, not as a quality win.
+That derived field uses a fixed Decimal calculation rounded to 12 decimal places
+for portable serialization; it does not change the raw gate or native computation.
 
 Primary contrast: gated elliptic minus gated tangent. Also report pointwise
 geometry, each gate versus its own pointwise control, and the paired interaction.

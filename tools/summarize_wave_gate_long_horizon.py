@@ -7,12 +7,26 @@ import hashlib
 import json
 import math
 import statistics
+from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
 from pathlib import Path
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def canonical_gate(raw):
+    """Descriptive tanh, fixed at 12 decimal places without platform libm."""
+    require(math.isfinite(raw), "nonfinite raw gate")
+    with localcontext(Context(prec=50, rounding=ROUND_HALF_EVEN)):
+        value = Decimal.from_float(float(raw))
+        if abs(value) >= 20:
+            return -1.0 if value < 0 else 1.0
+        decay = (-2 * abs(value)).exp()
+        mix = ((1 - decay) / (1 + decay)).copy_sign(value)
+        # Normalize signed zero as well as the final decimal representation.
+        return float(mix.quantize(Decimal("1e-12"))) or 0.0
 
 
 def causal_factorial_contrasts(config, runs, measured, sets):
@@ -106,7 +120,7 @@ def gated_trajectories(config, runs):
             report[key] = {
                 "initial_raw_mix": before[0],
                 "final_raw_mix": after[-1],
-                "final_mix": math.tanh(after[-1]),
+                "final_mix": canonical_gate(after[-1]),
                 "min_raw_mix": min(before + after),
                 "max_raw_mix": max(before + after),
                 "nonzero_gradient_steps": sum(v != 0 for v in gradients),
