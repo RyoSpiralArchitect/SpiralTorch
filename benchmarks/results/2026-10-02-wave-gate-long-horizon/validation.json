@@ -1,0 +1,22 @@
+{
+  "schema": "spiraltorch.wave_gate_long_horizon_validation.v1",
+  "source_revision": "82d5ed3d4815ddee32e434941f553709e2e7319a",
+  "study_id": "a4e516af8cef3d57b524425004d9969b0b54022cba1a08852ecec9fd90db6d88",
+  "status": "training_in_progress_not_an_outcome",
+  "python_tests": {
+    "passed": 47,
+    "failed": 0,
+    "skipped": 0
+  },
+  "targeted_ruff": "passed",
+  "frozen_driver_sha256": "5f999499f24ce2315d48ef0c4b89ceaee52a71a3709729b04c1a4e5b748dc6b4",
+  "frozen_helper_sha256": "0a2b87308e1ea1ae1193b86f23bdc4a21e65c3b05098b729d4a29dc9d18f6814",
+  "protocol_sha256": "9b96ee340047e2a42417c479367364370d9bb3739296cf325cca7bbf09d3ab6a",
+  "native_sha256": "ecbfe0cf6ca7551d6d667aab766645387cb185b3488421e007ecf832e737af8a",
+  "local_test_log_sha256": "3e04027c2b5e867c12d2480f00bf5dc19ad21885c1741ac559eb7de50cbc3553",
+  "notes": [
+    "This receipt validates restart/gating behavior, not completion or quality of the live 512-step experiment.",
+    "Native Rust/WASM mathematics are reused unchanged from the preceding radius study.",
+    "The first test draft compared different batch shapes; after matching batch shape, causal CE agreement passes without broadening tolerance."
+  ]
+}
