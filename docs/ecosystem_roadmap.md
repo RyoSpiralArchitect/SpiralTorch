@@ -39,8 +39,15 @@ now connects that scalar through Rust/Python/WASM and completes 18 conditions.
 All 15 active adapter/Adam continuations match exactly. Learning radius improves
 its fixed-radius controls very slightly, but tangent remains best in all seeds.
 Widening radius approaches the linear map, not proof of geometric advantage.
-Longer runs, fresh evaluation data and nonlinear controls remain open; this is
-an implemented learning mechanism, not a language-quality or speed win.
+The [fixed 512-update study](../benchmarks/results/2026-10-02-wave-gate-long-horizon/README.md)
+now completes all nine runs, exact continuations and delayed evaluation on 120
+unused within-book blocks and 32 transfer-book blocks. Every active arm improves
+versus the frozen baseline, but tangent remains best for every seed on both sets.
+Learned radius grows from 4 to about 9.2-9.3 and improves fixed radius without
+closing that gap. Nonlinear controls and directional/relational geometry remain
+open; this is an implemented learning mechanism, not a geometric quality or
+speed win. CI now exercises the geometric clients and exact tiny-HF continuation
+instead of leaving that coverage solely in local experiments.
 
 ## Restarted execution slice: vision across Rust, Python, and browser
 

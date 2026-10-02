@@ -1,0 +1,178 @@
+{
+  "schema": "spiraltorch.wave_gate_long_horizon_summary.v1",
+  "study_id": "a4e516af8cef3d57b524425004d9969b0b54022cba1a08852ecec9fd90db6d88",
+  "steps_per_run": 512,
+  "runs": 9,
+  "primary_updates": 4608,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "tangent": {
+          "mean_ce": 4.016924432251188,
+          "mean_delta_vs_baseline": -0.056788836585151437,
+          "mean_delta_vs_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.017254807551702,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.017041208346685,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.016477280855179,
+              "delta_vs_tangent": 0.0
+            }
+          ]
+        },
+        "wave_gate_radius4": {
+          "mean_ce": 4.04998879565133,
+          "mean_delta_vs_baseline": -0.02372447318500992,
+          "mean_delta_vs_tangent": 0.03306436340014093,
+          "paired_delta_sample_sd": 0.00033629457689494024,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.050048728783925,
+              "delta_vs_tangent": 0.0327939212322228
+            },
+            {
+              "seed": 43,
+              "ce": 4.049999463558197,
+              "delta_vs_tangent": 0.03295825521151219
+            },
+            {
+              "seed": 47,
+              "ce": 4.049918194611867,
+              "delta_vs_tangent": 0.033440913756687785
+            }
+          ]
+        },
+        "wave_gate_learnable_radius4": {
+          "mean_ce": 4.034820720222261,
+          "mean_delta_vs_baseline": -0.038892548614078315,
+          "mean_delta_vs_tangent": 0.017896287971072233,
+          "paired_delta_sample_sd": 0.00023148974761324852,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.034898422161738,
+              "delta_vs_tangent": 0.017643614610035385
+            },
+            {
+              "seed": 43,
+              "ce": 4.034988303979238,
+              "delta_vs_tangent": 0.017947095632552923
+            },
+            {
+              "seed": 47,
+              "ce": 4.034575434525808,
+              "delta_vs_tangent": 0.018098153670628392
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "tangent": {
+          "mean_ce": 3.9763072753945985,
+          "mean_delta_vs_baseline": -0.03550021102031087,
+          "mean_delta_vs_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.9764342978596687,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.9763288646936417,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.9761586636304855,
+              "delta_vs_tangent": 0.0
+            }
+          ]
+        },
+        "wave_gate_radius4": {
+          "mean_ce": 3.997139227886995,
+          "mean_delta_vs_baseline": -0.014668258527914535,
+          "mean_delta_vs_tangent": 0.020831952492396038,
+          "paired_delta_sample_sd": 0.00012861914525140534,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.9971610978245735,
+              "delta_vs_tangent": 0.020726799964904785
+            },
+            {
+              "seed": 43,
+              "ce": 3.9971225634217262,
+              "delta_vs_tangent": 0.020793698728084564
+            },
+            {
+              "seed": 47,
+              "ce": 3.9971340224146843,
+              "delta_vs_tangent": 0.02097535878419876
+            }
+          ]
+        },
+        "wave_gate_learnable_radius4": {
+          "mean_ce": 3.9876437534888587,
+          "mean_delta_vs_baseline": -0.024163732926050674,
+          "mean_delta_vs_tangent": 0.011336478094259897,
+          "paired_delta_sample_sd": 0.00011280035186594963,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.9876424446702003,
+              "delta_vs_tangent": 0.011208146810531616
+            },
+            {
+              "seed": 43,
+              "ce": 3.98771021515131,
+              "delta_vs_tangent": 0.011381350457668304
+            },
+            {
+              "seed": 47,
+              "ce": 3.9875786006450653,
+              "delta_vs_tangent": 0.011419937014579773
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "Seeds vary paired sample order, not the frozen model or identity initialization.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "The learned-radius arm has one extra scalar; radius 4 was selected by an earlier pilot.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "input_sha256": {
+    "plan": "31fb9701b13df228ce26cb0cdc5f0609553d48e5e0e2ffe4a26087504e3718ec",
+    "results": "cc10f160da9b6ba33b139aff15c3fdc8e2664640b38ae3ba89429b05128c11d3",
+    "journal": "38f0b7d3d5ca8259fad6826c309e85847a243ebe99c743bdf98392eb841a58f5"
+  }
+}

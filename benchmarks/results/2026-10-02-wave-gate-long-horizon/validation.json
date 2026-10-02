@@ -1,0 +1,96 @@
+{
+  "schema": "spiraltorch.wave_gate_long_horizon_validation.v1",
+  "source_revision": "82d5ed3d4815ddee32e434941f553709e2e7319a",
+  "study_id": "a4e516af8cef3d57b524425004d9969b0b54022cba1a08852ecec9fd90db6d88",
+  "status": "completed",
+  "python_tests": {
+    "passed": 47,
+    "failed": 0,
+    "skipped": 0
+  },
+  "targeted_ruff": "passed",
+  "frozen_driver_sha256": "5f999499f24ce2315d48ef0c4b89ceaee52a71a3709729b04c1a4e5b748dc6b4",
+  "frozen_helper_sha256": "0a2b87308e1ea1ae1193b86f23bdc4a21e65c3b05098b729d4a29dc9d18f6814",
+  "protocol_sha256": "9b96ee340047e2a42417c479367364370d9bb3739296cf325cca7bbf09d3ab6a",
+  "native_sha256": "ecbfe0cf6ca7551d6d667aab766645387cb185b3488421e007ecf832e737af8a",
+  "local_test_log_sha256": "3e04027c2b5e867c12d2480f00bf5dc19ad21885c1741ac559eb7de50cbc3553",
+  "notes": [
+    "Structural tests alone do not establish experiment completion or quality. The completion record below separately verifies the actual fixed-endpoint run.",
+    "Native Rust/WASM mathematics are reused unchanged from the preceding radius study.",
+    "The first test draft compared different batch shapes; after matching batch shape, causal CE agreement passes without broadening tolerance."
+  ],
+  "optional_native_test_guard": {
+    "passed": 47,
+    "failed": 0,
+    "skipped": 0,
+    "test_file_sha256": "a88080cc131e4e61e9cd37f3406c50c985fa2ef992785da6c7748bf39e7b33e8",
+    "local_test_log_sha256": "88da8f352fe5957ca5ac2bcc115e181f1c7f4899aa4357d731244dd2fb0bad2d",
+    "scope": "Test collection only; frozen training source and protocol remain unchanged."
+  },
+  "aggregation_validation": {
+    "passed": 58,
+    "failed": 0,
+    "skipped": 0,
+    "aggregation_tests": 11,
+    "local_test_log_sha256": "0f8c8907be37f66699e707e59c0e096827590aca1798b52ddb6903a54ad10e6a",
+    "script_sha256": "ac07bda64c9b4f30ec5f1d7413165cf3c4f5fe849ab9414324edcbe483fcbd4c",
+    "test_file_sha256": "0a7c1247ee3751438a969cc7a141f24a089acbd9e92b0882060e9c058f35104d",
+    "targeted_ruff": "passed",
+    "scope": "Post-training receipt aggregation only. Frozen live training source and protocol unchanged."
+  },
+  "ci_import_mode_local_validation": {
+    "passed": 58,
+    "failed": 0,
+    "skipped": 0,
+    "local_test_log_sha256": "f4e4ab6b4ee45dd8c1c937cb92c528629b51942cb830c733a4b83f4305c598a5",
+    "workflow_yaml": "parsed",
+    "native_exports": "required before pytest collection",
+    "scope": "Local macOS run with Python -I and pytest importlib mode, explicitly selecting the frozen native package. This is not remote Ubuntu CI completion."
+  },
+  "completion": {
+    "primary_process_exit_code": 0,
+    "completed_resume_process_exit_code": 0,
+    "runs": 9,
+    "primary_updates": 4608,
+    "extra_validation_updates": 18,
+    "all_endpoint_cursors": 512,
+    "all_frozen_bases_unchanged": true,
+    "all_next_adapter_and_adam_updates_equal": true,
+    "all_endpoint_checkpoint_hashes_reverified": true,
+    "all_training_losses_and_gradients_finite": true,
+    "all_observed_affines_finite": true,
+    "completed_resume_repeated_no_endpoints": true,
+    "result_hash_unchanged_after_completed_resume": true,
+    "results_sha256": "cc10f160da9b6ba33b139aff15c3fdc8e2664640b38ae3ba89429b05128c11d3",
+    "local_training_log_sha256": "9caa09acb5394e6fdb7488b1af4a67692ac8b045587705a190ca48c67fe8c6bc",
+    "local_completed_resume_log_sha256": "80375b9750164f4ee2a0013dcd9970926b1dde261709f4e55743f126f58d2147",
+    "latest_python_tests": {
+      "passed": 59,
+      "failed": 0,
+      "skipped": 0,
+      "aggregation_tests": 12,
+      "local_test_log_sha256": "d5033bc39404d9074b165880b77e67e97c35c48ff4e7c85f8f66af5db94c1613"
+    },
+    "aggregator_source_sha256": "6f7ab040bc427ea56fc3a1537fb868e5284c9824197906d5524fe2e34ea95d15",
+    "aggregator_test_sha256": "29ddff68a1149e380029be53a172aefd559f87c28140e6b29c0193b4e6ad18d3",
+    "public_reaggregation_byte_exact": true,
+    "local_originals_retained": true,
+    "interpretation": "All active arms improve baseline, but tangent is best for every seed on both fixed evaluation sets. No geometric advantage, significance or speed claim."
+  },
+  "post_run_plan_guard": {
+    "pre_fix_regression": "saved config edit with unchanged study_id was accepted in an isolated tiny-model fixture",
+    "pre_fix_failed_tests": 1,
+    "post_fix_python_tests": {
+      "passed": 62,
+      "failed": 0,
+      "skipped": 0
+    },
+    "pre_fix_log_sha256": "119e7e305d25f2eadad91b6130f0dc1b7afadfda88b842adffff3fc478638ca6",
+    "post_fix_log_sha256": "e36d6930cf443c852fefe1878d6c72b0961c538c4d444e3104217d48bc482d4a",
+    "current_driver_sha256": "947c224e3a15b55e4be8cb62869cce8bae32b460912832c271bbce9b7ace9d5d",
+    "current_driver_tests_sha256": "22ca8349e99ee8b477db5acd0a094a8ad713f215c7229572031305ece5f05e76",
+    "original_study_plan_binding_rehashed": true,
+    "original_study_source_and_results_unchanged": true,
+    "note": "The completed numerical experiment uses the frozen 82d5ed3 source. This later resume guard is not retroactively part of that experiment."
+  }
+}

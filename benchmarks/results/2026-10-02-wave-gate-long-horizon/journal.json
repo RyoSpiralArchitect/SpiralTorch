@@ -1,0 +1,106 @@
+{
+  "study_id": "a4e516af8cef3d57b524425004d9969b0b54022cba1a08852ecec9fd90db6d88",
+  "status": "completed",
+  "runs": {
+    "41:tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-419n_0v1.pt",
+        "sha256": "0a47698db5ba11747590dae2bc7b37c74837d6f7992b4caa0dce6227ca4c47f4"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:wave_gate_radius4": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-wx1yxmjo.pt",
+        "sha256": "e6dc63b981b57d3acdc64bb3f80e8beabb39c9ce78bdca8eaca8a69125288a4b"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:wave_gate_learnable_radius4": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-eqk1vf24.pt",
+        "sha256": "5dc2e8ec1bf34e144a94bd3f7cfa6ee13ff84d8aaddbcb6369d1e9a0abedd7bd"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-rmeyty6g.pt",
+        "sha256": "690db43e594bd7736b757dbd2c8050acf194c0e5b3231a5cc4613755b201fd84"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:wave_gate_radius4": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-91j4nmzg.pt",
+        "sha256": "20c4f9f899d3f2256b9972b9adb6c41d0076d76445eaae0db69c8bfa1a94228e"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:wave_gate_learnable_radius4": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-em6djl22.pt",
+        "sha256": "ebc66de53865194c27d85218fa7e364aed4698b9bacccb1052eeea7eb7686236"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-yhxda2tq.pt",
+        "sha256": "dde06b8d9b2820b0faaf0391c649cb5d6819e5d12ae60d4bd0097e8e5032200d"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:wave_gate_radius4": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-u10u6uqq.pt",
+        "sha256": "5e02e5057e31044f7ea10ac5a1daedc98f33ae1e744d201bd61c9000f1a51b90"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:wave_gate_learnable_radius4": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-1vf474ud.pt",
+        "sha256": "c56122d882f55511e161af6f897e81f316416be037a9d8a321d8db8cfadb325c"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    }
+  },
+  "results_sha256": "cc10f160da9b6ba33b139aff15c3fdc8e2664640b38ae3ba89429b05128c11d3"
+}
