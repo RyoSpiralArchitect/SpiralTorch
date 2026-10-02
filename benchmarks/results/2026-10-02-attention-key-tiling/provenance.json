@@ -1,0 +1,37 @@
+{
+  "schema": "spiraltorch.attention_key_tiling_provenance.v1",
+  "source_revisions": {
+    "baseline": "107d733197f4b0b55742efcf57e003239330ba6d",
+    "unconditional": "b88ece705f4e287c5939f586d72a88d746ff4541",
+    "adaptive": "a147cf56e94f8f087d0266333941f320f67d6150"
+  },
+  "fixture_sha256": "988a61d591a15fcf3baec7ea648a49040bc3008fc4661aa528c9bb22c8dc244d",
+  "diagnostic_fixture_sha256": "a5ed1a36ca9d99d5d66841255fea9c8c8b97ed1087b47b4f3b8fe75f7836092d",
+  "binary_sha256": {
+    "st_baseline": "47b120df07b21103cae29a7c0493cb86f11c20eaf75fa0506018da203d715e15",
+    "st_tiled": "065b1482bdf87743d7cfa9b8aa19ddd58b7390ffaebb56a450ea9057485d6fe9",
+    "st_adaptive": "f77460c3ffced609e166f06f3ced337524d45ce4c0f8434fbca9d3f146fa1c8e"
+  },
+  "compiler": "rustc 1.98.0",
+  "native_profile": "release",
+  "formatter": "nightly-2026-04-15",
+  "torch_version": "2.12.1",
+  "python_version": "3.12.6",
+  "environment": {
+    "SPIRALTON_MAGIC": "0",
+    "SPIRALTON_TORCH": "0",
+    "SPIRALTON_MODEL_PATCHES": "0",
+    "SPIRALTON_NUMPY": "0",
+    "PYTORCH_ENABLE_MPS_FALLBACK": "0",
+    "PYTORCH_MPS_FAST_MATH": "0",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1"
+  },
+  "larger_shape_paired_medians": {
+    "favorable": 96,
+    "total": 96,
+    "independent_trials": false
+  },
+  "raw_artifacts": "Local only; published reports contain all conditions and timings.",
+  "browser_verification_revision": "31b2548cf49fe83f0abc1489270b94f469028de1"
+}
