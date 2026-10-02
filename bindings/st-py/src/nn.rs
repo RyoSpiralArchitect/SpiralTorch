@@ -2375,6 +2375,23 @@ impl PyWaveGate {
         Ok(PyTensor::from_tensor(grad))
     }
 
+    /// Returns input, gate and bias VJPs without averaging or accumulation.
+    pub fn vjp(
+        &self,
+        input: &PyTensor,
+        grad_output: &PyTensor,
+    ) -> PyResult<(PyTensor, PyTensor, PyTensor)> {
+        let gradients = self
+            .inner()?
+            .vjp(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok((
+            PyTensor::from_tensor(gradients.grad_input),
+            PyTensor::from_tensor(gradients.grad_gate),
+            PyTensor::from_tensor(gradients.grad_bias),
+        ))
+    }
+
     pub fn infuse_text(&mut self, text: &str) -> PyResult<()> {
         self.inner_mut()?
             .infuse_text(text)

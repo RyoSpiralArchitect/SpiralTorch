@@ -18,7 +18,10 @@ The [elliptic/Lie connection](elliptic_learning_bridge.md) now repairs near-pole
 derivatives and large finite norms, owns batched VJPs in Rust, and reaches both
 trainable projections in a bounded pretrained GPT-2 run. Its tangent-linear
 control performs better on the tiny authored corpus; this is not a quality win.
-The next rail is the existing WaveGate derivative,
+The [WaveGate pullback repair](wave_gate_learning.md) now includes the missing
+parameter saturation derivative, separates raw VJPs from training-policy rewrites,
+and hardens shared CPU/WGPU projection arithmetic. Its Rust/Python Tensor API is
+available; an immutable Torch/WASM learning adapter is the next client boundary,
 followed by combinations only after isolated controls. Rust owns each geometric
 rule; Python/WASM own transport and orchestration, not replacement mathematics.
 Pretrained FT quality, mixed precision and resident geometric execution remain
