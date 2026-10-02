@@ -188,6 +188,7 @@ def generation_entry(report, spec, protocol, seed, arm, step, checkpoint, tokeni
 
 def assess(root, spec_path):
     spec = study.read_json(spec_path)
+    study.validate_spec_alignment(spec)
     protocol = "sha256:" + study.digest(spec_path)
     seal = study.read_json(root / "sealed-plan.json")
     completed = study.read_json(root / "completed.json")

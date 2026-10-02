@@ -24,8 +24,22 @@ import sys
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO / "bindings/st-py/examples"
 DEFAULT_SPEC = (
-    REPO / "docs/benchmarks/hf_repetition_schedule_256step_prespec_20261002.json"
+    REPO / "docs/benchmarks/hf_repetition_schedule_aligned_256step_prespec_20261002.json"
 )
+LABEL_ALIGNMENT = {
+    "rule": "mask_unpredicted_first_label",
+    "ignore_index": -100,
+    "base_class": "transformers.DataCollatorForLanguageModeling",
+}
+
+
+def validate_spec_alignment(spec):
+    if (
+        spec.get("schema") != "spiraltorch.hf_repetition_schedule_study.v2"
+        or spec.get("causal_label_alignment") != LABEL_ALIGNMENT
+        or "--causal-lm-mask-first-label" not in spec["training_args"]
+    ):
+        raise ValueError("matched study requires the aligned v2 protocol")
 
 
 def client_command(script, arguments):
@@ -114,18 +128,25 @@ def require_uniform_labels(dataset, collator, shifted_count):
             raise ValueError(f"row {index} is not fixed length")
         if int((labels[:, 1:] != -100).sum()) != shifted_count:
             raise ValueError(f"row {index} has unequal causal label count")
+        if int((labels != -100).sum()) != shifted_count:
+            raise ValueError(f"row {index} includes an unpredicted first label")
 
 
 def dataset_preflight(spec, model, corpus, output):
     import datasets
+    import spiraltorch as st
+    import torch
     import transformers
 
+    validate_spec_alignment(spec)
+    if torch.get_default_device().type != "cpu":
+        raise ValueError("disable automatic device patches before Python startup")
     sys.path.insert(0, str(EXAMPLES))
     bridge = importlib.import_module("hf_gpt2_finetune_bridge")
     tokenizer = transformers.AutoTokenizer.from_pretrained(model, local_files_only=True)
     tokenizer.pad_token = tokenizer.eos_token
-    collator = transformers.DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm=False
+    collator = st.HfCausalLabelAlignmentCollator(
+        transformers.DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     )
     result = {}
     for seed in spec["seeds"]:
@@ -152,6 +173,8 @@ def dataset_preflight(spec, model, corpus, output):
             "train_rows": len(train),
             "eval_rows": len(evaluation),
             "shifted_labels_per_row": args.block_size - 1,
+            "trainer_counted_labels_per_row": args.block_size - 1,
+            "causal_label_alignment": LABEL_ALIGNMENT,
         }
     return result
 
@@ -163,9 +186,21 @@ def validate_training(card, spec, expected_dataset, arm, directory):
         raise ValueError("training did not save its adapter")
     if card["tokenized_dataset_identity"]["observed_identity_id"] != expected_dataset:
         raise ValueError("tokenized dataset changed after preflight")
-    training = card["training_recipe_identity"]["identity_payload"][
-        "training_arguments"
-    ]
+    identity = card["training_recipe_identity"]["identity_payload"]
+    collator = identity.get("trainer_contract", {}).get("data_collator", {})
+    expected_class = (
+        "spiraltorch.HfCausalLabelAlignmentCollator"
+        if arm["name"] == "ordinary_ft"
+        else "spiraltorch.HfRepetitionUnlikelihoodCollator"
+    )
+    if (
+        collator.get("causal_label_alignment") != LABEL_ALIGNMENT
+        or collator.get("class") != expected_class
+        or collator.get("base_class") != "spiraltorch.HfCausalLabelAlignmentCollator"
+        or collator.get("mlm") is not False
+    ):
+        raise ValueError("training omitted the shared causal label alignment")
+    training = identity["training_arguments"]
     if (
         training["use_cpu"] is not True
         or training["world_size"] != 1
@@ -258,6 +293,7 @@ def execute(command, log_path, output):
 
 def run(args):
     spec = read_json(args.spec)
+    validate_spec_alignment(spec)
     if digest(args.corpus) != spec["corpus_sha256"]:
         raise ValueError("wrong corpus bytes")
     if args.model.name != spec["model_revision"]:

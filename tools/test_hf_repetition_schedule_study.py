@@ -28,13 +28,14 @@ def test_schedule_study_rotates_arms_without_dropping_coordinates():
 def test_training_keeps_full_horizon_and_only_schedule_differs_between_treatments():
     spec = study.read_json(study.DEFAULT_SPEC)
     commands = [
-        study.train_args(spec, Path("model"), Path("corpus"), Path("run"), 137, arm)
+        study.train_args(spec, Path("model"), Path("corpus"), Path("run"), 151, arm)
         for arm in spec["arms"]
     ]
     for command in commands:
         assert command[command.index("--max-steps") + 1] == "256"
         assert command[command.index("--max-eval-blocks") + 1] == "0"
         assert "--training-use-cpu" in command
+        assert command.count("--causal-lm-mask-first-label") == 1
         assert "--resume-from-checkpoint" not in command
     assert commands[2][: len(commands[1])] == commands[1]
     assert commands[2][len(commands[1]) :] == [
@@ -45,6 +46,22 @@ def test_training_keeps_full_horizon_and_only_schedule_differs_between_treatment
         "--zspace-repetition-unlikelihood-decay-final-scale",
         "0",
     ]
+
+
+def test_v2_requires_alignment_and_excludes_invalidated_seeds():
+    spec = study.read_json(study.DEFAULT_SPEC)
+    study.validate_spec_alignment(spec)
+    assert not set(spec["seeds"]) & {7, 109, 113, 127, 137, 139, 149}
+    prior = study.read_json(
+        study.REPO / "docs/benchmarks/hf_repetition_schedule_256step_prespec_20261002.json"
+    )
+    assert spec["acceptance"] == prior["acceptance"]
+    assert spec["milestones"] == prior["milestones"]
+    with pytest.raises(ValueError, match="aligned v2"):
+        study.validate_spec_alignment(prior)
+    spec["training_args"].remove("--causal-lm-mask-first-label")
+    with pytest.raises(ValueError, match="aligned v2"):
+        study.validate_spec_alignment(spec)
 
 
 def test_generation_binds_study_and_never_adds_inference_intervention():
@@ -84,10 +101,12 @@ def test_uniform_label_gate_rejects_masked_or_partial_rows():
     def collate(rows):
         return {"labels": torch.tensor([row["labels"] for row in rows])}
 
-    study.require_uniform_labels([{"labels": [1, 2, 3, 4]}], collate, 3)
-    for labels in ([1, 2, -100, 4], [1, 2, 3]):
+    study.require_uniform_labels([{"labels": [-100, 2, 3, 4]}], collate, 3)
+    for labels in ([-100, 2, -100, 4], [-100, 2, 3]):
         with pytest.raises(ValueError):
             study.require_uniform_labels([{"labels": labels}], collate, 3)
+    with pytest.raises(ValueError, match="unpredicted first label"):
+        study.require_uniform_labels([{"labels": [1, 2, 3, 4]}], collate, 3)
     with pytest.raises(ValueError, match="empty"):
         study.require_uniform_labels([], collate, 3)
 
@@ -116,6 +135,14 @@ def test_training_validation_checks_horizon_partition_and_exact_policy(tmp_path)
         "tokenized_dataset_identity": {"observed_identity_id": "tokens"},
         "training_recipe_identity": {
             "identity_payload": {
+                "trainer_contract": {
+                    "data_collator": {
+                        "class": "spiraltorch.HfRepetitionUnlikelihoodCollator",
+                        "base_class": "spiraltorch.HfCausalLabelAlignmentCollator",
+                        "mlm": False,
+                        "causal_label_alignment": study.LABEL_ALIGNMENT,
+                    }
+                },
                 "training_arguments": {
                     "use_cpu": True,
                     "world_size": 1,
@@ -149,6 +176,15 @@ def test_training_validation_checks_horizon_partition_and_exact_policy(tmp_path)
     }
     arm = spec["arms"][2]
     study.validate_training(card, spec, "tokens", arm, tmp_path)
+    changed = copy.deepcopy(card)
+    del changed["training_recipe_identity"]["identity_payload"]["trainer_contract"]
+    with pytest.raises(ValueError, match="shared causal label alignment"):
+        study.validate_training(changed, spec, "tokens", arm, tmp_path)
+    changed = copy.deepcopy(card)
+    changed["training_recipe_identity"]["identity_payload"]["trainer_contract"][
+        "data_collator"
+    ]["class"] = "spiraltorch.HfCausalLabelAlignmentCollator"
+    study.validate_training(changed, spec, "tokens", spec["arms"][0], tmp_path)
     changed = copy.deepcopy(card)
     changed["trainer_trace_lineage"]["trace_last_global_step"] = 64
     with pytest.raises(ValueError, match="horizon"):

@@ -3,22 +3,30 @@
 This is the first long-horizon comparison for the
 [Rust-owned objective control](hf_repetition_objective_control.md), not a new
 decoding intervention or a claim of language-quality improvement.
-The [prespecified protocol](benchmarks/hf_repetition_schedule_256step_prespec_20261002.json)
+The [aligned v2 protocol](benchmarks/hf_repetition_schedule_aligned_256step_prespec_20261002.json)
 must be committed before training. Its byte SHA-256 is the generation protocol
 identity, also recorded in each private execution plan.
+The original v1 attempt was stopped for a confirmed causal-label denominator
+confound, not an efficacy result. Its protocol and raw artifacts remain intact;
+see the [invalidation record](../benchmarks/results/2026-10-02-llm-schedule-v1-invalidated.md).
+It is neither resumed nor pooled with v2. The horizon and acceptance gates did
+not change.
 
 ## Fixed Comparison
 
 - Cached pretrained GPT-2, the existing complete *Pride and Prejudice* text,
-  three new paired seeds (137, 139, 149), and 256 update slots per arm.
+  three new paired seeds (151, 157, 163), and 256 update slots per arm.
 - Ordinary LoRA FT, periodic unlikelihood at constant strength 0.1, and the
   same periodic objective with linear strength decay from slot 0 to 256.
 - CPU float32, rank 4 / alpha 8, learning rate 5e-5 and the same linear learning
   rate scheduler. Batch size 1 with accumulation 16 avoids unequal last-batch
-  sizes; every collated row must have 127 valid shifted labels.
+  sizes; every collated row must have 127 valid labels both before and after
+  causal shifting. All three arms use `--causal-lm-mask-first-label` through the
+  shared `st.HfCausalLabelAlignmentCollator`. Fixed lengths alone are not enough.
 - Full selected held-out split, not the development smoke's two-block subset.
-  The initial data-only preflight found 1,133-1,138 training blocks and 124-129
-  evaluation blocks across seeds. Rows are randomly split within the same book;
+  The data-only preflight records exact training/evaluation block counts for
+  each new seed: 1,139/124, 1,137/127 and 1,134/128 for seeds 151, 157 and 163.
+  Rows are randomly split within the same book;
   this does not establish cross-book or contiguous-document generalization.
 - Twelve existing frozen prompts, greedy generation without inference controls,
   96-token limit, and checkpoints at 64/128/192/256. No best-checkpoint selection.
@@ -38,6 +46,8 @@ Each child preloads the tested installed wheel before opening the source example
 an unrelated native extension in the checkout cannot shadow the study runtime.
 
 ```bash
+export SPIRALTON_MAGIC=0 SPIRALTON_TORCH=0
+export SPIRALTON_MODEL_PATCHES=0 SPIRALTON_NUMPY=0
 "$PYTHON" -I tools/run_hf_repetition_schedule_study.py \
   --model "$MODEL_SNAPSHOT" --corpus "$CORPUS" --output "$OUTPUT"
 ```
@@ -46,6 +56,8 @@ The output directory must not exist. `--preflight-only` performs data checks and
 seals the plan without training; use a separate fresh output for the actual
 study. The runner uses the existing generic HF bridge and generation client.
 Objective coefficients and generation metrics still come from Rust.
+Disable automatic device/model patches before Python starts, including when
+running the tests or assessor. Preflight rejects a non-CPU default device.
 
 Before the first update, `sealed-plan.json` records exact commands, dataset
 identities, package versions, source/input hashes and the current Git commit.
@@ -56,7 +68,8 @@ automatically reused or restarted. A partial study keeps its logs and checkpoint
 for explicit recovery; it cannot produce `completed.json`.
 
 Completed run cards must prove the full horizon, saved checkpoint steps, finite
-held-out loss, paired initial evaluation/runtime identity, and active treatment
+held-out loss, paired initial evaluation/runtime identity, the shared alignment
+collator contract, and active treatment
 with the exact objective policy. Each generation report is revalidated by the
 Rust evidence API. `completed.json` means **execution complete, assessment still
 pending**, not that the treatment passed its scientific gate.
