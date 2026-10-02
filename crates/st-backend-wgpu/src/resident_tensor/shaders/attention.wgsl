@@ -56,13 +56,21 @@ fn checked(x: f32) -> f32 {
 fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
     let row = group.y * params.groups_x + group.x;
     if (row >= params.contexts * params.queries) { return; }
-    let context = row / params.queries;
-    let query = row % params.queries;
-    let batch = context / params.heads;
-    let head = context % params.heads;
-    // Resolve the output order before the key loop, retaining one row index.
-    // Both specializations are bijections over the validated element count.
-    let output_row = select(row, (batch * params.queries + query) * params.heads + head, MERGED_HEADS != 0u);
+    var batch: u32;
+    var head: u32;
+    var query: u32;
+    // Dispatch rows in physical output order for each specialization.
+    if (MERGED_HEADS != 0u) {
+        let batch_query = row / params.heads;
+        head = row % params.heads;
+        batch = batch_query / params.queries;
+        query = batch_query % params.queries;
+    } else {
+        let context = row / params.queries;
+        query = row % params.queries;
+        batch = context / params.heads;
+        head = context % params.heads;
+    }
     let query_base = params.query.offset + batch * params.query.strides.x + head * params.query.strides.y + query * params.query.strides.z;
     let key_base = params.key.offset + batch * params.key.strides.x + head * params.key.strides.y;
     let value_base = params.value.offset + batch * params.value.strides.x + head * params.value.strides.y;
@@ -125,5 +133,5 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
         }
         workgroupBarrier();
     }
-    for (var i = lane; i < d; i += 64u) { output[output_row * d + i] = accum[i]; }
+    for (var i = lane; i < d; i += 64u) { output[row * d + i] = accum[i]; }
 }
