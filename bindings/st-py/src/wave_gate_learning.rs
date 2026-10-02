@@ -59,6 +59,25 @@ impl PyWaveGateKernel {
             .map(|inner| PyWaveGateLearningBatch { inner })
             .map_err(value_error)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn forward_with_log_radius(
+        &self,
+        py: Python<'_>,
+        input: Vec<f32>,
+        gate: Vec<f32>,
+        bias: Vec<f32>,
+        rows: usize,
+        features: usize,
+        log_radius: f32,
+    ) -> PyResult<PyWaveGateLearningBatch> {
+        py.detach(|| {
+            self.inner
+                .forward_with_log_radius(&input, &gate, &bias, rows, features, log_radius)
+        })
+        .map(|inner| PyWaveGateLearningBatch { inner })
+        .map_err(value_error)
+    }
 }
 
 #[pymethods]
@@ -80,6 +99,23 @@ impl PyWaveGateLearningBatch {
                     vjp.grad_input.data().to_vec(),
                     vjp.grad_gate.data().to_vec(),
                     vjp.grad_bias.data().to_vec(),
+                )
+            })
+            .map_err(value_error)
+    }
+
+    fn vjp_with_log_radius(
+        &self,
+        py: Python<'_>,
+        upstream: Vec<f32>,
+    ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>, f32)> {
+        py.detach(|| self.inner.vjp_with_log_radius(&upstream))
+            .map(|(vjp, radius)| {
+                (
+                    vjp.grad_input.data().to_vec(),
+                    vjp.grad_gate.data().to_vec(),
+                    vjp.grad_bias.data().to_vec(),
+                    radius,
                 )
             })
             .map_err(value_error)

@@ -2,6 +2,9 @@ use super::*;
 use crate::execution::{push_backend_policy, BackendPolicy};
 use st_core::backend::device_caps::DeviceCaps;
 
+mod radius;
+use radius::ProjectionRadius;
+
 /// Immutable CPU recipe for external optimizers; no training-policy rewrites.
 #[derive(Clone, Debug)]
 pub struct WaveGateKernel {
@@ -16,6 +19,7 @@ pub struct WaveGateLearningBatch {
     gate: Tensor,
     bias: Tensor,
     output: Tensor,
+    radius: Option<ProjectionRadius>,
 }
 
 /// Local conditioning of the captured map, not a full loss-gradient estimate.
@@ -35,6 +39,10 @@ pub struct WaveGateConditioning {
     pub relative_radial_gain_min: Option<f64>,
     pub relative_tangential_gain_mean: Option<f64>,
     pub relative_tangential_gain_min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projection_radius: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_radius: Option<f32>,
 }
 
 impl WaveGateKernel {
@@ -62,6 +70,41 @@ impl WaveGateKernel {
         rows: usize,
         features: usize,
     ) -> PureResult<WaveGateLearningBatch> {
+        self.forward_impl(input, gate, bias, rows, features, None)
+    }
+
+    /// R=exp(log_radius), with fixed origin gain I/sqrt(-curvature).
+    /// The caller owns this scalar parameter; the snapshot owns its value.
+    #[allow(clippy::too_many_arguments)]
+    pub fn forward_with_log_radius(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        bias: &[f32],
+        rows: usize,
+        features: usize,
+        log_radius: f32,
+    ) -> PureResult<WaveGateLearningBatch> {
+        self.forward_impl(
+            input,
+            gate,
+            bias,
+            rows,
+            features,
+            Some(ProjectionRadius::new(log_radius)?),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn forward_impl(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        bias: &[f32],
+        rows: usize,
+        features: usize,
+        radius: Option<ProjectionRadius>,
+    ) -> PureResult<WaveGateLearningBatch> {
         let count = rows.checked_mul(features);
         if features == 0 || count != Some(input.len()) {
             return Err(TensorError::InvalidDimensions {
@@ -84,13 +127,18 @@ impl WaveGateKernel {
         // Client transport explicitly promises CPU execution, independent of
         // thread-local trainer policy. The guard also restores the caller's policy.
         let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
-        let output = self.layer(&gate, &bias)?.forward(&input)?;
+        let output = if let Some(radius) = radius {
+            radius.forward(&self.topos, &input, &gate, &bias)?
+        } else {
+            self.layer(&gate, &bias)?.forward(&input)?
+        };
         Ok(WaveGateLearningBatch {
             kernel: self.clone(),
             input,
             gate,
             bias,
             output,
+            radius,
         })
     }
 
@@ -113,7 +161,7 @@ impl WaveGateLearningBatch {
     pub fn conditioning(&self) -> WaveGateConditioning {
         let (rows, features) = self.input.shape();
         let topos = &self.kernel.topos;
-        let scale = f64::from((-topos.curvature()).sqrt());
+        let scale = f64::from((-topos.curvature()).sqrt()) * self.radius.map_or(1.0, |r| r.radius);
         let gate: Vec<_> = self
             .gate
             .data()
@@ -151,7 +199,11 @@ impl WaveGateLearningBatch {
             tangent_min = tangent_min.min(tangent);
         }
         WaveGateConditioning {
-            schema: "spiraltorch.wave_gate_conditioning.v1",
+            schema: if self.radius.is_some() {
+                "spiraltorch.wave_gate_conditioning.v2"
+            } else {
+                "spiraltorch.wave_gate_conditioning.v1"
+            },
             rows,
             features,
             gate_outside_values: self
@@ -169,17 +221,42 @@ impl WaveGateLearningBatch {
             relative_radial_gain_min: (rows > 0).then_some(radial_min),
             relative_tangential_gain_mean: (rows > 0).then(|| tangent_sum / rows as f64),
             relative_tangential_gain_min: (rows > 0).then_some(tangent_min),
+            projection_radius: self.radius.map(|r| r.radius),
+            log_radius: self.radius.map(|r| r.log_radius),
         }
     }
 
     /// Sum-reduced parameter derivatives, without mutation or optimizer policy.
     pub fn vjp(&self, upstream: &[f32]) -> PureResult<WaveGateVjp> {
+        if self.radius.is_some() {
+            return self.vjp_with_log_radius(upstream).map(|(vjp, _)| vjp);
+        }
         let (rows, cols) = self.input.shape();
         let upstream = Tensor::from_vec(rows, cols, upstream.to_vec())?;
         let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
         self.kernel
             .layer(&self.gate, &self.bias)?
             .vjp(&self.input, &upstream)
+    }
+
+    /// Sum-reduced input/gate/bias derivatives plus the shared log-radius derivative.
+    /// Rejects legacy snapshots rather than inventing a radius parameter for them.
+    pub fn vjp_with_log_radius(&self, upstream: &[f32]) -> PureResult<(WaveGateVjp, f32)> {
+        let radius = self.radius.ok_or(TensorError::InvalidValue {
+            label: "wave_gate_snapshot_has_no_log_radius",
+        })?;
+        let (rows, cols) = self.input.shape();
+        let upstream = Tensor::from_vec(rows, cols, upstream.to_vec())?;
+        self.kernel
+            .topos
+            .guard_tensor("wave_gate_radius_upstream", &upstream)?;
+        radius.vjp(
+            &self.kernel.topos,
+            &self.input,
+            &self.gate,
+            &self.bias,
+            &upstream,
+        )
     }
 }
 

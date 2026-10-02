@@ -42,3 +42,18 @@ def test_schedules_are_seed_paired_and_probe_has_no_duplicate_blocks():
         example["spaced_indices"](3, 4)
     with pytest.raises(ValueError):
         schedule(41, 1, 2, 2)
+
+
+def test_radius_protocol_pairs_initial_maps_and_only_adds_one_learnable_scalar():
+    config = {"features": 3, "strength": 0.1}
+    value = torch.tensor([[0.1, -0.2, 0.3]])
+    for suffix in ("radius1", "radius4"):
+        fixed = example["adapter_for"](f"wave_gate_{suffix}", config)
+        learned = example["adapter_for"](f"wave_gate_learnable_{suffix}", config)
+        assert sum(p.numel() for p in fixed.parameters()) == 6
+        assert sum(p.numel() for p in learned.parameters()) == 7
+        assert torch.equal(fixed.log_radius, learned.log_radius)
+        with torch.no_grad():
+            fixed.gate.fill_(0.3)
+            learned.gate.fill_(0.3)
+        assert torch.equal(fixed(value), learned(value))

@@ -16,6 +16,7 @@ pub struct WaveGateLearningBatch {
 #[wasm_bindgen]
 pub struct WaveGatePullback {
     inner: WaveGateVjp,
+    grad_log_radius: Option<f32>,
 }
 
 fn number(value: &Number, label: &str) -> Result<f32, JsValue> {
@@ -64,6 +65,29 @@ impl WaveGateKernel {
             .map(|inner| WaveGateLearningBatch { inner })
             .map_err(js_error)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn forward_with_log_radius(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        bias: &[f32],
+        rows: Number,
+        features: Number,
+        log_radius: Number,
+    ) -> Result<WaveGateLearningBatch, JsValue> {
+        self.inner
+            .forward_with_log_radius(
+                input,
+                gate,
+                bias,
+                js_u32(rows.as_ref(), "rows")? as usize,
+                js_u32(features.as_ref(), "features")? as usize,
+                number(&log_radius, "log_radius")?,
+            )
+            .map(|inner| WaveGateLearningBatch { inner })
+            .map_err(js_error)
+    }
 }
 
 #[wasm_bindgen]
@@ -80,13 +104,30 @@ impl WaveGateLearningBatch {
     pub fn vjp(&self, upstream: &[f32]) -> Result<WaveGatePullback, JsValue> {
         self.inner
             .vjp(upstream)
-            .map(|inner| WaveGatePullback { inner })
+            .map(|inner| WaveGatePullback {
+                inner,
+                grad_log_radius: None,
+            })
+            .map_err(js_error)
+    }
+
+    pub fn vjp_with_log_radius(&self, upstream: &[f32]) -> Result<WaveGatePullback, JsValue> {
+        self.inner
+            .vjp_with_log_radius(upstream)
+            .map(|(inner, gradient)| WaveGatePullback {
+                inner,
+                grad_log_radius: Some(gradient),
+            })
             .map_err(js_error)
     }
 }
 
 #[wasm_bindgen]
 impl WaveGatePullback {
+    #[wasm_bindgen(getter)]
+    pub fn grad_log_radius(&self) -> Option<f32> {
+        self.grad_log_radius
+    }
     #[wasm_bindgen(getter)]
     pub fn grad_input(&self) -> Vec<f32> {
         self.inner.grad_input.data().to_vec()

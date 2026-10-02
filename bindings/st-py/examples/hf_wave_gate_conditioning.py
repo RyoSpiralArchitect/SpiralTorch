@@ -8,6 +8,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import random
 import subprocess
 from pathlib import Path
@@ -96,13 +97,31 @@ class TangentControl(st.WaveGateAdapter):
 
 def adapter_for(arm, config):
     constructor = TangentControl if arm == "tangent" else ObservedWaveGate
+    radius_options = {}
+    if arm in RADIUS_ARMS[2:]:
+        radius_options = {
+            "log_radius": math.log(4.0) if arm.endswith("radius4") else 0.0,
+            "learnable_radius": "learnable" in arm,
+        }
     return constructor(
         config["features"],
         strength=0.0 if arm == "off" else config["strength"],
         curvature=-1.0,
         saturation=10000.0 if arm == "wave_gate_wide_saturation" else 1.0,
         porosity=0.05,
+        **radius_options,
     )
+
+
+LEGACY_ARMS = ["off", "tangent", "wave_gate", "wave_gate_wide_saturation"]
+RADIUS_ARMS = [
+    "off",
+    "tangent",
+    "wave_gate_radius1",
+    "wave_gate_radius4",
+    "wave_gate_learnable_radius1",
+    "wave_gate_learnable_radius4",
+]
 
 
 def evaluate(model, blocks, batch_size):
@@ -126,12 +145,14 @@ def update(model, adapter, optimizer, batch):
         raise ValueError("nonfinite training loss")
     loss.backward()
     record = {"loss": float(loss.detach()), "conditioning": adapter.last_conditioning}
-    for name in ("gate", "bias"):
-        parameter = getattr(adapter, name)
+    for name, parameter in adapter.named_parameters():
         if parameter.grad is None or not torch.isfinite(parameter.grad).all():
             raise ValueError(f"invalid {name} gradient")
         record[f"{name}_gradient_l2"] = float(parameter.grad.norm())
         record[f"{name}_before_update_l2"] = float(parameter.detach().norm())
+        if name == "log_radius":
+            record["log_radius_gradient"] = float(parameter.grad)
+            record["log_radius_before_update"] = float(parameter.detach())
     optimizer.step()
     if not all(torch.isfinite(p).all() for p in adapter.parameters()):
         raise ValueError("nonfinite adapter update")
@@ -166,6 +187,8 @@ def native_fixture():
     )
     batch = kernel.forward(x, gate, bias, 2, 2)
     dx, dg, db = batch.vjp(upstream)
+    radius_batch = kernel.forward_with_log_radius(x, gate, bias, 2, 2, 0.5)
+    rdx, rdg, rdb, rdr = radius_batch.vjp_with_log_radius(upstream)
     return {
         "input": x,
         "gate": gate,
@@ -176,6 +199,15 @@ def native_fixture():
         "grad_gate": dg,
         "grad_bias": db,
         "conditioning": json.loads(batch.conditioning_json()),
+        "radius": {
+            "log_radius": 0.5,
+            "output": radius_batch.output,
+            "grad_input": rdx,
+            "grad_gate": rdg,
+            "grad_bias": rdb,
+            "grad_log_radius": rdr,
+            "conditioning": json.loads(radius_batch.conditioning_json()),
+        },
     }
 
 
@@ -193,7 +225,7 @@ def main():
         raise ValueError("corpus hash differs from fixed protocol")
     if not args.model_dir.is_dir() or args.model_dir.name != config["model_snapshot"]:
         raise ValueError("cached model snapshot differs from protocol")
-    if config["arms"] != ["off", "tangent", "wave_gate", "wave_gate_wide_saturation"]:
+    if config["arms"] not in (LEGACY_ARMS, RADIUS_ARMS):
         raise ValueError("unrecognized arms")
     args.output_dir.mkdir(parents=True, exist_ok=False)
     torch.set_num_threads(config["threads"])
@@ -365,6 +397,12 @@ def main():
                     run["extra_validation_updates"] = 2
                     assert any(row["gate_gradient_l2"] > 0 for row in run["steps"])
                     assert any(row["bias_gradient_l2"] > 0 for row in run["steps"])
+                    if "learnable" in arm:
+                        assert run["steps"][0]["log_radius_gradient"] == 0.0
+                        assert any(
+                            row["log_radius_gradient_l2"] > 0
+                            for row in run["steps"][1:]
+                        )
             finally:
                 parent.add_module(child_name, original)
             assert model_digest(model) == baseline_hash

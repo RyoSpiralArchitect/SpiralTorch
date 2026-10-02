@@ -61,19 +61,31 @@ if torch is not None:
     class _WaveGateFunction(torch.autograd.Function):
         @staticmethod
         def forward(
-            ctx: Any, value: Any, gate: Any, bias: Any, kernel: Any, conditioning: Any
+            ctx: Any,
+            value: Any,
+            gate: Any,
+            bias: Any,
+            log_radius: Any,
+            kernel: Any,
+            conditioning: Any,
         ) -> Any:
             features = value.shape[-1]
-            ctx.snapshot = kernel.forward(
+            arguments = (
                 _values(value),
                 _values(gate),
                 _values(bias),
                 value.numel() // features,
                 features,
             )
+            ctx.has_radius = log_radius is not None
+            ctx.snapshot = (
+                kernel.forward_with_log_radius(*arguments, _values(log_radius)[0])
+                if ctx.has_radius
+                else kernel.forward(*arguments)
+            )
             # Keep Torch's version checks, but the mathematical pullback reads
             # only the owned Rust snapshot, never current adapter parameters.
-            ctx.save_for_backward(value, gate, bias)
+            ctx.save_for_backward(value, gate, bias, log_radius)
             if conditioning is not None:
                 conditioning.update(json.loads(ctx.snapshot.conditioning_json()))
             return torch.tensor(
@@ -82,15 +94,25 @@ if torch is not None:
 
         @staticmethod
         @torch.autograd.function.once_differentiable
-        def backward(ctx: Any, grad_output: Any) -> tuple[Any, Any, Any, None, None]:
-            value, gate, bias = ctx.saved_tensors
-            gradients = ctx.snapshot.vjp(_values(grad_output))
-            return tuple(
+        def backward(ctx: Any, grad_output: Any) -> tuple[Any, ...]:
+            value, gate, bias, log_radius = ctx.saved_tensors
+            gradients = (
+                ctx.snapshot.vjp_with_log_radius(_values(grad_output))
+                if ctx.has_radius
+                else ctx.snapshot.vjp(_values(grad_output))
+            )
+            parameters = (
+                (value, gate, bias, log_radius)
+                if ctx.has_radius
+                else (value, gate, bias)
+            )
+            result = tuple(
                 torch.tensor(
                     gradient, device=parameter.device, dtype=parameter.dtype
                 ).reshape(parameter.shape)
-                for gradient, parameter in zip(gradients, (value, gate, bias))
-            ) + (None, None)
+                for gradient, parameter in zip(gradients, parameters)
+            )
+            return result + ((None, None) if ctx.has_radius else (None, None, None))
 
     class _ToposResonatorFunction(torch.autograd.Function):
         @staticmethod
@@ -133,6 +155,7 @@ def wave_gate_autograd(
     gate: Any,
     bias: Any,
     *,
+    log_radius: Any = None,
     kernel: Any = None,
     return_conditioning: bool = False,
 ) -> Any:
@@ -154,6 +177,15 @@ def wave_gate_autograd(
             raise TypeError(f"{name} must be a float32 tensor on the input device")
         if parameter.shape != (value.shape[-1],):
             raise ValueError(f"{name} must be a shared vector of feature width")
+    if log_radius is not None:
+        if (
+            not isinstance(log_radius, torch.Tensor)
+            or log_radius.dtype != value.dtype
+            or log_radius.device != value.device
+        ):
+            raise TypeError("log_radius must be a float32 tensor on the input device")
+        if log_radius.ndim != 0:
+            raise ValueError("log_radius must be a shared scalar")
     from . import WaveGateKernel
 
     if kernel is None:
@@ -163,7 +195,9 @@ def wave_gate_autograd(
     if max(value.numel(), value.shape[-1]) > kernel.max_values:
         raise ValueError("input exceeds the geometric kernel's value budget")
     conditioning = {} if return_conditioning else None
-    output = _WaveGateFunction.apply(value, gate, bias, kernel, conditioning)
+    output = _WaveGateFunction.apply(
+        value, gate, bias, log_radius, kernel, conditioning
+    )
     return (output, conditioning) if return_conditioning else output
 
 
@@ -218,7 +252,13 @@ else:
         """
 
         def __init__(
-            self, features: int, *, strength: float = 0.1, **kernel_options: Any
+            self,
+            features: int,
+            *,
+            strength: float = 0.1,
+            log_radius: float | None = None,
+            learnable_radius: bool = False,
+            **kernel_options: Any,
         ) -> None:
             super().__init__()
             if (
@@ -236,6 +276,28 @@ else:
                 raise ValueError("features exceed the geometric kernel's value budget")
             self.gate = torch.nn.Parameter(torch.zeros(features, dtype=torch.float32))
             self.bias = torch.nn.Parameter(torch.zeros(features, dtype=torch.float32))
+            if not isinstance(learnable_radius, bool):
+                raise TypeError("learnable_radius must be a bool")
+            if log_radius is None and not learnable_radius:
+                self.register_parameter("log_radius", None)
+            else:
+                radius = torch.tensor(
+                    0.0 if log_radius is None else float(log_radius),
+                    dtype=torch.float32,
+                )
+                # Rust owns the parameter domain as well as the map and pullback.
+                self._kernel.forward_with_log_radius(
+                    [],
+                    _values(self.gate),
+                    _values(self.bias),
+                    0,
+                    features,
+                    radius.item(),
+                )
+                if learnable_radius:
+                    self.log_radius = torch.nn.Parameter(radius)
+                else:
+                    self.register_buffer("log_radius", radius)
 
         @property
         def execution_backend(self) -> str:
@@ -259,6 +321,7 @@ else:
                 value,
                 self.gate,
                 self.bias,
+                log_radius=self.log_radius,
                 kernel=self._kernel,
                 return_conditioning=return_conditioning,
             )
@@ -268,19 +331,41 @@ else:
             return value + strength * result
 
         def get_extra_state(self) -> dict[str, Any]:
-            return {
+            state = {
                 "schema": "spiraltorch.wave_gate_adapter.v1",
                 "features": self.features,
                 "strength": _strength(self.strength),
                 "kernel": json.loads(self._kernel.configuration_json()),
             }
+            if self.log_radius is not None:
+                state["schema"] = "spiraltorch.wave_gate_adapter.v2"
+                state["learnable_radius"] = isinstance(
+                    self.log_radius, torch.nn.Parameter
+                )
+            return state
 
         def set_extra_state(self, state: dict[str, Any]) -> None:
+            expected_schema = (
+                "spiraltorch.wave_gate_adapter.v1"
+                if self.log_radius is None
+                else "spiraltorch.wave_gate_adapter.v2"
+            )
+            expected_keys = {"schema", "features", "strength", "kernel"}
+            if self.log_radius is not None:
+                expected_keys.add("learnable_radius")
             if (
                 not isinstance(state, dict)
-                or set(state) != {"schema", "features", "strength", "kernel"}
-                or state["schema"] != "spiraltorch.wave_gate_adapter.v1"
+                or set(state) != expected_keys
+                or state["schema"] != expected_schema
                 or state["features"] != self.features
+                or (
+                    self.log_radius is not None
+                    and (
+                        not isinstance(state["learnable_radius"], bool)
+                        or state["learnable_radius"]
+                        != isinstance(self.log_radius, torch.nn.Parameter)
+                    )
+                )
             ):
                 raise ValueError("incompatible WaveGate adapter state")
             from . import WaveGateKernel
