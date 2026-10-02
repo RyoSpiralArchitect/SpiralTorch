@@ -1,0 +1,35 @@
+{
+  "schema": "spiraltorch.fractional_history_study_preflight.v1",
+  "status": "running",
+  "study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+  "source_revision": "e8eff55fd3ae211b51fe3f91b516a1a58344fd2e",
+  "native_source_revision": "237143ce368fed5d6df2d2be22f42f10c338beb4",
+  "native_sha256": "7478a93aae719681e03cf0580df61b0bb98f941f31f051eadb6fcb11a33168b3",
+  "frozen_runtime_manifest_sha256": "9bf68f23279824302f8efcc8dbbf35e3bec94b4819836bd8722c1af80a8c4a98",
+  "model_files_manifest_sha256": "bbfb3f3faabdd46d39f75791675f75e06be80e7f184267543143bd6eba153c22",
+  "plan_sha256": "93376a2879e520917aa9759e4c0fda5c923776a70893d433d74ec25a811922a8",
+  "planned_runs": 12,
+  "primary_updates": 6144,
+  "continuation_only_updates": 24,
+  "train_blocks": 1204,
+  "diagnostic_development_blocks": 16,
+  "endpoint_blocks": {
+    "pride_unused_tail": 120,
+    "alice_transfer": 32
+  },
+  "same_base_parameters_as_prior_full_gl_study": true,
+  "same_data_as_prior_full_gl_study": true,
+  "same_batch_schedules_as_prior_full_gl_study": true,
+  "verified_unchanged_runtime_files": 73,
+  "launch_tests": {
+    "passed": 292,
+    "skipped": 0,
+    "log_sha256": "8bc7971f9e72cb962aff4663b80c33acfd0258af2d68f44a24b2e20045e614e4"
+  },
+  "notes": [
+    "No endpoint score before all twelve runs and all exact continuation checks finish. No completed-result claim.",
+    "The later empty-history review fix is not hot-loaded into this frozen run. Its K=32, T=128 protocol does not use the empty-history branch.",
+    "Ordinary EMA and learned GL match trainable parameter count, not compute, filter initialization, numerical conditioning or mathematical prior.",
+    "Reused exploratory books; no significance, unique geometric advantage, or speed claim."
+  ]
+}

@@ -6,6 +6,15 @@ tests a structural hypothesis: do not tie current-feature gain to the fractional
 history gate. It uses the public Rust-backed `FractionalHistoryAdapter`, not a
 Python reimplementation of fractional coefficients or derivatives.
 
+The [completed twelve-run results](../benchmarks/results/2026-10-03-fractional-history-study/README.md)
+are now available. Learned GL history beats learned EMA by mean CE differences
+of `-0.000950204` on Pride and `-0.000715551` on Alice, in all three seeds.
+EMA also beats fixed-order GL. Learned alpha ends at `0.9887..1.0348`: at
+exactly alpha 1 and step 1, strictly-past GL reduces to `-x[t-1]`. The small
+advantage therefore does not establish that long fractional memory is needed;
+an ordinary single-lag control is the next discriminating comparison. No
+default changes or speed/significance/general-LLM claims follow from this run.
+
 ## Controls
 
 All arms insert after frozen GPT-2's `transformer.h.0.mlp`, start at identity,

@@ -166,6 +166,11 @@ report parameter counts and additional work, and use the same data/update
 schedule. Existing full-GL checkpoints and comparisons keep their meaning.
 The [four-arm independent-history protocol](fractional_history_study.md) fixes
 those controls before observing pretrained outcomes.
+Its completed three-seed experiment gives learned GL a small advantage over
+ordinary EMA on both reused endpoints, but learned alpha approaches 1.
+At step 1 that limit is the single-lag map `-x[t-1]`, so this is not evidence
+that a long fractional tail is necessary; the next control should test that
+ordinary short-memory explanation directly.
 
 ## WASM
 
