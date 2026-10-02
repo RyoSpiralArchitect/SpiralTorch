@@ -7,6 +7,22 @@ from typing import Any, Callable, ContextManager, Dict, Iterable, Iterator, List
 from types import ModuleType
 
 from .optim import Amegagrad, amegagrad
+from .geometry_autograd import (
+    ToposResonatorAdapter as ToposResonatorAdapter,
+    topos_resonator_autograd as topos_resonator_autograd,
+)
+
+class ToposResonatorKernel:
+    def __init__(self, *, coupling: float = ..., iterations: int = ...,
+                 saturation: float = ..., porosity: float = ..., max_values: int = ...) -> None: ...
+    @property
+    def execution_backend(self) -> Literal["rust_f32_cpu"]: ...
+    @property
+    def max_values(self) -> int: ...
+    def configuration_json(self) -> str: ...
+    def forward(self, input: Sequence[float], gate: Sequence[float], rows: int, features: int) -> List[float]: ...
+    def backward(self, input: Sequence[float], gate: Sequence[float], grad_output: Sequence[float],
+                 rows: int, features: int) -> Tuple[List[float], List[float]]: ...
 
 export: ModuleType
 hf_ft: ModuleType
