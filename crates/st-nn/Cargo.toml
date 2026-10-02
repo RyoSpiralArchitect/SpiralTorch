@@ -70,6 +70,10 @@ name = "resident_attention_chain"
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_attention_chain_bench"
+required-features = ["wgpu"]
+
+[[example]]
 name = "resident_attention_chain_browser"
 crate-type = ["cdylib"]
 required-features = ["wgpu"]
