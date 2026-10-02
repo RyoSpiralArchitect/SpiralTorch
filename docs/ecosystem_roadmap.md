@@ -185,6 +185,35 @@ stand in for a learning improvement. HF retains its differentiable model graph;
 resident Linear/normalization/adapter execution can migrate in separately tested
 slices rather than delaying this learning question for a complete decoder port.
 
+The [aligned schedule comparison](../benchmarks/results/2026-10-02-llm-schedule-v2/README.md)
+now completes nine 256-update runs and all 432 continuations. Ordinary FT learns,
+but decay loses to both constant intervention and ordinary FT on the final loop
+score in all three seeds. The held-out-loss safety margin passes, not a claim of
+equivalent loss or better language. Keep this negative result and the separately
+invalidated v1 attempt; do not extend schedule search until these seeds favor it.
+
+The next language rails preserve Z-Space integration and independent PyTorch
+controls rather than choosing between them:
+
+1. **Improve the learning mechanism.** Inspect teacher-forced candidate exposure
+   and generated-context repetition using the shared Rust periodicity rules.
+   Candidate selection, objective budget and control semantics stay in Rust;
+   Python/HF and WASM expose the same contracts. A generated-context intervention
+   is a hypothesis, not an established fix. Freeze new quality controls and
+   account for extra compute before testing it; never turn held-out prompts into
+   training data.
+2. **Connect resident causal attention and Z-bias.** Carry Q/K/V projections,
+   causal attention and output projection without intermediate host readback.
+   Compare both zero-bias and the same nonzero geometric bias with PyTorch, so
+   the numerical reference computes the same operation. Masking, sequence/head
+   layout and cached-query offsets require explicit shared semantics before KV
+   cache expansion; do not implement a separate client-side interpretation.
+3. **Measure the complete language path.** Require numerical agreement before
+   transfer-inclusive throughput measurements, with resident-only timings
+   labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are
+   distinct observations, not interchangeable performance evidence. Learning
+   quality remains a separate matched-model, matched-budget gate.
+
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the
 working end-to-end path rather than multiplying disconnected entry points.
