@@ -2,6 +2,24 @@
 
 SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape for the Python bindings, and a TypeScript-powered collaboration canvas. This document captures the near-term ecosystem priorities so contributors can converge on the same themes while the core crates continue to evolve.
 
+## Learning Geometry Rail
+
+Return the main research effort to language-model learning, while retaining the
+vision correctness fixtures as regression controls. Keep the pure speed race
+limited to PyTorch-equivalent computation. Novel geometry earns its place via
+actual gradients/updates, stability and matched learning controls, with extra
+compute and transfers reported separately.
+
+The first [geometric learning bridge](geometric_learning_bridge.md) connects the
+existing Rust Topos recurrence and VJP to a zero-initialized Torch residual gate
+and to a browser forward/VJP client. A random tiny HF loss updates that gate;
+the three-seed control experiment does **not** establish a quality advantage.
+Next rails are the existing elliptic/Lie Jacobian and WaveGate derivatives,
+followed by combinations only after isolated controls. Rust owns each geometric
+rule; Python/WASM own transport and orchestration, not replacement mathematics.
+Pretrained FT quality, mixed precision and resident geometric execution remain
+open, rather than being inferred from the wiring tests.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:
