@@ -121,5 +121,7 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
         }
         workgroupBarrier();
     }
-    for (var i = lane; i < d; i += 64u) { output[row * d + i] = accum[i]; }
+    // Both orders are bijections over the same validated element count.
+    let output_row = select(row, (batch * params.queries + query) * params.heads + head, (params.flags & 8u) != 0u);
+    for (var i = lane; i < d; i += 64u) { output[output_row * d + i] = accum[i]; }
 }

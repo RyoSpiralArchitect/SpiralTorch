@@ -7,6 +7,12 @@ pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 const SHADER_SOURCE: &str = include_str!("shaders/attention.wgsl");
 const MAX_HEAD_DIM: usize = 256;
 
+#[derive(Clone, Copy)]
+enum OutputOrder {
+    HeadMajor,
+    MergedHeads,
+}
+
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 struct View {
@@ -177,6 +183,7 @@ impl ResidentTensor {
     /// must be finite; score/weighted-output overflow fails on readback and is
     /// inherited by downstream operations. Strided and broadcast inputs are
     /// read directly from their immutable storage, without intermediate packing.
+    /// Returns owned, contiguous head-major output [B,H,Q,D].
     ///
     /// This initial forward kernel supports D <= 256, no dropout or backward
     /// tape. Unsupported shapes/devices return errors, never a CPU fallback.
@@ -188,6 +195,53 @@ impl ResidentTensor {
         mask: AttentionMask,
         z_bias: Option<&Self>,
         pair_bias: Option<&Self>,
+    ) -> Result<Self, TensorError> {
+        self.attention_forward(
+            keys,
+            values,
+            scale,
+            mask,
+            z_bias,
+            pair_bias,
+            OutputOrder::HeadMajor,
+        )
+    }
+
+    /// Same arithmetic, masks, input shapes and guards as
+    /// [Self::scaled_dot_attention], but returns owned, contiguous [B,Q,H*D].
+    /// Element (b,q,h*D+d) equals the head-major output (b,h,q,d).
+    /// The attention kernel writes this order directly: no head-merge dispatch,
+    /// intermediate output copy or host readback is needed before a Linear.
+    pub fn scaled_dot_attention_merged_heads(
+        &self,
+        keys: &Self,
+        values: &Self,
+        scale: f32,
+        mask: AttentionMask,
+        z_bias: Option<&Self>,
+        pair_bias: Option<&Self>,
+    ) -> Result<Self, TensorError> {
+        self.attention_forward(
+            keys,
+            values,
+            scale,
+            mask,
+            z_bias,
+            pair_bias,
+            OutputOrder::MergedHeads,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attention_forward(
+        &self,
+        keys: &Self,
+        values: &Self,
+        scale: f32,
+        mask: AttentionMask,
+        z_bias: Option<&Self>,
+        pair_bias: Option<&Self>,
+        order: OutputOrder,
     ) -> Result<Self, TensorError> {
         let spec = AttentionSpec::new(
             self.layout.shape(),
@@ -215,13 +269,18 @@ impl ResidentTensor {
         }
         let gpu = context.device();
         let grid = preflight(spec, &gpu.limits())?;
+        let output_layout = match order {
+            OutputOrder::HeadMajor => NdLayout::contiguous(&spec.query_shape())?,
+            OutputOrder::MergedHeads => NdLayout::contiguous(&spec.merged_output_shape()?)?,
+        };
+        validate_view(&output_layout, output_layout.len(), &gpu.limits())?;
         let kernels = self
             .device
             .0
             .attention
             .get_or_init(|| AttentionKernels::new(gpu));
         let mut encoder = gpu.create_command_encoder(&Default::default());
-        let output = self.device.allocate_output(&self.layout)?;
+        let output = self.device.allocate_output(&output_layout)?;
         // Concatenate inherited guards, then reduce them into the owned output
         // guard. No host read or mutable shared guard is needed.
         let flag_words = inputs.iter().flatten().try_fold(1usize, |total, tensor| {
@@ -261,7 +320,10 @@ impl ResidentTensor {
                 keys: spec.keys() as u32,
                 head_dim: spec.head_dim() as u32,
                 scale,
-                flags: u32::from(z_bias.is_some()) | (u32::from(pair_bias.is_some()) << 1) | causal,
+                flags: u32::from(z_bias.is_some())
+                    | (u32::from(pair_bias.is_some()) << 1)
+                    | causal
+                    | (u32::from(matches!(order, OutputOrder::MergedHeads)) << 3),
                 query_offset,
                 groups_x: grid[0],
                 heads: spec.query_shape()[1] as u32,

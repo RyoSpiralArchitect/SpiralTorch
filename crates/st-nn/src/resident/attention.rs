@@ -219,7 +219,7 @@ impl ResidentAttentionBlock {
         let query = head(0)?;
         let keys = head(1)?;
         let values = head(2)?;
-        let attended = query.scaled_dot_attention(
+        let merged = query.scaled_dot_attention_merged_heads(
             &keys,
             &values,
             self.spec.scale(),
@@ -227,11 +227,6 @@ impl ResidentAttentionBlock {
             z_bias,
             pair_bias,
         )?;
-        let merged = attended.permute(&[0, 2, 1, 3])?.contiguous()?.reshape(&[
-            batch,
-            sequence,
-            heads * dim,
-        ])?;
         Ok(self.output.forward_tensor(&merged)?)
     }
 }

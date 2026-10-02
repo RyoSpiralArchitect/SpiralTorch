@@ -19,6 +19,13 @@ z_bias     : [batch, heads, keys]
 pair_bias  : [batch, heads, queries, keys]
 ```
 
+`scaled_dot_attention_merged_heads` uses the same inputs and arithmetic but
+returns owned, contiguous `[B,Q,H*D]`. Element `(b,q,h*D+d)` equals the ordinary
+head-major output `(b,h,q,d)`. The kernel writes this order directly, without
+a separate head-merge dispatch or copy. The ordinary API retains `[B,H,Q,D]`.
+`AttentionSpec::merged_output_shape` checks the merged width even for an empty
+batch. Neither entry point changes masking, guards or numerical policy.
+
 Biases are additive, after scaling the dot product. Use `broadcast_to` explicitly
 for shared biases. A zero bias is an identity control. A nonzero Z-space bias
 must also be supplied to the PyTorch reference; comparing it only with plain
@@ -77,16 +84,15 @@ the graphs. The resident chain is:
 input [B,T,I]
   -> fused QKV Linear [B,T,3*H*D]
   -> select/permute head views [B,H,T,D]
-  -> attention with optional key-wise/pairwise bias
-  -> GPU head merge [B,T,H*D]
+  -> attention with optional key-wise/pairwise bias, directly writing [B,T,H*D]
   -> output Linear [B,T,O]
 ```
 
 The split is a storage-sharing N-D view. Attention reads the noncontiguous heads
 and broadcast score biases directly from their original immutable storage.
-Head merge and projection outputs still remain on GPU. This uses multiple
-submissions and a head-merge copy, not a single
-fused dispatch. There are no intermediate activation readbacks or CPU fallbacks;
+Attention writes head-concatenated output for the next projection directly.
+This still uses multiple submissions, not a single fused dispatch, but removes
+the intermediate head-merge tensor and copy. There are no intermediate activation readbacks or CPU fallbacks;
 only the caller's final snapshot materializes the output. Inputs, biases and
 both graphs must share the owning device and queue. Outputs retain their own
 storage and deferred failure guards across graph reuse.
@@ -121,7 +127,8 @@ parameter training, an autograd tape, or a new competing Z-space policy.
 See the [dated numerical evidence](../benchmarks/results/2026-10-02-resident-zspace-attention/README.md).
 The same 20 frozen PyTorch SDPA cases are checked by the Rust oracle, native
 resident kernel and browser example. The browser now runs each case in canonical
-and reversed/padded strided storage, for 40 checks against the same oracle.
+and reversed/padded strided storage, with both head-major and merged-head output,
+for 80 checks against the same oracle.
 Native tests additionally cover head widths through 256, direct strided reads,
 independent broadcast inputs, ownership, invalid inputs and inherited guards,
 including failed storage hidden by a crop and empty-query failure propagation.

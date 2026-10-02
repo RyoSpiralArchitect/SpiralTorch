@@ -10,9 +10,10 @@ try {
   await init();
   const report = JSON.parse(await run_resident_attention_checks());
   if (report.schema !== "spiraltorch.resident_attention.browser.v1" ||
-      !report.passed || report.checks.length !== 40 ||
-      report.checks.filter(c => c.layout === "canonical").length !== 20 ||
-      report.checks.filter(c => c.layout === "strided").length !== 20) throw Error("Incomplete attention fixture");
+      !report.passed || report.checks.length !== 80 ||
+      ["canonical", "strided"].some(layout =>
+        ["head_major", "merged_heads"].some(order =>
+          report.checks.filter(c => c.layout === layout && c.output_order === order).length !== 20))) throw Error("Incomplete attention fixture");
   result.textContent = JSON.stringify(report, null, 2);
   result.dataset.status = "passed";
 } catch (error) {

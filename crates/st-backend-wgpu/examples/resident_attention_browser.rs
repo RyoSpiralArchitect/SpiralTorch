@@ -72,7 +72,7 @@ mod browser {
                     query_offset: offset as usize,
                 });
             let spec = AttentionSpec::new(&q_shape, &k_shape, &k_shape, scale, mask)?;
-            for strided in [false, true] {
+            for (strided, merged) in [(false, false), (true, false), (false, true), (true, true)] {
                 let q = upload_view(&device, &q_shape, &floats(&case["query"]), strided)?;
                 let k = upload_view(&device, &k_shape, &floats(&case["key"]), strided)?;
                 let v = upload_view(&device, &k_shape, &floats(&case["value"]), strided)?;
@@ -100,14 +100,39 @@ mod browser {
                     .context()
                     .device()
                     .push_error_scope(wgpu::ErrorFilter::Validation);
-                let output =
-                    q.scaled_dot_attention(&k, &v, scale, mask, z.as_ref(), pair.as_ref())?;
+                let output = if merged {
+                    q.scaled_dot_attention_merged_heads(
+                        &k,
+                        &v,
+                        scale,
+                        mask,
+                        z.as_ref(),
+                        pair.as_ref(),
+                    )?
+                } else {
+                    q.scaled_dot_attention(&k, &v, scale, mask, z.as_ref(), pair.as_ref())?
+                };
                 if let Some(error) = runtime.context().device().pop_error_scope().await {
                     return Err(format!("{}: WebGPU validation: {error}", case["name"]).into());
                 }
                 drop((q, k, v, z, pair));
                 let actual = output.snapshot()?.read_async().await?;
-                let expected = floats(&case["expected"]);
+                let mut expected = floats(&case["expected"]);
+                let expected_shape = if merged {
+                    let view = NdLayout::contiguous(&q_shape)?.permute(&[0, 2, 1, 3])?;
+                    expected = (0..view.len())
+                        .map(|i| expected[view.storage_index(i).unwrap()])
+                        .collect();
+                    spec.merged_output_shape()?.to_vec()
+                } else {
+                    q_shape.clone()
+                };
+                if output.layout().shape() != expected_shape
+                    || !output.layout().is_contiguous()
+                    || output.layout().offset() != 0
+                {
+                    return Err("attention output layout".into());
+                }
                 if actual.len() != expected.len() {
                     return Err("attention output length".into());
                 }
@@ -118,10 +143,10 @@ mod browser {
                     }
                     max_error = max_error.max((a - b).abs());
                 }
-                checks.push(serde_json::json!({"name": case["name"], "layout": if strided {"strided"} else {"canonical"}, "max_abs_error": max_error}));
+                checks.push(serde_json::json!({"name": case["name"], "layout": if strided {"strided"} else {"canonical"}, "output_order": if merged {"merged_heads"} else {"head_major"}, "max_abs_error": max_error}));
             }
         }
-        if checks.len() != 40 {
+        if checks.len() != 80 {
             return Err("incomplete attention fixture".into());
         }
         Ok(serde_json::to_string(&serde_json::json!({
