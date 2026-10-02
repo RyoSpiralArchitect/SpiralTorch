@@ -209,6 +209,25 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
         )
         self.assertEqual(missing, [])
 
+    def test_repetition_objective_stub_exposes_control_and_recipe_option(self) -> None:
+        functions = {
+            node.name: node
+            for node in ast.parse(TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef)
+        }
+        control = functions["zspace_repetition_objective_control"]
+        self.assertEqual(
+            [arg.arg for arg in control.args.kwonlyargs],
+            ["config", "base_strength", "completed_update_slots",
+             "active_position_count", "eligible_target_count"],
+        )
+        recipe = functions["hf_repetition_unlikelihood_recipe_contract"]
+        options = dict(zip(
+            (arg.arg for arg in recipe.args.kwonlyargs), recipe.args.kw_defaults,
+        ))
+        self.assertIn("objective_control", options)
+        self.assertIsNotNone(options["objective_control"])
+
     def test_wgpu_stub_preserves_facade_and_wildcard_aliases(self) -> None:
         stub = ast.parse(TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8"))
         classes = {
