@@ -81,3 +81,24 @@ presence alone does not show whether a process is alive. `journal.json` reports
 training progress; only the hash-bound completed `results.json` is final evidence.
 There is no CUDA or resident WGPU claim: Furnace contention is not bypassed by
 interrupting another workload, and this experiment reuses the local CPU runtime.
+
+## Reproduce the Summary
+
+Once the process has ended successfully and the journal seals a completed result,
+the standard-library-only summarizer derives paired seed comparisons without
+loading model weights, importing Torch or running evaluation again:
+
+```bash
+python tools/summarize_wave_gate_long_horizon.py --plan "$STUDY/plan.json" --results "$STUDY/results.json" --journal "$STUDY/journal.json" --output "$STUDY/summary.json"
+```
+
+It checks result identity/hash, every planned run and its endpoint receipt,
+training cursor/batch history, evaluation block counts and reported means. It
+refuses partial evidence and never overwrites an earlier summary or input.
+The output binds all three input hashes and keeps within-book and transfer
+cross-entropy separate, including every seed's difference versus tangent.
+Sample standard deviation describes these paired differences; it is not a
+confidence interval. Seeds vary sample order, not initialization, and reuse the
+same evaluation blocks. No block-independent significance claim follows.
+This is a receipt check, not a revalidation of original checkpoint contents or
+process termination; those remain part of the local completion verification.

@@ -29,12 +29,18 @@ pretraining. Evaluation novelty is limited to this WaveGate comparison.
 ## Evidence Available Now
 
 `plan.json` fixes corpus/token hashes, model/runtime/source identities, actual
-data partitions and every batch schedule. `validation.json` records **47 passing
-Python tests** covering geometric clients and restart/evaluation boundaries.
+data partitions and every batch schedule. `validation.json` records **58 passing
+Python tests**: 47 covering geometric clients and restart/evaluation boundaries,
+plus 11 for completed-result aggregation without Torch or another evaluation.
 Tests include a real tiny HF interruption/resume with exact parameter, Adam and
 history equality; changed-protocol/corrupt-checkpoint rejection; single-writer
 exclusion; rejecting mutated-base checkpoints; and preventing early endpoint
 evaluation. These tests do not substitute for the live experiment's completion.
+
+The summary tool preserves paired per-seed cross-entropy differences for each
+evaluation set, including losing seeds. It verifies the sealed result hash and
+refuses incomplete evidence, incorrect means, changed schedules and overwrite of
+an existing record. See the protocol document for its reproduction command.
 
 Each live checkpoint is flushed before its hash enters an atomic journal.
 Original logs, model/cache data and optimizer checkpoints stay local. The eventual

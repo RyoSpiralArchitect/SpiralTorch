@@ -26,5 +26,16 @@
     "test_file_sha256": "a88080cc131e4e61e9cd37f3406c50c985fa2ef992785da6c7748bf39e7b33e8",
     "local_test_log_sha256": "88da8f352fe5957ca5ac2bcc115e181f1c7f4899aa4357d731244dd2fb0bad2d",
     "scope": "Test collection only; frozen training source and protocol remain unchanged."
+  },
+  "aggregation_validation": {
+    "passed": 58,
+    "failed": 0,
+    "skipped": 0,
+    "aggregation_tests": 11,
+    "local_test_log_sha256": "0f8c8907be37f66699e707e59c0e096827590aca1798b52ddb6903a54ad10e6a",
+    "script_sha256": "ac07bda64c9b4f30ec5f1d7413165cf3c4f5fe849ab9414324edcbe483fcbd4c",
+    "test_file_sha256": "0a7c1247ee3751438a969cc7a141f24a089acbd9e92b0882060e9c058f35104d",
+    "targeted_ruff": "passed",
+    "scope": "Post-training receipt aggregation only. Frozen live training source and protocol unchanged."
   }
 }
