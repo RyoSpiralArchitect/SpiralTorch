@@ -151,7 +151,7 @@ def fractional_report(config, runs, measured, sets):
                   for arm in arms if arm != "pointwise"}
         require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
                 "fractional initial parameters are not paired")
-        for arm in arms:
+        for arm in config["arms"]:
             row = runs[f"{seed}:{arm}"]
             learned = arm == "fractional_learned"
             require(type(row.get("parameter_count")) is int

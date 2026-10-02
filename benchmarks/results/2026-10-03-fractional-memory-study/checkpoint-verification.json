@@ -1,0 +1,195 @@
+{
+  "schema": "spiraltorch.fractional_memory_checkpoint_verification.v1",
+  "status": "passed",
+  "study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+  "planned_runs_verified": 9,
+  "primary_updates": 4608,
+  "extra_continuation_updates": 18,
+  "artifacts": {
+    "plan.json": "1cf159e438bf0451e8bf0f6df2398e8851dc2ae65200d209dc5e5363ccc0e8b3",
+    "journal.json": "8c31de99af13887d95785f1d206436bda1665ae3698a456b38c5995eee401ef5",
+    "results.json": "1718d44bd879d7c76449f1315a9cf72f78016575395c9f576275f3e47aa9f15b"
+  },
+  "frozen_client_files_verified": 4,
+  "frozen_package_files_verified": 67,
+  "runs": {
+    "41:pointwise": {
+      "checkpoint": {
+        "filename": "checkpoint-l20klaji.pt",
+        "sha256": "148c336a8dc597fec194205a8dee18f28c3b79097a7d990fb6cd84449fa0257b"
+      },
+      "cursor": 512,
+      "parameter_count": 768,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "9f0abd93a887e3887660e7f6f8e3a944db7fa93ec61a86e1ac7ebe2f290f3d56",
+      "final_parameter_sha256": "eec91dab8b7e2c2a2fb06842f27e42af80ca3b1eb14d08bf7c6b54efea44e332",
+      "gate_l2": 5.049279689788818,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "41:fractional_fixed": {
+      "checkpoint": {
+        "filename": "checkpoint-czhure89.pt",
+        "sha256": "7835b113ee54954d823411d7319d1fa228d7bef67b8f405f46f6e703584cbe1d"
+      },
+      "cursor": 512,
+      "parameter_count": 769,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "10ff28f0d6f595271a19ad3c6213880f34e86d210450cb5cd629ee4617c4eba5",
+      "final_parameter_sha256": "a8c62c94558f28dab9a0a2a67da4beb5e5a6b39e09957f218a0197ca54f65936",
+      "gate_l2": 4.583780765533447,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.5,
+      "alpha_changed": false,
+      "nonzero_order_gradient_steps": 0,
+      "fixed_order_has_no_adam_state": true
+    },
+    "41:fractional_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-tmvu24pu.pt",
+        "sha256": "1080ad88f9528833abb9b029ddb71356edb635fe5cb9a8171ecbfeb3e0fb0837"
+      },
+      "cursor": 512,
+      "parameter_count": 769,
+      "trainable_parameter_count": 769,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "10ff28f0d6f595271a19ad3c6213880f34e86d210450cb5cd629ee4617c4eba5",
+      "final_parameter_sha256": "c87f3a34c429c64c6196f9e9a03a0cf8b6662ae31ddb9f6dbab9d9543f4a4f8a",
+      "gate_l2": 4.548302173614502,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.8268868327140808,
+      "alpha_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "fixed_order_has_no_adam_state": null
+    },
+    "43:pointwise": {
+      "checkpoint": {
+        "filename": "checkpoint-n8p1eoem.pt",
+        "sha256": "e6d386c34074e395b7eaf055e76fb947d7e3aa3ab7b268ee87e114ea20a54ca0"
+      },
+      "cursor": 512,
+      "parameter_count": 768,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "9f0abd93a887e3887660e7f6f8e3a944db7fa93ec61a86e1ac7ebe2f290f3d56",
+      "final_parameter_sha256": "6bbce04bd48d5098cccb1f13ea64a592cbafe6c13c99af666d50b3a03d155a87",
+      "gate_l2": 5.063220977783203,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "43:fractional_fixed": {
+      "checkpoint": {
+        "filename": "checkpoint-lyuee9se.pt",
+        "sha256": "b12274f443fac5c740873396b3be995bc6f41170bbdffc83d1fad398ea8d8e33"
+      },
+      "cursor": 512,
+      "parameter_count": 769,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "10ff28f0d6f595271a19ad3c6213880f34e86d210450cb5cd629ee4617c4eba5",
+      "final_parameter_sha256": "632f2596c5f6458bb9e25a9e726b5f7d4ffbf9f098c056a8f14c49eb7c8c46cf",
+      "gate_l2": 4.639402389526367,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.5,
+      "alpha_changed": false,
+      "nonzero_order_gradient_steps": 0,
+      "fixed_order_has_no_adam_state": true
+    },
+    "43:fractional_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-stdpucx6.pt",
+        "sha256": "a0183b3e519b78dfce929a31520035c96267e5687a3f5275fbf3baa15d40fb5d"
+      },
+      "cursor": 512,
+      "parameter_count": 769,
+      "trainable_parameter_count": 769,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "10ff28f0d6f595271a19ad3c6213880f34e86d210450cb5cd629ee4617c4eba5",
+      "final_parameter_sha256": "3a2fc9afd2c9c4479125719556b945a1a5482f4673b03081f15a864606d466f0",
+      "gate_l2": 4.606479167938232,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.7733337879180908,
+      "alpha_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "fixed_order_has_no_adam_state": null
+    },
+    "47:pointwise": {
+      "checkpoint": {
+        "filename": "checkpoint-5ck9l_29.pt",
+        "sha256": "58ea25d28d595f5ba547dfaa16c1e37542dc7cb1b3b1e162d2bbd4f8bb104fd3"
+      },
+      "cursor": 512,
+      "parameter_count": 768,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "9f0abd93a887e3887660e7f6f8e3a944db7fa93ec61a86e1ac7ebe2f290f3d56",
+      "final_parameter_sha256": "df9f7ba1779a50b876795ddba18640eeae397e5ebafeb24f93897b377e0fe54d",
+      "gate_l2": 5.111724376678467,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "47:fractional_fixed": {
+      "checkpoint": {
+        "filename": "checkpoint-ot8blvph.pt",
+        "sha256": "dec08f217ff0f113b1d765ad63c71e8701b580e7c062fefe5cf94433c5359c73"
+      },
+      "cursor": 512,
+      "parameter_count": 769,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "10ff28f0d6f595271a19ad3c6213880f34e86d210450cb5cd629ee4617c4eba5",
+      "final_parameter_sha256": "da72cc125e8affa6bccbada1a32aa465bd706e25a03e93eb96f18ea63d1c63fc",
+      "gate_l2": 4.673547267913818,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.5,
+      "alpha_changed": false,
+      "nonzero_order_gradient_steps": 0,
+      "fixed_order_has_no_adam_state": true
+    },
+    "47:fractional_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-3gqvz8w8.pt",
+        "sha256": "fe88f8d25d7d435c5a84350919ca00e419a12d66601acf77242720356f1b2f94"
+      },
+      "cursor": 512,
+      "parameter_count": 769,
+      "trainable_parameter_count": 769,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "10ff28f0d6f595271a19ad3c6213880f34e86d210450cb5cd629ee4617c4eba5",
+      "final_parameter_sha256": "0493613deb8d5c0c34118b630bd86f68bad9c0a59bde999725c1a058b23c3617",
+      "gate_l2": 4.6374311447143555,
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.8130422234535217,
+      "alpha_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "fixed_order_has_no_adam_state": null
+    }
+  },
+  "scope": "Saved contents and receipts only. The original driver executed frozen-base and next-update checks. No model training or endpoint scoring here."
+}

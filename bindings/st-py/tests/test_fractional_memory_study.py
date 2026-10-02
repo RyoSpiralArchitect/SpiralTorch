@@ -248,6 +248,7 @@ def test_summary_keeps_order_effect_separate_from_history(summary_module):
     measured = {"41:pointwise": {"tail": 2.}, "41:fractional_fixed": {"tail": 1.8},
                 "41:fractional_learned": {"tail": 1.9}}
     contrasts, trajectories = summary_module.fractional_report(config, runs, measured, {"tail": []})
+    assert list(trajectories) == ["41:fractional_fixed", "41:fractional_learned"]
     assert contrasts["tail"]["fixed_minus_pointwise"]["mean_ce_difference"] == pytest.approx(-.2)
     assert contrasts["tail"]["learned_minus_fixed"]["mean_ce_difference"] == pytest.approx(.1)
     assert trajectories["41:fractional_fixed"]["nonzero_order_gradient_steps"] == 0

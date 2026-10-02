@@ -87,3 +87,18 @@ endpoint scoring and frozen-base preservation. Those tests establish wiring
 and restart correctness; pretrained quality remains an experimental result,
 not a premise of this protocol. Publish numeric results and verification hashes,
 not model weights, book text, checkpoints or raw logs.
+
+## Completed Pretrained Study
+
+The [frozen nine-run result](../benchmarks/results/2026-10-03-fractional-memory-study/README.md)
+completes 4608 primary updates, all 18 continuation-only updates and delayed
+endpoint scoring. Saved adapter/Adam contents, fixed-order invariance, learned
+order trajectories and completed-resume non-rescoring are verified separately.
+
+Learned alpha reaches 0.7733-0.8269, with 511 nonzero order-gradient steps per
+seed after the zero-gate initialization. All active arms improve over the frozen
+model, but the ordinary pointwise gate remains better in every seed on both
+sets. Learning alpha improves fixed GL's mean Pride CE by 0.000261 and worsens
+Alice CE by 0.000019. The learned-versus-pointwise gaps remain +0.002215 and
++0.001798 respectively. This is a working differentiable learning mechanism,
+not a quality win or evidence for combining more mechanisms by default.
