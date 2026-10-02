@@ -5,6 +5,7 @@ mod autograd;
 mod cobol;
 mod concept_diffusion;
 mod cosmology;
+mod elliptic_learning;
 mod fractal_field;
 mod free_energy;
 mod generation_control;
@@ -84,6 +85,8 @@ pub use cobol::*;
 pub use cobol_bridge::*;
 pub use concept_diffusion::*;
 pub use cosmology::*;
+#[cfg(target_arch = "wasm32")]
+pub use elliptic_learning::*;
 #[cfg(target_arch = "wasm32")]
 pub use fft::*;
 pub use fractal_field::*;

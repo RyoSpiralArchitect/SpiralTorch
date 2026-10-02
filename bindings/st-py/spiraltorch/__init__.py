@@ -9550,7 +9550,7 @@ def __getattr__(name: str) -> _Any:
 
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
-    if name in {"ToposResonatorAdapter", "topos_resonator_autograd"}:
+    if name in {"ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter"}:
         module = import_module("spiraltorch.geometry_autograd")
         value = getattr(module, name)
         globals()[name] = value
@@ -9626,7 +9626,7 @@ for _name in [
 
 _EXPORTED.update(
     ["hg", "rg", "z", "__version__", "model_zoo",
-     "ToposResonatorAdapter", "topos_resonator_autograd"]
+     "ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter"]
 )
 if _resolve_rs_attr("ToposResonatorKernel") is not None:
     _EXPORTED.add("ToposResonatorKernel")

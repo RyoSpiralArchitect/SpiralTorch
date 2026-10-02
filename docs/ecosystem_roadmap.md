@@ -14,7 +14,11 @@ The first [geometric learning bridge](geometric_learning_bridge.md) connects the
 existing Rust Topos recurrence and VJP to a zero-initialized Torch residual gate
 and to a browser forward/VJP client. A random tiny HF loss updates that gate;
 the three-seed control experiment does **not** establish a quality advantage.
-Next rails are the existing elliptic/Lie Jacobian and WaveGate derivatives,
+The [elliptic/Lie connection](elliptic_learning_bridge.md) now repairs near-pole
+derivatives and large finite norms, owns batched VJPs in Rust, and reaches both
+trainable projections in a bounded pretrained GPT-2 run. Its tangent-linear
+control performs better on the tiny authored corpus; this is not a quality win.
+The next rail is the existing WaveGate derivative,
 followed by combinations only after isolated controls. Rust owns each geometric
 rule; Python/WASM own transport and orchestration, not replacement mathematics.
 Pretrained FT quality, mixed precision and resident geometric execution remain

@@ -256,14 +256,14 @@ impl EllipticWarp {
         for (dst, &value) in dir.iter_mut().zip(orientation.iter()).take(3) {
             *dst = value;
         }
-        let norm_sq = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+        let norm_sq: f64 = dir.iter().map(|&value| f64::from(value).powi(2)).sum();
         let norm = norm_sq.sqrt();
-        if !norm.is_finite() || norm <= EPSILON {
+        if !norm.is_finite() || norm <= f64::from(EPSILON) {
             return None;
         }
 
         for component in dir.iter_mut() {
-            *component /= norm;
+            *component = (f64::from(*component) / norm) as f32;
         }
 
         let (telemetry, differential) = self.build_telemetry_from_unit(dir, norm);
@@ -273,12 +273,14 @@ impl EllipticWarp {
     fn build_telemetry_from_unit(
         &self,
         dir: [f32; 3],
-        source_norm: f32,
+        source_norm: f64,
     ) -> (EllipticTelemetry, EllipticDifferential) {
         let jac_unit = unit_normalization_jacobian(dir, source_norm);
         let dir_z = dir[2].clamp(-1.0, 1.0);
-        let polar = dir_z.acos();
-        let sin_theta = (1.0 - dir_z * dir_z).sqrt();
+        // acos(z) loses the entire polar angle when f32 normalization rounds z
+        // to +/-1. Keep the transverse components in both the map and its VJP.
+        let sin_theta = dir[0].hypot(dir[1]);
+        let polar = sin_theta.atan2(dir_z);
         let geodesic_radius = polar * self.curvature_radius;
         let denom_radius = (self.curvature_radius * PI).max(EPSILON);
         let mut normalized_radius = (geodesic_radius / denom_radius).clamp(0.0, 1.0);
@@ -316,11 +318,10 @@ impl EllipticWarp {
 
         let curvature_tensor = curvature_tensor_from_direction(dir, self.curvature_radius);
 
-        let sin_theta_safe = sin_theta.max(EPSILON);
-        let rotor_unit = if sin_theta <= EPSILON {
+        let rotor_unit = if sin_theta == 0.0 {
             [0.0, 0.0, 0.0]
         } else {
-            [-dir[1] / sin_theta_safe, dir[0] / sin_theta_safe, 0.0]
+            [-dir[1] / sin_theta, dir[0] / sin_theta, 0.0]
         };
         let rotor_field = [
             rotor_unit[0] * polar,
@@ -361,9 +362,13 @@ impl EllipticWarp {
 
         // Jacobians
         let mut d_polar = [0.0; 3];
-        if sin_theta > EPSILON {
-            for (d_polar_j, &jac) in d_polar.iter_mut().zip(jac_unit[2].iter()) {
-                *d_polar_j = -jac / sin_theta_safe;
+        let mut d_sin_theta = [0.0; 3];
+        if sin_theta > 0.0 {
+            let norm_sq = sin_theta * sin_theta + dir_z * dir_z;
+            for j in 0..3 {
+                d_sin_theta[j] =
+                    dir[0] / sin_theta * jac_unit[0][j] + dir[1] / sin_theta * jac_unit[1][j];
+                d_polar[j] = (dir_z * d_sin_theta[j] - sin_theta * jac_unit[2][j]) / norm_sq;
             }
         }
 
@@ -382,16 +387,14 @@ impl EllipticWarp {
             normalized_radius = normalized_radius.clamp(0.0, 1.0);
         }
 
-        let denom_xy = (dir[0] * dir[0] + dir[1] * dir[1]).max(EPSILON);
+        let denom_xy = f64::from(dir[0]).powi(2) + f64::from(dir[1]).powi(2);
         let mut d_azimuth = [0.0; 3];
-        let azimuth_coeff_x = -dir[1] / denom_xy;
-        let azimuth_coeff_y = dir[0] / denom_xy;
-        for ((d_azimuth_j, &jac0), &jac1) in d_azimuth
-            .iter_mut()
-            .zip(jac_unit[0].iter())
-            .zip(jac_unit[1].iter())
-        {
-            *d_azimuth_j = azimuth_coeff_x * jac0 + azimuth_coeff_y * jac1;
+        if denom_xy > 0.0 {
+            for j in 0..3 {
+                d_azimuth[j] = ((-f64::from(dir[1]) * f64::from(jac_unit[0][j])
+                    + f64::from(dir[0]) * f64::from(jac_unit[1][j]))
+                    / denom_xy) as f32;
+            }
         }
 
         let mut d_spin = [0.0; 3];
@@ -413,21 +416,21 @@ impl EllipticWarp {
         let mut d_rotor_x = [0.0; 3];
         let mut d_rotor_y = [0.0; 3];
         let mut d_rotor_z = [0.0; 3];
-        if sin_theta > EPSILON {
-            let mut d_sin_theta = [0.0; 3];
-            let sin_theta_coeff = -dir[2] / sin_theta_safe;
-            for (d_sin_theta_j, &jac) in d_sin_theta.iter_mut().zip(jac_unit[2].iter()) {
-                *d_sin_theta_j = sin_theta_coeff * jac;
-            }
+        if sin_theta > 0.0 {
             for j in 0..3 {
-                let d_dir0 = jac_unit[0][j];
-                let d_dir1 = jac_unit[1][j];
-                let d_axis_unit_x = -d_dir1 / sin_theta_safe
-                    + dir[1] / (sin_theta_safe * sin_theta_safe) * d_sin_theta[j];
-                let d_axis_unit_y = d_dir0 / sin_theta_safe
-                    - dir[0] / (sin_theta_safe * sin_theta_safe) * d_sin_theta[j];
-                d_rotor_x[j] = d_axis_unit_x * polar + rotor_unit[0] * d_polar[j];
-                d_rotor_y[j] = d_axis_unit_y * polar + rotor_unit[1] * d_polar[j];
+                let transverse = f64::from(sin_theta);
+                let d_axis_unit_x = (-f64::from(jac_unit[1][j])
+                    + f64::from(dir[1]) / transverse * f64::from(d_sin_theta[j]))
+                    / transverse;
+                let d_axis_unit_y = (f64::from(jac_unit[0][j])
+                    - f64::from(dir[0]) / transverse * f64::from(d_sin_theta[j]))
+                    / transverse;
+                d_rotor_x[j] = (d_axis_unit_x * f64::from(polar)
+                    + f64::from(rotor_unit[0]) * f64::from(d_polar[j]))
+                    as f32;
+                d_rotor_y[j] = (d_axis_unit_y * f64::from(polar)
+                    + f64::from(rotor_unit[1]) * f64::from(d_polar[j]))
+                    as f32;
                 d_rotor_z[j] = rotor_unit[2] * d_polar[j];
             }
         }
@@ -780,13 +783,13 @@ impl EllipticAccumulator {
     }
 }
 
-fn unit_normalization_jacobian(dir: [f32; 3], source_norm: f32) -> [[f32; 3]; 3] {
+fn unit_normalization_jacobian(dir: [f32; 3], source_norm: f64) -> [[f32; 3]; 3] {
     let mut jac = [[0.0f32; 3]; 3];
-    let denom = source_norm.max(EPSILON);
+    let denom = source_norm.max(f64::from(EPSILON));
     for i in 0..3 {
         for j in 0..3 {
             let delta = if i == j { 1.0 } else { 0.0 };
-            jac[i][j] = (delta - dir[i] * dir[j]) / denom;
+            jac[i][j] = ((delta - f64::from(dir[i]) * f64::from(dir[j])) / denom) as f32;
         }
     }
     jac
