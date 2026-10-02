@@ -1,0 +1,56 @@
+{
+  "schema": "spiraltorch.elliptic_gated_study_preflight.v1",
+  "status": "passed_preflight_training_not_complete",
+  "study_id": "24ab0ab87cfeecd63371faf27f8ce5876f571d80902cc88659795251b3fe1cb1",
+  "executed_source_revision": "d83d6029e761e6588a5af74f8ea0f01b9953bede",
+  "native_source_revision": "b8c6fd0d03553c8a34b5dd2f1984bea93f7d82c0",
+  "tests": {
+    "passed": 121,
+    "skipped": 0,
+    "log_sha256": "3c2beaddd1d008e822cd04e2c5b9267fab23c35896c78b437c94763afb7ea986",
+    "training_shape_oracle": [
+      2,
+      128,
+      3
+    ],
+    "tiny_hf_interrupted_resume": "full adapter/Adam/records exact",
+    "paired_projection_checks": "all four arms",
+    "paired_parameter_checks": "separately within pointwise and gated pairs",
+    "gate_receipts": "signed before/after/gradient values and endpoint continuity"
+  },
+  "regression": {
+    "previous_causal_summary": "byte-identical",
+    "sha256": "e51eb46b292a13e8c4438d1d204036ee50402e90c66145ee9dc33ce55ddf2af6"
+  },
+  "source_sha256": {
+    "hf_elliptic_gated_study.py": "2be932d2fbcfebf23770895d9d8382a9f98670af7a9aa27f85a4267f505b3d54",
+    "hf_elliptic_pride_gated.json": "bee9c487094c7cd189c509763feafcecc1fc1e2c3c3ff493f2eed591d845ac0f",
+    "hf_elliptic_causal_study.py": "39456844f9e59169cc4fd901853c78bc4f2b0dfdfb53f4c870808699ad807813",
+    "hf_elliptic_nonlinear_study.py": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "hf_wave_gate_long_horizon.py": "91b3175f5b72a35c27e31acf09d0edf4ab87d462cd6bd012f9c99acbb34b1d31",
+    "hf_wave_gate_conditioning.py": "752009289edeb9748dcf8fa8f544f7f8ffe5039793a791247522ca037f2c736f",
+    "summarize_wave_gate_long_horizon.py": "ea2ad2d16e1668024bfc175aca275d67e4474e1427d303590e951ed28d7faca0"
+  },
+  "native_sha256": "08dde1be2a9225fce10b8a807c1574cebb64c7eb15987357e0210484002392e3",
+  "bridge_sha256": "c303a7a6988e4ce7781b46932e2390a8eb6cd3c653c496a7644dc8136dbff239",
+  "plan_sha256": "971c7951254c8db9e5658aa153a62435c7d10a5a030a8b0e124b4328a134061e",
+  "planned_runs": 12,
+  "planned_primary_updates": 6144,
+  "planned_continuation_validation_updates": 24,
+  "gate_initialization": 0,
+  "parameter_counts": {
+    "pointwise": 8450,
+    "gated": 8451
+  },
+  "environment": {
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "device": "CPU float32; Rust geometry CPU; two Torch threads"
+  },
+  "limitations": [
+    "Launch and preflight only, not completed pretrained-model outcomes",
+    "Gated versus local contrasts include one additional learned scalar",
+    "Exploratory reuse of endpoints after a negative unconditional-mixing study",
+    "No speed, resident GPU, padding or KV-cache claim"
+  ]
+}
