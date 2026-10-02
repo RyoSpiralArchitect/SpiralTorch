@@ -3,7 +3,10 @@ use crate::utils::{js_error, js_u32};
 #[cfg(target_arch = "wasm32")]
 use js_sys::Number;
 #[cfg(target_arch = "wasm32")]
-use st_core::theory::microlocal::{EllipticLearningBatch as CoreBatch, EllipticWarp};
+use st_core::theory::microlocal::{
+    EllipticCausalLearningBatch as CoreCausalBatch, EllipticLearningBatch as CoreBatch,
+    EllipticWarp,
+};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -18,6 +21,25 @@ pub struct EllipticWarpKernel {
 #[wasm_bindgen]
 pub struct EllipticLearningBatch {
     inner: CoreBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct EllipticCausalLearningBatch {
+    inner: CoreCausalBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl EllipticCausalLearningBatch {
+    #[wasm_bindgen(getter)]
+    pub fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    pub fn vjp(&self, upstream: &[f32]) -> Result<Vec<f32>, JsValue> {
+        self.inner.vjp(upstream).map_err(js_error)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -46,6 +68,26 @@ impl EllipticWarpKernel {
         self.warp
             .differentiate_batch(orientations, self.max_rows)
             .map(|inner| EllipticLearningBatch { inner })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = forwardCausal)]
+    pub fn forward_causal(
+        &self,
+        orientations: &[f32],
+        batch: Number,
+        sequence: Number,
+        max_pairs: Number,
+    ) -> Result<EllipticCausalLearningBatch, JsValue> {
+        self.warp
+            .differentiate_causal_batch(
+                orientations,
+                js_u32(batch.as_ref(), "batch")? as usize,
+                js_u32(sequence.as_ref(), "sequence")? as usize,
+                self.max_rows,
+                js_u32(max_pairs.as_ref(), "max_pairs")? as usize,
+            )
+            .map(|inner| EllipticCausalLearningBatch { inner })
             .map_err(js_error)
     }
 }

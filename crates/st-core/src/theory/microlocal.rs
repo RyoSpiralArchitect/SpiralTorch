@@ -28,11 +28,14 @@ use std::sync::{Arc, Mutex};
 
 #[path = "microlocal/elliptic.rs"]
 mod elliptic;
+#[path = "microlocal/elliptic_causal.rs"]
+mod elliptic_causal;
 #[path = "microlocal/elliptic_learning.rs"]
 mod elliptic_learning;
 
 use elliptic::EllipticAccumulator;
 pub use elliptic::{EllipticDifferential, EllipticTelemetry, EllipticWarp, LieFrame};
+pub use elliptic_causal::EllipticCausalLearningBatch;
 pub use elliptic_learning::{EllipticLearningBatch, EllipticLearningError};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.

@@ -1,6 +1,117 @@
 use super::*;
 
 #[test]
+fn attention_vjp_matches_all_input_finite_differences_with_batches_heads_and_offsets() {
+    for mask in [
+        AttentionMask::None,
+        AttentionMask::Causal { query_offset: 1 },
+    ] {
+        let spec =
+            AttentionSpec::new(&[2, 2, 2, 2], &[2, 2, 3, 2], &[2, 2, 3, 2], 0.7, mask).unwrap();
+        let make = |n: usize, shift: f32| {
+            (0..n)
+                .map(|i| ((i as f32 + shift) * 0.3).sin())
+                .collect::<Vec<_>>()
+        };
+        let fields = [
+            make(16, 0.),
+            make(24, 1.),
+            make(24, 2.),
+            make(12, 3.),
+            make(24, 4.),
+        ];
+        let upstream = make(16, 5.);
+        let g = attention_vjp_reference(
+            spec,
+            &fields[0],
+            &fields[1],
+            &fields[2],
+            Some(&fields[3]),
+            Some(&fields[4]),
+            &upstream,
+        )
+        .unwrap();
+        let grads = [
+            g.query,
+            g.key,
+            g.value,
+            g.z_bias.unwrap(),
+            g.pair_bias.unwrap(),
+        ];
+        let loss = |f: &[Vec<f32>; 5]| {
+            attention_reference(spec, &f[0], &f[1], &f[2], Some(&f[3]), Some(&f[4]))
+                .unwrap()
+                .iter()
+                .zip(&upstream)
+                .map(|(&a, &b)| f64::from(a) * f64::from(b))
+                .sum::<f64>()
+        };
+        for field in 0..5 {
+            for i in 0..fields[field].len() {
+                let mut plus = fields.clone();
+                let mut minus = fields.clone();
+                plus[field][i] += 0.001;
+                minus[field][i] -= 0.001;
+                let numeric =
+                    (loss(&plus) - loss(&minus)) / f64::from(plus[field][i] - minus[field][i]);
+                assert!(
+                    (numeric - f64::from(grads[field][i])).abs() < 0.0003,
+                    "field={field} index={i} numerical={numeric} analytic={}",
+                    grads[field][i]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn attention_vjp_preserves_causality_and_has_no_cross_batch_gradients() {
+    let shape = [2, 1, 3, 1];
+    let spec = AttentionSpec::new(
+        &shape,
+        &shape,
+        &shape,
+        0.5,
+        AttentionMask::Causal { query_offset: 0 },
+    )
+    .unwrap();
+    let g = attention_vjp_reference(
+        spec,
+        &[1.; 6],
+        &[2.; 6],
+        &[3.; 6],
+        Some(&[0.; 6]),
+        Some(&[0.; 18]),
+        &[1., 0., 0., 0., 0., 0.],
+    )
+    .unwrap();
+    assert_eq!(g.query, [0.; 6]);
+    assert_eq!(g.key, [0.; 6]);
+    assert_eq!(g.value, [1., 0., 0., 0., 0., 0.]);
+    assert_eq!(g.pair_bias.unwrap(), [0.; 18]);
+    assert_eq!(g.z_bias.unwrap(), [0.; 6]);
+}
+
+#[test]
+fn attention_vjp_rejects_invalid_upstream_and_handles_empty_without_key_scratch() {
+    let shape = [1, 1, 1, 1];
+    let spec = AttentionSpec::new(&shape, &shape, &shape, 1., AttentionMask::None).unwrap();
+    assert!(matches!(
+        attention_vjp_reference(spec, &[1.], &[1.], &[1.], None, None, &[]),
+        Err(AttentionError::Length)
+    ));
+    assert!(matches!(
+        attention_vjp_reference(spec, &[1.], &[1.], &[1.], None, None, &[f32::NAN]),
+        Err(AttentionError::NonFinite)
+    ));
+    let empty = [0, 1, usize::MAX, 1];
+    let spec = AttentionSpec::new(&empty, &empty, &empty, 1., AttentionMask::None).unwrap();
+    let g = attention_vjp_reference(spec, &[], &[], &[], None, None, &[]).unwrap();
+    assert!(g.query.is_empty() && g.key.is_empty() && g.value.is_empty());
+    assert!(g.z_bias.is_none() && g.pair_bias.is_none());
+}
+
+#[test]
 fn merged_output_shape_checks_width_even_with_an_empty_batch() {
     for shape in [[2, 3, 5, 7], [0, 3, 5, 7], [2, 0, 5, 7], [2, 3, 0, 7]] {
         let key = [shape[0], shape[1], 6, shape[3]];

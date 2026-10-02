@@ -1,5 +1,9 @@
 # Elliptic Features In Real Learning
 
+For the separate, full-context token-relational adapter, see
+[causal elliptic learning](elliptic_causal_learning.md). The adapter below remains
+pointwise; its existing checkpoint semantics are unchanged.
+
 `EllipticResidualAdapter` connects the existing Rust elliptic/Lie feature map to
 Torch/HF losses. It does not substitute a Python approximation of the geometry.
 The Rust `EllipticLearningBatch` owns nine features per row and an immutable

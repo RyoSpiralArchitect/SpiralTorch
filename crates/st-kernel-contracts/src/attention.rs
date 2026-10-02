@@ -4,6 +4,9 @@
 
 use thiserror::Error;
 
+mod backward;
+pub use backward::{attention_vjp_reference, AttentionGradients};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttentionMask {
     None,
@@ -152,18 +155,14 @@ fn finite(value: f32) -> Result<f32, AttentionError> {
     }
 }
 
-/// CPU oracle, not a routing fallback. Biases are added AFTER scaling QK.
-/// Online normalized softmax avoids materializing a quadratic score tensor.
-/// Inputs and f32 score/weighted-output arithmetic must remain finite; no
-/// bitwise identity between different reduction orders is promised.
-pub fn attention_reference(
+fn validate_inputs(
     spec: AttentionSpec,
     query: &[f32],
     key: &[f32],
     value: &[f32],
     z_bias: Option<&[f32]>,
     pair_bias: Option<&[f32]>,
-) -> Result<Vec<f32>, AttentionError> {
+) -> Result<(), AttentionError> {
     for (values, len) in [
         (Some(query), product(&spec.query)?),
         (Some(key), product(&spec.key)?),
@@ -180,6 +179,46 @@ pub fn attention_reference(
             }
         }
     }
+    Ok(())
+}
+
+fn score(
+    spec: AttentionSpec,
+    query: &[f32],
+    key: &[f32],
+    biases: (Option<&[f32]>, Option<&[f32]>),
+    row: usize,
+    key_row: usize,
+    k: usize,
+) -> Result<f32, AttentionError> {
+    let d = spec.head_dim();
+    let mut dot = 0.;
+    for i in 0..d {
+        dot = finite(dot + finite(query[row * d + i] * key[key_row * d + i])?)?;
+    }
+    let mut score = finite(dot * spec.scale())?;
+    if let Some(bias) = biases.0 {
+        score = finite(score + bias[key_row])?;
+    }
+    if let Some(bias) = biases.1 {
+        score = finite(score + bias[row * spec.keys() + k])?;
+    }
+    Ok(score)
+}
+
+/// CPU oracle, not a routing fallback. Biases are added AFTER scaling QK.
+/// Online normalized softmax avoids materializing a quadratic score tensor.
+/// Inputs and f32 score/weighted-output arithmetic must remain finite; no
+/// bitwise identity between different reduction orders is promised.
+pub fn attention_reference(
+    spec: AttentionSpec,
+    query: &[f32],
+    key: &[f32],
+    value: &[f32],
+    z_bias: Option<&[f32]>,
+    pair_bias: Option<&[f32]>,
+) -> Result<Vec<f32>, AttentionError> {
+    validate_inputs(spec, query, key, value, z_bias, pair_bias)?;
     let mut output = vec![0.; query.len()];
     let d = spec.head_dim();
     for context in 0..spec.contexts() {
@@ -193,17 +232,7 @@ pub fn attention_reference(
             let mut sum = 0.;
             for k in 0..visible {
                 let key_row = context * spec.keys() + k;
-                let mut dot = 0.;
-                for i in 0..d {
-                    dot = finite(dot + finite(query[row * d + i] * key[key_row * d + i])?)?;
-                }
-                let mut score = finite(dot * spec.scale())?;
-                if let Some(bias) = z_bias {
-                    score = finite(score + bias[key_row])?;
-                }
-                if let Some(bias) = pair_bias {
-                    score = finite(score + bias[row * spec.keys() + k])?;
-                }
+                let score = score(spec, query, key, (z_bias, pair_bias), row, key_row, k)?;
                 let next_maximum = maximum.max(score);
                 let previous = sum * (maximum - next_maximum).exp();
                 let current = (score - next_maximum).exp();

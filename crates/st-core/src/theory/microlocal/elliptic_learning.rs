@@ -14,6 +14,10 @@ pub enum EllipticLearningError {
     InvalidUpstream,
     #[error("elliptic VJP result is not finite")]
     NonFiniteGradient,
+    #[error("elliptic causal attention exceeds the score-pair budget")]
+    PairBudget,
+    #[error(transparent)]
+    Attention(#[from] st_kernel_contracts::attention::AttentionError),
 }
 
 /// An immutable forward snapshot. Later warp reconfiguration cannot alter its VJP.
