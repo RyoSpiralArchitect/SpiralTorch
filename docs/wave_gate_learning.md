@@ -45,6 +45,8 @@ Jacobian is `I / sqrt(-curvature)`.
 The parameter pullback is `S'(gate) * sum_rows(grad_affine * input)`. Previously,
 `S'(gate)` was omitted. The porous map's outside slope can be **negative**, so the
 missing factor can reverse the update direction, not merely change its size.
+At exactly the saturation boundary, the implementation selects the inside slope
+of one; the mathematical piecewise map is not differentiable at that boundary.
 The regression fixture gave analytic `+0.023985479` versus finite difference
 `-0.0006646663` before the repair.
 
