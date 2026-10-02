@@ -49,6 +49,26 @@ open; this is an implemented learning mechanism, not a geometric quality or
 speed win. CI now exercises the geometric clients and exact tiny-HF continuation
 instead of leaving that coverage solely in local experiments.
 
+The [causal factorial](elliptic_causal_study.md) and
+[learned-context comparison](elliptic_gated_study.md) retain ordinary tangent
+controls as the stronger learning path. A signed context gate modestly improves
+the elliptic mean, but geometry still loses in every seed on both reused sets.
+The [frozen-checkpoint intervention](elliptic_context_ablation.md) then separates
+local gain, fixed-anchor correction and true context; its outcomes are not
+retraining evidence. The resulting [Rust-owned anchored operator](elliptic_anchored_learning.md)
+connects the same input/shared-gate VJPs to Python/HF and WASM without adding a
+sequence cache or quadratic anchor attention.
+
+The [anchored training study](../benchmarks/results/2026-10-03-elliptic-anchored-study/README.md)
+now completes four equally parameterized arms across three seeds and 512 updates
+each. Fixed-anchor elliptic improves over gated-context elliptic in all seeds on
+both sets (-0.028651 mean Pride CE, -0.011172 Alice), but ordinary anchored tangent
+still wins every seed (+0.116164 and +0.064956 primary geometry gaps). All saved
+states and exact continuations are verified; six old-control replays are not
+independent confirmations. Before adding another mixer, inspect nonlinear chart
+feature/gradient conditioning against the ordinary control. The experiment does
+not establish that conditioning causes the remaining gap, nor any speed advantage.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:

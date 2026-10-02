@@ -1,0 +1,572 @@
+{
+  "schema": "spiraltorch.elliptic_anchored_summary.v1",
+  "study_id": "229ccd7afba7893e7e18c7f354249957e977381afac80938c4c36cdcfd4b3ca8",
+  "steps_per_run": 512,
+  "runs": 12,
+  "primary_updates": 6144,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "anchored_tangent": {
+          "mean_ce": 3.5634887417157493,
+          "mean_delta_vs_baseline": -0.5102245271205903,
+          "mean_delta_vs_anchored_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_anchored_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.565271204710007,
+              "delta_vs_anchored_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.5646956006685895,
+              "delta_vs_anchored_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.5604994197686515,
+              "delta_vs_anchored_tangent": 0.0
+            }
+          ]
+        },
+        "anchored_elliptic": {
+          "mean_ce": 3.6796525127357906,
+          "mean_delta_vs_baseline": -0.3940607561005489,
+          "mean_delta_vs_anchored_tangent": 0.11616377102004138,
+          "paired_delta_sample_sd": 0.0037095001123884966,
+          "seeds_better_than_anchored_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.685430004199346,
+              "delta_vs_anchored_tangent": 0.12015879948933916
+            },
+            {
+              "seed": 43,
+              "ce": 3.6775238732496898,
+              "delta_vs_anchored_tangent": 0.11282827258110029
+            },
+            {
+              "seed": 47,
+              "ce": 3.676003660758336,
+              "delta_vs_anchored_tangent": 0.1155042409896847
+            }
+          ]
+        },
+        "gated_tangent": {
+          "mean_ce": 3.5698861598968503,
+          "mean_delta_vs_baseline": -0.5038271089394892,
+          "mean_delta_vs_anchored_tangent": 0.006397418181101215,
+          "paired_delta_sample_sd": 0.001338865122381172,
+          "seeds_better_than_anchored_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.5703635732332866,
+              "delta_vs_anchored_tangent": 0.005092368523279767
+            },
+            {
+              "seed": 43,
+              "ce": 3.571027773618698,
+              "delta_vs_anchored_tangent": 0.006332172950108461
+            },
+            {
+              "seed": 47,
+              "ce": 3.568267132838567,
+              "delta_vs_anchored_tangent": 0.007767713069915416
+            }
+          ]
+        },
+        "gated_elliptic": {
+          "mean_ce": 3.708303849564658,
+          "mean_delta_vs_baseline": -0.36540941927168147,
+          "mean_delta_vs_anchored_tangent": 0.14481510784890914,
+          "paired_delta_sample_sd": 0.004608523242513288,
+          "seeds_better_than_anchored_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7153897047042848,
+              "delta_vs_anchored_tangent": 0.15011849999427795
+            },
+            {
+              "seed": 43,
+              "ce": 3.706479525566101,
+              "delta_vs_anchored_tangent": 0.14178392489751168
+            },
+            {
+              "seed": 47,
+              "ce": 3.703042318423589,
+              "delta_vs_anchored_tangent": 0.14254289865493774
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "anchored_tangent": {
+          "mean_ce": 3.673358661433061,
+          "mean_delta_vs_baseline": -0.33844882498184825,
+          "mean_delta_vs_anchored_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_anchored_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.698008216917515,
+              "delta_vs_anchored_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.66829015314579,
+              "delta_vs_anchored_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.653777614235878,
+              "delta_vs_anchored_tangent": 0.0
+            }
+          ]
+        },
+        "anchored_elliptic": {
+          "mean_ce": 3.7383148645361266,
+          "mean_delta_vs_baseline": -0.27349262187878276,
+          "mean_delta_vs_anchored_tangent": 0.06495620310306549,
+          "paired_delta_sample_sd": 0.028295466299796505,
+          "seeds_better_than_anchored_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7340790927410126,
+              "delta_vs_anchored_tangent": 0.03607087582349777
+            },
+            {
+              "seed": 43,
+              "ce": 3.7344654873013496,
+              "delta_vs_anchored_tangent": 0.06617533415555954
+            },
+            {
+              "seed": 47,
+              "ce": 3.746400013566017,
+              "delta_vs_anchored_tangent": 0.09262239933013916
+            }
+          ]
+        },
+        "gated_tangent": {
+          "mean_ce": 3.6717978740731874,
+          "mean_delta_vs_baseline": -0.340009612341722,
+          "mean_delta_vs_anchored_tangent": -0.0015607873598734538,
+          "paired_delta_sample_sd": 0.009888921063196,
+          "seeds_better_than_anchored_tangent": 1,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7005913704633713,
+              "delta_vs_anchored_tangent": 0.002583153545856476
+            },
+            {
+              "seed": 43,
+              "ce": 3.6554426476359367,
+              "delta_vs_anchored_tangent": -0.012847505509853363
+            },
+            {
+              "seed": 47,
+              "ce": 3.6593596041202545,
+              "delta_vs_anchored_tangent": 0.005581989884376526
+            }
+          ]
+        },
+        "gated_elliptic": {
+          "mean_ce": 3.7494865705569587,
+          "mean_delta_vs_baseline": -0.2623209158579507,
+          "mean_delta_vs_anchored_tangent": 0.07612790912389755,
+          "paired_delta_sample_sd": 0.019176498149223335,
+          "seeds_better_than_anchored_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7547348514199257,
+              "delta_vs_anchored_tangent": 0.05672663450241089
+            },
+            {
+              "seed": 43,
+              "ce": 3.7448758110404015,
+              "delta_vs_anchored_tangent": 0.07658565789461136
+            },
+            {
+              "seed": 47,
+              "ce": 3.7488490492105484,
+              "delta_vs_anchored_tangent": 0.09507143497467041
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "All four arms have 8451 trainable parameters and identical initial projection/readout/gate tensors within each seed; raw gates start at zero without RNG draws. Minibatches are paired.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "Anchored features use (1-g)*f + g*phi(1,0,0); gated-context features use (1-g)*f + g*causal(f), with g=tanh(raw_mix). The anchor is fixed, not learned.",
+    "Primary contrast is anchored elliptic minus anchored tangent. Also report geometry within gated context, anchor minus context within each map, and their paired interaction, including every losing seed.",
+    "Rust owns both nonlinear maps and complete VJPs; ordinary controls use its fixed anchor/Jacobian with explicit Torch blend/attention. This is not matched computation or a speed test.",
+    "All twelve runs are retrained from identity, not initialized from earlier endpoints or the frozen-weight ablation. Endpoints are locked until all runs and continuation checks complete.",
+    "Pride and Alice were already inspected and motivated the anchor design. These are reused exploratory sets, not untouched confirmation or evidence of general LLM advantage.",
+    "A fixed-anchor adapter is pointwise, but the underlying GPT-2 hidden state is contextual. Some gate scaling can be absorbed into the readout; optimization effects are not necessarily added expressivity.",
+    "Gated controls are rerun with the current frozen package. Exact historical replays, if observed, are reproducibility evidence and not independent replications.",
+    "Full unpadded contexts, model KV cache disabled, CPU float32. No hyperparameter selection from interim development loss, resident WGPU claim, or acceleration claim.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "reference_arm": "anchored_tangent",
+  "paired_factorial_contrasts": {
+    "pride_unused_tail": {
+      "geometry_anchored": {
+        "weights": {
+          "anchored_elliptic": 1,
+          "anchored_tangent": -1
+        },
+        "mean_ce_difference": 0.11616377102004138,
+        "paired_sample_sd": 0.0037095001123884966,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.12015879948933916
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.11282827258110029
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.1155042409896847
+          }
+        ]
+      },
+      "geometry_gated": {
+        "weights": {
+          "gated_elliptic": 1,
+          "gated_tangent": -1
+        },
+        "mean_ce_difference": 0.1384176896678079,
+        "paired_sample_sd": 0.005733067486982068,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.1450261314709982
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.13545175194740322
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.13477518558502233
+          }
+        ]
+      },
+      "anchor_tangent": {
+        "weights": {
+          "anchored_tangent": 1,
+          "gated_tangent": -1
+        },
+        "mean_ce_difference": -0.006397418181101215,
+        "paired_sample_sd": 0.001338865122381172,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.005092368523279767
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.006332172950108461
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.007767713069915416
+          }
+        ]
+      },
+      "anchor_elliptic": {
+        "weights": {
+          "anchored_elliptic": 1,
+          "gated_elliptic": -1
+        },
+        "mean_ce_difference": -0.02865133682886774,
+        "paired_sample_sd": 0.0014841087408909923,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.02995970050493879
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.028955652316411395
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.02703865766525304
+          }
+        ]
+      },
+      "interaction": {
+        "weights": {
+          "anchored_elliptic": 1,
+          "anchored_tangent": -1,
+          "gated_elliptic": -1,
+          "gated_tangent": 1
+        },
+        "mean_ce_difference": -0.02225391864776653,
+        "paired_sample_sd": 0.0028164373396115483,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.024867331981659024
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.022623479366302934
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.019270944595337625
+          }
+        ]
+      }
+    },
+    "alice_transfer": {
+      "geometry_anchored": {
+        "weights": {
+          "anchored_elliptic": 1,
+          "anchored_tangent": -1
+        },
+        "mean_ce_difference": 0.06495620310306549,
+        "paired_sample_sd": 0.028295466299796505,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.03607087582349777
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.06617533415555954
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.09262239933013916
+          }
+        ]
+      },
+      "geometry_gated": {
+        "weights": {
+          "gated_elliptic": 1,
+          "gated_tangent": -1
+        },
+        "mean_ce_difference": 0.07768869648377101,
+        "paired_sample_sd": 0.020390774202426718,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.05414348095655441
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.08943316340446472
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.08948944509029388
+          }
+        ]
+      },
+      "anchor_tangent": {
+        "weights": {
+          "anchored_tangent": 1,
+          "gated_tangent": -1
+        },
+        "mean_ce_difference": 0.0015607873598734538,
+        "paired_sample_sd": 0.009888921063196,
+        "negative_seeds": 2,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.002583153545856476
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.012847505509853363
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.005581989884376526
+          }
+        ]
+      },
+      "anchor_elliptic": {
+        "weights": {
+          "anchored_elliptic": 1,
+          "gated_elliptic": -1
+        },
+        "mean_ce_difference": -0.011171706020832062,
+        "paired_sample_sd": 0.009127210315695014,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.020655758678913116
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.010410323739051819
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.00244903564453125
+          }
+        ]
+      },
+      "interaction": {
+        "weights": {
+          "anchored_elliptic": 1,
+          "anchored_tangent": -1,
+          "gated_elliptic": -1,
+          "gated_tangent": 1
+        },
+        "mean_ce_difference": -0.012732493380705515,
+        "paired_sample_sd": 0.013982344525623193,
+        "negative_seeds": 2,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.01807260513305664
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.023257829248905182
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.003132954239845276
+          }
+        ]
+      }
+    }
+  },
+  "gate_trajectories": {
+    "41:anchored_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.165524423122406,
+      "final_mix": -0.164029110768,
+      "min_raw_mix": -0.165524423122406,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "41:anchored_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.511658787727356,
+      "final_mix": -0.471236637984,
+      "min_raw_mix": -0.511658787727356,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "41:gated_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": 0.047157686203718185,
+      "final_mix": 0.047122760106,
+      "min_raw_mix": 0.0,
+      "max_raw_mix": 0.08757632225751877,
+      "nonzero_gradient_steps": 511
+    },
+    "41:gated_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.575985848903656,
+      "final_mix": -0.519741742618,
+      "min_raw_mix": -0.575985848903656,
+      "max_raw_mix": 0.005563954822719097,
+      "nonzero_gradient_steps": 511
+    },
+    "43:anchored_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.17940306663513184,
+      "final_mix": -0.177502803797,
+      "min_raw_mix": -0.18031232059001923,
+      "max_raw_mix": 0.0007416801527142525,
+      "nonzero_gradient_steps": 511
+    },
+    "43:anchored_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.46257343888282776,
+      "final_mix": -0.432179311572,
+      "min_raw_mix": -0.46257343888282776,
+      "max_raw_mix": 0.0014697987353429198,
+      "nonzero_gradient_steps": 511
+    },
+    "43:gated_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": 0.09179260581731796,
+      "final_mix": 0.091535660542,
+      "min_raw_mix": -0.008733789436519146,
+      "max_raw_mix": 0.11032532900571823,
+      "nonzero_gradient_steps": 511
+    },
+    "43:gated_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.4858208894729614,
+      "final_mix": -0.450893236365,
+      "min_raw_mix": -0.4858208894729614,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "47:anchored_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.18117603659629822,
+      "final_mix": -0.179219370344,
+      "min_raw_mix": -0.18118523061275482,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "47:anchored_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.4541603624820709,
+      "final_mix": -0.425312816527,
+      "min_raw_mix": -0.45423534512519836,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "47:gated_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": 0.09268250316381454,
+      "final_mix": 0.092418029529,
+      "min_raw_mix": 0.0,
+      "max_raw_mix": 0.11123716831207275,
+      "nonzero_gradient_steps": 511
+    },
+    "47:gated_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.46712788939476013,
+      "final_mix": -0.435875785093,
+      "min_raw_mix": -0.46712788939476013,
+      "max_raw_mix": 0.0007435285951942205,
+      "nonzero_gradient_steps": 511
+    }
+  },
+  "input_sha256": {
+    "plan": "19eab1f4e427de6ae662a3fa8c6d1611f03272030835e471788e70becf335515",
+    "results": "f76f12f1f8f232c43c3ce41240c21d1f36a1cf6574dea6fce0e389ff4b37e678",
+    "journal": "052e4f8a3d8de52e0e416827cb71364f57058a1a393b6544d04ca6f5cc6e7d23"
+  }
+}
