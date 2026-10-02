@@ -14,6 +14,8 @@ pub enum EllipticLearningError {
     InvalidUpstream,
     #[error("elliptic VJP result is not finite")]
     NonFiniteGradient,
+    #[error("elliptic learning output is not finite")]
+    NonFiniteOutput,
     #[error("elliptic causal attention exceeds the score-pair budget")]
     PairBudget,
     #[error(transparent)]

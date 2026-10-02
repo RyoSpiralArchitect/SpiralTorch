@@ -26,7 +26,7 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                 try:
                     if name.endswith('Adapter'):
                         namespace[name](8)
-                    elif name == 'wave_gate_autograd':
+                    elif name in ('wave_gate_autograd', 'elliptic_gated_causal_autograd'):
                         namespace[name](None, None, None)
                     else:
                         namespace[name](None, None)

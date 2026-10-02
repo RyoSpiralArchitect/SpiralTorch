@@ -79,10 +79,12 @@ def test_shape_budget_and_saved_input_version_guards():
         y.sum().backward()
 
 
-def test_causal_adapter_trains_both_projections_and_resumes_exactly():
+@pytest.mark.parametrize("gated", [False, True])
+def test_causal_adapter_trains_both_projections_and_resumes_exactly(gated):
     torch.manual_seed(89)
-    adapter = st.EllipticCausalResidualAdapter(4)
-    assert sum(p.numel() for p in adapter.parameters()) == 11 * 4 + 2
+    cls = st.EllipticGatedCausalResidualAdapter if gated else st.EllipticCausalResidualAdapter
+    adapter = cls(4)
+    assert sum(p.numel() for p in adapter.parameters()) == 11 * 4 + 2 + int(gated)
     x = torch.randn(2, 3, 4)
     assert torch.equal(adapter(x), x)
     target = x + 0.1 * x.cumsum(1)
@@ -98,7 +100,10 @@ def test_causal_adapter_trains_both_projections_and_resumes_exactly():
         step(adapter, optimizer)
     assert adapter.orientation.weight.grad.abs().sum() > 0
     assert adapter.readout.weight.grad.abs().sum() > 0
-    clone = st.EllipticCausalResidualAdapter(4)
+    if gated:
+        assert adapter.raw_mix.grad.abs() > 0
+        assert adapter.raw_mix.item() != 0
+    clone = cls(4)
     clone.load_state_dict(copy.deepcopy(adapter.state_dict()))
     resumed = torch.optim.Adam(clone.parameters(), lr=0.01)
     resumed.load_state_dict(copy.deepcopy(optimizer.state_dict()))
@@ -116,7 +121,8 @@ def test_causal_adapter_trains_both_projections_and_resumes_exactly():
         clone.load_state_dict(pointwise.state_dict())
 
 
-def test_actual_hf_loss_reaches_native_token_relations_without_base_updates():
+@pytest.mark.parametrize("gated", [False, True])
+def test_actual_hf_loss_reaches_native_token_relations_without_base_updates(gated):
     transformers = pytest.importorskip("transformers")
     torch.manual_seed(97)
     torch.set_num_threads(2)
@@ -140,7 +146,8 @@ def test_actual_hf_loss_reaches_native_token_relations_without_base_updates():
     ids = torch.tensor([[1, 2, 3, 1, 2, 3]])
     original = model(ids).logits.detach()
     base = {name: p.detach().clone() for name, p in model.named_parameters()}
-    adapter = st.EllipticCausalResidualAdapter(8)
+    cls = st.EllipticGatedCausalResidualAdapter if gated else st.EllipticCausalResidualAdapter
+    adapter = cls(8)
     model.transformer.h[0].mlp = torch.nn.Sequential(
         model.transformer.h[0].mlp, adapter
     )
@@ -155,21 +162,33 @@ def test_actual_hf_loss_reaches_native_token_relations_without_base_updates():
     assert adapter.orientation.weight.grad.abs().sum() > 0
     assert adapter.readout.weight.grad.abs().sum() > 0
     assert not torch.equal(model(ids).logits.detach(), original)
+    if gated:
+        assert adapter.raw_mix.grad.abs() > 0
+        assert adapter.raw_mix.item() != 0
     for name, p in model.named_parameters():
         if not p.requires_grad:
             old_name = name.replace("mlp.0.", "mlp.")
             assert torch.equal(p, base[old_name]) and p.grad is None
 
 
-def test_mps_transport_is_not_claimed_resident_execution():
+@pytest.mark.parametrize("gated", [False, True])
+def test_mps_transport_is_not_claimed_resident_execution(gated):
     if not torch.backends.mps.is_available():
         pytest.skip("requires Apple GPU")
     warp = st.EllipticWarp(1.0)
     x = torch.tensor([[[1.0, 0.2, 0.3], [1.0, -0.4, 0.5]]], requires_grad=True)
     device_x = x.detach().to("mps").requires_grad_()
-    expected = st.elliptic_causal_autograd(warp, x)
-    actual = st.elliptic_causal_autograd(warp, device_x)
+    if gated:
+        gate = torch.tensor(-0.3, requires_grad=True)
+        device_gate = gate.detach().to("mps").requires_grad_()
+        expected = st.elliptic_gated_causal_autograd(warp, x, gate)
+        actual = st.elliptic_gated_causal_autograd(warp, device_x, device_gate)
+    else:
+        expected = st.elliptic_causal_autograd(warp, x)
+        actual = st.elliptic_causal_autograd(warp, device_x)
     expected.sum().backward()
     actual.sum().backward()
     torch.testing.assert_close(actual.cpu(), expected)
     torch.testing.assert_close(device_x.grad.cpu(), x.grad)
+    if gated:
+        torch.testing.assert_close(device_gate.grad.cpu(), gate.grad)
