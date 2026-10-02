@@ -157,6 +157,34 @@ browser real-image restart, throughput or a Z-space policy advantage.
    these development seeds favor a window. Model-derived proposal production and
    its latent-state restart remain separate future optimizer gates.
 
+### Focus Handoff: Back To Language Models
+
+The [bounded convolution diagnostic](../benchmarks/results/2026-10-02-vision-vjp-profile/README.md)
+closes this vision execution slice without claiming the remaining performance
+gap is solved. All 54 cases preserve both routes' complete reference checkpoints.
+At batch 64 the existing convolution VJP passes total about 3.2 ms against a
+roughly 63 ms profiled host step. The rest is unattributed; neither convolution
+dominance nor a mapping-only explanation follows. Shared NN graph backward and
+execution waits remain candidates to examine on language-model workloads.
+Browser real-image restart, peak memory and useful vision policy remain open,
+but are not prerequisites for returning the main development effort to LLMs.
+
+The next learning slice is the existing Rust-owned repetition-unlikelihood
+objective used by HF/PEFT, not another reporting surface or a complete HF
+backend replacement. The retained
+[GPT-2 long-horizon result](benchmarks/hf_periodic_gpt2_pride_full_corpus_256step_20260823.json)
+records early benefit followed by later reversal and unequal auxiliary-loss
+magnitudes at equal nominal strength. This motivates testing an explicit Rust
+objective budget/normalization or update-time schedule, not declaring cumulative
+over-application proven. Preserve the current default as a frozen control;
+include gradient accumulation, masked tokens and resumed optimizer-update clocks
+in the new contract. Then compare ordinary FT, the frozen intervention and one
+prespecified candidate over the same longer horizon with fresh seeds, held-out
+causal-LM loss and generated-text assessment. Decoding-only controls must not
+stand in for a learning improvement. HF retains its differentiable model graph;
+resident Linear/normalization/adapter execution can migrate in separately tested
+slices rather than delaying this learning question for a complete decoder port.
+
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the
 working end-to-end path rather than multiplying disconnected entry points.

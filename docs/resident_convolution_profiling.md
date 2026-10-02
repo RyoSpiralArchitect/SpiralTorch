@@ -62,6 +62,19 @@ each settled step and outside its host clock. This inter-step observation is
 diagnostic, not a replacement for uninstrumented throughput. All output paths
 are exclusive-create; retain failed attempts rather than overwrite them.
 
+After the default 54-case grid finishes, independently replay its retained
+files. The verifier checks case/pass coverage, input order, query tick decoding
+and both complete checkpoints against the prior matched timing reference. It
+exports every condition's per-step durations and hashes without images, weights
+or private filesystem paths. This is file verification, not hardware attestation.
+
+```bash
+python -I tools/verify_vision_gpu_profile.py "$NEW_PROFILE_DIR" \
+  --timing-root "$RETAINED_TIMING_DIR" --source-ref "$CAPTURED_SOURCE" \
+  --output "$NEW_VERIFICATION_DIR"
+python -I tools/test_vision_gpu_profile.py
+```
+
 The native/browser shared fixture is
 `crates/st-backend-wgpu/examples/support/convolution_profile_checks.rs`.
 It checks default-device refusal, context-clone propagation, dense/depthwise
