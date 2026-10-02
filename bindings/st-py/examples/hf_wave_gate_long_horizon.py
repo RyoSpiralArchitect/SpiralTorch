@@ -172,6 +172,13 @@ def make_adapter(arm, config, seed, factory):
     )
 
 
+def make_optimizer(adapter, arm, config, factory):
+    return (
+        torch.optim.Adam(adapter.parameters(), lr=config["learning_rate"])
+        if factory is None else factory(adapter, arm, config)
+    )
+
+
 def run_training(
     model,
     parent,
@@ -185,6 +192,7 @@ def run_training(
     after_checkpoint=None,
     *,
     adapter_factory=None,
+    optimizer_factory=None,
 ):
     config, study_id = plan["config"], plan["study_id"]
     base_hash = pilot.model_digest(model)
@@ -219,9 +227,7 @@ def run_training(
                 pilot.model_digest(adapter, exclude={"raw_mix"})
                 if hasattr(adapter, "raw_mix") else None
             )
-            optimizer = torch.optim.Adam(
-                adapter.parameters(), lr=config["learning_rate"]
-            )
+            optimizer = make_optimizer(adapter, arm, config, optimizer_factory)
             cursor, records, development = 0, [], []
             if saved:
                 require(
@@ -334,9 +340,7 @@ def run_training(
                 pilot.update(model, adapter, optimizer, train[batches[-1]])
                 restored = make_adapter(arm, config, seed, adapter_factory)
                 restored.load_state_dict(endpoint["adapter"])
-                resumed = torch.optim.Adam(
-                    restored.parameters(), lr=config["learning_rate"]
-                )
+                resumed = make_optimizer(restored, arm, config, optimizer_factory)
                 resumed.load_state_dict(copy.deepcopy(endpoint["optimizer"]))
                 parent.add_module(child, torch.nn.Sequential(original, restored))
                 pilot.update(model, restored, resumed, train[batches[-1]])
@@ -522,6 +526,7 @@ def main(
     arms=None,
     adapter_factory=None,
     adapter_sources=None,
+    optimizer_factory=None,
     result_schema="spiraltorch.wave_gate_long_horizon.v1",
 ):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -529,6 +534,7 @@ def main(
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+    require(optimizer_factory is None or bool(adapter_sources), "custom optimizer sources must be bound")
     config_bytes = args.config.read_bytes()
     config = json.loads(config_bytes)
     require(config["arms"] == (ARMS if arms is None else arms), "unrecognized arms")
@@ -650,6 +656,7 @@ def main(
             args.output_dir,
             journal,
             adapter_factory=adapter_factory,
+            optimizer_factory=optimizer_factory,
         )
         run_endpoints(
             model,

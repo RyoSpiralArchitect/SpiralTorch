@@ -168,6 +168,8 @@ def update(model, adapter, optimizer, batch):
             record[f"{name}_gradient"] = float(parameter.grad)
             record[f"{name}_before_update"] = float(parameter.detach())
     optimizer.step()
+    if hasattr(optimizer, "last_step_diagnostics"):
+        record["optimizer_step"] = optimizer.last_step_diagnostics
     if not all(torch.isfinite(p).all() for p in adapter.parameters()):
         raise ValueError("nonfinite adapter update")
     if hasattr(adapter, "raw_mix"):

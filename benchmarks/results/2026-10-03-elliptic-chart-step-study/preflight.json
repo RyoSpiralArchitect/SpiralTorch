@@ -1,0 +1,102 @@
+{
+  "schema": "spiraltorch.elliptic_chart_step_preflight.v1",
+  "status": "passed",
+  "training_status_at_record_time": "running; no endpoint result or quality conclusion",
+  "training_source_revision": "76ccee3649bcadd407539de6e14b832cc1e480e0",
+  "summary_source_revision": "48199ca5163cc1a3ced8662f2f82c6a429e1b328",
+  "study_id": "0a1066fd9a2ccad1e004de37d6d55849d8a15d75eb6e048ae95587717c8d12bb",
+  "plan_sha256": "8e9b5e2781b7b04854e87195f6eba2eac301dec7f47dac1d0f8f0fdc73b2ed8e",
+  "protocol": {
+    "arms": [
+      "adam_tangent",
+      "adam_elliptic",
+      "chart_tangent",
+      "chart_elliptic"
+    ],
+    "seeds": [
+      41,
+      43,
+      47
+    ],
+    "updates_per_run": 512,
+    "planned_primary_updates": 6144,
+    "relative_damping": 0.1,
+    "reference": "adam_tangent"
+  },
+  "rust": {
+    "passed": 16,
+    "skipped": 0,
+    "clippy": "passed with -D warnings",
+    "workspace_fmt": "passed"
+  },
+  "python": {
+    "passed": 204,
+    "skipped": 0,
+    "checks": [
+      "native chart metric and normalized step versus independent Torch dense solve",
+      "ordinary Adam controls preserve exact parameter/moment updates",
+      "four tiny HF arms train with frozen base and exact interrupted continuation",
+      "native rejection rolls parameters and optimizer state back",
+      "summary keeps all factorial contrasts and validates step receipts",
+      "earlier committed summaries reproduce byte for byte"
+    ]
+  },
+  "wasm": {
+    "build": "passed",
+    "runtime": "wasm-bindgen nodejs, not a new browser run",
+    "typescript": "strict passed",
+    "synthetic": {
+      "schema": "spiraltorch.elliptic_chart_step_wasm.v1",
+      "status": "passed",
+      "scope": "Synthetic update path, not pretrained quality or speed",
+      "updates": 100,
+      "initial_loss": 0.3497292522635229,
+      "final_loss": 2.3314683517128287e-15
+    }
+  },
+  "environment": {
+    "platform": "Apple Silicon macOS",
+    "rust": "1.98.0",
+    "rustfmt": "nightly-2026-04-15",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  },
+  "source_sha256": {
+    "crates/st-core/src/theory/microlocal/elliptic_learning.rs": "606246adc07ce1b5a166a11d45ba157cecc105137b48f065cc7801528c2a7962",
+    "crates/st-core/src/theory/microlocal.rs": "e6c63b2d66ffc5d959d57a1c249467b77157330b1c8fa57d6ba8e418fe25c82a",
+    "crates/st-core/tests/elliptic_chart_step.rs": "95064a80accfdbccb967b745d20ae4025975a5b882d48bba3777dd4c9f2bb92e",
+    "bindings/st-py/src/elliptic.rs": "cab65c5da268ac519d23520c20939784fea6dcc274ff759b08f853c67ffca665",
+    "bindings/st-py/spiraltorch/__init__.pyi": "29fa2d8a56b427cf322301923e8c17c7d9602deca30599003489675ee971f03d",
+    "bindings/st-py/examples/hf_elliptic_chart_step_study.py": "2487bd9226945d171b1e55f414446fc40bb1fe4f8bbe4f9abe2801a22ca4ebf8",
+    "bindings/st-py/examples/hf_elliptic_pride_chart_step.json": "04d466fe8e78eee394c0c5882c04ef28818e48296df9ab32b7d9411216b12cfc",
+    "bindings/st-py/examples/hf_wave_gate_long_horizon.py": "aac1f365b82fd33ab0006499390357231650d8353840e3eef8327fd1660ac774",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "1d31668debf444d9b23c342979c9e4a4052c760b850aa7b08d1c7f2aeda3a8ae",
+    "bindings/st-py/tests/test_elliptic_chart_step.py": "e79ee8c8b9c5a1a32d5adffb71fe369441245fe49869642fa750f613186d0447",
+    "bindings/st-wasm/src/elliptic_learning.rs": "886e91eeb39ee2d8c802332170519c0b7c5843ed92d0cff7a56aeae249c87629",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "26f22724f4d3acd0e6adbdd895e646bf5a451567e247b787f3d503e45b143104",
+    "bindings/st-wasm/tests/elliptic_chart_step.mjs": "796d2c323666b749d633010a1c778054aaaadc72b60c30352670ca797a29ecc6",
+    "bindings/st-wasm/tests/elliptic_directional_types.ts": "29cb731f2bde30edb411c2616bac18b878b2bb14d44419ebb63b330498dd49a1",
+    "tools/summarize_wave_gate_long_horizon.py": "b5388e82dda0702b4f236ab5f641f994c416536abe717c83fb8426c374055b8a",
+    "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "576205c853e1e1eac466ab87572ccf42bf347fe25f074e9cd9238b00fab6c00c"
+  },
+  "native_sha256": "0ceb95f8dc34673c3e4d3a4bcf925f2d45ded92e86977e3cfab107c13c75d0f5",
+  "wasm_sha256": "ddaa95ba1377b062a0f999d5b3995b7d26ae2264cb3f223c1c8455185e85d7d3",
+  "local_log_sha256": {
+    "rust-tests.log": "eb28e1752398114a9399576caee29b7b89e2af16e4960672333f977335638d1b",
+    "native-build.log": "8a65b9fc9370dd2eeec8969bb8f48724d93e04a25ad62aef075bd55d6fc5bba4",
+    "wasm-build.log": "362ca68a0313982cb408dc36fff4a647989a43673c172443e58bdbbf1062315e",
+    "clippy.log": "a6be005d6838516e72435f69be8a5d1991a3e75a68a7d76789c36b8100d5a210",
+    "preflight-tests.log": "ab87827a36347e57cdb283a985fe1df4d8092dea223d7d531b7ba78c90fd94f2",
+    "full-tests.log": "3ee92ea44e14cbf9ef3fb68ae73f124e6a346d532a15d94327027f0728629175",
+    "summary-tests.log": "624bea455acf231e5ccd83f84472804459b12607d83722e86a30070837cd5a7e",
+    "final-preflight-tests.log": "b8bd107ae577fa308eb22110aa937a7310a29699e02b9a95c3030a34f283abfb"
+  },
+  "storage_cleanup": "Only two obsolete inactive st-core incremental compilation directories were removed; frozen studies/packages/weights/corpora preserved",
+  "limitations": [
+    "Mean chart metric only, not full parameter pullback, Fisher information or loss Hessian",
+    "Single-forward CPU f32 optimizer client, no accumulation or closures",
+    "No matched-compute, speed or current pretrained-quality claim",
+    "Historical reused endpoints, not untouched confirmatory data"
+  ]
+}

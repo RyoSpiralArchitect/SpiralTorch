@@ -3,8 +3,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::IntoPyObjectExt;
 use st_core::theory::microlocal::{
-    EllipticAnchoredLearningBatch, EllipticCausalLearningBatch, EllipticGatedCausalLearningBatch,
-    EllipticLearningBatch, EllipticTelemetry, EllipticWarp,
+    EllipticAnchoredLearningBatch, EllipticCausalLearningBatch, EllipticChartStep,
+    EllipticGatedCausalLearningBatch, EllipticLearningBatch, EllipticTelemetry, EllipticWarp,
 };
 
 type EllipticDifferential = (PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>);
@@ -17,6 +17,39 @@ pub struct PyEllipticWarp {
 #[pyclass(name = "EllipticLearningBatch", module = "spiraltorch", frozen)]
 pub struct PyEllipticLearningBatch {
     inner: EllipticLearningBatch,
+}
+
+#[pyclass(name = "EllipticChartStep", module = "spiraltorch", frozen)]
+pub struct PyEllipticChartStep {
+    inner: EllipticChartStep,
+}
+
+#[pymethods]
+impl PyEllipticChartStep {
+    #[getter]
+    fn values(&self) -> Vec<f32> {
+        self.inner.values.clone()
+    }
+    #[getter]
+    fn metric(&self) -> Vec<f64> {
+        self.inner.metric.to_vec()
+    }
+    #[getter]
+    fn damped_condition(&self) -> f64 {
+        self.inner.damped_condition
+    }
+    #[getter]
+    fn proposal_l2(&self) -> f64 {
+        self.inner.proposal_l2
+    }
+    #[getter]
+    fn step_l2(&self) -> f64 {
+        self.inner.step_l2
+    }
+    #[getter]
+    fn cosine(&self) -> Option<f64> {
+        self.inner.cosine
+    }
 }
 
 #[pyclass(name = "EllipticCausalLearningBatch", module = "spiraltorch", frozen)]
@@ -100,6 +133,16 @@ fn value_error(error: impl std::fmt::Display) -> PyErr {
 
 #[pymethods]
 impl PyEllipticLearningBatch {
+    fn chart_step(
+        &self,
+        py: Python<'_>,
+        proposal: Vec<f32>,
+        relative_damping: f32,
+    ) -> PyResult<PyEllipticChartStep> {
+        py.detach(|| self.inner.chart_step(&proposal, relative_damping))
+            .map(|inner| PyEllipticChartStep { inner })
+            .map_err(value_error)
+    }
     #[getter]
     fn features(&self) -> Vec<f32> {
         self.inner.features().to_vec()
@@ -416,6 +459,7 @@ pub fn register(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyEllipticWarp>()?;
     module.add_class::<PyEllipticTelemetry>()?;
     module.add_class::<PyEllipticLearningBatch>()?;
+    module.add_class::<PyEllipticChartStep>()?;
     module.add_class::<PyEllipticAnchoredLearningBatch>()?;
     module.add_class::<PyEllipticCausalLearningBatch>()?;
     module.add_class::<PyEllipticGatedCausalLearningBatch>()?;
