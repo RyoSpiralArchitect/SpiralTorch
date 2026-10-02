@@ -44,7 +44,7 @@ does not allocate the quadratic score/probability matrix. A caller-supplied
 pairwise bias is still quadratic. Only explicit snapshots read values back.
 
 For at least 128 keys and head dimension at most 32, the portable 64-thread kernel
-computes four key dot products in parallel with 16 lanes each, amortizing
+computes eight key dot products in parallel with eight lanes each, amortizing
 workgroup barriers. Short sequences and unmeasured wider heads retain one key
 per tile with 64 lanes. Each pipeline specialization is cached lazily. This
 bounded policy follows full-chain measurements, not a universal speed claim.
@@ -55,6 +55,11 @@ must not load masked keys. This uses core WGSL, not subgroups or native-only
 instructions, and is exercised by the browser probe as well as native tests.
 Output order is another cached pipeline specialization, resolved before the
 key loop rather than a per-dispatch output-order flag.
+Merged-head workgroups follow physical `[B,Q,H]` output order; ordinary output
+retains `[B,H,Q]`. The [pass and full-chain study](../benchmarks/results/2026-10-02-attention-pass-optimization/README.md)
+retains a rejected tile-normalization experiment and short-input reversals.
+Its larger resident measurements improve versus the prior ST kernel, not
+PyTorch; it does not measure learning quality or browser throughput.
 
 All inputs must be finite. Non-finite score/weighted-output arithmetic sets an
 owned failure guard, inherited by downstream operations and checked on readback.
