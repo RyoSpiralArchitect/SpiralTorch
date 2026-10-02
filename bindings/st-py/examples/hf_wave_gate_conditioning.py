@@ -151,11 +151,20 @@ def update(model, adapter, optimizer, batch):
         "conditioning": getattr(adapter, "last_conditioning", None),
     }
     for name, parameter in adapter.named_parameters():
+        if name == "log_alpha":
+            record["log_alpha_trainable"] = parameter.requires_grad
+            record["log_alpha_before_update"] = float(parameter.detach())
+            record["alpha_before_update"] = float(parameter.detach().exp())
+            record["log_alpha_gradient"] = None
+        if not parameter.requires_grad:
+            if parameter.grad is not None:
+                raise ValueError(f"frozen {name} has a stale gradient")
+            continue
         if parameter.grad is None or not torch.isfinite(parameter.grad).all():
             raise ValueError(f"invalid {name} gradient")
         record[f"{name}_gradient_l2"] = float(parameter.grad.norm())
         record[f"{name}_before_update_l2"] = float(parameter.detach().norm())
-        if name in {"log_radius", "raw_mix"}:
+        if name in {"log_radius", "raw_mix", "log_alpha"}:
             record[f"{name}_gradient"] = float(parameter.grad)
             record[f"{name}_before_update"] = float(parameter.detach())
     optimizer.step()
@@ -163,6 +172,12 @@ def update(model, adapter, optimizer, batch):
         raise ValueError("nonfinite adapter update")
     if hasattr(adapter, "raw_mix"):
         record["raw_mix_after_update"] = float(adapter.raw_mix.detach())
+    if hasattr(adapter, "log_alpha"):
+        record["log_alpha_after_update"] = float(adapter.log_alpha.detach())
+        alpha = adapter.log_alpha.detach().exp()
+        if not bool(torch.isfinite(alpha)) or not bool(alpha > 0):
+            raise ValueError("updated alpha is not representable as positive finite f32")
+        record["alpha_after_update"] = float(alpha)
     return record
 
 

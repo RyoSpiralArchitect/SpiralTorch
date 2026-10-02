@@ -414,6 +414,9 @@ def run_endpoints(
         adapter.load_state_dict(saved["adapter"])
         if hasattr(adapter, "raw_mix"):
             gated_metadata["final_raw_mix"] = float(adapter.raw_mix.detach())
+        if hasattr(adapter, "log_alpha"):
+            gated_metadata["final_log_alpha"] = float(adapter.log_alpha.detach())
+            gated_metadata["final_alpha"] = float(adapter.log_alpha.detach().exp())
         radius = getattr(adapter, "log_radius", None)
         parent.add_module(child, torch.nn.Sequential(original, adapter))
         try:
@@ -431,6 +434,9 @@ def run_endpoints(
                 "records": saved["records"],
                 "development": saved["development"],
                 "parameter_count": sum(p.numel() for p in adapter.parameters()),
+                "trainable_parameter_count": sum(
+                    p.numel() for p in adapter.parameters() if p.requires_grad
+                ),
                 "final_log_radius": None if radius is None else float(radius.detach()),
                 "initial_parameter_sha256": saved.get("initial_parameter_sha256"),
                 "resume_next_update_equal": entry["resume_next_update_equal"],
