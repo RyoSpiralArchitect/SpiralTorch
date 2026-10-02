@@ -72,6 +72,44 @@ def causal_factorial_contrasts(config, runs, measured, sets):
             "tangent": 1,
         },
     }
+    return contrast_report(config, measured, sets, contrasts)
+
+
+def anchored_factorial_contrasts(config, runs, measured, sets):
+    arms = {"anchored_tangent", "anchored_elliptic", "gated_tangent", "gated_elliptic"}
+    require(
+        set(config["arms"]) == arms and config.get("reference_arm") == "anchored_tangent",
+        "incomplete anchored factorial design",
+    )
+    for seed in config["seeds"]:
+        rows = [runs[f"{seed}:{arm}"] for arm in arms]
+        for field in ("initial_parameter_sha256", "initial_projection_sha256"):
+            hashes = {row.get(field) for row in rows}
+            require(
+                len(hashes) == 1
+                and all(isinstance(value, str) and len(value) == 64 for value in hashes),
+                "anchored factorial initial parameters are not paired",
+            )
+        require(
+            all(row["parameter_count"] == 11 * config["features"] + 3 for row in rows),
+            "anchored factorial parameter counts differ",
+        )
+    contrasts = {
+        "geometry_anchored": {"anchored_elliptic": 1, "anchored_tangent": -1},
+        "geometry_gated": {"gated_elliptic": 1, "gated_tangent": -1},
+        "anchor_tangent": {"anchored_tangent": 1, "gated_tangent": -1},
+        "anchor_elliptic": {"anchored_elliptic": 1, "gated_elliptic": -1},
+        "interaction": {
+            "anchored_elliptic": 1,
+            "anchored_tangent": -1,
+            "gated_elliptic": -1,
+            "gated_tangent": 1,
+        },
+    }
+    return contrast_report(config, measured, sets, contrasts)
+
+
+def contrast_report(config, measured, sets, contrasts):
     report = {}
     for name in sets:
         report[name] = {}
@@ -98,10 +136,10 @@ def causal_factorial_contrasts(config, runs, measured, sets):
     return report
 
 
-def gated_trajectories(config, runs):
+def gated_trajectories(config, runs, arms=("gated_tangent", "gated_elliptic")):
     report = {}
     for seed in config["seeds"]:
-        for arm in ("gated_tangent", "gated_elliptic"):
+        for arm in arms:
             key = f"{seed}:{arm}"
             row = runs[key]
             before = [r.get("raw_mix_before_update") for r in row["records"]]
@@ -140,10 +178,11 @@ def summarize(plan, result, journal, result_sha256):
     require(journal["results_sha256"] == result_sha256, "result hash differs")
     config = plan["config"]
     seeds, arms = config["seeds"], config["arms"]
+    reference = config.get("reference_arm", "tangent")
     require(
         len(set(seeds)) == len(seeds) > 0
         and len(set(arms)) == len(arms)
-        and "tangent" in arms,
+        and reference in arms,
         "invalid paired design",
     )
     expected = {f"{seed}:{arm}" for seed in seeds for arm in arms}
@@ -209,19 +248,19 @@ def summarize(plan, result, journal, result_sha256):
         for arm in arms:
             values = [measured[f"{seed}:{arm}"][name] for seed in seeds]
             delta = [
-                value - measured[f"{seed}:tangent"][name]
+                value - measured[f"{seed}:{reference}"][name]
                 for seed, value in zip(seeds, values)
             ]
             rows[arm] = {
                 "mean_ce": statistics.fmean(values),
                 "mean_delta_vs_baseline": statistics.fmean(values) - baseline[name],
-                "mean_delta_vs_tangent": statistics.fmean(delta),
+                f"mean_delta_vs_{reference}": statistics.fmean(delta),
                 "paired_delta_sample_sd": statistics.stdev(delta)
                 if len(delta) > 1
                 else None,
-                "seeds_better_than_tangent": sum(value < 0 for value in delta),
+                f"seeds_better_than_{reference}": sum(value < 0 for value in delta),
                 "per_seed": [
-                    {"seed": seed, "ce": value, "delta_vs_tangent": difference}
+                    {"seed": seed, "ce": value, f"delta_vs_{reference}": difference}
                     for seed, value, difference in zip(seeds, values, delta)
                 ],
             }
@@ -270,6 +309,12 @@ def summarize(plan, result, journal, result_sha256):
         )
     if config.get("schema") == "spiraltorch.elliptic_gated_protocol.v1":
         summary["gate_trajectories"] = gated_trajectories(config, runs)
+    if config.get("schema") == "spiraltorch.elliptic_anchored_protocol.v1":
+        summary["reference_arm"] = reference
+        summary["paired_factorial_contrasts"] = anchored_factorial_contrasts(
+            config, runs, measured, sets
+        )
+        summary["gate_trajectories"] = gated_trajectories(config, runs, arms)
     return summary
 
 

@@ -216,6 +216,78 @@ def test_gated_summary_pairs_projections_and_keeps_signed_trajectory(summary_mod
     assert gate["min_raw_mix"] == -0.2 and gate["nonzero_gradient_steps"] == 2
 
 
+def anchored_fixture():
+    plan, result, journal = gated_fixture()
+    rename = {"tangent": "anchored_tangent", "elliptic": "anchored_elliptic"}
+    plan["config"].update(
+        schema="spiraltorch.elliptic_anchored_protocol.v1",
+        reference_arm="anchored_tangent",
+        arms=[rename.get(arm, arm) for arm in plan["config"]["arms"]],
+    )
+    for row in result["runs"]:
+        key = row["run_key"]
+        seed, arm = key.split(":")
+        row["run_key"] = f"{seed}:{rename.get(arm, arm)}"
+        if row["run_key"] != key:
+            journal["runs"][row["run_key"]] = journal["runs"].pop(key)
+            row.update(
+                parameter_count=91, initial_projection_sha256=row["initial_parameter_sha256"],
+                initial_parameter_sha256="a" * 64, final_raw_mix=-0.2,
+            )
+            for i, record in enumerate(row["records"]):
+                record.update(raw_mix_before_update=-0.1*i, raw_mix_after_update=-0.1*(i+1), raw_mix_gradient=0.3)
+    return plan, result, journal
+
+
+def test_anchored_factorial_reports_real_reference_and_all_four_gates(summary_module):
+    plan, result, journal = anchored_fixture()
+    before = copy.deepcopy((plan, result, journal))
+    report = summary_module.summarize(plan, result, journal, "sealed")
+    assert report["reference_arm"] == "anchored_tangent"
+    assert set(report["gate_trajectories"]) == set(journal["runs"])
+    row = report["comparisons"]["tail"]["arms"]["anchored_elliptic"]
+    assert "mean_delta_vs_tangent" not in row
+    assert row["mean_delta_vs_anchored_tangent"] == 0.125
+    assert row["seeds_better_than_anchored_tangent"] == 1
+    expected = {
+        "geometry_anchored": [0.5, -0.25],
+        "geometry_gated": [-0.25, 0.25],
+        "anchor_tangent": [0.25, 0.5],
+        "anchor_elliptic": [1.0, 0.0],
+        "interaction": [0.75, -0.5],
+    }
+    for name, values in expected.items():
+        observed = report["paired_factorial_contrasts"]["tail"][name]
+        assert [r["ce_difference"] for r in observed["per_seed"]] == values
+        assert observed["mean_ce_difference"] == sum(values) / 2
+        assert observed["negative_seeds"] == sum(value < 0 for value in values)
+    assert (plan, result, journal) == before
+
+
+@pytest.mark.parametrize("corruption", ["projection", "parameters", "hash", "reference", "missing_reference", "gate", "endpoint", "nan"])
+def test_anchored_summary_rejects_unpaired_or_mislabeled_evidence(summary_module, corruption):
+    plan, result, journal = anchored_fixture()
+    row = result["runs"][0]
+    if corruption == "projection":
+        row["initial_projection_sha256"] = "b" * 64
+    elif corruption == "parameters":
+        row["parameter_count"] -= 1
+    elif corruption == "hash":
+        row["initial_parameter_sha256"] = "b" * 64
+    elif corruption == "reference":
+        plan["config"]["reference_arm"] = "gated_tangent"
+    elif corruption == "missing_reference":
+        del plan["config"]["reference_arm"]
+    elif corruption == "gate":
+        del row["records"][0]["raw_mix_gradient"]
+    elif corruption == "endpoint":
+        row["final_raw_mix"] = 0.3
+    else:
+        row["records"][0]["raw_mix_before_update"] = float("nan")
+    with pytest.raises(ValueError):
+        summary_module.summarize(plan, result, journal, "sealed")
+
+
 @pytest.mark.parametrize("corruption", ["projection", "gate_hash", "parameters", "missing", "endpoint", "discontinuous", "nan"])
 def test_gated_summary_rejects_invalid_pairing_or_trajectory(summary_module, corruption):
     plan, result, journal = gated_fixture()
