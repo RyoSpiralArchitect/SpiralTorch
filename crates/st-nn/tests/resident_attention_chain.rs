@@ -11,6 +11,11 @@ fn qkv_geometry_attention_output_matches_pytorch_without_host_intermediates() {
     let report = pollster::block_on(support::run()).unwrap();
     assert_eq!(report["passed"], true);
     assert_eq!(report["checks"].as_array().unwrap().len(), 12);
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|c| c["merged_heads_max_abs_error"].is_number()));
     eprintln!("{report}");
 }
 
@@ -29,6 +34,11 @@ fn explicit_projection_variants_match_the_same_pytorch_fixture() {
         .unwrap();
         assert_eq!(report["passed"], true);
         assert_eq!(report["projection"], projection);
+        assert!(report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["merged_heads_max_abs_error"].is_number()));
         assert_eq!(report["checks"].as_array().unwrap().len(), 12);
         eprintln!("{report}");
     }

@@ -1,0 +1,5 @@
+{
+  "source": "9469bd2ab6173886ff522ad9c0a2d6f78cc878df",
+  "status": "error",
+  "text": "{\"passed\":false,\"error\":\"\\\"rectangular/plain\\\": -0.06273786 != 0.11915272\"}"
+}

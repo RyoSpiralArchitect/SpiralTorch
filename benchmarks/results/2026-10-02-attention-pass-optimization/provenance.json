@@ -1,0 +1,199 @@
+{
+  "schema": "spiraltorch.attention_pass_optimization.provenance.v1",
+  "status": "passed",
+  "source_revisions": {
+    "baseline_probe": "19f1755c1c9493111e77f552bee37fc686fcceab",
+    "full_chain_before": "06a02fa18dd9d93f1ae7f45cf6bf3b9a750726a4",
+    "row_order": "6b1a0cca4696c5e016c538802b05d128502b228a",
+    "rejected_normalization": "1a26bf6c5865a718ce1f7ecad0f7d876498f95f5",
+    "eight_key": "6d36f64a4b3a5cc85590ad86963954948f853abd"
+  },
+  "fixture_sha256": "988a61d591a15fcf3baec7ea648a49040bc3008fc4661aa528c9bb22c8dc244d",
+  "local_artifacts": {
+    "baseline-lint-fixed-tests": {
+      "sha256": "bfd17cfc082a29d7967549cbf303ffc28cd5978e32778523d78603efd2923274",
+      "bytes": 35338848
+    },
+    "row-order-tests": {
+      "sha256": "65dac68e653e1bf27a2b36160f46bc3cd4830c41368de89661908eef11580fef",
+      "bytes": 35338848
+    },
+    "tile-normalize-tests": {
+      "sha256": "33a5ed0541f1e7ac140cdce97323b1d142a5c662858c89eb93fffc56ed7e8dc0",
+      "bytes": 35373120
+    },
+    "key8-tests": {
+      "sha256": "95946abc1b008c9ed296c922144561d4a34c06fa8ecd0876b256416843e5cc35",
+      "bytes": 35372704
+    },
+    "row-order-bench": {
+      "sha256": "104c5210d7d6979029b760b13895716d5464c5160f4e014fe1092d0390334193",
+      "bytes": 5829056
+    },
+    "tile-normalize-bench": {
+      "sha256": "f27bad21a100067fa3218f90ca03b8c027d362543ab766115f1d52c757915043",
+      "bytes": 5829056
+    },
+    "key8-bench": {
+      "sha256": "eb2f0aef43e78e09d2cb8ccbc3920430c4226e16d9739909e73cf1e5e63ad6c4",
+      "bytes": 5829056
+    },
+    "baseline.log": {
+      "sha256": "7d496f866ce578cc0f3e3723c15f4e0ff4c719ce593797a6e18554c82a28a3de",
+      "bytes": 203
+    },
+    "row-order.log": {
+      "sha256": "24caef430bc38eed6c6e0a6a5953fa094d76533e17f9795bf891b3cc726a1515",
+      "bytes": 203
+    },
+    "tile-normalize.log": {
+      "sha256": "6ca74cbab14bcf13546f40e06ba21b8b5e83e1036645041f354ab42365e97986",
+      "bytes": 203
+    },
+    "key8.log": {
+      "sha256": "74bc3244cb9e5b11f5558facf82c3d2ddec96fd9e8e97184bc2d92fbf428d48c",
+      "bytes": 203
+    },
+    "wasm/resident_attention_browser.js": {
+      "sha256": "f0702d0b4f9de27afbdead2d041285c1fc4b1ee30a97a2e5afa37bdeb34cee9b",
+      "bytes": 44103
+    },
+    "wasm/resident_attention_browser_bg.wasm": {
+      "sha256": "fceef2f6e1346330954c64eb0800cba72972bdcece6b885cc510b90ada49f951",
+      "bytes": 2327945
+    },
+    "wasm/resident_attention_chain_browser.js": {
+      "sha256": "19097be38ce57d0bee984fd6b9fdfb4b4a2cf9a722ded33792f79e5638767ea8",
+      "bytes": 45018
+    },
+    "wasm/resident_attention_chain_browser_bg.wasm": {
+      "sha256": "82a4d186391330cf7cfd80447ae3c736d7a3ec3c75aa001947a53c34a8ea35c3",
+      "bytes": 4267790
+    }
+  },
+  "local_validation_logs": {
+    "st-attention-key8-regression.log": {
+      "sha256": "3e77cc147ed9897a020c06980dab8610884f76b31b3491ff512f1ce242c21dd7",
+      "bytes": 122348
+    },
+    "st-attention-key8-nn-all.log": {
+      "sha256": "d78749343bfeb6c55f32c218947d6f5398f4be6b0038092055557c8b67ed8dca",
+      "bytes": 116475
+    },
+    "st-attention-key8-chain.log": {
+      "sha256": "b9c60cf7e724005354eefba120de04382280ce6e5fdfc0982ffb9dc4d517c5a4",
+      "bytes": 115093
+    },
+    "st-attention-key8-clippy.log": {
+      "sha256": "c0ca9c2d10c28e6467fb1d85e844b2d9cc8f4c14e5d86a7131530bbf9bfdd8a4",
+      "bytes": 114163
+    },
+    "st-attention-key8-wasm-core.log": {
+      "sha256": "b1ae225234966091a8a40abf48f6f15a11242b40a41858ded01c0b6deb2956d8",
+      "bytes": 110977
+    },
+    "st-attention-key8-wasm-chain.log": {
+      "sha256": "f4d0fc41e1d14a233811fde44f98d0cb058015dbedbd99c6c57636b05e4c88d4",
+      "bytes": 111802
+    }
+  },
+  "full_chain_before_binary_sha256": "bc7e55ef7f194fe632e80710a943c820a1f477fa0df94004af352137610823b7",
+  "full_chain_recipe": {
+    "rounds": 8,
+    "samples": 9,
+    "warmup": 50,
+    "burst": 4,
+    "order_seed": 23,
+    "orders": [
+      [
+        "torch_mps",
+        "row_register16",
+        "before_register16",
+        "row_scalar",
+        "key8_register16",
+        "before_scalar",
+        "torch_cpu",
+        "key8_scalar"
+      ],
+      [
+        "row_register16",
+        "before_register16",
+        "row_scalar",
+        "key8_register16",
+        "before_scalar",
+        "torch_cpu",
+        "key8_scalar",
+        "torch_mps"
+      ],
+      [
+        "before_register16",
+        "row_scalar",
+        "key8_register16",
+        "before_scalar",
+        "torch_cpu",
+        "key8_scalar",
+        "torch_mps",
+        "row_register16"
+      ],
+      [
+        "row_scalar",
+        "key8_register16",
+        "before_scalar",
+        "torch_cpu",
+        "key8_scalar",
+        "torch_mps",
+        "row_register16",
+        "before_register16"
+      ],
+      [
+        "key8_register16",
+        "before_scalar",
+        "torch_cpu",
+        "key8_scalar",
+        "torch_mps",
+        "row_register16",
+        "before_register16",
+        "row_scalar"
+      ],
+      [
+        "before_scalar",
+        "torch_cpu",
+        "key8_scalar",
+        "torch_mps",
+        "row_register16",
+        "before_register16",
+        "row_scalar",
+        "key8_register16"
+      ],
+      [
+        "torch_cpu",
+        "key8_scalar",
+        "torch_mps",
+        "row_register16",
+        "before_register16",
+        "row_scalar",
+        "key8_register16",
+        "before_scalar"
+      ],
+      [
+        "key8_scalar",
+        "torch_mps",
+        "row_register16",
+        "before_register16",
+        "row_scalar",
+        "key8_register16",
+        "before_scalar",
+        "torch_cpu"
+      ]
+    ]
+  },
+  "full_chain_rust_toolchain": "1.98.0",
+  "formatter": "nightly-2026-04-15",
+  "full_chain_native_build": "cargo +1.98.0 build --locked --offline -j2 -p st-nn --features wgpu --example resident_attention_chain_bench --release",
+  "probe_build": "cargo +1.98.0 test --locked --offline -j2 -p st-backend-wgpu --lib --no-run",
+  "probe_shape_cases": 36,
+  "probe_records_each": 1800,
+  "full_chain_scope": "All native binaries execute the direct merged-head path. The before binary predates the explicit opt-in method and called that path through forward; later binaries call forward_merged_heads. Ordinary head-major NN forwarding was checked numerically and probed internally, not timed end-to-end here.",
+  "independence_limit": "Single Apple M4; synthetic fixed fixtures; sequential diagnostic runs and correlated rotated full-chain rounds; no clock isolation or browser-throughput/learning/CUDA claim.",
+  "preservation": "Full condition results, rejected diagnostics and validation hashes are public; original binaries, generated WASM/JS and logs are retained locally. Earlier studies are unchanged."
+}

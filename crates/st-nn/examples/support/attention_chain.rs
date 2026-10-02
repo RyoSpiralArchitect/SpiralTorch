@@ -162,7 +162,13 @@ pub async fn run_fixture_with_projection(
                 let actual = output.snapshot()?.read_async().await?;
                 let case_name = format!("{name}/{}", case["name"].as_str().unwrap());
                 let error = close(&actual, &floats(&case["expected"]), &case_name)?;
-                checks.push(serde_json::json!({"name": case_name, "max_abs_error": error}));
+                let merged = compiled.forward_merged_heads(&input, None, pair.as_ref())?;
+                #[cfg(not(target_arch = "wasm32"))]
+                let merged_actual = merged.snapshot()?.read()?;
+                #[cfg(target_arch = "wasm32")]
+                let merged_actual = merged.snapshot()?.read_async().await?;
+                let merged_error = close(&merged_actual, &floats(&case["expected"]), &case_name)?;
+                checks.push(serde_json::json!({"name": case_name, "max_abs_error": error, "merged_heads_max_abs_error": merged_error}));
             }
         }
     }
@@ -172,6 +178,7 @@ pub async fn run_fixture_with_projection(
     Ok(serde_json::json!({
         "schema": "spiraltorch.attention_chain.v1", "passed": true,
         "projection": projection,
+        "output_paths": ["default_head_merge", "direct_merged_heads"],
         "adapter": format!("{:?}", runtime.adapter_info()),
         "reference_torch_version": fixture["torch_version"],
         "checks": checks, "geometry_checks": geometry_checks,

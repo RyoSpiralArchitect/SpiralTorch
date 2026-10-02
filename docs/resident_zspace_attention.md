@@ -19,6 +19,13 @@ z_bias     : [batch, heads, keys]
 pair_bias  : [batch, heads, queries, keys]
 ```
 
+`scaled_dot_attention_merged_heads` uses the same inputs and arithmetic but
+returns owned, contiguous `[B,Q,H*D]`. Element `(b,q,h*D+d)` equals the ordinary
+head-major output `(b,h,q,d)`. The kernel writes this order directly, without
+a separate head-merge dispatch or copy. The ordinary API retains `[B,H,Q,D]`.
+`AttentionSpec::merged_output_shape` checks the merged width even for an empty
+batch. Neither entry point changes masking, guards or numerical policy.
+
 Biases are additive, after scaling the dot product. Use `broadcast_to` explicitly
 for shared biases. A zero bias is an identity control. A nonzero Z-space bias
 must also be supplied to the PyTorch reference; comparing it only with plain
@@ -37,7 +44,7 @@ does not allocate the quadratic score/probability matrix. A caller-supplied
 pairwise bias is still quadratic. Only explicit snapshots read values back.
 
 For at least 128 keys and head dimension at most 32, the portable 64-thread kernel
-computes four key dot products in parallel with 16 lanes each, amortizing
+computes eight key dot products in parallel with eight lanes each, amortizing
 workgroup barriers. Short sequences and unmeasured wider heads retain one key
 per tile with 64 lanes. Each pipeline specialization is cached lazily. This
 bounded policy follows full-chain measurements, not a universal speed claim.
@@ -46,6 +53,13 @@ accumulation still visit keys in order; dot-product reduction order changes, so
 agreement is tolerance-based, not bitwise. Tail tiles and causal visibility
 must not load masked keys. This uses core WGSL, not subgroups or native-only
 instructions, and is exercised by the browser probe as well as native tests.
+Output order is another cached pipeline specialization, resolved before the
+key loop rather than a per-dispatch output-order flag.
+Merged-head workgroups follow physical `[B,Q,H]` output order; ordinary output
+retains `[B,H,Q]`. The [pass and full-chain study](../benchmarks/results/2026-10-02-attention-pass-optimization/README.md)
+retains a rejected tile-normalization experiment and short-input reversals.
+Its larger resident measurements improve versus the prior ST kernel, not
+PyTorch; it does not measure learning quality or browser throughput.
 
 All inputs must be finite. Non-finite score/weighted-output arithmetic sets an
 owned failure guard, inherited by downstream operations and checked on readback.
@@ -71,25 +85,29 @@ not cached decode. Empty sequences are rejected at this higher-level boundary.
 QKV weights are packed together once during plan construction, not every forward.
 The plan owns frozen parameter versions; updating a source module requires a new
 plan and compilation. `compile_wgpu` rejects unsupported limits before building
-the graphs. The resident chain is:
+the graphs. The opt-in `forward_merged_heads` chain is:
 
 ```text
 input [B,T,I]
   -> fused QKV Linear [B,T,3*H*D]
   -> select/permute head views [B,H,T,D]
-  -> attention with optional key-wise/pairwise bias
-  -> GPU head merge [B,T,H*D]
+  -> attention with optional key-wise/pairwise bias, directly writing [B,T,H*D]
   -> output Linear [B,T,O]
 ```
 
 The split is a storage-sharing N-D view. Attention reads the noncontiguous heads
 and broadcast score biases directly from their original immutable storage.
-Head merge and projection outputs still remain on GPU. This uses multiple
-submissions and a head-merge copy, not a single
-fused dispatch. There are no intermediate activation readbacks or CPU fallbacks;
+Attention writes head-concatenated output for the next projection directly.
+This still uses multiple submissions, not a single fused dispatch, but removes
+the intermediate head-merge tensor and copy. There are no intermediate activation readbacks or CPU fallbacks;
 only the caller's final snapshot materializes the output. Inputs, biases and
 both graphs must share the owning device and queue. Outputs retain their own
 storage and deferred failure guards across graph reuse.
+
+The ordinary `forward` retains the existing head-major attention followed by
+GPU head-merge packing. Direct merged-head output is explicit, not an automatic
+shape heuristic: measurements show short-input gains but mixed larger-input
+latency. See the [comparison and adoption boundary](../benchmarks/results/2026-10-02-attention-merged-output/README.md).
 
 `compile_wgpu_with_options(runtime, tile, kernel, accumulation)` selects the
 existing resident matmul implementation for **both** QKV and output projections.
@@ -121,7 +139,13 @@ parameter training, an autograd tape, or a new competing Z-space policy.
 See the [dated numerical evidence](../benchmarks/results/2026-10-02-resident-zspace-attention/README.md).
 The same 20 frozen PyTorch SDPA cases are checked by the Rust oracle, native
 resident kernel and browser example. The browser now runs each case in canonical
-and reversed/padded strided storage, for 40 checks against the same oracle.
+and reversed/padded strided storage, with both head-major and merged-head output,
+for 80 checks against the same oracle.
+The standalone browser probe also executes three independent compute-constant
+checks (defaults, named/numeric-ID overrides and a second pipeline). The pinned
+WGPU WebGPU bridge now forwards compute compilation constants; earlier numeric
+parity alone did not establish that a requested specialization actually ran.
+This repair is scoped to compute stages, not render-stage compilation options.
 Native tests additionally cover head widths through 256, direct strided reads,
 independent broadcast inputs, ownership, invalid inputs and inherited guards,
 including failed storage hidden by a crop and empty-query failure propagation.
@@ -194,7 +218,8 @@ python3 -m http.server 8782 --bind 127.0.0.1
 ```
 
 Open `http://127.0.0.1:8782/crates/st-nn/tests/attention_chain_browser.html` and
-require `passed: true`, 12 output checks and two geometry checks. Native runtime
+require `passed: true`, 12 condition pairs (ordinary and direct merged-head
+outputs) and two geometry checks. Native runtime
 tests also compare the full chain with the original `ZRBFAttention` mean and
 exercise frozen parameters, noncontiguous inputs, retained outputs and inherited
 non-finite guards. The GPU CI lane runs the full-chain fixture; the recorded
@@ -203,7 +228,9 @@ browser probe was run locally, not by that CI lane.
 ## Bounded Performance Comparison
 
 `resident_attention_chain_bench` consumes the independent fixture with three
-larger shapes. `bench_attention_chain_vs_torch.py` rotates native executables and
+larger shapes. It explicitly measures `forward_merged_heads`, not the default
+NN forwarding path, and labels this `output_path=direct_merged_heads`.
+`bench_attention_chain_vs_torch.py` rotates native executables and
 eager PyTorch CPU/MPS runs, requires complete numerical/sample coverage, and
 records every sample rather than just favorable medians. Build native executables
 in release mode, and keep baseline/candidate binaries separate for paired runs.

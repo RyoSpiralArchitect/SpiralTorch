@@ -1,0 +1,5409 @@
+{
+  "schema": "spiraltorch.attention_pass_optimization.derived.v1",
+  "source_sha256": "2d0d432d53926eae6dd76ee487765e7217ffc47ed23551e9b0924d0060d144e4",
+  "pooled": [
+    {
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_ms": 0.270401,
+      "row_ms": 0.274427125,
+      "key8_ms": 0.27101050000000004,
+      "before_over_key8": 0.9977510096472275,
+      "row_over_key8": 1.0126069838622487,
+      "before_over_row": 0.9853289830587993
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_ms": 0.49624999999999997,
+      "row_ms": 0.47612499999999996,
+      "key8_ms": 0.470125,
+      "before_over_key8": 1.0555703270406807,
+      "row_over_key8": 1.0127625631480988,
+      "before_over_row": 1.0422683118928853
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_ms": 0.27385424999999997,
+      "row_ms": 0.2661875,
+      "key8_ms": 0.30764575000000005,
+      "before_over_key8": 0.8901610049870669,
+      "row_over_key8": 0.8652402966723902,
+      "before_over_row": 1.0288020662127257
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 0.495771,
+      "row_ms": 0.4979995,
+      "key8_ms": 0.5575,
+      "before_over_key8": 0.88927533632287,
+      "row_over_key8": 0.8932726457399103,
+      "before_over_row": 0.995525095908731
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_ms": 0.2733855,
+      "row_ms": 0.27969275000000005,
+      "key8_ms": 0.282890625,
+      "before_over_key8": 0.9664,
+      "row_over_key8": 0.9886957194145265,
+      "before_over_row": 0.9774493618443809
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_ms": 0.489375,
+      "row_ms": 0.5178545,
+      "key8_ms": 0.5095624999999999,
+      "before_over_key8": 0.9603826812216364,
+      "row_over_key8": 1.0162727830246536,
+      "before_over_row": 0.9450048227832335
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_ms": 0.271479125,
+      "row_ms": 0.272755125,
+      "key8_ms": 0.267630375,
+      "before_over_key8": 1.0143808414870696,
+      "row_over_key8": 1.019148611214254,
+      "before_over_row": 0.9953218110933755
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_ms": 0.482333,
+      "row_ms": 0.5049790000000001,
+      "key8_ms": 0.45922949999999996,
+      "before_over_key8": 1.0503092680239403,
+      "row_over_key8": 1.0996223021386913,
+      "before_over_row": 0.9551545707841315
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_ms": 0.27666662500000005,
+      "row_ms": 0.2706615,
+      "key8_ms": 0.27056250000000004,
+      "before_over_key8": 1.0225608685608687,
+      "row_over_key8": 1.0003659043659041,
+      "before_over_row": 1.0221868459311725
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 0.5096670000000001,
+      "row_ms": 0.489771,
+      "key8_ms": 0.47945899999999997,
+      "before_over_key8": 1.0630043444799244,
+      "row_over_key8": 1.0215075741617115,
+      "before_over_row": 1.0406230666985183
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_ms": 0.2721875,
+      "row_ms": 0.300979125,
+      "key8_ms": 0.2740625,
+      "before_over_key8": 0.9931584948688713,
+      "row_over_key8": 1.0982134549600913,
+      "before_over_row": 0.904340126578546
+    },
+    {
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_ms": 0.5453749999999999,
+      "row_ms": 0.5985210000000001,
+      "key8_ms": 0.503333,
+      "before_over_key8": 1.0835272076339122,
+      "row_over_key8": 1.189115357030038,
+      "before_over_row": 0.911204452308273
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_ms": 1.06661975,
+      "row_ms": 1.0659113750000002,
+      "key8_ms": 1.04164575,
+      "before_over_key8": 1.0239755214284703,
+      "row_over_key8": 1.023295467772993,
+      "before_over_row": 1.0006645721366842
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_ms": 1.350562,
+      "row_ms": 1.359041,
+      "key8_ms": 1.3078539999999998,
+      "before_over_key8": 1.0326550211262115,
+      "row_over_key8": 1.039138160681544,
+      "before_over_row": 0.9937610417934412
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_ms": 1.201458375,
+      "row_ms": 1.194458375,
+      "key8_ms": 1.05409375,
+      "before_over_key8": 1.1398021997569001,
+      "row_over_key8": 1.1331614242091843,
+      "before_over_row": 1.0058603967676982
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 1.5909375,
+      "row_ms": 1.5905420000000001,
+      "key8_ms": 1.412521,
+      "before_over_key8": 1.1263106884782599,
+      "row_over_key8": 1.12603069264103,
+      "before_over_row": 1.0002486573759133
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_ms": 1.2008230000000002,
+      "row_ms": 1.1826978750000001,
+      "key8_ms": 1.049828125,
+      "before_over_key8": 1.1438281861614255,
+      "row_over_key8": 1.1265633362604,
+      "before_over_row": 1.0153252368023407
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_ms": 1.5853959999999998,
+      "row_ms": 1.5936875000000001,
+      "key8_ms": 1.397813,
+      "before_over_key8": 1.1341974927976775,
+      "row_over_key8": 1.1401292590639809,
+      "before_over_row": 0.9947972861680848
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_ms": 0.829619875,
+      "row_ms": 0.84075525,
+      "key8_ms": 0.7657292499999999,
+      "before_over_key8": 1.0834376184532588,
+      "row_over_key8": 1.097979801607422,
+      "before_over_row": 0.9867555094065723
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_ms": 1.1673955,
+      "row_ms": 1.1588955,
+      "key8_ms": 1.0636245,
+      "before_over_key8": 1.0975635668414934,
+      "row_over_key8": 1.0895720247136091,
+      "before_over_row": 1.0073345698555218
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_ms": 0.83991675,
+      "row_ms": 0.9080988750000001,
+      "key8_ms": 0.8212710000000001,
+      "before_over_key8": 1.0227035290421795,
+      "row_over_key8": 1.1057237805791267,
+      "before_over_row": 0.924917729911294
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 1.2757079999999998,
+      "row_ms": 1.3208745,
+      "key8_ms": 1.229146,
+      "before_over_key8": 1.037881586076837,
+      "row_over_key8": 1.0746278310306505,
+      "before_over_row": 0.9658056083299359
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_ms": 0.9198855,
+      "row_ms": 0.8773437500000001,
+      "key8_ms": 0.8123281250000001,
+      "before_over_key8": 1.1324063167208447,
+      "row_over_key8": 1.080036161495701,
+      "before_over_row": 1.0484892609082812
+    },
+    {
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_ms": 1.2914375,
+      "row_ms": 1.320354,
+      "key8_ms": 1.2350625000000002,
+      "before_over_key8": 1.0456454632862708,
+      "row_over_key8": 1.069058448459086,
+      "before_over_row": 0.9780994339396859
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_ms": 4.277948,
+      "row_ms": 4.28620825,
+      "key8_ms": 3.9175261249999993,
+      "before_over_key8": 1.0920024177247831,
+      "row_over_key8": 1.0941109550354309,
+      "before_over_row": 0.9980728304556832
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_ms": 4.5916879999999995,
+      "row_ms": 4.7257295,
+      "key8_ms": 4.084208500000001,
+      "before_over_key8": 1.1242540629353273,
+      "row_over_key8": 1.1570735186511656,
+      "before_over_row": 0.9716358077625898
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_ms": 4.294573,
+      "row_ms": 4.383260375000001,
+      "key8_ms": 3.9766095000000004,
+      "before_over_key8": 1.0799584419843082,
+      "row_over_key8": 1.1022607009815775,
+      "before_over_row": 0.9797668020120751
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 5.1545835,
+      "row_ms": 5.136312,
+      "key8_ms": 5.018896,
+      "before_over_key8": 1.0270353280880895,
+      "row_over_key8": 1.0233947864231496,
+      "before_over_row": 1.0035573189479143
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_ms": 4.1754947499999995,
+      "row_ms": 4.265192750000001,
+      "key8_ms": 3.9760416249999997,
+      "before_over_key8": 1.050163741683665,
+      "row_over_key8": 1.0727233646604495,
+      "before_over_row": 0.9789697663722229
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_ms": 5.0192499999999995,
+      "row_ms": 5.1482915,
+      "key8_ms": 5.0476455,
+      "before_over_key8": 0.9943745058958676,
+      "row_over_key8": 1.0199391973941119,
+      "before_over_row": 0.9749350828328193
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_ms": 2.96999475,
+      "row_ms": 2.9822292499999996,
+      "key8_ms": 2.8851197500000003,
+      "before_over_key8": 1.0294181896609318,
+      "row_over_key8": 1.0336587415479026,
+      "before_over_row": 0.9958975320223958
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_ms": 3.3161249999999995,
+      "row_ms": 3.4518545,
+      "key8_ms": 3.107979,
+      "before_over_key8": 1.0669714949811435,
+      "row_over_key8": 1.1106428003535418,
+      "before_over_row": 0.9606792522685993
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_ms": 3.063927125,
+      "row_ms": 3.2723385,
+      "key8_ms": 2.9704585000000003,
+      "before_over_key8": 1.0314660598692087,
+      "row_over_key8": 1.1016274086980173,
+      "before_over_row": 0.9363111808268002
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 3.8731039999999997,
+      "row_ms": 3.9343334999999993,
+      "key8_ms": 3.818125,
+      "before_over_key8": 1.0143994761826811,
+      "row_over_key8": 1.030436012440661,
+      "before_over_row": 0.9844371352860657
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_ms": 3.0361615000000004,
+      "row_ms": 3.0338385,
+      "key8_ms": 3.0308698749999996,
+      "before_over_key8": 1.0017459096623211,
+      "row_over_key8": 1.0009794630328694,
+      "before_over_row": 1.0007656966578808
+    },
+    {
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_ms": 3.8688335,
+      "row_ms": 3.9279585,
+      "key8_ms": 3.8796874999999997,
+      "before_over_key8": 0.9972023519935562,
+      "row_over_key8": 1.0124419814740233,
+      "before_over_row": 0.9849476515599643
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_ms": 0.280786375,
+      "row_ms": 0.2842395,
+      "key8_ms": 0.2766875,
+      "before_over_key8": 1.0148140953241473,
+      "row_over_key8": 1.0272943302462163,
+      "before_over_row": 0.9878513542276848
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_ms": 0.4777915,
+      "row_ms": 0.513667,
+      "key8_ms": 0.4845835,
+      "before_over_key8": 0.9859838397304076,
+      "row_over_key8": 1.060017520200337,
+      "before_over_row": 0.9301580595989231
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_ms": 0.29169275000000006,
+      "row_ms": 0.27206237499999997,
+      "key8_ms": 0.27346875000000004,
+      "before_over_key8": 1.0666401554108103,
+      "row_over_key8": 0.9948572734544621,
+      "before_over_row": 1.0721539499903288
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 0.5163545,
+      "row_ms": 0.5016244999999999,
+      "key8_ms": 0.5039374999999999,
+      "before_over_key8": 1.024639960312539,
+      "row_over_key8": 0.9954101451072801,
+      "before_over_row": 1.0293645944326886
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_ms": 0.27509375,
+      "row_ms": 0.28310412500000004,
+      "key8_ms": 0.270447875,
+      "before_over_key8": 1.017178448897038,
+      "row_over_key8": 1.046797372691503,
+      "before_over_row": 0.9717051985731398
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_ms": 0.5407705,
+      "row_ms": 0.494146,
+      "key8_ms": 0.4933955,
+      "before_over_key8": 1.09601830580133,
+      "row_over_key8": 1.0015210921056232,
+      "before_over_row": 1.0943536930380902
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_ms": 0.27581762499999996,
+      "row_ms": 0.27456775,
+      "key8_ms": 0.271838625,
+      "before_over_key8": 1.0146373606767616,
+      "row_over_key8": 1.0100395041359556,
+      "before_over_row": 1.0045521551602472
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_ms": 0.516979,
+      "row_ms": 0.489854,
+      "key8_ms": 0.47075,
+      "before_over_key8": 1.098202867764206,
+      "row_over_key8": 1.04058204992034,
+      "before_over_row": 1.055373641942293
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_ms": 0.291317625,
+      "row_ms": 0.27576037499999995,
+      "key8_ms": 0.270541625,
+      "before_over_key8": 1.076794097765917,
+      "row_over_key8": 1.019290007591253,
+      "before_over_row": 1.0564158284162475
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 0.597354,
+      "row_ms": 0.5109165,
+      "key8_ms": 0.49127049999999994,
+      "before_over_key8": 1.2159370448663214,
+      "row_over_key8": 1.0399901887045937,
+      "before_over_row": 1.169181265431827
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_ms": 0.27535937499999996,
+      "row_ms": 0.275140625,
+      "key8_ms": 0.276984375,
+      "before_over_key8": 0.9941332430755343,
+      "row_over_key8": 0.9933434873357027,
+      "before_over_row": 1.0007950479868246
+    },
+    {
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_ms": 0.49424999999999997,
+      "row_ms": 0.494521,
+      "key8_ms": 0.522896,
+      "before_over_key8": 0.9452166396377099,
+      "row_over_key8": 0.9457349071325846,
+      "before_over_row": 0.9994519949607802
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_ms": 0.921177,
+      "row_ms": 0.914927125,
+      "key8_ms": 0.8023488750000001,
+      "before_over_key8": 1.148100319826584,
+      "row_over_key8": 1.140310846699947,
+      "before_over_row": 1.0068310085352428
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_ms": 1.1941454999999999,
+      "row_ms": 1.1795624999999998,
+      "key8_ms": 1.067854,
+      "before_over_key8": 1.118266635701135,
+      "row_over_key8": 1.1046102744382658,
+      "before_over_row": 1.0123630583373073
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_ms": 0.9328645,
+      "row_ms": 0.933557375,
+      "key8_ms": 0.82050525,
+      "before_over_key8": 1.1369390994146595,
+      "row_over_key8": 1.1377835486122727,
+      "before_over_row": 0.999257812086804
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 1.293333,
+      "row_ms": 1.2863540000000002,
+      "key8_ms": 1.222479,
+      "before_over_key8": 1.0579592778280853,
+      "row_over_key8": 1.0522503863052046,
+      "before_over_row": 1.0054254116673946
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_ms": 0.9303125,
+      "row_ms": 0.93306775,
+      "key8_ms": 0.823713625,
+      "before_over_key8": 1.1294125431031932,
+      "row_over_key8": 1.1327574556023643,
+      "before_over_row": 0.9970471061720867
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_ms": 1.319917,
+      "row_ms": 1.283896,
+      "key8_ms": 1.2345834999999998,
+      "before_over_key8": 1.0691192616781289,
+      "row_over_key8": 1.0399426203249922,
+      "before_over_row": 1.0280560107672274
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_ms": 0.6534636250000001,
+      "row_ms": 0.636796875,
+      "key8_ms": 0.5704115000000001,
+      "before_over_key8": 1.1456003692071426,
+      "row_over_key8": 1.1163815508628419,
+      "before_over_row": 1.026172788614894
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_ms": 0.9444585,
+      "row_ms": 0.923458,
+      "key8_ms": 0.8605,
+      "before_over_key8": 1.097569436374201,
+      "row_over_key8": 1.0731644392794886,
+      "before_over_row": 1.022741153360521
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_ms": 0.65178125,
+      "row_ms": 0.6534115,
+      "key8_ms": 0.597,
+      "before_over_key8": 1.0917608877721943,
+      "row_over_key8": 1.0944916247906198,
+      "before_over_row": 0.9975050178945426
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 1.061979,
+      "row_ms": 1.0665205,
+      "key8_ms": 1.0108130000000002,
+      "before_over_key8": 1.0506186604248262,
+      "row_over_key8": 1.0551115785016614,
+      "before_over_row": 0.9957417602380827
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_ms": 0.6619634999999999,
+      "row_ms": 0.6585053750000001,
+      "key8_ms": 0.576000125,
+      "before_over_key8": 1.1492419380985377,
+      "row_over_key8": 1.1432382501653104,
+      "before_over_row": 1.0052514757377642
+    },
+    {
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_ms": 1.071292,
+      "row_ms": 1.042167,
+      "key8_ms": 0.9816040000000001,
+      "before_over_key8": 1.0913688208279508,
+      "row_over_key8": 1.0616979963406832,
+      "before_over_row": 1.0279465767002791
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_ms": 3.3039791249999997,
+      "row_ms": 3.6196406249999997,
+      "key8_ms": 2.808354125,
+      "before_over_key8": 1.176482372927239,
+      "row_over_key8": 1.2888832618286696,
+      "before_over_row": 0.912792033048861
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_ms": 3.9393330000000004,
+      "row_ms": 4.0976875,
+      "key8_ms": 3.1442500000000004,
+      "before_over_key8": 1.2528688876520633,
+      "row_over_key8": 1.3032320903236065,
+      "before_over_row": 0.9613551545841406
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_ms": 3.470859375,
+      "row_ms": 3.6133385,
+      "key8_ms": 2.97089575,
+      "before_over_key8": 1.1682871655796068,
+      "row_over_key8": 1.2162454707473327,
+      "before_over_row": 0.9605685642239165
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 4.574521000000001,
+      "row_ms": 4.589166,
+      "key8_ms": 3.9159165,
+      "before_over_key8": 1.1681865535181868,
+      "row_over_key8": 1.1719264187579077,
+      "before_over_row": 0.9968087883506505
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_ms": 3.48949475,
+      "row_ms": 3.554390625,
+      "key8_ms": 2.947999875,
+      "before_over_key8": 1.183682122781637,
+      "row_over_key8": 1.2056956498344493,
+      "before_over_row": 0.9817420531824637
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_ms": 4.621916499999999,
+      "row_ms": 4.4165,
+      "key8_ms": 3.832375,
+      "before_over_key8": 1.2060188525392217,
+      "row_over_key8": 1.152418539417463,
+      "before_over_row": 1.0465111513642023
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_ms": 2.112260375,
+      "row_ms": 2.1201406250000003,
+      "key8_ms": 1.855401,
+      "before_over_key8": 1.138438739118929,
+      "row_over_key8": 1.1426859341996691,
+      "before_over_row": 0.9962831474916903
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_ms": 2.3674169999999997,
+      "row_ms": 2.389334,
+      "key8_ms": 2.1020209999999997,
+      "before_over_key8": 1.1262575397676806,
+      "row_over_key8": 1.136684172042049,
+      "before_over_row": 0.9908271509968886
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_ms": 2.10975,
+      "row_ms": 2.1737029999999997,
+      "key8_ms": 1.851234375,
+      "before_over_key8": 1.1396450003798142,
+      "row_over_key8": 1.1741911393580295,
+      "before_over_row": 0.9705787773214649
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_ms": 3.094688,
+      "row_ms": 3.0670835,
+      "key8_ms": 2.71475,
+      "before_over_key8": 1.1399532185284096,
+      "row_over_key8": 1.129784878902293,
+      "before_over_row": 1.0090002440429158
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_ms": 2.19463525,
+      "row_ms": 2.138822875,
+      "key8_ms": 1.920848875,
+      "before_over_key8": 1.1425340528155814,
+      "row_over_key8": 1.1134779538551673,
+      "before_over_row": 1.026094902786188
+    },
+    {
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_ms": 3.1325415,
+      "row_ms": 3.1259585000000003,
+      "key8_ms": 2.7711040000000002,
+      "before_over_key8": 1.1304308679861887,
+      "row_over_key8": 1.1280552804947053,
+      "before_over_row": 1.0021059140740352
+    }
+  ],
+  "within_round": [
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.004380233803048,
+      "row_over_key8": 1.0123338162348987
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.6642438897429225,
+      "row_over_key8": 0.6283445668297949
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.8564588970691248,
+      "row_over_key8": 0.8848585879097268
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.7334494773519163,
+      "row_over_key8": 0.7540332946186605
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.209755199520465,
+      "row_over_key8": 0.7471010800224437
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.114596519627681,
+      "row_over_key8": 0.8608530959125861
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1536390493653383,
+      "row_over_key8": 1.1645130679163198
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.946200052232959,
+      "row_over_key8": 1.1950023504831548
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.5627296207359129,
+      "row_over_key8": 0.5272410253628556
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.7044794456007681,
+      "row_over_key8": 0.7295156759722562
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.6013688371612279,
+      "row_over_key8": 0.5118834723492552
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.641919895799414,
+      "row_over_key8": 0.6246616737219147
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0259761149608133,
+      "row_over_key8": 1.1467283397509658
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0661811564900932,
+      "row_over_key8": 1.0857258390618683
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0215705348754789,
+      "row_over_key8": 1.1634302732013864
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1172055378061767,
+      "row_over_key8": 1.0885402910898119
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2618577120133787,
+      "row_over_key8": 1.2453141123133185
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1099613534861652,
+      "row_over_key8": 1.0476070580775754
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1111204767251057,
+      "row_over_key8": 1.1816650833405302
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.060340777502068,
+      "row_over_key8": 1.0477769112607822
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.027705560513756,
+      "row_over_key8": 1.1662203251717047
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0206343853750242,
+      "row_over_key8": 1.0206009898119095
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0133562371045461,
+      "row_over_key8": 1.0631816057231573
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0148073863346556,
+      "row_over_key8": 1.0742121621465979
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.09144075310808,
+      "row_over_key8": 1.0945850170732168
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0019919885327844,
+      "row_over_key8": 1.0158430634830606
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1614306132843149,
+      "row_over_key8": 1.1596846152436955
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.121720845808366,
+      "row_over_key8": 1.1521678002184383
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1242630816171546,
+      "row_over_key8": 1.1662025883861573
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1481434251304163,
+      "row_over_key8": 1.1298575343825479
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1273746885455291,
+      "row_over_key8": 1.1549263976961557
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0424702602017684,
+      "row_over_key8": 1.0668563917018254
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0102128701795703,
+      "row_over_key8": 1.0186557079776275
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1234451153197074,
+      "row_over_key8": 1.1658980686292892
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1241903918736311,
+      "row_over_key8": 1.0777495922836773
+    },
+    {
+      "round": 0,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1532187728354901,
+      "row_over_key8": 1.1738070792145532
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.4980234831395686,
+      "row_over_key8": 0.4865715773034878
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.5806281464836278,
+      "row_over_key8": 0.6210874298257097
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.6858451053761199,
+      "row_over_key8": 0.6995851360631328
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.788236360850819,
+      "row_over_key8": 0.9532318428679968
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.7310457796073366,
+      "row_over_key8": 0.678924753774762
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9209889249801021,
+      "row_over_key8": 0.7951609460347192
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.9615610627372181,
+      "row_over_key8": 0.9054101361911141
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.8236839295995745,
+      "row_over_key8": 0.8076413547374336
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.5458473400106697,
+      "row_over_key8": 0.5288606441933412
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2593279926003151,
+      "row_over_key8": 0.9232459062654325
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.5981949280328992,
+      "row_over_key8": 0.5840986977381769
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8634532311062433,
+      "row_over_key8": 0.8606790799561885
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.2023062426711473,
+      "row_over_key8": 1.1911254887114249
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2202200037792292,
+      "row_over_key8": 1.0958908874513613
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.245438080591802,
+      "row_over_key8": 1.1855500304426114
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1192519858093428,
+      "row_over_key8": 1.1181365980047844
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2340110403438609,
+      "row_over_key8": 1.1075125320051544
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.110574554137552,
+      "row_over_key8": 1.0717015016462166
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.2624207009994195,
+      "row_over_key8": 1.1022839786605985
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1165422609569282,
+      "row_over_key8": 1.138793853927132
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.169794525404179,
+      "row_over_key8": 1.1338576549749169
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.10221642253344,
+      "row_over_key8": 1.0342724500008762
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2105321306977948,
+      "row_over_key8": 1.1251242395069068
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0900132730638674,
+      "row_over_key8": 1.022940807456658
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.2252576850919112,
+      "row_over_key8": 1.147367817008171
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2333191871076323,
+      "row_over_key8": 1.2030350264514589
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2145602322206095,
+      "row_over_key8": 1.2125050798258346
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2645250039254152,
+      "row_over_key8": 1.2632340116430638
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1968779021407836,
+      "row_over_key8": 1.1966659799846364
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.4218246413287436,
+      "row_over_key8": 1.2481323131723765
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1499397200388386,
+      "row_over_key8": 1.1711709524542593
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.126918687065712,
+      "row_over_key8": 1.1088538669221053
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1491099796181916,
+      "row_over_key8": 1.2895075590260654
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1245555660466435,
+      "row_over_key8": 1.1250431498442075
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2011558278791252,
+      "row_over_key8": 1.1477044979807827
+    },
+    {
+      "round": 0,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1750632817837379,
+      "row_over_key8": 1.2469240757408013
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.1168571841410257,
+      "row_over_key8": 1.0681909402519003
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0224657863704072,
+      "row_over_key8": 0.8979293383813307
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1247420177719798,
+      "row_over_key8": 0.8283678460103016
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0396295007416068,
+      "row_over_key8": 0.8785809128350321
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.8053738474824311,
+      "row_over_key8": 0.9082736005236146
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8153098562200457,
+      "row_over_key8": 0.9906230464680141
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.8635798712528361,
+      "row_over_key8": 0.851336205443092
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9137047672920283,
+      "row_over_key8": 1.1708591390717704
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0766009852216747,
+      "row_over_key8": 1.0532019704433497
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0312224157894403,
+      "row_over_key8": 1.0029973519157864
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0018654455347704,
+      "row_over_key8": 1.6095802421256944
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.5370220524013083,
+      "row_over_key8": 1.5262297682319328
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.1304569558538702,
+      "row_over_key8": 1.0941585520603754
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1076303005276742,
+      "row_over_key8": 1.1022297589779848
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1956871756867729,
+      "row_over_key8": 1.0191561599517633
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.151961670583981,
+      "row_over_key8": 1.0364910504429579
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.3146905710491368,
+      "row_over_key8": 1.008883737776168
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1011951939760445,
+      "row_over_key8": 1.1133587296213439
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1921613828545494,
+      "row_over_key8": 1.0848562425349255
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0351311787072242,
+      "row_over_key8": 0.9695418250950572
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0455799317214403,
+      "row_over_key8": 0.9769996661651493
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1248710266485629,
+      "row_over_key8": 1.0062403657837318
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.3418988690836624,
+      "row_over_key8": 1.064555460660535
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1450222463779267,
+      "row_over_key8": 0.9830242276136965
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.279144333843798,
+      "row_over_key8": 1.233272741194487
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2013169036289222,
+      "row_over_key8": 1.1524562050006495
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9927450151449814,
+      "row_over_key8": 0.9726857838725416
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0807329164516255,
+      "row_over_key8": 1.05409867086713
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9829518113962428,
+      "row_over_key8": 0.9838967308201843
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8218808557955645,
+      "row_over_key8": 0.7989690916953235
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.9753174766886974,
+      "row_over_key8": 0.9897306390789293
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9760760540946468,
+      "row_over_key8": 0.9814944737584599
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0101561081418344,
+      "row_over_key8": 1.0120059560710444
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1073019847553118,
+      "row_over_key8": 1.099016828073793
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9341937556365608,
+      "row_over_key8": 0.8399796742529122
+    },
+    {
+      "round": 1,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.015998566075119,
+      "row_over_key8": 1.0185031047800894
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.082822058271852,
+      "row_over_key8": 1.0763206202325872
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0965453141159067,
+      "row_over_key8": 0.9805425737562563
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1710705703089783,
+      "row_over_key8": 0.9791829710195026
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2694764073405371,
+      "row_over_key8": 1.0322148680498404
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1457267623206489,
+      "row_over_key8": 1.0892905801621962
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2920520733628353,
+      "row_over_key8": 1.043729263152473
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.4632310995015911,
+      "row_over_key8": 0.9760741307872455
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.6731233692969467,
+      "row_over_key8": 0.9921021084549749
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.972503308917602,
+      "row_over_key8": 1.0001150527678013
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.6419695218076722,
+      "row_over_key8": 1.159398843930636
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.4377059497759717,
+      "row_over_key8": 1.1518532874856726
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8550290253176547,
+      "row_over_key8": 1.0324894115099934
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.2613675807011455,
+      "row_over_key8": 1.243607775078098
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1383940026689994,
+      "row_over_key8": 1.0963443867549718
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1825033598207848,
+      "row_over_key8": 1.1359358257976653
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.061582647027791,
+      "row_over_key8": 1.0228119571276773
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1291125095932464,
+      "row_over_key8": 1.12704036838066
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0500767306088405,
+      "row_over_key8": 1.0253336113427858
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0997641585912965,
+      "row_over_key8": 1.1027952158636871
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1047446321071652,
+      "row_over_key8": 1.0900550873073853
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.09453590004826,
+      "row_over_key8": 1.0954294600246661
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.013714874325315,
+      "row_over_key8": 1.0144936565591116
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1370440738733556,
+      "row_over_key8": 1.154759918808201
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0268540843757576,
+      "row_over_key8": 1.0316217524066644
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.23715352625431,
+      "row_over_key8": 1.2535052646707487
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1733447011554181,
+      "row_over_key8": 1.175462199242736
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2497465665265666,
+      "row_over_key8": 1.1354892832513483
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1800473718275337,
+      "row_over_key8": 1.0202368379516982
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2417114678571386,
+      "row_over_key8": 1.1157208442465625
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2786193388467215,
+      "row_over_key8": 1.143490933685465
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.9994249860474556,
+      "row_over_key8": 0.9843619205466017
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9567076120586265,
+      "row_over_key8": 0.9329178890173724
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.134636262690377,
+      "row_over_key8": 1.1396885611974952
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0221979393137348,
+      "row_over_key8": 1.1067681255317139
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1276186419292928,
+      "row_over_key8": 1.1294117374696777
+    },
+    {
+      "round": 1,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.012421179637106,
+      "row_over_key8": 1.1044131978282055
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.9563438830705491,
+      "row_over_key8": 1.0440409713430774
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9423493204738322,
+      "row_over_key8": 0.9253586303576463
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.14996356986728,
+      "row_over_key8": 1.1066800822076048
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9864336029219932,
+      "row_over_key8": 1.0392194103835115
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9157804118156901,
+      "row_over_key8": 0.9292357014018332
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8219020220971441,
+      "row_over_key8": 0.8428884719616427
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0763929212506047,
+      "row_over_key8": 0.9957323769663574
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2999339939861188,
+      "row_over_key8": 1.018332781431197
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0979108764651726,
+      "row_over_key8": 0.9621834822666613
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2711993888464477,
+      "row_over_key8": 1.1042363127069008
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0682827596899833,
+      "row_over_key8": 1.1626115508487382
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9974660997005576,
+      "row_over_key8": 0.9621314787915182
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.8980192501170412,
+      "row_over_key8": 1.475390686585467
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0888178254590468,
+      "row_over_key8": 1.0901242005364142
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1136322236463978,
+      "row_over_key8": 1.52552700562892
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0819504708676506,
+      "row_over_key8": 1.0225045697940474
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.079903202846975,
+      "row_over_key8": 1.0410042704626334
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1245354402721248,
+      "row_over_key8": 1.1323250167345755
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1503094223888228,
+      "row_over_key8": 1.105497699778497
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.036678406807706,
+      "row_over_key8": 1.0329748256707245
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0372004059645563,
+      "row_over_key8": 1.039438519790772
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0559698079457414,
+      "row_over_key8": 1.0479593599772343
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.052213612565445,
+      "row_over_key8": 1.1689869303858833
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1320648396340613,
+      "row_over_key8": 1.1340311893739077
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.2231033052760578,
+      "row_over_key8": 1.048598894289453
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0513740154297886,
+      "row_over_key8": 1.2014499151246152
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0042846034053032,
+      "row_over_key8": 1.125079413016512
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0615190050909222,
+      "row_over_key8": 1.0445118167193037
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.3008001377702105,
+      "row_over_key8": 1.1923409879968123
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0141697319754777,
+      "row_over_key8": 1.1983920555302223
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.2614826702276059,
+      "row_over_key8": 1.0400287100735635
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0222180996177412,
+      "row_over_key8": 1.3730880820352402
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2066476437121278,
+      "row_over_key8": 1.1308030159650557
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.092421456483126,
+      "row_over_key8": 1.0802131438721136
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0497869457270808,
+      "row_over_key8": 1.1116822052579067
+    },
+    {
+      "round": 2,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1016795772098746,
+      "row_over_key8": 1.0996643741403025
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.076838272045698,
+      "row_over_key8": 1.8783767702011185
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.116203501519862,
+      "row_over_key8": 1.6468774727484208
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0376323225272255,
+      "row_over_key8": 0.9846838183148117
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9866392600205551,
+      "row_over_key8": 1.0755395683453237
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1199810831401988,
+      "row_over_key8": 1.0983176792652418
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.5477174487732623,
+      "row_over_key8": 0.9830993134789786
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0415241487066678,
+      "row_over_key8": 1.248701646094509
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.277826028790636,
+      "row_over_key8": 1.200583117619453
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1656760834590665,
+      "row_over_key8": 1.0435319408669523
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2136701641617038,
+      "row_over_key8": 0.9957325046475721
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9823416938477112,
+      "row_over_key8": 0.9866156787762906
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9869029275808937,
+      "row_over_key8": 0.9823667180277351
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.2047278821557732,
+      "row_over_key8": 1.268163006086266
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1324131027539284,
+      "row_over_key8": 1.129393656554179
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.131069528739763,
+      "row_over_key8": 1.1453980198874
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0107157378061027,
+      "row_over_key8": 1.0355827810135902
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.108926649160251,
+      "row_over_key8": 1.2273074239183157
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.063746531372955,
+      "row_over_key8": 1.076757920894595
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.361431114105567,
+      "row_over_key8": 1.087221778653715
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2216593680295607,
+      "row_over_key8": 1.105533956728476
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0086556799843513,
+      "row_over_key8": 1.0428058095750403
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0225447791283295,
+      "row_over_key8": 1.136212920725836
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.108791650474657,
+      "row_over_key8": 1.1440439682451562
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.026671279330639,
+      "row_over_key8": 1.0571407559935286
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.007239208043081,
+      "row_over_key8": 1.3432243514178854
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9819206791201464,
+      "row_over_key8": 1.0184803916851257
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.3057407575769795,
+      "row_over_key8": 1.3452642457187143
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0901495624189717,
+      "row_over_key8": 1.1236835949199937
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1760514160136004,
+      "row_over_key8": 1.207934237260024
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1760731341859667,
+      "row_over_key8": 1.1650460603479313
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1825064921925061,
+      "row_over_key8": 1.515251391462833
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1475569044006069,
+      "row_over_key8": 1.1674454628224582
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0186791025504702,
+      "row_over_key8": 1.0237020248818944
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0786697583392857,
+      "row_over_key8": 1.0834452318809213
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1718304351482038,
+      "row_over_key8": 1.125614358010336
+    },
+    {
+      "round": 2,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1025829678362573,
+      "row_over_key8": 1.0844451754385964
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.9945580304423779,
+      "row_over_key8": 0.9803100471455963
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.078197530143345,
+      "row_over_key8": 0.9420447009855236
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9184218554354013,
+      "row_over_key8": 0.9257825839499145
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0459345844504022,
+      "row_over_key8": 1.022788203753351
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0865635796946316,
+      "row_over_key8": 1.058260168792556
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9875997093393217,
+      "row_over_key8": 1.1053727066338783
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0938897841480515,
+      "row_over_key8": 1.0328712258580317
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0466606942889138,
+      "row_over_key8": 1.0643896976483762
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 2.36926576030056,
+      "row_over_key8": 1.0291346811655007
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0328310021638156,
+      "row_over_key8": 0.9974725179257273
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0362727597953638,
+      "row_over_key8": 1.0612208488272277
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.983653715260115,
+      "row_over_key8": 1.080377293602631
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.6765587795310439,
+      "row_over_key8": 0.6692938883626607
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0816274010808575,
+      "row_over_key8": 0.9961500589845276
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.104682389659335,
+      "row_over_key8": 1.0349987928039335
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0965638755574696,
+      "row_over_key8": 1.0846007958822823
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.133897834721381,
+      "row_over_key8": 1.015886627519526
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1144588576360583,
+      "row_over_key8": 1.0491038805793624
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0441123748780168,
+      "row_over_key8": 1.0710218521806882
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.8754991352849032,
+      "row_over_key8": 0.8007669253266447
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0578850138514666,
+      "row_over_key8": 1.5799148419414824
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.134510771810296,
+      "row_over_key8": 1.0372454070827741
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1384148742504423,
+      "row_over_key8": 1.1708573949618897
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.3872362459546923,
+      "row_over_key8": 1.0768689842363504
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.119730646607872,
+      "row_over_key8": 0.9960772950605085
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0920673328574828,
+      "row_over_key8": 0.9518698548655721
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.4470688233126197,
+      "row_over_key8": 1.1990327293034595
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0752888316506592,
+      "row_over_key8": 0.9224514674182909
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.8159794586188814,
+      "row_over_key8": 0.8234474079163879
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.990501800957221,
+      "row_over_key8": 1.0060772684659791
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.7782664859781249,
+      "row_over_key8": 0.6821584875480418
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0414563798219583,
+      "row_over_key8": 0.9079376854599407
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2217335058214749,
+      "row_over_key8": 1.1692144890038811
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1062577857656646,
+      "row_over_key8": 1.0852180381522638
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.966096351107025,
+      "row_over_key8": 0.7766147409952042
+    },
+    {
+      "round": 3,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.6441378154510589,
+      "row_over_key8": 0.9736789248074259
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0205473000675953,
+      "row_over_key8": 1.0074262454336254
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0155733929006014,
+      "row_over_key8": 1.2721617181796057
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9016972827618087,
+      "row_over_key8": 0.9164230368894565
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9599604547701432,
+      "row_over_key8": 1.1562867029164605
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0252012502772492,
+      "row_over_key8": 1.2225364897180167
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.009587976159627,
+      "row_over_key8": 1.2355532521378596
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1337072860069202,
+      "row_over_key8": 1.2684856048454718
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0558433722869223,
+      "row_over_key8": 1.321056533538751
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0319035311499265,
+      "row_over_key8": 1.1519220642443393
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2186707255200406,
+      "row_over_key8": 0.9722638254693048
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1566078267064455,
+      "row_over_key8": 0.9877170331994944
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.3331648129423659,
+      "row_over_key8": 0.9792719919110211
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.2682637005347595,
+      "row_over_key8": 1.2294191229946525
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0831030251192855,
+      "row_over_key8": 1.117361155133279
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1064022712936747,
+      "row_over_key8": 1.09844841569085
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.192455913369274,
+      "row_over_key8": 1.1329344275604274
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.594434923033355,
+      "row_over_key8": 0.5954829315232526
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2325538855794729,
+      "row_over_key8": 1.1035434743037438
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.5247156447931892,
+      "row_over_key8": 0.5374515988409365
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9799786407787543,
+      "row_over_key8": 0.9544872887231145
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0344426634724708,
+      "row_over_key8": 1.0455426821330447
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.978862369404651,
+      "row_over_key8": 0.9888380043627458
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1426120147473433,
+      "row_over_key8": 1.1278824549989157
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1116218735563914,
+      "row_over_key8": 1.0265087771398405
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.998555679602687,
+      "row_over_key8": 1.1246551011517107
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1544321214428381,
+      "row_over_key8": 1.134207306312328
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.145319415136972,
+      "row_over_key8": 1.0676364587029188
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.218696978127731,
+      "row_over_key8": 0.9531555586387497
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.5695404036229128,
+      "row_over_key8": 1.4488657390282467
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.9240049780213266,
+      "row_over_key8": 1.1557950224021547
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.9716709868411734,
+      "row_over_key8": 0.8541437092497529
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.4618486162868833,
+      "row_over_key8": 1.1156659539373204
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2164906129225301,
+      "row_over_key8": 1.170402852404579
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2099387334228755,
+      "row_over_key8": 1.1391336923296231
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0172515002377673,
+      "row_over_key8": 0.9088532539568926
+    },
+    {
+      "round": 3,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.202630710076327,
+      "row_over_key8": 1.1370276710125518
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0601610435218864,
+      "row_over_key8": 1.0949454408629125
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.114360728075014,
+      "row_over_key8": 1.0504688361831218
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.8444840997631466,
+      "row_over_key8": 0.8919413237901714
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.8007507780358952,
+      "row_over_key8": 0.8024550081609868
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9539763505680503,
+      "row_over_key8": 1.0510085787155112
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0263392643637053,
+      "row_over_key8": 1.0436665786403891
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.9636452757432221,
+      "row_over_key8": 0.9426179750441241
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.072085409252669,
+      "row_over_key8": 1.0035587188612098
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2334935003845677,
+      "row_over_key8": 1.0112104565364022
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.4170545987264354,
+      "row_over_key8": 1.051160857830071
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9548634810750067,
+      "row_over_key8": 1.0760142344909065
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1475927387529596,
+      "row_over_key8": 1.0835737963693763
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.1192227924936657,
+      "row_over_key8": 1.0729019555889037
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.043355816597196,
+      "row_over_key8": 1.056808639636226
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.132075198747067,
+      "row_over_key8": 1.1791206607305391
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.145100162425555,
+      "row_over_key8": 1.184142212597004
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.144422753413124,
+      "row_over_key8": 1.1913370342713268
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.123996354356021,
+      "row_over_key8": 1.1871289549751496
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0209836437065503,
+      "row_over_key8": 1.2494978742796763
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1257197266500598,
+      "row_over_key8": 1.222000343051836
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0983420797923569,
+      "row_over_key8": 1.065074923903994
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1070990475220477,
+      "row_over_key8": 1.1809565162232165
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1302911140313032,
+      "row_over_key8": 1.2023900178878935
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.013853045266048,
+      "row_over_key8": 1.0853592053893237
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.1439687774202985,
+      "row_over_key8": 1.262071000292483
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0967284563270188,
+      "row_over_key8": 1.2166380527318346
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1402044711693053,
+      "row_over_key8": 1.3241410987483369
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0097514118544901,
+      "row_over_key8": 1.1544307300941237
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0034050168871076,
+      "row_over_key8": 1.0811659266510243
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9774748772959572,
+      "row_over_key8": 1.1393681121287256
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0750232461869917,
+      "row_over_key8": 1.301233209531203
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9925076760943045,
+      "row_over_key8": 1.189297439908979
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0213833677158484,
+      "row_over_key8": 1.1980592332181215
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.006243557418383,
+      "row_over_key8": 1.1610837290022595
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.8511843870704265,
+      "row_over_key8": 1.0404975619985244
+    },
+    {
+      "round": 4,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9361538297220192,
+      "row_over_key8": 0.9698312799090305
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.9957296908570649,
+      "row_over_key8": 1.3772085616490235
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9455310720475366,
+      "row_over_key8": 1.302878930428324
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.060093759741314,
+      "row_over_key8": 0.9327053740360713
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.8068804531704096,
+      "row_over_key8": 0.7830507712154536
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.8961394750851253,
+      "row_over_key8": 1.012765462355655
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9366363463339532,
+      "row_over_key8": 0.9300408730899039
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.007679457246581,
+      "row_over_key8": 1.003954231639145
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0577673692427791,
+      "row_over_key8": 1.073032526671871
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0174757090945437,
+      "row_over_key8": 1.1289872066708073
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9799068412537818,
+      "row_over_key8": 1.0989082603035885
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9388619706878639,
+      "row_over_key8": 1.2571519019446862
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9612838087882737,
+      "row_over_key8": 1.215537561744783
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.1475137846825332,
+      "row_over_key8": 1.1362537845528167
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0917757868136917,
+      "row_over_key8": 1.0974426832069837
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0618240948548707,
+      "row_over_key8": 1.0284404760678094
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9730137761841857,
+      "row_over_key8": 0.9939301755048122
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1694163549992413,
+      "row_over_key8": 1.1423816907538906
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0122530403464072,
+      "row_over_key8": 1.1201131098924135
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.141743170003318,
+      "row_over_key8": 1.167606680676916
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0100955090690198,
+      "row_over_key8": 0.9999110197246758
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.109619086965503,
+      "row_over_key8": 1.09312827928114
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9389016026612415,
+      "row_over_key8": 1.0239328446647225
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1578225415594816,
+      "row_over_key8": 1.1429672739302608
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.021468247140048,
+      "row_over_key8": 1.1013815930661273
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.3967939427093954,
+      "row_over_key8": 1.2248587415402719
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2998131881235344,
+      "row_over_key8": 1.2856898922850668
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.250252550926597,
+      "row_over_key8": 1.4418514560705598
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1486589016383693,
+      "row_over_key8": 1.1563611966220815
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.4601306438345054,
+      "row_over_key8": 1.4284582961615553
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1572449898818462,
+      "row_over_key8": 1.1858912461648934
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1696014367843433,
+      "row_over_key8": 1.1198358695773056
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1210355598270063,
+      "row_over_key8": 1.1472652570879387
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1491534786399684,
+      "row_over_key8": 1.3110755987566014
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.126120486366986,
+      "row_over_key8": 1.1530795873249817
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1434532525375596,
+      "row_over_key8": 1.2812850206438173
+    },
+    {
+      "round": 4,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1464148214544112,
+      "row_over_key8": 1.1819740548310322
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.07665848336593,
+      "row_over_key8": 1.0679236710586097
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0194926568758345,
+      "row_over_key8": 1.1137516688918558
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.8204239740183054,
+      "row_over_key8": 0.8324306662730047
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.8229992772470488,
+      "row_over_key8": 0.8689555482351553
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9587673498927346,
+      "row_over_key8": 1.0772340236981348
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.03349636562106,
+      "row_over_key8": 1.2654048588134748
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0174477045850059,
+      "row_over_key8": 1.6033059760020003
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.989990717990718,
+      "row_over_key8": 1.5785793065793066
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9700182649296429,
+      "row_over_key8": 0.8841552848518636
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.022250907149134,
+      "row_over_key8": 1.0501948846459488
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9727716428084525,
+      "row_over_key8": 1.1879118382185865
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9911437246963564,
+      "row_over_key8": 1.2765688259109311
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0260974143114854,
+      "row_over_key8": 1.070314852675887
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0493899584748962,
+      "row_over_key8": 1.1190071725179311
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1859516597101618,
+      "row_over_key8": 1.1215778519410342
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1659364190180783,
+      "row_over_key8": 1.1607568868568134
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2912280335070885,
+      "row_over_key8": 1.1423184341951098
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.153573053838574,
+      "row_over_key8": 1.177670518677775
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0234348274405394,
+      "row_over_key8": 1.06288598986885
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1432713615023475,
+      "row_over_key8": 1.14604882629108
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9448597398228287,
+      "row_over_key8": 1.0254948477908565
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0480352139831899,
+      "row_over_key8": 1.1475049561665271
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1640413539100736,
+      "row_over_key8": 1.1058631298724733
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1042018370032876,
+      "row_over_key8": 1.1997694158616756
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0404918239086824,
+      "row_over_key8": 1.2614128463457424
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9264757245013172,
+      "row_over_key8": 1.1058917952578096
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0146062836775749,
+      "row_over_key8": 0.9275442942991505
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.870551923279587,
+      "row_over_key8": 1.059598777531879
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.004356460136693,
+      "row_over_key8": 1.0190863726201926
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0265665534087212,
+      "row_over_key8": 1.107374232241812
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.010018349225073,
+      "row_over_key8": 0.9599552737638848
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1618012699911315,
+      "row_over_key8": 1.2135666506365506
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2008628042026384,
+      "row_over_key8": 1.41501710407005
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0781564272264303,
+      "row_over_key8": 1.3324312092663038
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9480272588456001,
+      "row_over_key8": 1.0649622616814276
+    },
+    {
+      "round": 5,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0806720151364417,
+      "row_over_key8": 1.1396945718098301
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0247945382285448,
+      "row_over_key8": 0.9135359204000113
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2880304009005434,
+      "row_over_key8": 0.9519961923325363
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.2016412932849216,
+      "row_over_key8": 0.9552155801654484
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.3128805342640792,
+      "row_over_key8": 0.9143022464387648
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2298090020673504,
+      "row_over_key8": 1.6811919369625168
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2293063641181108,
+      "row_over_key8": 1.1761737394694416
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.176196456155144,
+      "row_over_key8": 0.986721641070827
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.8378982268992359,
+      "row_over_key8": 0.8385574701934131
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.103036156041865,
+      "row_over_key8": 0.995638439581351
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9437844717861688,
+      "row_over_key8": 0.8337564700890963
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9869330922365939,
+      "row_over_key8": 0.8771585906095326
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2047277291202,
+      "row_over_key8": 0.9695633252251761
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.9625123123712352,
+      "row_over_key8": 1.0659930017332158
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9653805075463731,
+      "row_over_key8": 1.0031384130702845
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0450046955139782,
+      "row_over_key8": 1.1963687062053023
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.060606743277411,
+      "row_over_key8": 1.1161454027170457
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1770155636891981,
+      "row_over_key8": 1.199512868327534
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0083467449490586,
+      "row_over_key8": 1.154492833707477
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.090830812985179,
+      "row_over_key8": 1.405503728551426
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0545569587957646,
+      "row_over_key8": 1.3404771016711314
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1209736723333836,
+      "row_over_key8": 1.8251842936663158
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.100695904474947,
+      "row_over_key8": 1.488710634973775
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1907830203787484,
+      "row_over_key8": 1.2111317412019056
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1487082501403265,
+      "row_over_key8": 1.1591754163896006
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0582285994610097,
+      "row_over_key8": 1.220834364828245
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1070162019331062,
+      "row_over_key8": 1.259764133231347
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.127369220306299,
+      "row_over_key8": 1.1353810659343497
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1510133861902303,
+      "row_over_key8": 1.2234923565668359
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1153124278163558,
+      "row_over_key8": 1.1161484317461388
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0306653011061042,
+      "row_over_key8": 1.0986276116345761
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.154377002545813,
+      "row_over_key8": 1.472085091546107
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.8233974957951784,
+      "row_over_key8": 0.8291785460661557
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9906823954669793,
+      "row_over_key8": 0.9974044880275051
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.03271556694017,
+      "row_over_key8": 1.1925624473992171
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.306956827888722,
+      "row_over_key8": 1.042238947246912
+    },
+    {
+      "round": 5,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.054454128944764,
+      "row_over_key8": 1.5184060403914523
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0167695353441248,
+      "row_over_key8": 1.031870501921509
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0480931534817128,
+      "row_over_key8": 1.0195015746547302
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.8484620535714287,
+      "row_over_key8": 0.8028586309523809
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.8303879463220546,
+      "row_over_key8": 0.8074826049666931
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.8536263503512546,
+      "row_over_key8": 0.86176258638649
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8223419417268418,
+      "row_over_key8": 0.8484687747316902
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1158467782851345,
+      "row_over_key8": 1.1117879249112126
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0134707924515292,
+      "row_over_key8": 1.044358149387662
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.925615797626239,
+      "row_over_key8": 0.877948218666793
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1301027912488757,
+      "row_over_key8": 0.9972011867640508
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1216317024628675,
+      "row_over_key8": 1.0057079371573292
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2872302516873189,
+      "row_over_key8": 1.0251899426884261
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.1126540625215517,
+      "row_over_key8": 0.9924448316483864
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0497379704621248,
+      "row_over_key8": 1.036238970938542
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.132628545669547,
+      "row_over_key8": 1.138044073879335
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1479488310542567,
+      "row_over_key8": 1.1613289810322014
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1389353703123637,
+      "row_over_key8": 1.1613861132540473
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1434462633451958,
+      "row_over_key8": 1.1784099644128114
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0398679452251671,
+      "row_over_key8": 1.0314892183145987
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.020656995749823,
+      "row_over_key8": 0.9569284424453062
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9837542571931884,
+      "row_over_key8": 1.066830593071051
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0219955797682898,
+      "row_over_key8": 1.1793541081095456
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9424573726706168,
+      "row_over_key8": 0.8743540969514628
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.952901392560845,
+      "row_over_key8": 1.018627327689041
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.8688478568785329,
+      "row_over_key8": 1.0278242117217706
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.8685422367499416,
+      "row_over_key8": 1.0110048097128184
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.057492739646764,
+      "row_over_key8": 0.9901932604083432
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1297615239154593,
+      "row_over_key8": 1.0912946301885629
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9212304668072887,
+      "row_over_key8": 1.0665751302594992
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.016394682037601,
+      "row_over_key8": 1.0020598535203158
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.8642699496703459,
+      "row_over_key8": 0.8641055500861234
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1864831774206668,
+      "row_over_key8": 1.0516594655827776
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1770934384324747,
+      "row_over_key8": 0.9920564602364731
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9601259255462049,
+      "row_over_key8": 1.012886523425305
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1044247457658716,
+      "row_over_key8": 1.0786766216455543
+    },
+    {
+      "round": 6,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9236100767999877,
+      "row_over_key8": 1.030899726559964
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0651713091205666,
+      "row_over_key8": 1.2418965238539592
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.014788522848034,
+      "row_over_key8": 0.98609564293305
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0120801308140583,
+      "row_over_key8": 1.096644648221116
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.012952920451798,
+      "row_over_key8": 1.0210802430882202
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9998103520555479,
+      "row_over_key8": 1.0044989210937514
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0095807031049526,
+      "row_over_key8": 1.0650059019758789
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0105255073525874,
+      "row_over_key8": 1.0456497037127512
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0523321535125918,
+      "row_over_key8": 0.9885024100875703
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1205268931198815,
+      "row_over_key8": 0.996514289024378
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0148646294006856,
+      "row_over_key8": 1.1155545506592213
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1224119570294255,
+      "row_over_key8": 1.2318617468472677
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2154953780762672,
+      "row_over_key8": 1.269713220735772
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0204583045975664,
+      "row_over_key8": 1.0100112059157977
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.136682742316785,
+      "row_over_key8": 1.114026477541371
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1293279666451108,
+      "row_over_key8": 1.1170093170605793
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1874549553003237,
+      "row_over_key8": 1.0967266240371298
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1380689392496668,
+      "row_over_key8": 1.1354027804227766
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0191233067863583,
+      "row_over_key8": 1.0173822667922745
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.2063058585416355,
+      "row_over_key8": 1.1439919041561177
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.140444588581485,
+      "row_over_key8": 1.1340859989412289
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1559719059274238,
+      "row_over_key8": 1.0885921038629351
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0377618847614476,
+      "row_over_key8": 1.067930463560025
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1116902069109293,
+      "row_over_key8": 1.1438649085318187
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0406807957243824,
+      "row_over_key8": 1.198835355023242
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0532673025484007,
+      "row_over_key8": 1.1221219757631011
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.4148933212722326,
+      "row_over_key8": 1.3050282388012464
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0376234847231236,
+      "row_over_key8": 1.0180086907033097
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1326019985842577,
+      "row_over_key8": 1.1450583510713919
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1836578581006192,
+      "row_over_key8": 1.1577160096336
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.2602196267614574,
+      "row_over_key8": 1.1240319918750794
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1179832500586002,
+      "row_over_key8": 1.1581011026237478
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1347765363128492,
+      "row_over_key8": 1.138737208538086
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.314974735133744,
+      "row_over_key8": 1.4462772788898328
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1762058782685112,
+      "row_over_key8": 1.1310946017535906
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1337396589787538,
+      "row_over_key8": 1.2830884574505708
+    },
+    {
+      "round": 6,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9932993226765772,
+      "row_over_key8": 0.9975528534652048
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 0.9291625325829573,
+      "row_over_key8": 1.0214872132676982
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9029906357811729,
+      "row_over_key8": 0.9451296205027107
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.006420922071636,
+      "row_over_key8": 0.9862127904162632
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9920224032586559,
+      "row_over_key8": 1.009674134419552
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0407989967183862,
+      "row_over_key8": 0.9459146294133215
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0508837158725912,
+      "row_over_key8": 1.0024403606798715
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.9952187284829012,
+      "row_over_key8": 0.9607913702088593
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2115902964959568,
+      "row_over_key8": 1.0943396226415094
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9674962809150409,
+      "row_over_key8": 1.0358793951858694
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0006070923406227,
+      "row_over_key8": 1.0021717633216087
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9884803673938,
+      "row_over_key8": 1.1052427095292765
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1467171643602814,
+      "row_over_key8": 1.0006487011410536
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.2551887833559476,
+      "row_over_key8": 1.0098496607869742
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9992547089858671,
+      "row_over_key8": 1.0074297829927426
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.148653296541667,
+      "row_over_key8": 1.1248701913310444
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.135975119824365,
+      "row_over_key8": 1.1217890044704326
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0668349425691697,
+      "row_over_key8": 1.1290696030551604
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1312620756402727,
+      "row_over_key8": 1.1318879881312685
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 0.9923144725403484,
+      "row_over_key8": 1.0061355406886645
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0865724947622104,
+      "row_over_key8": 1.0953447055991492
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9537465029294891,
+      "row_over_key8": 1.0987649711951055
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 0.9772928520840153,
+      "row_over_key8": 0.9921293082203017
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.2670436577720008,
+      "row_over_key8": 1.004472819022861
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.9745922288791632,
+      "row_over_key8": 1.0067402499321387
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0974480811416882,
+      "row_over_key8": 1.1051136446390548
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.2295209452906435,
+      "row_over_key8": 1.6644292486065972
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 0.9968399231131906,
+      "row_over_key8": 0.9886676386319951
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2554467319213987,
+      "row_over_key8": 1.0262333883971497
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1769072324273946,
+      "row_over_key8": 1.2578911492468696
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1201516372135234,
+      "row_over_key8": 1.1253632384367178
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.1960412002945722,
+      "row_over_key8": 1.0314762088611582
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1480834340386095,
+      "row_over_key8": 1.1909255743592577
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0819454245507765,
+      "row_over_key8": 1.103403475327379
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0265065466349506,
+      "row_over_key8": 1.0019614566690427
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9889502844923489,
+      "row_over_key8": 0.9995956146545268
+    },
+    {
+      "round": 7,
+      "projection": "scalar",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0100532036426544,
+      "row_over_key8": 1.1269813624049354
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.0214773438405378,
+      "row_over_key8": 0.9928918762313129
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.0540102619497702,
+      "row_over_key8": 1.0059411288144746
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.053871035693388,
+      "row_over_key8": 1.0553156231714451
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0971440768763692,
+      "row_over_key8": 1.0078583995971326
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9589427353381728,
+      "row_over_key8": 1.19568245189538
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0053260121278078,
+      "row_over_key8": 0.9932167546777804
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0256798825365527,
+      "row_over_key8": 0.9832897342380261
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.1323134043134042,
+      "row_over_key8": 0.9955424515424516
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.1524993013507219,
+      "row_over_key8": 1.0283726129482997
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2781413929040737,
+      "row_over_key8": 1.0173455978975035
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9827566386941027,
+      "row_over_key8": 1.005862742844005
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "short_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8020987501881738,
+      "row_over_key8": 0.797095443404955
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.1739690990772964,
+      "row_over_key8": 1.1212726698696962
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.122006295333242,
+      "row_over_key8": 1.1357070085002205
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.117278129692135,
+      "row_over_key8": 1.1365437170105641
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1504830473635241,
+      "row_over_key8": 1.156117698393809
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.155945907612308,
+      "row_over_key8": 1.15427201377432
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.1118905317140377,
+      "row_over_key8": 1.001959802520794
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.0932880236118332,
+      "row_over_key8": 1.064423755034553
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 0.9978659400544959,
+      "row_over_key8": 0.9850136239782017
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0514439293713211,
+      "row_over_key8": 1.0572425647169124
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.0172170714266906,
+      "row_over_key8": 1.0164584628909772
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.1748681816963193,
+      "row_over_key8": 1.1427478946649021
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "batched_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.140554871794872,
+      "row_over_key8": 1.0294871794871796
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "resident",
+      "before_over_key8": 1.19888383629599,
+      "row_over_key8": 1.260224638280281
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.3224151528963501,
+      "row_over_key8": 2.0124700404070412
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.277080483065388,
+      "row_over_key8": 1.2364957810890254
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.2628750729069707,
+      "row_over_key8": 1.2961414548717585
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "resident",
+      "before_over_key8": 0.9223291349599699,
+      "row_over_key8": 1.1234883704305598
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/unmasked/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 1.0888565861503727,
+      "row_over_key8": 1.1180940834441593
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "resident",
+      "before_over_key8": 1.2328964494519916,
+      "row_over_key8": 1.213049925852694
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/causal/plain",
+      "route": "host_to_host",
+      "before_over_key8": 1.016913935391369,
+      "row_over_key8": 1.0491701112546625
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "resident",
+      "before_over_key8": 1.0326238012140736,
+      "row_over_key8": 1.0410507256103927
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zero_geometry",
+      "route": "host_to_host",
+      "before_over_key8": 1.1190959048310372,
+      "row_over_key8": 1.1291033561648474
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "resident",
+      "before_over_key8": 1.0405665128739396,
+      "row_over_key8": 1.0183707099270725
+    },
+    {
+      "round": 7,
+      "projection": "register16",
+      "case": "wide_prefill/causal/zrbf",
+      "route": "host_to_host",
+      "before_over_key8": 0.8810897048236143,
+      "row_over_key8": 0.893016558675306
+    }
+  ],
+  "note": "Ratios are before/after medians of per-forward latency; larger than one favors after. Correlated descriptive pairs, not independent trials or significance tests."
+}
