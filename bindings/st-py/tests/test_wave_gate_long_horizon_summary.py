@@ -265,6 +265,59 @@ def test_anchored_factorial_reports_real_reference_and_all_four_gates(summary_mo
     assert (plan, result, journal) == before
 
 
+def chart_fixture():
+    plan, result, journal = anchored_fixture()
+    rename = dict(zip(plan["config"]["arms"], ["adam_tangent", "adam_elliptic", "chart_tangent", "chart_elliptic"]))
+    plan["config"].update(schema="spiraltorch.elliptic_chart_step_protocol.v1", arms=list(rename.values()), reference_arm="adam_tangent")
+    for row in result["runs"]:
+        old = row["run_key"]
+        seed, arm = old.split(":")
+        row["run_key"] = f"{seed}:{rename[arm]}"
+        journal["runs"][row["run_key"]] = journal["runs"].pop(old)
+        for record in row["records"]:
+            enabled = rename[arm].startswith("chart_")
+            record["optimizer_step"] = {"enabled": enabled}
+            if enabled:
+                record["optimizer_step"].update(metric=[1., 0., 0., 2.], damped_condition=1.8, proposal_l2=.1, step_l2=.1, applied_step_l2=.100000001, cosine=.9, gradient_dot_proposal=-.01, gradient_dot_applied_step=-.01)
+    return plan, result, journal
+
+
+def test_chart_factorial_keeps_reference_interaction_and_step_receipts(summary_module):
+    plan, result, journal = chart_fixture()
+    report = summary_module.summarize(plan, result, journal, "sealed")
+    contrasts = report["paired_factorial_contrasts"]["tail"]
+    expected = {"chart_elliptic": [-1., 0.], "chart_tangent": [-.25, -.5], "geometry_adam": [.5, -.25], "geometry_chart": [-.25, .25], "interaction": [-.75, .5]}
+    for name, values in expected.items():
+        assert [r["ce_difference"] for r in contrasts[name]["per_seed"]] == values
+    assert report["reference_arm"] == "adam_tangent"
+    assert report["chart_step_trajectories"]["41:chart_elliptic"]["nonzero_proposals"] == 2
+
+
+@pytest.mark.parametrize("corruption", ["pairing", "count", "enabled", "missing", "nan", "norm", "cosine", "metric"])
+def test_chart_summary_rejects_inconsistent_receipts(summary_module, corruption):
+    plan, result, journal = chart_fixture()
+    row = next(r for r in result["runs"] if r["run_key"].endswith(":chart_elliptic"))
+    receipt = row["records"][0]["optimizer_step"]
+    if corruption == "pairing":
+        row["initial_parameter_sha256"] = "b" * 64
+    elif corruption == "count":
+        row["parameter_count"] -= 1
+    elif corruption == "enabled":
+        receipt["enabled"] = False
+    elif corruption == "missing":
+        del row["records"][0]["optimizer_step"]
+    elif corruption == "nan":
+        receipt["gradient_dot_applied_step"] = float("nan")
+    elif corruption == "norm":
+        receipt["step_l2"] = .2
+    elif corruption == "cosine":
+        receipt["cosine"] = -1
+    else:
+        receipt["metric"] = [0., 0., 0., 0.]
+    with pytest.raises(ValueError):
+        summary_module.summarize(plan, result, journal, "sealed")
+
+
 @pytest.mark.parametrize("corruption", ["projection", "parameters", "hash", "reference", "missing_reference", "gate", "endpoint", "nan"])
 def test_anchored_summary_rejects_unpaired_or_mislabeled_evidence(summary_module, corruption):
     plan, result, journal = anchored_fixture()

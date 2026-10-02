@@ -136,6 +136,52 @@ def contrast_report(config, measured, sets, contrasts):
     return report
 
 
+def chart_step_report(config, runs, measured, sets):
+    arms = {"adam_tangent", "adam_elliptic", "chart_tangent", "chart_elliptic"}
+    require(set(config["arms"]) == arms and config.get("reference_arm") == "adam_tangent", "incomplete chart factorial design")
+    for seed in config["seeds"]:
+        rows = [runs[f"{seed}:{arm}"] for arm in arms]
+        for field in ("initial_parameter_sha256", "initial_projection_sha256"):
+            hashes = {row.get(field) for row in rows}
+            require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes), "chart initial parameters are not paired")
+        require(all(row["parameter_count"] == 11 * config["features"] + 3 for row in rows), "chart parameter counts differ")
+    trajectories = {}
+    for key, row in runs.items():
+        enabled = key.split(":", 1)[1].startswith("chart_")
+        receipts = [record.get("optimizer_step") for record in row["records"]]
+        require(all(isinstance(r, dict) and r.get("enabled") is enabled for r in receipts), "missing or mismatched chart-step receipt")
+        if not enabled:
+            continue
+        for receipt in receipts:
+            fields = ("proposal_l2", "step_l2", "applied_step_l2", "damped_condition", "gradient_dot_proposal", "gradient_dot_applied_step")
+            require(all(type(receipt.get(k)) in (int, float) and math.isfinite(receipt[k]) for k in fields), "invalid chart-step scalar")
+            require(all(receipt[k] >= 0 for k in fields[:3]), "negative step norm")
+            require(math.isclose(receipt["proposal_l2"], receipt["step_l2"], rel_tol=1e-6, abs_tol=1e-40), "native chart step changed proposal budget")
+            require(receipt["damped_condition"] >= 1, "invalid damped condition")
+            metric = receipt.get("metric")
+            require(isinstance(metric, list) and len(metric) == 4 and all(type(v) in (int, float) and math.isfinite(v) for v in metric), "invalid chart metric")
+            require(metric[0] >= 0 and metric[3] >= 0 and metric[0] + metric[3] > 0 and metric[1] == metric[2], "invalid chart metric")
+            cosine = receipt.get("cosine")
+            require((receipt["proposal_l2"] == 0 and cosine is None and receipt["applied_step_l2"] == 0) or (receipt["proposal_l2"] > 0 and type(cosine) in (int, float) and math.isfinite(cosine) and 0 <= cosine <= 1), "invalid step direction cosine")
+        active = [r for r in receipts if r["proposal_l2"] > 0]
+        trajectories[key] = {
+            "nonzero_proposals": len(active),
+            "mean_direction_cosine": statistics.fmean(r["cosine"] for r in active) if active else None,
+            "mean_damped_condition": statistics.fmean(r["damped_condition"] for r in receipts),
+            "max_applied_norm_relative_error": max((abs(r["applied_step_l2"] / r["proposal_l2"] - 1) for r in active), default=0),
+            "positive_gradient_dot_proposal_steps": sum(r["gradient_dot_proposal"] > 0 for r in receipts),
+            "positive_gradient_dot_applied_steps": sum(r["gradient_dot_applied_step"] > 0 for r in receipts),
+        }
+    contrasts = {
+        "chart_elliptic": {"chart_elliptic": 1, "adam_elliptic": -1},
+        "chart_tangent": {"chart_tangent": 1, "adam_tangent": -1},
+        "geometry_adam": {"adam_elliptic": 1, "adam_tangent": -1},
+        "geometry_chart": {"chart_elliptic": 1, "chart_tangent": -1},
+        "interaction": {"chart_elliptic": 1, "adam_elliptic": -1, "chart_tangent": -1, "adam_tangent": 1},
+    }
+    return contrast_report(config, measured, sets, contrasts), trajectories
+
+
 def gated_trajectories(config, runs, arms=("gated_tangent", "gated_elliptic")):
     report = {}
     for seed in config["seeds"]:
@@ -314,6 +360,10 @@ def summarize(plan, result, journal, result_sha256):
         summary["paired_factorial_contrasts"] = anchored_factorial_contrasts(
             config, runs, measured, sets
         )
+        summary["gate_trajectories"] = gated_trajectories(config, runs, arms)
+    if config.get("schema") == "spiraltorch.elliptic_chart_step_protocol.v1":
+        summary["reference_arm"] = reference
+        summary["paired_factorial_contrasts"], summary["chart_step_trajectories"] = chart_step_report(config, runs, measured, sets)
         summary["gate_trajectories"] = gated_trajectories(config, runs, arms)
     return summary
 
