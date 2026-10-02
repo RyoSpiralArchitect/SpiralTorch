@@ -53,6 +53,8 @@ accumulation still visit keys in order; dot-product reduction order changes, so
 agreement is tolerance-based, not bitwise. Tail tiles and causal visibility
 must not load masked keys. This uses core WGSL, not subgroups or native-only
 instructions, and is exercised by the browser probe as well as native tests.
+Output order is another cached pipeline specialization, resolved before the
+key loop rather than a per-dispatch output-order flag.
 
 All inputs must be finite. Non-finite score/weighted-output arithmetic sets an
 owned failure guard, inherited by downstream operations and checked on readback.
@@ -78,7 +80,7 @@ not cached decode. Empty sequences are rejected at this higher-level boundary.
 QKV weights are packed together once during plan construction, not every forward.
 The plan owns frozen parameter versions; updating a source module requires a new
 plan and compilation. `compile_wgpu` rejects unsupported limits before building
-the graphs. The resident chain is:
+the graphs. The opt-in `forward_merged_heads` chain is:
 
 ```text
 input [B,T,I]
@@ -96,6 +98,11 @@ the intermediate head-merge tensor and copy. There are no intermediate activatio
 only the caller's final snapshot materializes the output. Inputs, biases and
 both graphs must share the owning device and queue. Outputs retain their own
 storage and deferred failure guards across graph reuse.
+
+The ordinary `forward` retains the existing head-major attention followed by
+GPU head-merge packing. Direct merged-head output is explicit, not an automatic
+shape heuristic: measurements show short-input gains but mixed larger-input
+latency. See the [comparison and adoption boundary](../benchmarks/results/2026-10-02-attention-merged-output/README.md).
 
 `compile_wgpu_with_options(runtime, tile, kernel, accumulation)` selects the
 existing resident matmul implementation for **both** QKV and output projections.
@@ -129,6 +136,11 @@ The same 20 frozen PyTorch SDPA cases are checked by the Rust oracle, native
 resident kernel and browser example. The browser now runs each case in canonical
 and reversed/padded strided storage, with both head-major and merged-head output,
 for 80 checks against the same oracle.
+The standalone browser probe also executes three independent compute-constant
+checks (defaults, named/numeric-ID overrides and a second pipeline). The pinned
+WGPU WebGPU bridge now forwards compute compilation constants; earlier numeric
+parity alone did not establish that a requested specialization actually ran.
+This repair is scoped to compute stages, not render-stage compilation options.
 Native tests additionally cover head widths through 256, direct strided reads,
 independent broadcast inputs, ownership, invalid inputs and inherited guards,
 including failed storage hidden by a crop and empty-query failure propagation.

@@ -161,7 +161,7 @@ mod native {
                 let expected = floats(&case["expected"]);
                 close(
                     &graph
-                        .forward(&resident_input, None, resident_bias.as_ref())?
+                        .forward_merged_heads(&resident_input, None, resident_bias.as_ref())?
                         .snapshot()?
                         .read()?,
                     &expected,
@@ -176,7 +176,7 @@ mod native {
                         let start = Instant::now();
                         let host_output = if resident {
                             for _ in 0..forwards {
-                                outputs.push(graph.forward(
+                                outputs.push(graph.forward_merged_heads(
                                     &resident_input,
                                     None,
                                     resident_bias.as_ref(),
@@ -189,7 +189,7 @@ mod native {
                             let bias = upload_bias()?;
                             Some(
                                 graph
-                                    .forward(&input, None, bias.as_ref())?
+                                    .forward_merged_heads(&input, None, bias.as_ref())?
                                     .snapshot()?
                                     .read()?,
                             )
@@ -225,7 +225,7 @@ mod native {
         }
         println!(
             "{}",
-            json!({"schema":"spiraltorch.attention_chain_bench.v1","status":"passed","engine":"st_wgpu","projection":projection,"adapter":format!("{:?}",runtime.adapter_info()),"warmup":warmup,"samples_per_route":samples,"burst":burst,"cases":cases,"boundary":"Resident: fixed input/bias/weights, burst forwards, queue completion included, reads/checks excluded. Host-to-host: fresh input and bias upload plus owning output read each forward, weights remain resident. Setup, compile and geometry construction excluded. This is a host-timed inference comparison, not kernel timestamps or training."})
+            json!({"schema":"spiraltorch.attention_chain_bench.v1","status":"passed","engine":"st_wgpu","projection":projection,"output_path":"direct_merged_heads","adapter":format!("{:?}",runtime.adapter_info()),"warmup":warmup,"samples_per_route":samples,"burst":burst,"cases":cases,"boundary":"Resident: fixed input/bias/weights, burst forwards, queue completion included, reads/checks excluded. Host-to-host: fresh input and bias upload plus owning output read each forward, weights remain resident. Setup, compile and geometry construction excluded. This is a host-timed inference comparison of the explicit merged-head path, not the default NN route, kernel timestamps or training."})
         );
         Ok(())
     }
