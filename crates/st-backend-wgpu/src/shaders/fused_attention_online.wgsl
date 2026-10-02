@@ -66,7 +66,7 @@ fn main(
     workgroupBarrier();
 
     if (lane == 0u) {
-        shared_running_max = -3.40282347e38;
+        shared_running_max = bitcast<f32>(0xff7fffffu);
         shared_running_sum = 0.0;
     }
     workgroupBarrier();

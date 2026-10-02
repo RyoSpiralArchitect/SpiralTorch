@@ -208,6 +208,9 @@ controls rather than choosing between them:
    the numerical reference computes the same operation. Masking, sequence/head
    layout and cached-query offsets require explicit shared semantics before KV
    cache expansion; do not implement a separate client-side interpretation.
+   The [first resident forward slice](resident_zspace_attention.md) now covers
+   causal offsets and both score biases, with matched PyTorch fixtures on native
+   WGPU and browser WebGPU. Projection-chain lowering and backward remain open.
 3. **Measure the complete language path.** Require numerical agreement before
    transfer-inclusive throughput measurements, with resident-only timings
    labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are
