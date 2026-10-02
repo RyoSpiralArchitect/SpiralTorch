@@ -1,0 +1,139 @@
+{
+  "study_id": "2d5860c91905b26b6b29e729b94cfa9c710bb11ade2e4125f827c778a89c3954",
+  "status": "completed",
+  "runs": {
+    "41:tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-rbukg7_8.pt",
+        "sha256": "2cbf58f898d2aea6e894d0070f1d574eb1870388270d03331c37e5f0f12c7acc"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:elliptic": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-ajm6hbb4.pt",
+        "sha256": "2076a344287d2e3ad0826ade84a69ec0d7ff8a83b9bf5e0f4685908fd80ed986"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:causal_tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-vdd7yqu6.pt",
+        "sha256": "cc991a3369b733699464858d65c3ae09a9162e46595f27ba4a8f605ad79133bf"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:causal_elliptic": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-aggqiys4.pt",
+        "sha256": "f0c6cf16a232016850fb045bf4ff6b0b13fea8c8113e550cf50bf8e98aa463d9"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-ge1zj318.pt",
+        "sha256": "707187649e6f505139f3e02a5ddd17b0308aae297e547eab650ff11e6a1e471b"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:elliptic": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-chvklyyr.pt",
+        "sha256": "2d96b96d4885f6f1ee2ab03b6a0e774dd81a8e16a386f779c64fe70799566526"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:causal_tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-hjfyfx68.pt",
+        "sha256": "c23842ea7b9d55569e4f6eafc5111b00279bcbd4795beb03373af0a898d57ab7"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:causal_elliptic": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-lxrbghjq.pt",
+        "sha256": "2fdc2b3eb3aa34cc04e8c672f80084f15b4b98b8e9bcf965e2278bed6ddcd3a6"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-h4xcfx1f.pt",
+        "sha256": "20380d7cb344e3c734a1a757bdc1deb9718c20cb1503256c3227259b2981c4a8"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:elliptic": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-haz235d2.pt",
+        "sha256": "b7b3a60e9c2f059a4d0773167f15b70bb9634f923d44e25edfeaa13189500063"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:causal_tangent": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-5tb1vrtv.pt",
+        "sha256": "d48031a103fcaedf069d8cca8a697cdae1c73fe1f01b81cc31c613f42fca4f48"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:causal_elliptic": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-oekuapa_.pt",
+        "sha256": "638bdea6719d87a12868cfef4fedbbf846df62adcbaa593821ddb6a2702a9cd9"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    }
+  },
+  "results_sha256": "d7b0ff56b3573c8e9d0a4f790aa95b043a145030afe56f3d302a13729184cd8f"
+}

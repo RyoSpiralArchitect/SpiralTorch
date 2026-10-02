@@ -1,0 +1,472 @@
+{
+  "schema": "spiraltorch.elliptic_causal_summary.v1",
+  "study_id": "2d5860c91905b26b6b29e729b94cfa9c710bb11ade2e4125f827c778a89c3954",
+  "steps_per_run": 512,
+  "runs": 12,
+  "primary_updates": 6144,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "tangent": {
+          "mean_ce": 3.566816002792782,
+          "mean_delta_vs_baseline": -0.5068972660435573,
+          "mean_delta_vs_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.568681957324346,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.56787139972051,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.563894651333491,
+              "delta_vs_tangent": 0.0
+            }
+          ]
+        },
+        "elliptic": {
+          "mean_ce": 3.7173868000507357,
+          "mean_delta_vs_baseline": -0.3563264687856038,
+          "mean_delta_vs_tangent": 0.1505707972579534,
+          "paired_delta_sample_sd": 0.0195322451282447,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7417838613192242,
+              "delta_vs_tangent": 0.17310190399487846
+            },
+            {
+              "seed": 43,
+              "ce": 3.7062988499800364,
+              "delta_vs_tangent": 0.13842745025952663
+            },
+            {
+              "seed": 47,
+              "ce": 3.704077688852946,
+              "delta_vs_tangent": 0.14018303751945504
+            }
+          ]
+        },
+        "causal_tangent": {
+          "mean_ce": 3.600875704156028,
+          "mean_delta_vs_baseline": -0.4728375646803116,
+          "mean_delta_vs_tangent": 0.034059701363245765,
+          "paired_delta_sample_sd": 0.004343440375559937,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.599825499455134,
+              "delta_vs_tangent": 0.031143542130788404
+            },
+            {
+              "seed": 43,
+              "ce": 3.6069229443868003,
+              "delta_vs_tangent": 0.03905154466629046
+            },
+            {
+              "seed": 47,
+              "ce": 3.5958786686261495,
+              "delta_vs_tangent": 0.03198401729265843
+            }
+          ]
+        },
+        "causal_elliptic": {
+          "mean_ce": 3.7649818148877885,
+          "mean_delta_vs_baseline": -0.30873145394855106,
+          "mean_delta_vs_tangent": 0.19816581209500628,
+          "paired_delta_sample_sd": 0.004782930811914239,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.771622562408447,
+              "delta_vs_tangent": 0.2029406050841014
+            },
+            {
+              "seed": 43,
+              "ce": 3.7612461845080056,
+              "delta_vs_tangent": 0.1933747847874958
+            },
+            {
+              "seed": 47,
+              "ce": 3.7620766977469127,
+              "delta_vs_tangent": 0.19818204641342163
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "tangent": {
+          "mean_ce": 3.673727867503961,
+          "mean_delta_vs_baseline": -0.3380796189109483,
+          "mean_delta_vs_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.6978732869029045,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.6693658530712128,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.6539444625377655,
+              "delta_vs_tangent": 0.0
+            }
+          ]
+        },
+        "elliptic": {
+          "mean_ce": 3.759478154281775,
+          "mean_delta_vs_baseline": -0.25232933213313435,
+          "mean_delta_vs_tangent": 0.08575028677781422,
+          "paired_delta_sample_sd": 0.014134291495017007,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7693303525447845,
+              "delta_vs_tangent": 0.07145706564188004
+            },
+            {
+              "seed": 43,
+              "ce": 3.7554395496845245,
+              "delta_vs_tangent": 0.08607369661331177
+            },
+            {
+              "seed": 47,
+              "ce": 3.7536645606160164,
+              "delta_vs_tangent": 0.09972009807825089
+            }
+          ]
+        },
+        "causal_tangent": {
+          "mean_ce": 3.7105873053272567,
+          "mean_delta_vs_baseline": -0.3012201810876527,
+          "mean_delta_vs_tangent": 0.03685943782329559,
+          "paired_delta_sample_sd": 0.03815883780935292,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7142829596996307,
+              "delta_vs_tangent": 0.016409672796726227
+            },
+            {
+              "seed": 43,
+              "ce": 3.6826499924063683,
+              "delta_vs_tangent": 0.013284139335155487
+            },
+            {
+              "seed": 47,
+              "ce": 3.7348289638757706,
+              "delta_vs_tangent": 0.08088450133800507
+            }
+          ]
+        },
+        "causal_elliptic": {
+          "mean_ce": 3.782360369960467,
+          "mean_delta_vs_baseline": -0.2294471164544425,
+          "mean_delta_vs_tangent": 0.10863250245650609,
+          "paired_delta_sample_sd": 0.016816506683247967,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7898879051208496,
+              "delta_vs_tangent": 0.0920146182179451
+            },
+            {
+              "seed": 43,
+              "ce": 3.777607910335064,
+              "delta_vs_tangent": 0.10824205726385117
+            },
+            {
+              "seed": 47,
+              "ce": 3.7795852944254875,
+              "delta_vs_tangent": 0.12564083188772202
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "Seeds vary paired projection initialization and minibatch order; both are identical across all four arms within a seed.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "The 2x2 factors are tangent/elliptic features and pointwise/causal tied-QKV mixing. All arms have 8450 trainable parameters, not equal expressivity or compute.",
+    "Causal scores are feature dot products divided by 3, not geodesic distances. Only full unpadded contexts are admitted; model KV cache is disabled.",
+    "Geometry owns both features and backward in Rust. The ordinary causal control uses explicit Torch attention with f64 intermediates; parity is tolerance-based, not bitwise execution identity.",
+    "Compare elliptic minus tangent separately within pointwise and causal paths; compare causal minus pointwise within each map. Report their difference-in-differences per seed, without claiming significance.",
+    "Pride and Alice endpoints have already been inspected. This is exploratory reuse, not pristine held-out confirmation.",
+    "The pointwise arms are rerun under this exact native/runtime/source binding; historical outcomes are references, not replacements for paired runs.",
+    "No speed advantage, resident WGPU execution, padding-mask or KV-cache support is claimed.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "paired_factorial_contrasts": {
+    "pride_unused_tail": {
+      "geometry_pointwise": {
+        "weights": {
+          "elliptic": 1,
+          "tangent": -1
+        },
+        "mean_ce_difference": 0.1505707972579534,
+        "paired_sample_sd": 0.0195322451282447,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.17310190399487846
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.13842745025952663
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.14018303751945504
+          }
+        ]
+      },
+      "geometry_causal": {
+        "weights": {
+          "causal_elliptic": 1,
+          "causal_tangent": -1
+        },
+        "mean_ce_difference": 0.1641061107317605,
+        "paired_sample_sd": 0.008922763753549525,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.17179706295331298
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.15432324012120535
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.1661980291207632
+          }
+        ]
+      },
+      "mixing_tangent": {
+        "weights": {
+          "causal_tangent": 1,
+          "tangent": -1
+        },
+        "mean_ce_difference": 0.034059701363245765,
+        "paired_sample_sd": 0.004343440375559937,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.031143542130788404
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.03905154466629046
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.03198401729265843
+          }
+        ]
+      },
+      "mixing_elliptic": {
+        "weights": {
+          "causal_elliptic": 1,
+          "elliptic": -1
+        },
+        "mean_ce_difference": 0.0475950148370529,
+        "paired_sample_sd": 0.015452934593227045,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.02983870108922293
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.05494733452796918
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.057999008893966586
+          }
+        ]
+      },
+      "interaction": {
+        "weights": {
+          "causal_elliptic": 1,
+          "causal_tangent": -1,
+          "elliptic": -1,
+          "tangent": 1
+        },
+        "mean_ce_difference": 0.013535313473807134,
+        "paired_sample_sd": 0.013812031005320339,
+        "negative_seeds": 1,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0013048410415654743
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.015895789861678722
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.026014991601308157
+          }
+        ]
+      }
+    },
+    "alice_transfer": {
+      "geometry_pointwise": {
+        "weights": {
+          "elliptic": 1,
+          "tangent": -1
+        },
+        "mean_ce_difference": 0.08575028677781422,
+        "paired_sample_sd": 0.014134291495017007,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.07145706564188004
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.08607369661331177
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.09972009807825089
+          }
+        ]
+      },
+      "geometry_causal": {
+        "weights": {
+          "causal_elliptic": 1,
+          "causal_tangent": -1
+        },
+        "mean_ce_difference": 0.0717730646332105,
+        "paired_sample_sd": 0.025319208649214133,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.07560494542121887
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.09495791792869568
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.04475633054971695
+          }
+        ]
+      },
+      "mixing_tangent": {
+        "weights": {
+          "causal_tangent": 1,
+          "tangent": -1
+        },
+        "mean_ce_difference": 0.03685943782329559,
+        "paired_sample_sd": 0.03815883780935292,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.016409672796726227
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.013284139335155487
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.08088450133800507
+          }
+        ]
+      },
+      "mixing_elliptic": {
+        "weights": {
+          "causal_elliptic": 1,
+          "elliptic": -1
+        },
+        "mean_ce_difference": 0.022882215678691864,
+        "paired_sample_sd": 0.0027519302292216045,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.020557552576065063
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.022168360650539398
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.02592073380947113
+          }
+        ]
+      },
+      "interaction": {
+        "weights": {
+          "causal_elliptic": 1,
+          "causal_tangent": -1,
+          "elliptic": -1,
+          "tangent": 1
+        },
+        "mean_ce_difference": -0.01397722214460373,
+        "paired_sample_sd": 0.035574301253408255,
+        "negative_seeds": 1,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.004147879779338837
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.008884221315383911
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.054963767528533936
+          }
+        ]
+      }
+    }
+  },
+  "input_sha256": {
+    "plan": "ec96bd52de101ab6e1d0e88768ccb3e406894326bbe5ddf386b15c16ff1fa39c",
+    "results": "d7b0ff56b3573c8e9d0a4f790aa95b043a145030afe56f3d302a13729184cd8f",
+    "journal": "0f00780bbad12cac0a7c2be10dd3f285eb2e177ea2e8f9bb07ff1056dabe76a7"
+  }
+}

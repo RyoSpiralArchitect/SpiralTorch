@@ -109,3 +109,6 @@ comparison must distinguish causal mixing from geometry itself: include pointwis
 and causal ordinary controls, pair initialization/data, and label reused evaluation
 sets exploratory. Speed comparisons must use the same mathematics, not compare
 this richer map to a different simpler model and call the difference overhead.
+
+The [paired 2x2 study](elliptic_causal_study.md) implements that next comparison
+with a fixed recipe, ordinary causal control and the shared restartable HF loop.
