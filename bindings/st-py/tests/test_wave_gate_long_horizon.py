@@ -6,10 +6,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import spiraltorch as st
 
 pytest.importorskip("fcntl")
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
+pytestmark = pytest.mark.skipif(
+    not hasattr(st, "WaveGateKernel"), reason="native WaveGate kernel required"
+)
 
 
 @pytest.fixture

@@ -18,5 +18,13 @@
     "This receipt validates restart/gating behavior, not completion or quality of the live 512-step experiment.",
     "Native Rust/WASM mathematics are reused unchanged from the preceding radius study.",
     "The first test draft compared different batch shapes; after matching batch shape, causal CE agreement passes without broadening tolerance."
-  ]
+  ],
+  "optional_native_test_guard": {
+    "passed": 47,
+    "failed": 0,
+    "skipped": 0,
+    "test_file_sha256": "a88080cc131e4e61e9cd37f3406c50c985fa2ef992785da6c7748bf39e7b33e8",
+    "local_test_log_sha256": "88da8f352fe5957ca5ac2bcc115e181f1c7f4899aa4357d731244dd2fb0bad2d",
+    "scope": "Test collection only; frozen training source and protocol remain unchanged."
+  }
 }
