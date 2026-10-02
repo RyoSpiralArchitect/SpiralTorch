@@ -24,8 +24,18 @@ effective_strength = base_strength * schedule_scale * normalization_scale
 - These are microbatch reductions. Trainer averages the combined loss over an
   accumulation group; this is not a token-weighted global average across
   unequal masked microbatches or ranks. Stock Trainer can normalize its base
-  loss differently in that case. Keep valid-label counts matched when making
-  ordinary-FT comparisons, or explicitly match the base-loss reduction.
+  loss differently in that case. Matching fixed lengths alone is insufficient:
+  Transformers 4.57.6 can count the unpredicted first label in its accumulated
+  denominator. For matched ordinary FT, use `--causal-lm-mask-first-label` in
+  **every arm** and verify uniform shifted-label counts, or explicitly match
+  another base-loss reduction. This opt-in flag preserves existing defaults.
+
+`st.HfCausalLabelAlignmentCollator(base_collator)` masks only label position zero
+as `-100`, on a clone, before Trainer counts labels and before Rust candidate
+planning. Causal model loss already ignores that position, so target tokens and
+the candidate planner are unchanged. This HF label transport adapter is not
+appropriate for pre-shifted labels, masked-LM or encoder-decoder objectives.
+It does not equalize global token averages and unequal masked microbatch means.
 
 `constant` has schedule scale 1. `linear_decay` has scale 1 through
 `start_update`, interpolates to `final_scale` at `end_update`, and holds that
