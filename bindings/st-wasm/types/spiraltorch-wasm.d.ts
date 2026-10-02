@@ -21,10 +21,21 @@ declare module "spiraltorch-wasm" {
         free(): void;
     }
     export class EllipticLearningBatch {
+        chartStep(proposal: Float32Array, relativeDamping: number): EllipticChartStep;
         private constructor();
         readonly features: Float32Array;
         vjp(upstream: Float32Array): Float32Array;
         jvp(tangent: Float32Array): Float32Array;
+        free(): void;
+    }
+    export class EllipticChartStep {
+        private constructor();
+        readonly values: Float32Array;
+        readonly metric: Float64Array;
+        readonly dampedCondition: number;
+        readonly proposalL2: number;
+        readonly stepL2: number;
+        readonly cosine: number | undefined;
         free(): void;
     }
     /** Immutable causal snapshot with all tied query/key/value derivatives. */

@@ -1,0 +1,39 @@
+{
+  "schema": "spiraltorch.elliptic_chart_step_review_validation.v1",
+  "status": "completed",
+  "scope": "Read-only post-review receipt validation, not retraining or endpoint reevaluation",
+  "original_publication_revision": "22e24597b83ae29a469fa97f2d1eb3dae06fa9bc",
+  "training_rerun": false,
+  "endpoints_reevaluated": false,
+  "summary_byte_unchanged": true,
+  "original_artifact_sha256": {
+    "checkpoint-verification.json": "3d0e091e01019bbf8f223121e1a3c612743ba6ac33cc6a73a2789fa373468321",
+    "journal.json": "8f97c5f5f683d440a077119823dffde6865143ce5748b2acbd1bb59fde8c3d8e",
+    "plan.json.gz": "878a21dcdbc8d9c830d734241d06e1692afefffa2f5ecfeb3f3a2c4cadd03f1d",
+    "preflight.json": "ccf277a674e5a9a493524dda7b796c85f19e6486d8e8e227560604c0a2e33d99",
+    "results.json.gz": "106549d0f67d070d3641fb363a12fbc7a8a5293984f1d1619cce30c134222d38",
+    "summary.json": "40c87968f165b0de7f8734892e2fe1c85c526d5ac53cf1a844ba038a5d41f7a9",
+    "validation.json": "763d0654f3cf2ed97250b68b241032a62c6ed86a191b1164511f0c19acfcb3d7"
+  },
+  "checks": {
+    "applied_norm_relative_tolerance": 0.00002,
+    "applied_norm_absolute_tolerance": 0,
+    "normalized_gram_determinant_tolerance": 1.4210854715202004e-14,
+    "condition_relative_tolerance": 0.000001,
+    "configured_damping_required": true
+  },
+  "tests": {
+    "summary_passed": 78,
+    "related_python_passed": 240,
+    "skipped": 0,
+    "exit_code": 0
+  },
+  "source_sha256": {
+    "tools/summarize_wave_gate_long_horizon.py": "8de12cacb5868019dc9f720659e03daeaf95b97fb06ae7a8c4c03743fc575c4e",
+    "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "65ac98816cbe2b4da3b172e241581eaefeca068990e3ea0f30f2a13671a84800"
+  },
+  "local_log_sha256": {
+    "review-summary-tests.log": "b9e751529f0a9bf49e8a85ca2ce0e68154b8b7a7089ccc5f4df89350c3bae64a",
+    "review-full-tests.log": "84343afa35a7897ad60003b6fbdf3f2c3662dff99d0325579e4e692988c5698e"
+  }
+}

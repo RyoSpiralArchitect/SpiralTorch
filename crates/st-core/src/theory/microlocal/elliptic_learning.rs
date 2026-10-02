@@ -16,6 +16,12 @@ pub enum EllipticLearningError {
     InvalidTangent,
     #[error("elliptic JVP result is not finite")]
     NonFiniteTangent,
+    #[error("elliptic chart step needs nonempty finite two-row proposals (at most 131072 values)")]
+    InvalidProposal,
+    #[error("elliptic chart metric needs nonempty rows and positive finite trace")]
+    InvalidMetric,
+    #[error("elliptic chart step cannot be represented as finite nonzero f32 values")]
+    InvalidStep,
     #[error("elliptic VJP result is not finite")]
     NonFiniteGradient,
     #[error("elliptic learning output is not finite")]
@@ -34,6 +40,18 @@ pub struct EllipticLearningBatch {
     telemetry: Vec<EllipticTelemetry>,
 }
 
+/// Explicit optimizer proposal, not a replacement for the map's derivatives.
+#[derive(Clone, Debug)]
+pub struct EllipticChartStep {
+    pub values: Vec<f32>,
+    /// Mean J_chart^T J_chart in row-major order, before relative damping.
+    pub metric: [f64; 4],
+    pub damped_condition: f64,
+    pub proposal_l2: f64,
+    pub step_l2: f64,
+    pub cosine: Option<f64>,
+}
+
 impl EllipticLearningBatch {
     pub fn features(&self) -> &[f32] {
         &self.features
@@ -41,6 +59,99 @@ impl EllipticLearningBatch {
 
     pub fn telemetry(&self) -> &[EllipticTelemetry] {
         &self.telemetry
+    }
+
+    /// Precondition a row-major [2, C] proposal using the mean feature pullback
+    /// of coordinates 1 and 2 in the fixed-first-coordinate chart. Preserve the
+    /// proposal's global L2 norm, up to f32 rounding. This omits input covariance
+    /// and the downstream readout/loss; it is not a full parameter-space metric.
+    pub fn chart_step(
+        &self,
+        proposal: &[f32],
+        relative_damping: f32,
+    ) -> Result<EllipticChartStep, EllipticLearningError> {
+        if !(1e-6..=1.0).contains(&relative_damping) {
+            return Err(EllipticLearningError::Configuration);
+        }
+        if proposal.is_empty()
+            || proposal.len() > 131_072
+            || !proposal.len().is_multiple_of(2)
+            || proposal.iter().any(|v| !v.is_finite())
+        {
+            return Err(EllipticLearningError::InvalidProposal);
+        }
+        if self.differentials.is_empty() {
+            return Err(EllipticLearningError::InvalidMetric);
+        }
+        let (mut a, mut b, mut c) = (0.0, 0.0, 0.0);
+        for differential in &self.differentials {
+            for row in differential.jacobian() {
+                let (x, y) = (f64::from(row[1]), f64::from(row[2]));
+                a += x * x;
+                b += x * y;
+                c += y * y;
+            }
+        }
+        let count = self.differentials.len() as f64;
+        let metric = [a / count, b / count, b / count, c / count];
+        let scale = (a + c) * 0.5;
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(EllipticLearningError::InvalidMetric);
+        }
+        let damping = f64::from(relative_damping);
+        let (a, b, c) = (a / scale + damping, b / scale, c / scale + damping);
+        let largest = ((a + c) + (a - c).hypot(2.0 * b)) * 0.5;
+        let determinant = a * c - b * b;
+        if !determinant.is_finite() || determinant <= 0.0 {
+            return Err(EllipticLearningError::InvalidMetric);
+        }
+        let norm = |values: &[f32]| {
+            values
+                .iter()
+                .map(|&v| f64::from(v).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        };
+        let proposal_l2 = norm(proposal);
+        let mut values = proposal.to_vec();
+        if proposal_l2 > 0.0 {
+            let columns = proposal.len() / 2;
+            let mut raw = vec![0.0; proposal.len()];
+            for i in 0..columns {
+                let (x, y) = (f64::from(proposal[i]), f64::from(proposal[columns + i]));
+                // The positive inverse determinant cancels during normalization.
+                raw[i] = c * x - b * y;
+                raw[columns + i] = a * y - b * x;
+            }
+            let raw_l2 = raw.iter().map(|v| v * v).sum::<f64>().sqrt();
+            if !raw_l2.is_finite() || raw_l2 == 0.0 {
+                return Err(EllipticLearningError::InvalidStep);
+            }
+            for (out, raw) in values.iter_mut().zip(raw) {
+                *out = (raw * (proposal_l2 / raw_l2)) as f32;
+            }
+        }
+        let step_l2 = norm(&values);
+        if values.iter().any(|v| !v.is_finite()) || (proposal_l2 > 0.0 && step_l2 == 0.0) {
+            return Err(EllipticLearningError::InvalidStep);
+        }
+        let cosine = (proposal_l2 > 0.0).then(|| {
+            (values
+                .iter()
+                .zip(proposal)
+                .map(|(&a, &b)| f64::from(a) * f64::from(b))
+                .sum::<f64>()
+                / (proposal_l2 * step_l2))
+                .clamp(-1.0, 1.0)
+        });
+        Ok(EllipticChartStep {
+            values,
+            metric,
+            damped_condition: largest * largest / determinant,
+            proposal_l2,
+            step_l2,
+            cosine,
+        })
     }
 
     /// Apply the saved differential to a 3D input direction per row. This is
