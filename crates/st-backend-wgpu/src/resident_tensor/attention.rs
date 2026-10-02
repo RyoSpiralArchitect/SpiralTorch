@@ -86,7 +86,7 @@ fn preflight(spec: AttentionSpec, limits: &wgpu::Limits) -> Result<[u32; 2], Ten
         || limits.max_storage_buffers_per_shader_stage < 7
         || limits.max_uniform_buffers_per_shader_stage < 1
         || limits.max_uniform_buffer_binding_size < 32
-        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 4) * 4
+        || limits.max_compute_workgroup_storage_size < (256 * 2 + 64 + 10) * 4
     {
         return Err(TensorError::Limit(
             "attention pipeline (head dimension <= 256)",

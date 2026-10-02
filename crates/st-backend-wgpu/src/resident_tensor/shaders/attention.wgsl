@@ -23,8 +23,8 @@ var<workgroup> accum: array<f32, 256>;
 var<workgroup> partials: array<f32, 64>;
 var<workgroup> running_max: f32;
 var<workgroup> running_sum: f32;
-var<workgroup> alpha: f32;
-var<workgroup> weight: f32;
+var<workgroup> alpha: array<f32, 4>;
+var<workgroup> weight: array<f32, 4>;
 
 fn checked(x: f32) -> f32 {
     if ((bitcast<u32>(x) & 0x7f800000u) == 0x7f800000u) {
@@ -52,34 +52,47 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     workgroupBarrier();
     var visible = params.keys;
     if ((params.flags & 4u) != 0u) { visible = params.query_offset + query + 1u; }
-    for (var k = 0u; k < visible; k += 1u) {
+    // Four independent 16-lane dot products amortize workgroup barriers.
+    // The online normalization and value accumulation retain key order.
+    let key_slot = lane / 16u;
+    let dot_lane = lane % 16u;
+    for (var first = 0u; first < visible; first += 4u) {
+        let k = first + key_slot;
         let key_row = context * params.keys + k;
         var dot = 0.0;
-        for (var i = lane; i < d; i += 64u) {
-            dot = checked(dot + checked(shared_q[i] * keys[key_row * d + i]));
+        if (k < visible) {
+            for (var i = dot_lane; i < d; i += 16u) {
+                dot = checked(dot + checked(shared_q[i] * keys[key_row * d + i]));
+            }
         }
         partials[lane] = dot;
         workgroupBarrier();
-        for (var stride = 32u; stride > 0u; stride >>= 1u) {
-            if (lane < stride) { partials[lane] = checked(partials[lane] + partials[lane + stride]); }
+        for (var stride = 8u; stride > 0u; stride >>= 1u) {
+            if (dot_lane < stride) { partials[lane] = checked(partials[lane] + partials[lane + stride]); }
             workgroupBarrier();
         }
         if (lane == 0u) {
-            var score = checked(partials[0] * params.scale);
-            if ((params.flags & 1u) != 0u) { score = checked(score + z_bias[key_row]); }
-            if ((params.flags & 2u) != 0u) { score = checked(score + pair_bias[row * params.keys + k]); }
-            let next_max = max(running_max, score);
-            let previous = running_sum * exp(running_max - next_max);
-            let current = exp(score - next_max);
-            let sum = checked(previous + current);
-            alpha = checked(previous / sum);
-            weight = checked(current / sum);
-            running_sum = sum;
-            running_max = next_max;
+            for (var slot = 0u; slot < min(4u, visible - first); slot += 1u) {
+                let key_index = first + slot;
+                var score = checked(partials[slot * 16u] * params.scale);
+                if ((params.flags & 1u) != 0u) { score = checked(score + z_bias[context * params.keys + key_index]); }
+                if ((params.flags & 2u) != 0u) { score = checked(score + pair_bias[row * params.keys + key_index]); }
+                let next_max = max(running_max, score);
+                let previous = running_sum * exp(running_max - next_max);
+                let current = exp(score - next_max);
+                let sum = checked(previous + current);
+                alpha[slot] = checked(previous / sum);
+                weight[slot] = checked(current / sum);
+                running_sum = sum;
+                running_max = next_max;
+            }
         }
         workgroupBarrier();
         for (var i = lane; i < d; i += 64u) {
-            accum[i] = checked(accum[i] * alpha + values[key_row * d + i] * weight);
+            for (var slot = 0u; slot < min(4u, visible - first); slot += 1u) {
+                let value_row = context * params.keys + first + slot;
+                accum[i] = checked(accum[i] * alpha[slot] + values[value_row * d + i] * weight[slot]);
+            }
         }
         workgroupBarrier();
     }
