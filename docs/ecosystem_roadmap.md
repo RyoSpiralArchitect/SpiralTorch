@@ -78,11 +78,16 @@ silently inserted into the production adapter. Whether this helps actual LM
 optimization remains a matched-training question, not a concluded quality win.
 
 The [chart-step study](../benchmarks/results/2026-10-03-elliptic-chart-step-study/README.md)
-has now launched four matched arms across three seeds. Rust's mean two-coordinate
+now completes four matched arms across three seeds. Rust's mean two-coordinate
 metric corrects an explicit Adam proposal while preserving that proposal's norm;
 ordinary tangent receives the same optimizer treatment as the geometric arm.
-The code/native runtime and 512-update protocol are frozen before training.
-Preflight passes, but training outcomes and a quality conclusion remain pending.
+All twelve 512-update runs and exact continuations pass. The correction changes
+elliptic directions substantially (mean cosine 0.531-0.561), but mean CE changes
+by +0.001270 on Pride and -0.003290 on Alice versus ordinary elliptic Adam, with
+only one improving seed per set. Tangent remains better in every seed. Six Adam
+controls exactly reproduce their historical states; this is not independent
+replication. Keep the correction explicit and experimental rather than making
+it a default or claiming that a mean chart metric fixes the remaining gap.
 
 ## Restarted execution slice: vision across Rust, Python, and browser
 

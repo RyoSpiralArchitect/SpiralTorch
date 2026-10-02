@@ -83,3 +83,18 @@ reference remains ordinary Adam with the tangent map. Primary diagnostic
 contrast is chart elliptic minus Adam elliptic; also report the effect on the
 tangent control, both geometry gaps and the paired interaction. Keep all losing
 seeds. Successful numerical/continuation tests do not establish LM improvement.
+
+## Completed Comparison
+
+The [frozen three-seed study](../benchmarks/results/2026-10-03-elliptic-chart-step-study/README.md)
+completed all twelve 512-update runs with finite saved states and exact next
+updates after restore. Chart elliptic minus Adam elliptic gives +0.001270 mean
+Pride CE and -0.003290 Alice CE, with only one improving seed on each set. The
+ordinary tangent map remains better in every seed under either optimizer.
+
+Mean proposal-direction cosine of 0.531-0.561 confirms the elliptic correction
+really changes learning updates. Its limited/mixed effect does not establish
+that directional chart conditioning causes or resolves the remaining quality
+gap. The mean-metric approximation stays an explicit experimental operation;
+ordinary Adam remains the default. This result neither rejects geometry in
+general nor supports promoting this particular correction as a quality win.
