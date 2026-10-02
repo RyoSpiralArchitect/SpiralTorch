@@ -73,6 +73,10 @@ impl WaveGateLearningBatch {
         self.inner.output().data().to_vec()
     }
 
+    pub fn conditioning_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.inner.conditioning()).map_err(js_error)
+    }
+
     pub fn vjp(&self, upstream: &[f32]) -> Result<WaveGatePullback, JsValue> {
         self.inner
             .vjp(upstream)

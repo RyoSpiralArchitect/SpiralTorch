@@ -72,6 +72,30 @@ Its tiny authored corpus tests wiring, not generalization. Zero initialization
 and full-batch deterministic updates mean multiple seed labels are not
 independent experimental draws. No speed competition is attached to this probe.
 
+## On-Demand Conditioning
+
+`WaveGateLearningBatch::conditioning` describes the captured forward in Rust.
+Python and WASM expose `conditioning_json()`; Torch can request the same data
+with `wave_gate_autograd(..., return_conditioning=True)` or
+`adapter.forward_with_conditioning(x)`. Neither stores global last-call state.
+The latter returns `(x, None)` when strength is zero because no geometry executes.
+Normal calls do not compute these statistics.
+
+Counts distinguish parameter saturation from affine saturation. Row diagnostics
+include `r = norm(S(affine)) / sqrt(-curvature)` and the projection Jacobian's
+radial and tangential gains relative to its zero-norm slope: `1-tanh(r)^2`
+and `tanh(r)/r`. Both limits are one at zero. Empty row aggregates are null,
+not fabricated zeros. These are local projection gains, not full model gradient
+norms or evidence that saturation caused a change in language-model quality.
+
+The offline `hf_wave_gate_conditioning.py` example consumes a fixed configuration,
+hash-bound local corpus and cached model. It pairs minibatch schedules across
+off, tangent, WaveGate and wide-saturation arms; tracks actual parameter gradients;
+and verifies an extra next update against an adapter/Adam checkpoint loaded from
+disk. Those extra updates are validation only, not endpoint selection. Its novel
+split excludes the trailing Gutenberg notice before partitioning. The development
+partition is held out from adapter training, not necessarily from GPT-2 pretraining.
+
 ## Map And Chain Rule
 
 Let `S` be the existing open-topos porous saturation:

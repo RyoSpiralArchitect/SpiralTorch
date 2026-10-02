@@ -248,6 +248,7 @@ def main():
             "grad_input": gradients[0],
             "grad_gate": gradients[1],
             "grad_bias": gradients[2],
+            "conditioning": json.loads(batch.conditioning_json()),
         }
         print(json.dumps(report, indent=2, allow_nan=False))
         return

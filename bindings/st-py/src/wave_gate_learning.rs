@@ -68,6 +68,11 @@ impl PyWaveGateLearningBatch {
         self.inner.output().data().to_vec()
     }
 
+    fn conditioning_json(&self, py: Python<'_>) -> PyResult<String> {
+        py.detach(|| serde_json::to_string(&self.inner.conditioning()))
+            .map_err(value_error)
+    }
+
     fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, Vec<f32>, Vec<f32>)> {
         py.detach(|| self.inner.vjp(&upstream))
             .map(|vjp| {

@@ -1,5 +1,7 @@
 import copy
 import io
+import json
+from math import tanh as math_tanh
 
 import pytest
 import spiraltorch as st
@@ -87,6 +89,35 @@ def test_snapshot_ownership_and_repeatability():
         snapshot.vjp([float("nan"), 0.0])
     with pytest.raises(ValueError):
         snapshot.vjp([0.0])
+
+
+def test_conditioning_is_snapshot_local_optional_and_does_not_change_gradients():
+    kernel = st.WaveGateKernel(curvature=-1.0, saturation=10.0)
+    x = torch.tensor([[0.3, 0.4]], requires_grad=True)
+    gate = torch.ones(2, requires_grad=True)
+    bias = torch.zeros(2, requires_grad=True)
+    output, report = st.wave_gate_autograd(
+        x, gate, bias, kernel=kernel, return_conditioning=True
+    )
+    before = torch.autograd.grad(output.sum(), (x, gate, bias))
+    plain = st.wave_gate_autograd(x, gate, bias, kernel=kernel)
+    after = torch.autograd.grad(plain.sum(), (x, gate, bias))
+    assert torch.equal(output, plain)
+    assert all(torch.equal(a, b) for a, b in zip(before, after))
+    assert report["dimensionless_norm_mean"] == pytest.approx(0.5)
+    assert report["relative_radial_gain_mean"] == pytest.approx(1 - math_tanh(0.5) ** 2)
+    assert report["relative_tangential_gain_mean"] == pytest.approx(
+        math_tanh(0.5) / 0.5
+    )
+    snapshot = kernel.forward([0.3, 0.4], [1.0, 1.0], [0.0, 0.0], 1, 2)
+    assert json.loads(snapshot.conditioning_json()) == report
+    report["relative_radial_gain_mean"] = 123
+    assert json.loads(snapshot.conditioning_json())["relative_radial_gain_mean"] < 1
+    adapter = st.WaveGateAdapter(2)
+    result, identity = adapter.forward_with_conditioning(x)
+    assert torch.equal(result, x) and identity["relative_radial_gain_mean"] == 1
+    adapter.strength = 0
+    assert adapter.forward_with_conditioning(x) == (x, None)
 
 
 def test_identity_start_pointwise_causality_empty_and_noncontiguous():
