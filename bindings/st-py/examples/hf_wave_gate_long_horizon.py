@@ -164,6 +164,14 @@ def endpoint_gate(journal, plan, directory):
     return expected
 
 
+def make_adapter(arm, config, seed, factory):
+    return (
+        pilot.adapter_for(arm, config)
+        if factory is None
+        else factory(arm, config, seed)
+    )
+
+
 def run_training(
     model,
     parent,
@@ -175,6 +183,8 @@ def run_training(
     directory,
     journal,
     after_checkpoint=None,
+    *,
+    adapter_factory=None,
 ):
     config, study_id = plan["config"], plan["study_id"]
     base_hash = pilot.model_digest(model)
@@ -203,12 +213,17 @@ def run_training(
                     saved["cursor"] == config["steps"], "incomplete completed cursor"
                 )
                 continue
-            adapter = pilot.adapter_for(arm, config)
+            adapter = make_adapter(arm, config, seed, adapter_factory)
+            initial_hash = pilot.model_digest(adapter)
             optimizer = torch.optim.Adam(
                 adapter.parameters(), lr=config["learning_rate"]
             )
             cursor, records, development = 0, [], []
             if saved:
+                require(
+                    saved.get("initial_parameter_sha256") == initial_hash,
+                    "resume initialization differs",
+                )
                 adapter.load_state_dict(saved["adapter"])
                 optimizer.load_state_dict(saved["optimizer"])
                 cursor, records, development = (
@@ -286,6 +301,7 @@ def run_training(
                             "records": records,
                             "development": development,
                             "frozen_base_verified": True,
+                            "initial_parameter_sha256": initial_hash,
                         }
                         receipt = save_checkpoint(directory, payload)
                         journal["runs"][key] = {
@@ -305,7 +321,7 @@ def run_training(
                 )
                 # These two updates verify continuation, never replace the frozen endpoint.
                 pilot.update(model, adapter, optimizer, train[batches[-1]])
-                restored = pilot.adapter_for(arm, config)
+                restored = make_adapter(arm, config, seed, adapter_factory)
                 restored.load_state_dict(endpoint["adapter"])
                 resumed = torch.optim.Adam(
                     restored.parameters(), lr=config["learning_rate"]
@@ -339,7 +355,19 @@ def run_training(
     atomic_json(directory / "journal.json", journal)
 
 
-def run_endpoints(model, parent, child, original, evaluation, plan, directory, journal):
+def run_endpoints(
+    model,
+    parent,
+    child,
+    original,
+    evaluation,
+    plan,
+    directory,
+    journal,
+    *,
+    adapter_factory=None,
+    result_schema="spiraltorch.wave_gate_long_horizon.v1",
+):
     keys = endpoint_gate(journal, plan, directory)
     require(
         pilot.model_digest(model) == plan["base_parameter_sha256"],
@@ -347,7 +375,7 @@ def run_endpoints(model, parent, child, original, evaluation, plan, directory, j
     )
     config = plan["config"]
     report = {
-        "schema": "spiraltorch.wave_gate_long_horizon.v1",
+        "schema": result_schema,
         "status": "evaluating",
         "study_id": plan["study_id"],
         "baseline": {},
@@ -358,9 +386,14 @@ def run_endpoints(model, parent, child, original, evaluation, plan, directory, j
     for key in keys:
         entry = journal["runs"][key]
         saved = load_checkpoint(directory, entry["checkpoint"], plan["study_id"], key)
-        _, arm = key.split(":", 1)
-        adapter = pilot.adapter_for(arm, config)
+        seed, arm = key.split(":", 1)
+        adapter = make_adapter(arm, config, int(seed), adapter_factory)
+        require(
+            saved.get("initial_parameter_sha256") == pilot.model_digest(adapter),
+            "endpoint initialization differs",
+        )
         adapter.load_state_dict(saved["adapter"])
+        radius = getattr(adapter, "log_radius", None)
         parent.add_module(child, torch.nn.Sequential(original, adapter))
         try:
             scores = {
@@ -377,9 +410,8 @@ def run_endpoints(model, parent, child, original, evaluation, plan, directory, j
                 "records": saved["records"],
                 "development": saved["development"],
                 "parameter_count": sum(p.numel() for p in adapter.parameters()),
-                "final_log_radius": None
-                if adapter.log_radius is None
-                else float(adapter.log_radius.detach()),
+                "final_log_radius": None if radius is None else float(radius.detach()),
+                "initial_parameter_sha256": saved.get("initial_parameter_sha256"),
                 "resume_next_update_equal": entry["resume_next_update_equal"],
             }
         )
@@ -457,7 +489,13 @@ def prepare_data(tokenizer, corpus_bytes, transfer_bytes, config):
     return train, dev[development], evaluation, metadata
 
 
-def main():
+def main(
+    *,
+    arms=None,
+    adapter_factory=None,
+    adapter_sources=None,
+    result_schema="spiraltorch.wave_gate_long_horizon.v1",
+):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("config", "model-dir", "corpus", "transfer-corpus", "output-dir"):
         parser.add_argument(f"--{name}", type=Path, required=True)
@@ -465,7 +503,7 @@ def main():
     args = parser.parse_args()
     config_bytes = args.config.read_bytes()
     config = json.loads(config_bytes)
-    require(config["arms"] == ARMS, "unrecognized arms")
+    require(config["arms"] == (ARMS if arms is None else arms), "unrecognized arms")
     require(
         args.model_dir.is_dir() and args.model_dir.name == config["model_snapshot"],
         "model snapshot mismatch",
@@ -530,7 +568,14 @@ def main():
             "model_config_sha256": identity(model.config.to_dict()),
             "torch": str(torch.__version__),
             "transformers": str(transformers.__version__),
+            "result_schema": result_schema,
         }
+        if adapter_factory is not None:
+            require(bool(adapter_sources), "custom adapter sources must be bound")
+            binding["adapter_sources_sha256"] = {
+                name: pilot.digest(Path(path).read_bytes())
+                for name, path in adapter_sources.items()
+            }
         study_id = identity(binding)
         plan = {
             **binding,
@@ -576,9 +621,19 @@ def main():
             plan,
             args.output_dir,
             journal,
+            adapter_factory=adapter_factory,
         )
         run_endpoints(
-            model, parent, child, original, evaluation, plan, args.output_dir, journal
+            model,
+            parent,
+            child,
+            original,
+            evaluation,
+            plan,
+            args.output_dir,
+            journal,
+            adapter_factory=adapter_factory,
+            result_schema=result_schema,
         )
 
 

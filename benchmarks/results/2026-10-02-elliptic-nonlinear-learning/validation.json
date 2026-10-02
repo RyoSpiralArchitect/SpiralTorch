@@ -1,0 +1,76 @@
+{
+  "schema": "spiraltorch.elliptic_nonlinear_validation.v1",
+  "status": "completed",
+  "source_revision": "4227af8c36476eb4c85272dec0d5f379af1b0ec2",
+  "study_id": "45779e67f9c688c2dff5d12f3b68a8a961630785c731b62bb55164ccc6d59d45",
+  "python_tests": {
+    "passed": 68,
+    "failed": 0,
+    "skipped": 0
+  },
+  "local_test_log_sha256": "02c7cbcd5bf35edf26afb88c1037661fafd06a35a71e801a54e0f631bd45b4d8",
+  "targeted_ruff": "passed",
+  "old_wave_gate_summary_byte_exact": true,
+  "frozen_driver_sha256": "c1dc7419dea1a420fb6e444f1a50a68c37ee95bcbf6ea63b025dcb9d84c11463",
+  "frozen_helper_sha256": "bbf058df42555e190c2025f879af2170c20bf6be4763a5c6a6a6cd4ad876dece",
+  "adapter_sources_sha256": {
+    "study_adapter": "72436f02a3fe8563b9bb8d61a16b4215c3f47a44ad6bebbe662504b12bff51eb",
+    "elliptic_bridge": "6fefa5d5d6ec26a2391d18628d5bc7f85f121d668b954e1e8ff2c008b833c9c2"
+  },
+  "native_sha256": "ecbfe0cf6ca7551d6d667aab766645387cb185b3488421e007ecf832e737af8a",
+  "protocol_sha256": "57f7d439b6da5b33db5807e6d970423d55cea3e47c2dab0c28b8a7aa5169c110",
+  "notes": [
+    "Structural tests and completed experiment evidence are separate; the completion record verifies actual process termination and sealed endpoints.",
+    "Tests verify paired parameter initialization, RNG preservation, local anchor/Jacobian agreement and actual HF learning through both projections.",
+    "A tiny HF interruption in the second arm reproduces uninterrupted parameters, Adam state, histories and completed endpoints exactly.",
+    "Existing Rust math/native runtime reused without rebuild. Ordinary control math is explicitly labeled and does not replace the elliptic arm.",
+    "Reused evaluation blocks, unequal feature rank/compute, and cross-family parameter differences are declared before the run."
+  ],
+  "completion": {
+    "primary_process_exit_code": 0,
+    "completed_resume_process_exit_code": 0,
+    "runs": 9,
+    "primary_updates": 4608,
+    "extra_validation_updates": 18,
+    "all_endpoint_cursors": 512,
+    "all_parameter_counts": 8450,
+    "initial_parameters_paired_within_seed": true,
+    "all_frozen_bases_unchanged": true,
+    "all_next_adapter_and_adam_updates_equal": true,
+    "all_endpoint_checkpoint_hashes_reverified": true,
+    "all_training_losses_and_gradients_finite": true,
+    "all_runs_learn_both_projections": true,
+    "completed_resume_repeated_no_endpoints": true,
+    "result_hash_unchanged_after_completed_resume": true,
+    "results_sha256": "010b0da2303b8a3ba180ef86bd1d373022ee606c293b3905613df0b3dbf9c768",
+    "local_training_log_sha256": "d617de87d81736196ba3c5fe5af0d3295908be9c988959f4c1cc9ac5c8795abe",
+    "local_completed_resume_log_sha256": "80375b9750164f4ee2a0013dcd9970926b1dde261709f4e55743f126f58d2147",
+    "latest_python_tests": {
+      "passed": 68,
+      "failed": 0,
+      "skipped": 0,
+      "local_test_log_sha256": "eca55b408c82a03bcfc71c9e0dfa260fc54d367bea82af6b21ca9d8b0241c816",
+      "scope": "Frozen native package and current unchanged study sources; safe-path Python from the Git root, pytest importlib mode."
+    },
+    "aggregator_source_sha256": "843c2d6453b5cb2c983d7354a0c58d7d233adafeca8dc2e9dbd79082605bb7c8",
+    "public_reaggregation_byte_exact": true,
+    "local_originals_retained": true,
+    "interpretation": "Every active arm improves baseline. Elliptic beats the fixed tanh control in every seed on both sets, but tangent is best in every paired comparison. No geometric superiority, significance or speed claim."
+  },
+  "post_run_rng_guard": {
+    "pre_fix_regressions_failed": 2,
+    "post_fix_tests": {
+      "passed": 70,
+      "failed": 0,
+      "skipped": 0
+    },
+    "accelerator_seed_calls": "none in instrumented CUDA/MPS tests",
+    "explicit_cpu_construction_under_meta_default": true,
+    "all_nine_original_initial_parameter_hashes_match": true,
+    "pre_fix_log_sha256": "399d1c9784b89f7c8cdb262d2a03004552329da7949eff64ef1f72b33102f685",
+    "post_fix_log_sha256": "ab639e53de56f9a0c36700ef5c8a09c23d0df0c3c8104140b007447c604f6bde",
+    "initialization_check_log_sha256": "91a307bf2fa71ef14c96871a53c2fe827af91f3b02aa54770ebf6cc82db904fd",
+    "current_factory_sha256": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "scope": "Post-run factory isolation only. The original frozen source and completed numerical results remain unchanged."
+  }
+}

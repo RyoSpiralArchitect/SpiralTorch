@@ -117,8 +117,22 @@ def summarize(plan, result, journal, result_sha256):
             "baseline_ce": baseline[name],
             "arms": rows,
         }
+    comparison_notes = config.get(
+        "comparison_notes",
+        [
+            "Seeds vary paired sample order, not the frozen model or identity initialization.",
+            "The learned-radius arm has one extra scalar; radius 4 was selected by an earlier pilot.",
+        ],
+    )
+    require(
+        isinstance(comparison_notes, list)
+        and all(isinstance(x, str) for x in comparison_notes),
+        "invalid comparison notes",
+    )
     return {
-        "schema": "spiraltorch.wave_gate_long_horizon_summary.v1",
+        "schema": config.get(
+            "summary_schema", "spiraltorch.wave_gate_long_horizon_summary.v1"
+        ),
         "study_id": plan["study_id"],
         "steps_per_run": config["steps"],
         "runs": len(runs),
@@ -126,9 +140,11 @@ def summarize(plan, result, journal, result_sha256):
         "comparisons": comparisons,
         "interpretation": [
             "Negative cross-entropy differences favor the named arm; no significance claim.",
-            "Seeds vary paired sample order, not the frozen model or identity initialization.",
+            comparison_notes[0]
+            if comparison_notes
+            else "No seed interpretation supplied.",
             "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
-            "The learned-radius arm has one extra scalar; radius 4 was selected by an earlier pilot.",
+            *comparison_notes[1:],
             "This summary checks published receipts, not checkpoint contents or process termination.",
             "No speed or pristine-corpus generalization claim.",
         ],

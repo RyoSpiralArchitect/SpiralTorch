@@ -1,0 +1,33 @@
+{
+  "schema": "spiraltorch.elliptic_nonlinear_protocol.v1",
+  "scope": "Paired 512-update directional geometry versus tangent and ordinary tanh controls; exploratory benchmark, no speed claim",
+  "model_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "corpus_sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+  "corpus_end_marker": "*** END OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***",
+  "transfer_sha256": "7c1b30e1fa2d3c11484d5205096b7f69cacce6326a036518b3fd6676b0568999",
+  "transfer_end_marker": "*** END OF THE PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***",
+  "block": "transformer.h.0.mlp",
+  "features": 768,
+  "seeds": [41, 43, 47],
+  "arms": ["tangent", "tanh_control", "elliptic"],
+  "warp": {"curvature_radius": 1.0, "sheet_count": 2, "spin_harmonics": 1},
+  "steps": 512,
+  "batch_size": 2,
+  "block_size": 128,
+  "development_blocks": 16,
+  "transfer_blocks": 32,
+  "evaluate_every": 128,
+  "checkpoint_every": 64,
+  "learning_rate": 0.001,
+  "strength": 0.1,
+  "threads": 2,
+  "summary_schema": "spiraltorch.elliptic_nonlinear_summary.v1",
+  "comparison_notes": [
+    "Seeds vary paired projection initialization and minibatch order; both are identical across arms within a seed.",
+    "All active arms have 11*features+2 trainable parameters. Effective feature rank, expressivity and compute are not equalized.",
+    "Tanh acts on the same anchor-linearized feature displacement, not a learned unconstrained MLP or the full geometric map.",
+    "The local anchor and Jacobian agree, but feature distributions and gradient conditioning away from the anchor are not equalized.",
+    "Evaluation blocks were previously inspected in the WaveGate study. This is a reused exploratory benchmark, not a pristine held-out confirmation.",
+    "These arms share the preceding WaveGate study's update budget but use 8450 rather than 1536/1537 parameters; cross-family differences are not a parameter-matched victory."
+  ]
+}

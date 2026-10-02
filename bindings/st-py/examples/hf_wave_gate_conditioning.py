@@ -144,7 +144,10 @@ def update(model, adapter, optimizer, batch):
     if not torch.isfinite(loss):
         raise ValueError("nonfinite training loss")
     loss.backward()
-    record = {"loss": float(loss.detach()), "conditioning": adapter.last_conditioning}
+    record = {
+        "loss": float(loss.detach()),
+        "conditioning": getattr(adapter, "last_conditioning", None),
+    }
     for name, parameter in adapter.named_parameters():
         if parameter.grad is None or not torch.isfinite(parameter.grad).all():
             raise ValueError(f"invalid {name} gradient")
