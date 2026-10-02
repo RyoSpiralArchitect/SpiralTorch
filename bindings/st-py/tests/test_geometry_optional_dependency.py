@@ -50,6 +50,7 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                     raise AssertionError(name + ' did not reject missing PyTorch')
             # Native snapshots remain usable without the optional AD client.
             assert st.FractionalGlKernel().forward([1.0], [1], 0, 0.5).output == [1.0]
+            assert st.FractionalGlKernel().forward_history([1.0], [1], 0, 0.5).output == [0.0]
         """)
         completed = subprocess.run(
             [

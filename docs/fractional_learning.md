@@ -95,6 +95,76 @@ tensor-valued boundary. Save `adapter.state_dict()` **and** the optimizer state;
 the adapter's extra state preserves the GL recipe, dimensions and strength.
 It does not save the base model, trainer cursor, RNG or data lineage.
 
+## Independent Local And History Gates
+
+The full-GL adapter ties its current-feature and past-feature contributions to
+one gate. `FractionalHistoryAdapter` instead keeps an ordinary local gate and
+a strictly-past GL gate independent:
+
+```text
+H_alpha(x)[t] = h^(-alpha) * sum(c[k] * x[t-k], k=1..min(t, kernel_len-1))
+local = x + strength * tanh(local_gate[F]) * x
+output = local + strength * tanh(gate[F]) * H_alpha(x)
+```
+
+Rust's `FractionalGlKernel::forward_history` removes the zero-lag coefficient
+and its **scaled alpha derivative** before convolution. It does not subtract
+two rounded tensors to obtain history. This retains small historical values
+next to large current values, avoids overflow of an unused current term, and
+accounts for the non-unit step derivative. The first time position, or every
+position for `kernel_len=1`, has zero history and zero history derivatives.
+Other lanes and future positions cannot influence it. Shape, finite-domain and
+work-budget checks are shared with `forward`; this is not an unbounded filter.
+
+Python exposes the same snapshot through `kernel.forward_history(...)` and
+`st.fractional_gl_history_autograd(x, alpha, axis=1, kernel=kernel)`. In the HF
+example above, replace the adapter constructor with:
+
+```python
+adapter = st.FractionalHistoryAdapter(
+    model.config.n_embd, initial_alpha=0.5, strength=0.1, kernel_len=32,
+).to(next(model.parameters()).device)
+```
+
+Construct it before inserting it and creating the optimizer. Both feature
+gates start at zero, so the initial function is unchanged. `gate` is the
+**history** gate; `local_gate` is the current-feature gate. With a zero history
+gate, the finite output exactly recovers the ordinary pointwise gate, while
+the history gate can still receive gradients. This is not a speed fast path:
+the history snapshot is still evaluated. The alpha gradient is zero until
+the history gate moves, regardless of the local gate. There is no surrogate
+alpha gradient. The adapter has `2*F+1` parameters, not `F+1`; it is **not a
+capacity-matched comparison** to the original adapter or a pointwise gate.
+
+Its extra-state schema is `spiraltorch.fractional_history_adapter.v1`, distinct
+from the full-GL adapter. Cross-loading those recipes raises an error instead
+of silently changing the operator. Save the optimizer state as well as the
+adapter; reconstruct the same adapter class and parameter order on resume.
+All float32, full-prefix, padding and cache restrictions below still apply.
+
+The history tests cover the independent Torch polynomial, joint input/order
+derivatives, causality, non-unit step, cancellation/overflow and empty history.
+The tiny-HF fixture exercises both gates and alpha under the actual causal
+language loss with frozen base weights and exact Adam continuation. The WASM
+fixture jointly fits local/history gates and order to a synthetic target using
+the Rust VJP, rather than a JavaScript GL implementation:
+
+```sh
+node bindings/st-wasm/tests/fractional_history.mjs <node-bindgen-module>
+```
+
+The compiled-WASM fixture's 500 updates reduced MSE from `0.0912229914` to
+`0.0002418502`, with 499 nonzero order-gradient steps after the initial zero
+gate. Final alpha was `0.8955443`, **not** the target's `0.65`: fitting the
+output with independently learned gates does not establish order recovery.
+
+These fixtures test the learning connection, not pretrained quality, unique
+parameter recovery or throughput. Independent gates are a structural
+hypothesis, not evidence that fractional history improves language modeling.
+Any pretrained comparison must retain pointwise and ordinary causal controls,
+report parameter counts and additional work, and use the same data/update
+schedule. Existing full-GL checkpoints and comparisons keep their meaning.
+
 ## WASM
 
 The same classes expose explicit float32 arrays and owned handles:
@@ -111,8 +181,9 @@ gradient.free(); saved.free(); kernel.free();
 
 `saved.jvp(inputTangent, alphaTangent)` returns a `Float32Array`. The optimizer
 and object lifetime are client-owned. JavaScript does not implement another GL
-rule. The Node test executes the actual compiled wasm32 module; browser UI and
-WebGPU execution are not claimed by that test.
+rule. `kernel.forward_history` returns the same handle type with the strictly
+past map and its own VJP/JVP. The Node test executes the actual compiled wasm32
+module; browser UI and WebGPU execution are not claimed by that test.
 
 ## Limits And Evidence
 

@@ -795,6 +795,13 @@ pub fn fracdiff_gl_nd_alpha_derivative_config(
     if config.axis >= x.ndim() {
         return Err(FracErr::Axis);
     }
+    let (_, effective_derivatives, _) = gl_coeffs_and_scaled_alpha_derivative(config)?;
+    fracdiff_gl_nd_with_coeffs(x, config.axis, &effective_derivatives, config.pad, None)
+}
+
+fn gl_coeffs_and_scaled_alpha_derivative(
+    config: FracdiffGlConfig,
+) -> Result<(Vec<f32>, Vec<f32>, f32), FracErr> {
     let (coefficients, coefficient_derivatives) =
         gl_coeffs_with_alpha_derivative(config.alpha, config.kernel_len)?;
     let (scale, scale_derivative) = config.scale.multiplier_and_alpha_derivative(config.alpha)?;
@@ -809,7 +816,7 @@ pub fn fracdiff_gl_nd_alpha_derivative_config(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    fracdiff_gl_nd_with_coeffs(x, config.axis, &effective_derivatives, config.pad, None)
+    Ok((coefficients, effective_derivatives, scale))
 }
 
 #[cfg(test)]

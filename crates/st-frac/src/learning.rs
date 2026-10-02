@@ -2,7 +2,9 @@
 
 use crate::{
     checked_f32, fracdiff_gl_nd_alpha_derivative_config, fracdiff_gl_nd_config,
-    fracdiff_gl_nd_vjp_config, validate_slice, FracErr, FracdiffGlConfig, Pad,
+    fracdiff_gl_nd_vjp_config, fracdiff_gl_nd_vjp_with_coeffs, fracdiff_gl_nd_with_coeffs,
+    gl_coeffs_and_scaled_alpha_derivative, validate_alpha, validate_slice, FracErr,
+    FracdiffGlConfig, Pad,
 };
 use ndarray::{ArrayD, IxDyn};
 
@@ -34,6 +36,8 @@ pub struct FractionalGlLearningBatch {
     config: FracdiffGlConfig,
     output: ArrayD<f32>,
     alpha_derivative: ArrayD<f32>,
+    // Some(empty) is the zero map: no coefficient or step-scale evaluation is needed.
+    history_coefficients: Option<Vec<f32>>,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +90,30 @@ impl FractionalGlKernel {
         axis: usize,
         alpha: f32,
     ) -> Result<FractionalGlLearningBatch> {
+        self.forward_part(input, shape, axis, alpha, false)
+    }
+
+    /// Strictly past contribution: omit GL's zero-lag tap before convolution.
+    /// This is `GL(x) - h^-alpha*x` mathematically, without subtractive cancellation.
+    /// A length-one kernel or selected axis returns zero with zero differentials.
+    pub fn forward_history(
+        &self,
+        input: &[f32],
+        shape: &[usize],
+        axis: usize,
+        alpha: f32,
+    ) -> Result<FractionalGlLearningBatch> {
+        self.forward_part(input, shape, axis, alpha, true)
+    }
+
+    fn forward_part(
+        &self,
+        input: &[f32],
+        shape: &[usize],
+        axis: usize,
+        alpha: f32,
+        history_only: bool,
+    ) -> Result<FractionalGlLearningBatch> {
         if shape.is_empty()
             || shape.len() > 16
             || shape.contains(&0)
@@ -102,17 +130,43 @@ impl FractionalGlKernel {
         {
             return Err(FractionalLearningError::Budget);
         }
-        let input = ArrayD::from_shape_vec(IxDyn(shape), input.to_vec())
-            .map_err(|_| FractionalLearningError::Shape)?;
         let config =
             FracdiffGlConfig::new(alpha, axis, self.kernel_len, Pad::Zero).with_step(self.step);
-        // Both operations use the shared GL recurrence, including d(h^-alpha)/dalpha.
-        let output = fracdiff_gl_nd_config(&input, config)?;
-        let alpha_derivative = fracdiff_gl_nd_alpha_derivative_config(&input, config)?;
+        if history_only && (self.kernel_len == 1 || shape[axis] == 1) {
+            validate_alpha(alpha)?;
+            validate_slice("fractional input", input)?;
+            return Ok(FractionalGlLearningBatch {
+                config,
+                output: ArrayD::zeros(IxDyn(shape)),
+                alpha_derivative: ArrayD::zeros(IxDyn(shape)),
+                history_coefficients: Some(Vec::new()),
+            });
+        }
+        let input = ArrayD::from_shape_vec(IxDyn(shape), input.to_vec())
+            .map_err(|_| FractionalLearningError::Shape)?;
+        let (output, alpha_derivative, history_coefficients) = if history_only {
+            let (mut coefficients, mut derivatives, scale) =
+                gl_coeffs_and_scaled_alpha_derivative(config)?;
+            // Remove both zero-lag terms, including the sample-spacing derivative.
+            coefficients[0] = 0.0;
+            derivatives[0] = 0.0;
+            (
+                fracdiff_gl_nd_with_coeffs(&input, axis, &coefficients, Pad::Zero, Some(scale))?,
+                fracdiff_gl_nd_with_coeffs(&input, axis, &derivatives, Pad::Zero, None)?,
+                Some(coefficients),
+            )
+        } else {
+            (
+                fracdiff_gl_nd_config(&input, config)?,
+                fracdiff_gl_nd_alpha_derivative_config(&input, config)?,
+                None,
+            )
+        };
         Ok(FractionalGlLearningBatch {
             config,
             output,
             alpha_derivative,
+            history_coefficients,
         })
     }
 }
@@ -134,7 +188,17 @@ impl FractionalGlLearningBatch {
     /// True input/shared-alpha VJP; no optimizer policy or gradient normalization.
     pub fn vjp(&self, upstream: &[f32]) -> Result<FractionalGlGradients> {
         let upstream = self.shaped(upstream)?;
-        let input = fracdiff_gl_nd_vjp_config(&upstream, self.config)?;
+        let input = match &self.history_coefficients {
+            Some(coefficients) if coefficients.is_empty() => ArrayD::zeros(self.output.raw_dim()),
+            Some(coefficients) => fracdiff_gl_nd_vjp_with_coeffs(
+                &upstream,
+                self.config.axis,
+                coefficients,
+                self.config.pad,
+                Some(self.config.scale_multiplier()?),
+            )?,
+            None => fracdiff_gl_nd_vjp_config(&upstream, self.config)?,
+        };
         let alpha = upstream
             .iter()
             .zip(self.alpha_derivative.iter())
@@ -149,7 +213,17 @@ impl FractionalGlLearningBatch {
     pub fn jvp(&self, input_tangent: &[f32], alpha_tangent: f32) -> Result<Vec<f32>> {
         validate_slice("fractional alpha tangent", &[alpha_tangent])?;
         let tangent = self.shaped(input_tangent)?;
-        let input = fracdiff_gl_nd_config(&tangent, self.config)?;
+        let input = match &self.history_coefficients {
+            Some(coefficients) if coefficients.is_empty() => ArrayD::zeros(self.output.raw_dim()),
+            Some(coefficients) => fracdiff_gl_nd_with_coeffs(
+                &tangent,
+                self.config.axis,
+                coefficients,
+                self.config.pad,
+                Some(self.config.scale_multiplier()?),
+            )?,
+            None => fracdiff_gl_nd_config(&tangent, self.config)?,
+        };
         input
             .iter()
             .zip(self.alpha_derivative.iter())

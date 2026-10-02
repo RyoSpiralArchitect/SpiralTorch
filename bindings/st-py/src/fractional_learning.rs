@@ -51,6 +51,19 @@ impl PyFractionalGlKernel {
             .map(|inner| PyFractionalGlLearningBatch { inner })
             .map_err(value_error)
     }
+
+    fn forward_history(
+        &self,
+        py: Python<'_>,
+        input: Vec<f32>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+    ) -> PyResult<PyFractionalGlLearningBatch> {
+        py.detach(|| self.inner.forward_history(&input, &shape, axis, alpha))
+            .map(|inner| PyFractionalGlLearningBatch { inner })
+            .map_err(value_error)
+    }
 }
 
 #[pymethods]

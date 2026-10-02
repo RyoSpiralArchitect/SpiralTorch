@@ -6,5 +6,7 @@ const derivative: FractionalGlGradients = batch.vjp(new Float32Array(24));
 const alpha: number = derivative.alpha;
 const dx: Float32Array = derivative.input;
 const dy: Float32Array = batch.jvp(dx, alpha);
+const history: FractionalGlLearningBatch = kernel.forward_history(dx, new Uint32Array([2,4,3]), 1, .5);
+history.free();
 void dy;
 derivative.free(); batch.free(); kernel.free();
