@@ -28,6 +28,14 @@ rule; Python/WASM own transport and orchestration, not replacement mathematics.
 Pretrained FT quality, mixed precision and resident geometric execution remain
 open, rather than being inferred from the wiring tests.
 
+The [paired novel conditioning pilot](../benchmarks/results/2026-10-02-wave-gate-pride-conditioning/README.md)
+now exercises 12 conditions and actual adapter/Adam continuation. WaveGate learns,
+but the tangent control is slightly better in all three minibatch schedules.
+No logged training input reaches elementwise saturation; relaxing its threshold
+changes nothing. Rust-owned projection-gain observations instead motivate testing
+an explicitly parameterized, learnable projection radius with a preserved initial
+gain. That next mechanism still needs matched controls; the pilot is not a win.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:
