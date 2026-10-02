@@ -115,7 +115,7 @@ fn plain_and_biased_attention_match_rust_across_heads_and_dimension_tails() {
 #[test]
 fn tiled_key_tails_cached_offsets_and_late_overflow_preserve_semantics() {
     let Some(device) = device() else { return };
-    for count in 1..=9 {
+    for count in (1..=9).chain([127, 128, 129, 131]) {
         let qs = [1, 1, 1, 17];
         let ks = [1, 1, count, 17];
         let q = data(17, 0.2);
@@ -126,7 +126,7 @@ fn tiled_key_tails_cached_offsets_and_late_overflow_preserve_semantics() {
         let k_gpu = device.upload(&ks, &k).unwrap();
         let v_gpu = device.upload(&ks, &v).unwrap();
         let pair_gpu = device.upload(&[1, 1, 1, count], &pair).unwrap();
-        for offset in 0..count {
+        for offset in (0..count).filter(|&v| v < 9 || v + 1 == count) {
             let mask = AttentionMask::Causal {
                 query_offset: offset,
             };
@@ -161,6 +161,23 @@ fn tiled_key_tails_cached_offsets_and_late_overflow_preserve_semantics() {
         unmasked.snapshot().unwrap().read(),
         Err(TensorError::NonFinite)
     ));
+}
+
+#[test]
+fn tile_selection_preserves_short_sequences_and_unmeasured_wide_heads() {
+    for (keys, dim, expected) in [
+        (32, 16, 1),
+        (127, 32, 1),
+        (128, 32, 4),
+        (129, 17, 4),
+        (256, 33, 1),
+        (256, 256, 1),
+    ] {
+        let q = [1, 1, 1, dim];
+        let k = [1, 1, keys, dim];
+        let spec = AttentionSpec::new(&q, &k, &k, 1., AttentionMask::None).unwrap();
+        assert_eq!(key_tile(spec), expected);
+    }
 }
 
 #[test]

@@ -23,7 +23,9 @@ struct Params {
 #[derive(Debug)]
 pub(crate) struct AttentionKernels {
     layout: wgpu::BindGroupLayout,
-    pipeline: wgpu::ComputePipeline,
+    pipeline_layout: wgpu::PipelineLayout,
+    module: wgpu::ShaderModule,
+    pipelines: [std::sync::OnceLock<wgpu::ComputePipeline>; 2],
     guard: guard_capture::GuardCapture,
 }
 
@@ -60,18 +62,41 @@ impl AttentionKernels {
             label: Some("attention.shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
         });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("attention.forward"),
-            layout: Some(&pipeline_layout),
-            module: &module,
-            entry_point: "forward",
-            compilation_options: Default::default(),
-        });
         Self {
             layout,
-            pipeline,
+            pipeline_layout,
+            module,
+            pipelines: Default::default(),
             guard: guard_capture::GuardCapture::new(device),
         }
+    }
+
+    fn pipeline(&self, device: &wgpu::Device, spec: AttentionSpec) -> &wgpu::ComputePipeline {
+        let tile = key_tile(spec);
+        self.pipelines[usize::from(tile == 4)].get_or_init(|| {
+            let constants =
+                std::collections::HashMap::from([("KEY_TILE".to_owned(), f64::from(tile))]);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("attention.forward"),
+                layout: Some(&self.pipeline_layout),
+                module: &self.module,
+                entry_point: "forward",
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
+            })
+        })
+    }
+}
+
+fn key_tile(spec: AttentionSpec) -> u32 {
+    // Matched full-chain measurements support this range, not short sequences
+    // or wider heads. Keep their established reduction until measured too.
+    if spec.keys() >= 128 && spec.head_dim() <= 32 {
+        4
+    } else {
+        1
     }
 }
 
@@ -252,7 +277,7 @@ impl ResidentTensor {
                 label: Some("attention.forward"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&kernels.pipeline);
+            pass.set_pipeline(kernels.pipeline(gpu, spec));
             pass.set_bind_group(0, &binding, &[]);
             pass.dispatch_workgroups(grid[0], grid[1], 1);
         }

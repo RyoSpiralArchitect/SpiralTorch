@@ -8,6 +8,7 @@ struct Params {
     query_offset: u32,
     groups_x: u32,
 };
+override KEY_TILE: u32 = 1u;
 
 @group(0) @binding(0) var<storage, read> queries: array<f32>;
 @group(0) @binding(1) var<storage, read> keys: array<f32>;
@@ -52,29 +53,30 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     workgroupBarrier();
     var visible = params.keys;
     if ((params.flags & 4u) != 0u) { visible = params.query_offset + query + 1u; }
-    // Four independent 16-lane dot products amortize workgroup barriers.
+    // Specialized to one 64-lane or four 16-lane dot products.
     // The online normalization and value accumulation retain key order.
-    let key_slot = lane / 16u;
-    let dot_lane = lane % 16u;
-    for (var first = 0u; first < visible; first += 4u) {
+    let dot_lanes = 64u / KEY_TILE;
+    let key_slot = lane / dot_lanes;
+    let dot_lane = lane % dot_lanes;
+    for (var first = 0u; first < visible; first += KEY_TILE) {
         let k = first + key_slot;
         let key_row = context * params.keys + k;
         var dot = 0.0;
         if (k < visible) {
-            for (var i = dot_lane; i < d; i += 16u) {
+            for (var i = dot_lane; i < d; i += dot_lanes) {
                 dot = checked(dot + checked(shared_q[i] * keys[key_row * d + i]));
             }
         }
         partials[lane] = dot;
         workgroupBarrier();
-        for (var stride = 8u; stride > 0u; stride >>= 1u) {
+        for (var stride = dot_lanes / 2u; stride > 0u; stride >>= 1u) {
             if (dot_lane < stride) { partials[lane] = checked(partials[lane] + partials[lane + stride]); }
             workgroupBarrier();
         }
         if (lane == 0u) {
-            for (var slot = 0u; slot < min(4u, visible - first); slot += 1u) {
+            for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
                 let key_index = first + slot;
-                var score = checked(partials[slot * 16u] * params.scale);
+                var score = checked(partials[slot * dot_lanes] * params.scale);
                 if ((params.flags & 1u) != 0u) { score = checked(score + z_bias[context * params.keys + key_index]); }
                 if ((params.flags & 2u) != 0u) { score = checked(score + pair_bias[row * params.keys + key_index]); }
                 let next_max = max(running_max, score);
@@ -89,7 +91,7 @@ fn forward(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
         }
         workgroupBarrier();
         for (var i = lane; i < d; i += 64u) {
-            for (var slot = 0u; slot < min(4u, visible - first); slot += 1u) {
+            for (var slot = 0u; slot < min(KEY_TILE, visible - first); slot += 1u) {
                 let value_row = context * params.keys + first + slot;
                 accum[i] = checked(accum[i] * alpha[slot] + values[value_row * d + i] * weight[slot]);
             }

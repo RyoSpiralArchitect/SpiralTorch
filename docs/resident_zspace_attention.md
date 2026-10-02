@@ -35,8 +35,12 @@ and broadcast views are packed on GPU if needed. Online normalized softmax
 does not allocate the quadratic score/probability matrix. A caller-supplied
 pairwise bias is still quadratic. Only explicit snapshots read values back.
 
-The portable 64-thread kernel computes four key dot products in parallel with
-16 lanes each, amortizing workgroup barriers. Online normalization and value
+For at least 128 keys and head dimension at most 32, the portable 64-thread kernel
+computes four key dot products in parallel with 16 lanes each, amortizing
+workgroup barriers. Short sequences and unmeasured wider heads retain one key
+per tile with 64 lanes. Each pipeline specialization is cached lazily. This
+bounded policy follows full-chain measurements, not a universal speed claim.
+Online normalization and value
 accumulation still visit keys in order; dot-product reduction order changes, so
 agreement is tolerance-based, not bitwise. Tail tiles and causal visibility
 must not load masked keys. This uses core WGSL, not subgroups or native-only
@@ -214,3 +218,9 @@ These are full-chain inference observations, not kernel timestamps. ST's
 non-finite guards remain enabled; Torch is not given equivalent guard kernels.
 CPU, Metal/WGPU and MPS are different routes even on one machine, and short
 wall-clock samples are noisy. No CUDA or training advantage follows from them.
+
+To check both kernel specializations in the browser, build the WASM probe above,
+place the generated benchmark fixture at
+`target/attention-chain-web/benchmark-fixture.json`, and open the same local page
+with `?suite=benchmark`. Require 18 output checks and three geometry checks. This
+larger browser run is numerical validation, not a browser timing benchmark.
