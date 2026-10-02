@@ -3,7 +3,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::IntoPyObjectExt;
 use st_core::theory::microlocal::{
-    EllipticCausalLearningBatch, EllipticLearningBatch, EllipticTelemetry, EllipticWarp,
+    EllipticCausalLearningBatch, EllipticGatedCausalLearningBatch, EllipticLearningBatch,
+    EllipticTelemetry, EllipticWarp,
 };
 
 type EllipticDifferential = (PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>);
@@ -21,6 +22,35 @@ pub struct PyEllipticLearningBatch {
 #[pyclass(name = "EllipticCausalLearningBatch", module = "spiraltorch", frozen)]
 pub struct PyEllipticCausalLearningBatch {
     inner: EllipticCausalLearningBatch,
+}
+
+#[pyclass(
+    name = "EllipticGatedCausalLearningBatch",
+    module = "spiraltorch",
+    frozen
+)]
+pub struct PyEllipticGatedCausalLearningBatch {
+    inner: EllipticGatedCausalLearningBatch,
+}
+
+#[pymethods]
+impl PyEllipticGatedCausalLearningBatch {
+    #[getter]
+    fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    #[getter]
+    fn mix(&self) -> f32 {
+        self.inner.mix()
+    }
+
+    /// Returns (orientation gradient, sum-reduced shared raw-mix gradient).
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, f32)> {
+        py.detach(|| self.inner.vjp(&upstream))
+            .map(|g| (g.orientations, g.raw_mix))
+            .map_err(value_error)
+    }
 }
 
 #[pymethods]
@@ -151,6 +181,31 @@ impl PyEllipticWarp {
             )
         })
         .map(|inner| PyEllipticCausalLearningBatch { inner })
+        .map_err(value_error)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Keep the existing causal batch keyword API.
+    #[pyo3(signature = (orientations, *, batch_size, sequence_length, raw_mix, max_rows=65_536, max_pairs=1_048_576))]
+    fn map_gated_causal_batch(
+        &self,
+        py: Python<'_>,
+        orientations: Vec<f32>,
+        batch_size: usize,
+        sequence_length: usize,
+        raw_mix: f32,
+        max_rows: usize,
+        max_pairs: usize,
+    ) -> PyResult<PyEllipticGatedCausalLearningBatch> {
+        py.detach(|| {
+            self.warp.differentiate_gated_causal_batch(
+                &orientations,
+                [batch_size, sequence_length],
+                raw_mix,
+                max_rows,
+                max_pairs,
+            )
+        })
+        .map(|inner| PyEllipticGatedCausalLearningBatch { inner })
         .map_err(value_error)
     }
 
@@ -313,6 +368,7 @@ pub fn register(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyEllipticTelemetry>()?;
     module.add_class::<PyEllipticLearningBatch>()?;
     module.add_class::<PyEllipticCausalLearningBatch>()?;
+    module.add_class::<PyEllipticGatedCausalLearningBatch>()?;
     module.add("__doc__", "Elliptic microlocal warp helpers")?;
     let _ = py;
     Ok(())

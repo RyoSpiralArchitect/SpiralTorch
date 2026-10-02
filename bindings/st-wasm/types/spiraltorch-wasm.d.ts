@@ -15,6 +15,8 @@ declare module "spiraltorch-wasm" {
         forward(orientations: Float32Array): EllipticLearningBatch;
         /** Full unpadded [batch, sequence, 3]; max_pairs bounds batch*sequence^2. */
         forwardCausal(orientations: Float32Array, batch: number, sequence: number, max_pairs: number): EllipticCausalLearningBatch;
+        /** Signed ambient correction; raw_mix is shared, finite and narrowed to f32. */
+        forwardGatedCausal(orientations: Float32Array, batch: number, sequence: number, raw_mix: number, max_pairs: number): EllipticGatedCausalLearningBatch;
         free(): void;
     }
     export class EllipticLearningBatch {
@@ -28,6 +30,20 @@ declare module "spiraltorch-wasm" {
         private constructor();
         readonly features: Float32Array;
         vjp(upstream: Float32Array): Float32Array;
+        free(): void;
+    }
+    export class EllipticGatedCausalLearningBatch {
+        private constructor();
+        readonly features: Float32Array;
+        readonly mix: number;
+        vjp(upstream: Float32Array): EllipticGatedCausalGradients;
+        free(): void;
+    }
+    export class EllipticGatedCausalGradients {
+        private constructor();
+        readonly orientations: Float32Array;
+        /** Sum over all batch/token/feature contributions, not a mean. */
+        readonly rawMix: number;
         free(): void;
     }
     /** Original Rust NN Module. Requires webgpu; inputs/outputs stay resident. */

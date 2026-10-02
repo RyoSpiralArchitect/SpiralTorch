@@ -35,7 +35,9 @@ mod elliptic_learning;
 
 use elliptic::EllipticAccumulator;
 pub use elliptic::{EllipticDifferential, EllipticTelemetry, EllipticWarp, LieFrame};
-pub use elliptic_causal::EllipticCausalLearningBatch;
+pub use elliptic_causal::{
+    EllipticCausalLearningBatch, EllipticGatedCausalGradients, EllipticGatedCausalLearningBatch,
+};
 pub use elliptic_learning::{EllipticLearningBatch, EllipticLearningError};
 
 /// Result of running an [`InterfaceGauge`] on a binary phase field.

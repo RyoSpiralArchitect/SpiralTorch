@@ -22,6 +22,8 @@ __all__ = [
     "EllipticResidualAdapter",
     "EllipticCausalResidualAdapter",
     "elliptic_causal_autograd",
+    "EllipticGatedCausalResidualAdapter",
+    "elliptic_gated_causal_autograd",
     "WaveGateAdapter",
     "wave_gate_autograd",
 ]
@@ -59,6 +61,38 @@ def _values(tensor: Any) -> list[float]:
 
 
 if torch is not None:
+
+    class _EllipticGatedCausalFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(
+            ctx: Any, warp: Any, orientation: Any, raw_mix: Any, max_pairs: int
+        ) -> Any:
+            batch, sequence, _ = orientation.shape
+            ctx.snapshot = warp.map_gated_causal_batch(
+                _values(orientation),
+                batch_size=batch,
+                sequence_length=sequence,
+                raw_mix=raw_mix.detach().item(),
+                max_pairs=max_pairs,
+            )
+            ctx.save_for_backward(orientation, raw_mix)
+            return torch.tensor(
+                ctx.snapshot.features, device=orientation.device, dtype=orientation.dtype
+            ).reshape(batch, sequence, 9)
+
+        @staticmethod
+        @torch.autograd.function.once_differentiable
+        def backward(ctx: Any, upstream: Any) -> tuple[Any, ...]:
+            orientation, raw_mix = ctx.saved_tensors
+            dx, dg = ctx.snapshot.vjp(_values(upstream))
+            return (
+                None,
+                torch.tensor(
+                    dx, device=orientation.device, dtype=orientation.dtype
+                ).reshape_as(orientation),
+                torch.tensor(dg, device=raw_mix.device, dtype=raw_mix.dtype),
+                None,
+            )
 
     class _EllipticCausalFunction(torch.autograd.Function):
         @staticmethod
@@ -189,6 +223,11 @@ def elliptic_causal_autograd(
     1/sqrt(9); no dropout, padding mask or KV cache. The complete first-order
     chart/attention VJP lives in Rust. Device tensors use explicit CPU transport.
     """
+    _causal_input(warp, orientation, max_pairs)
+    return _EllipticCausalFunction.apply(warp, orientation, max_pairs)
+
+
+def _causal_input(warp: Any, orientation: Any, max_pairs: int) -> None:
     _input(orientation)
     from . import EllipticWarp
 
@@ -205,7 +244,28 @@ def elliptic_causal_autograd(
     batch, sequence, _ = orientation.shape
     if batch * sequence > 65_536 or batch * sequence * sequence > max_pairs:
         raise ValueError("causal orientations exceed the row or score-pair budget")
-    return _EllipticCausalFunction.apply(warp, orientation, max_pairs)
+
+
+def elliptic_gated_causal_autograd(
+    warp: Any, orientation: Any, raw_mix: Any, *, max_pairs: int = 1_048_576
+) -> Any:
+    """Rust local + tanh(raw_mix) * (causal - local), including both VJPs.
+
+    The signed shared scalar controls an ambient feature correction, not a
+    manifold interpolation. Zero exactly preserves pointwise features and their
+    orientation VJP, while the gate can learn. Same full-context CPU transport
+    contract as elliptic_causal_autograd; the gate gradient is summed, not averaged.
+    """
+    _causal_input(warp, orientation, max_pairs)
+    if (
+        not isinstance(raw_mix, torch.Tensor)
+        or raw_mix.dtype != orientation.dtype
+        or raw_mix.device != orientation.device
+    ):
+        raise TypeError("raw_mix must be a float32 tensor on the input device")
+    if raw_mix.ndim != 0:
+        raise ValueError("raw_mix must be a shared scalar")
+    return _EllipticGatedCausalFunction.apply(warp, orientation, raw_mix, max_pairs)
 
 
 def wave_gate_autograd(
@@ -296,6 +356,10 @@ if torch is None:
             _require_torch()
 
     class EllipticCausalResidualAdapter:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            _require_torch()
+
+    class EllipticGatedCausalResidualAdapter:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             _require_torch()
 
@@ -560,6 +624,41 @@ else:
                 raise ValueError("incompatible causal elliptic adapter state")
             super().set_extra_state(
                 {**state, "schema": "spiraltorch.elliptic_residual_adapter.v1"}
+            )
+
+    class EllipticGatedCausalResidualAdapter(EllipticCausalResidualAdapter):
+        """Pointwise-start features with a learned signed contextual correction.
+
+        11*F+3 parameters; the zero readout starts the entire adapter at identity.
+        The new shared gate starts at zero without consuming random numbers.
+        Full unpadded contexts only; no cache, padding mask or resident GPU path.
+        """
+
+        def __init__(self, features: int, *, raw_mix: float = 0.0, **options: Any) -> None:
+            value = torch.tensor(float(raw_mix), dtype=torch.float32)
+            if not torch.isfinite(value):
+                raise ValueError("raw_mix must be finite and representable as float32")
+            super().__init__(features, **options)
+            self.raw_mix = torch.nn.Parameter(value)
+
+        def _map_features(self, orientation: Any) -> Any:
+            return elliptic_gated_causal_autograd(self._warp, orientation, self.raw_mix)
+
+        def get_extra_state(self) -> dict[str, Any]:
+            return {
+                **super().get_extra_state(),
+                "schema": "spiraltorch.elliptic_gated_causal_residual_adapter.v1",
+            }
+
+        def set_extra_state(self, state: dict[str, Any]) -> None:
+            if (
+                not isinstance(state, dict)
+                or state.get("schema")
+                != "spiraltorch.elliptic_gated_causal_residual_adapter.v1"
+            ):
+                raise ValueError("incompatible gated causal elliptic adapter state")
+            super().set_extra_state(
+                {**state, "schema": "spiraltorch.elliptic_causal_residual_adapter.v1"}
             )
 
     class ToposResonatorAdapter(torch.nn.Module):

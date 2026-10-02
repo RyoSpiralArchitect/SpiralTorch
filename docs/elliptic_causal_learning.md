@@ -112,3 +112,7 @@ this richer map to a different simpler model and call the difference overhead.
 
 The [paired 2x2 study](elliptic_causal_study.md) implements that next comparison
 with a fixed recipe, ordinary causal control and the shared restartable HF loop.
+
+Its negative result motivates the optional [learnable context correction](elliptic_gated_context.md):
+start from local features and learn a signed contextual contribution instead of
+replacing them unconditionally. This next operator does not overturn that result.

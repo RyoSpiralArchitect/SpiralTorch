@@ -4,7 +4,9 @@ use crate::utils::{js_error, js_u32};
 use js_sys::Number;
 #[cfg(target_arch = "wasm32")]
 use st_core::theory::microlocal::{
-    EllipticCausalLearningBatch as CoreCausalBatch, EllipticLearningBatch as CoreBatch,
+    EllipticCausalLearningBatch as CoreCausalBatch,
+    EllipticGatedCausalGradients as CoreGatedGradients,
+    EllipticGatedCausalLearningBatch as CoreGatedBatch, EllipticLearningBatch as CoreBatch,
     EllipticWarp,
 };
 #[cfg(target_arch = "wasm32")]
@@ -27,6 +29,53 @@ pub struct EllipticLearningBatch {
 #[wasm_bindgen]
 pub struct EllipticCausalLearningBatch {
     inner: CoreCausalBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct EllipticGatedCausalLearningBatch {
+    inner: CoreGatedBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct EllipticGatedCausalGradients {
+    inner: CoreGatedGradients,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl EllipticGatedCausalGradients {
+    #[wasm_bindgen(getter)]
+    pub fn orientations(&self) -> Vec<f32> {
+        self.inner.orientations.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = rawMix)]
+    pub fn raw_mix(&self) -> f32 {
+        self.inner.raw_mix
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl EllipticGatedCausalLearningBatch {
+    #[wasm_bindgen(getter)]
+    pub fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn mix(&self) -> f32 {
+        self.inner.mix()
+    }
+
+    pub fn vjp(&self, upstream: &[f32]) -> Result<EllipticGatedCausalGradients, JsValue> {
+        self.inner
+            .vjp(upstream)
+            .map(|inner| EllipticGatedCausalGradients { inner })
+            .map_err(js_error)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -88,6 +137,34 @@ impl EllipticWarpKernel {
                 js_u32(max_pairs.as_ref(), "max_pairs")? as usize,
             )
             .map(|inner| EllipticCausalLearningBatch { inner })
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = forwardGatedCausal)]
+    pub fn forward_gated_causal(
+        &self,
+        orientations: &[f32],
+        batch: Number,
+        sequence: Number,
+        raw_mix: Number,
+        max_pairs: Number,
+    ) -> Result<EllipticGatedCausalLearningBatch, JsValue> {
+        let raw: &JsValue = raw_mix.as_ref();
+        let raw_mix = raw
+            .as_f64()
+            .ok_or_else(|| js_error("raw_mix must be a number"))? as f32;
+        self.warp
+            .differentiate_gated_causal_batch(
+                orientations,
+                [
+                    js_u32(batch.as_ref(), "batch")? as usize,
+                    js_u32(sequence.as_ref(), "sequence")? as usize,
+                ],
+                raw_mix,
+                self.max_rows,
+                js_u32(max_pairs.as_ref(), "max_pairs")? as usize,
+            )
+            .map(|inner| EllipticGatedCausalLearningBatch { inner })
             .map_err(js_error)
     }
 }
