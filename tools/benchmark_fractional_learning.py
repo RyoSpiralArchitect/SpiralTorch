@@ -72,7 +72,9 @@ def check_result(actual, reference, *, exact):
             torch.testing.assert_close(a, b, rtol=3e-5, atol=3e-5)
     return {"max_abs_output_error": float((actual[0] - reference[0]).abs().max()),
             "abs_alpha_gradient_error": float((actual[1] - reference[1]).abs()),
-            "alpha_gradient": float(actual[1])}
+            "alpha_gradient": float(actual[1]),
+            "output_sha256": hashlib.sha256(actual[0].detach().numpy().tobytes()).hexdigest(),
+            "alpha_gradient_sha256": hashlib.sha256(actual[1].detach().numpy().tobytes()).hexdigest()}
 
 
 def main():

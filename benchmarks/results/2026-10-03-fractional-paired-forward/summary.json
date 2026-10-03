@@ -1,0 +1,641 @@
+{
+  "schema": "spiraltorch.fractional_paired_forward_comparison.v1",
+  "status": "measured_under_ambient_load",
+  "successful_processes": 24,
+  "failed_processes": 0,
+  "bit_exact_across_native_binaries": true,
+  "groups": {
+    "full-2x128x768": {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "full",
+      "versions": {
+        "baseline": {
+          "files": [
+            "baseline-full-2x128x768-repeat1.json",
+            "baseline-full-2x128x768-repeat2.json",
+            "baseline-full-2x128x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 35.183271000000005,
+              "min_process_median_ms": 34.659917,
+              "max_process_median_ms": 37.7730205,
+              "process_medians_ms": [
+                37.7730205,
+                35.183271000000005,
+                34.659917
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 22.166979,
+              "min_process_median_ms": 21.698583,
+              "max_process_median_ms": 22.9246665,
+              "process_medians_ms": [
+                22.9246665,
+                22.166979,
+                21.698583
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.6239375,
+              "min_process_median_ms": 3.4277085,
+              "max_process_median_ms": 4.093604,
+              "process_medians_ms": [
+                4.093604,
+                3.6239375,
+                3.4277085
+              ]
+            }
+          }
+        },
+        "paired": {
+          "files": [
+            "paired-full-2x128x768-repeat1.json",
+            "paired-full-2x128x768-repeat2.json",
+            "paired-full-2x128x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 30.3280005,
+              "min_process_median_ms": 29.797813,
+              "max_process_median_ms": 31.745021,
+              "process_medians_ms": [
+                31.745021,
+                30.3280005,
+                29.797813
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 16.619583499999997,
+              "min_process_median_ms": 16.4976045,
+              "max_process_median_ms": 16.680812500000002,
+              "process_medians_ms": [
+                16.619583499999997,
+                16.680812500000002,
+                16.4976045
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.631292,
+              "min_process_median_ms": 3.5818125,
+              "max_process_median_ms": 3.8114999999999997,
+              "process_medians_ms": [
+                3.8114999999999997,
+                3.5818125,
+                3.631292
+              ]
+            }
+          }
+        }
+      },
+      "observed_baseline_over_paired_selective": 1.3337866740162294,
+      "observed_paired_selective_over_torch": 4.576768681780479
+    },
+    "history-2x128x768": {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "history",
+      "versions": {
+        "baseline": {
+          "files": [
+            "baseline-history-2x128x768-repeat1.json",
+            "baseline-history-2x128x768-repeat2.json",
+            "baseline-history-2x128x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 35.573021,
+              "min_process_median_ms": 34.514250000000004,
+              "max_process_median_ms": 37.261833499999995,
+              "process_medians_ms": [
+                37.261833499999995,
+                35.573021,
+                34.514250000000004
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 21.848937499999998,
+              "min_process_median_ms": 21.658958,
+              "max_process_median_ms": 22.137479,
+              "process_medians_ms": [
+                22.137479,
+                21.848937499999998,
+                21.658958
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.4770415,
+              "min_process_median_ms": 3.2327705,
+              "max_process_median_ms": 3.8656665,
+              "process_medians_ms": [
+                3.8656665,
+                3.4770415,
+                3.2327705
+              ]
+            }
+          }
+        },
+        "paired": {
+          "files": [
+            "paired-history-2x128x768-repeat1.json",
+            "paired-history-2x128x768-repeat2.json",
+            "paired-history-2x128x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 30.432333,
+              "min_process_median_ms": 29.0710205,
+              "max_process_median_ms": 30.941979,
+              "process_medians_ms": [
+                29.0710205,
+                30.941979,
+                30.432333
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 16.508874499999997,
+              "min_process_median_ms": 15.916896,
+              "max_process_median_ms": 18.567542,
+              "process_medians_ms": [
+                15.916896,
+                16.508874499999997,
+                18.567542
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.7187295000000002,
+              "min_process_median_ms": 3.490208,
+              "max_process_median_ms": 3.842375,
+              "process_medians_ms": [
+                3.7187295000000002,
+                3.842375,
+                3.490208
+              ]
+            }
+          }
+        }
+      },
+      "observed_baseline_over_paired_selective": 1.32346620600938,
+      "observed_paired_selective_over_torch": 4.43938568266393
+    },
+    "full-1x256x768": {
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "full",
+      "versions": {
+        "baseline": {
+          "files": [
+            "baseline-full-1x256x768-repeat1.json",
+            "baseline-full-1x256x768-repeat2.json",
+            "baseline-full-1x256x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 34.719667,
+              "min_process_median_ms": 33.656417,
+              "max_process_median_ms": 34.766812,
+              "process_medians_ms": [
+                34.719667,
+                33.656417,
+                34.766812
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 21.2240415,
+              "min_process_median_ms": 21.1023755,
+              "max_process_median_ms": 21.436438,
+              "process_medians_ms": [
+                21.436438,
+                21.2240415,
+                21.1023755
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.006625,
+              "min_process_median_ms": 2.9425625,
+              "max_process_median_ms": 3.0508125,
+              "process_medians_ms": [
+                3.0508125,
+                3.006625,
+                2.9425625
+              ]
+            }
+          }
+        },
+        "paired": {
+          "files": [
+            "paired-full-1x256x768-repeat1.json",
+            "paired-full-1x256x768-repeat2.json",
+            "paired-full-1x256x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 29.272083,
+              "min_process_median_ms": 28.570104,
+              "max_process_median_ms": 30.483104,
+              "process_medians_ms": [
+                29.272083,
+                30.483104,
+                28.570104
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 16.073396000000002,
+              "min_process_median_ms": 15.967833500000001,
+              "max_process_median_ms": 17.228333,
+              "process_medians_ms": [
+                16.073396000000002,
+                17.228333,
+                15.967833500000001
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.169646,
+              "min_process_median_ms": 3.0394164999999997,
+              "max_process_median_ms": 3.2504585,
+              "process_medians_ms": [
+                3.169646,
+                3.2504585,
+                3.0394164999999997
+              ]
+            }
+          }
+        }
+      },
+      "observed_baseline_over_paired_selective": 1.320445380677487,
+      "observed_paired_selective_over_torch": 5.07103821688605
+    },
+    "history-1x256x768": {
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "history",
+      "versions": {
+        "baseline": {
+          "files": [
+            "baseline-history-1x256x768-repeat1.json",
+            "baseline-history-1x256x768-repeat2.json",
+            "baseline-history-1x256x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 33.9163745,
+              "min_process_median_ms": 33.6589795,
+              "max_process_median_ms": 35.223937500000005,
+              "process_medians_ms": [
+                33.9163745,
+                33.6589795,
+                35.223937500000005
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 21.449541500000002,
+              "min_process_median_ms": 21.183812500000002,
+              "max_process_median_ms": 21.8980625,
+              "process_medians_ms": [
+                21.449541500000002,
+                21.183812500000002,
+                21.8980625
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.166125,
+              "min_process_median_ms": 2.7666874999999997,
+              "max_process_median_ms": 3.229896,
+              "process_medians_ms": [
+                2.7666874999999997,
+                3.229896,
+                3.166125
+              ]
+            }
+          }
+        },
+        "paired": {
+          "files": [
+            "paired-history-1x256x768-repeat1.json",
+            "paired-history-1x256x768-repeat2.json",
+            "paired-history-1x256x768-repeat3.json"
+          ],
+          "routes": {
+            "rust_joint": {
+              "median_of_process_medians_ms": 28.885061999999998,
+              "min_process_median_ms": 28.696854,
+              "max_process_median_ms": 31.6512915,
+              "process_medians_ms": [
+                28.885061999999998,
+                31.6512915,
+                28.696854
+              ]
+            },
+            "rust_selective": {
+              "median_of_process_medians_ms": 16.123728999999997,
+              "min_process_median_ms": 16.0428335,
+              "max_process_median_ms": 18.037604,
+              "process_medians_ms": [
+                16.123728999999997,
+                18.037604,
+                16.0428335
+              ]
+            },
+            "torch_conv1d": {
+              "median_of_process_medians_ms": 3.172334,
+              "min_process_median_ms": 3.108479,
+              "max_process_median_ms": 4.1481455,
+              "process_medians_ms": [
+                3.172334,
+                4.1481455,
+                3.108479
+              ]
+            }
+          }
+        }
+      },
+      "observed_baseline_over_paired_selective": 1.3303089812536546,
+      "observed_paired_selective_over_torch": 5.0826076321093545
+    }
+  },
+  "rust": {
+    "successful_processes": 6,
+    "failed_processes": 0,
+    "cases_per_process": 6,
+    "groups": [
+      {
+        "shape": [
+          2,
+          128,
+          768
+        ],
+        "axis": 1,
+        "history": false,
+        "output_fnv1a64": "c330d9c9def8a5e9",
+        "alpha_gradient_f32_bits": 3225399611,
+        "versions": {
+          "baseline": {
+            "files": [
+              "rust-baseline-repeat1.jsonl",
+              "rust-baseline-repeat2.jsonl",
+              "rust-baseline-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 6.8388124999999995,
+            "min_process_median_ms": 6.809875,
+            "max_process_median_ms": 7.452021,
+            "process_medians_ms": [
+              6.809875,
+              6.8388124999999995,
+              7.452021
+            ]
+          },
+          "paired": {
+            "files": [
+              "rust-paired-repeat1.jsonl",
+              "rust-paired-repeat2.jsonl",
+              "rust-paired-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 1.4900625,
+            "min_process_median_ms": 1.4097495,
+            "max_process_median_ms": 1.6541255000000001,
+            "process_medians_ms": [
+              1.6541255000000001,
+              1.4900625,
+              1.4097495
+            ]
+          }
+        },
+        "observed_baseline_over_paired": 4.589614529591879
+      },
+      {
+        "shape": [
+          2,
+          128,
+          768
+        ],
+        "axis": 1,
+        "history": true,
+        "output_fnv1a64": "85edf4e3db3a7957",
+        "alpha_gradient_f32_bits": 3225399611,
+        "versions": {
+          "baseline": {
+            "files": [
+              "rust-baseline-repeat1.jsonl",
+              "rust-baseline-repeat2.jsonl",
+              "rust-baseline-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 6.812542,
+            "min_process_median_ms": 6.716521,
+            "max_process_median_ms": 7.131583,
+            "process_medians_ms": [
+              6.716521,
+              7.131583,
+              6.812542
+            ]
+          },
+          "paired": {
+            "files": [
+              "rust-paired-repeat1.jsonl",
+              "rust-paired-repeat2.jsonl",
+              "rust-paired-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 1.4145835,
+            "min_process_median_ms": 1.4083959999999998,
+            "max_process_median_ms": 1.8109375,
+            "process_medians_ms": [
+              1.8109375,
+              1.4083959999999998,
+              1.4145835
+            ]
+          }
+        },
+        "observed_baseline_over_paired": 4.815934867047438
+      },
+      {
+        "shape": [
+          2,
+          768,
+          128
+        ],
+        "axis": 2,
+        "history": false,
+        "output_fnv1a64": "9537ceb7455c2930",
+        "alpha_gradient_f32_bits": 1069688412,
+        "versions": {
+          "baseline": {
+            "files": [
+              "rust-baseline-repeat1.jsonl",
+              "rust-baseline-repeat2.jsonl",
+              "rust-baseline-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 6.314042000000001,
+            "min_process_median_ms": 6.1088335,
+            "max_process_median_ms": 6.3346455,
+            "process_medians_ms": [
+              6.314042000000001,
+              6.1088335,
+              6.3346455
+            ]
+          },
+          "paired": {
+            "files": [
+              "rust-paired-repeat1.jsonl",
+              "rust-paired-repeat2.jsonl",
+              "rust-paired-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 3.294167,
+            "min_process_median_ms": 3.292396,
+            "max_process_median_ms": 3.322958,
+            "process_medians_ms": [
+              3.322958,
+              3.294167,
+              3.292396
+            ]
+          }
+        },
+        "observed_baseline_over_paired": 1.9167340332168954
+      },
+      {
+        "shape": [
+          2,
+          768,
+          128
+        ],
+        "axis": 2,
+        "history": true,
+        "output_fnv1a64": "1f7ee86d3f095602",
+        "alpha_gradient_f32_bits": 1069688412,
+        "versions": {
+          "baseline": {
+            "files": [
+              "rust-baseline-repeat1.jsonl",
+              "rust-baseline-repeat2.jsonl",
+              "rust-baseline-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 6.077604000000001,
+            "min_process_median_ms": 6.058417,
+            "max_process_median_ms": 6.119625,
+            "process_medians_ms": [
+              6.058417,
+              6.119625,
+              6.077604000000001
+            ]
+          },
+          "paired": {
+            "files": [
+              "rust-paired-repeat1.jsonl",
+              "rust-paired-repeat2.jsonl",
+              "rust-paired-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 3.3042914999999997,
+            "min_process_median_ms": 3.2861045,
+            "max_process_median_ms": 3.4788959999999998,
+            "process_medians_ms": [
+              3.2861045,
+              3.3042914999999997,
+              3.4788959999999998
+            ]
+          }
+        },
+        "observed_baseline_over_paired": 1.8393062476479456
+      },
+      {
+        "shape": [
+          196608
+        ],
+        "axis": 0,
+        "history": false,
+        "output_fnv1a64": "628f74b7c4fd824b",
+        "alpha_gradient_f32_bits": 1080582320,
+        "versions": {
+          "baseline": {
+            "files": [
+              "rust-baseline-repeat1.jsonl",
+              "rust-baseline-repeat2.jsonl",
+              "rust-baseline-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 5.4458545,
+            "min_process_median_ms": 5.4331455,
+            "max_process_median_ms": 5.454438,
+            "process_medians_ms": [
+              5.4331455,
+              5.454438,
+              5.4458545
+            ]
+          },
+          "paired": {
+            "files": [
+              "rust-paired-repeat1.jsonl",
+              "rust-paired-repeat2.jsonl",
+              "rust-paired-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 3.670542,
+            "min_process_median_ms": 3.637313,
+            "max_process_median_ms": 3.8804995,
+            "process_medians_ms": [
+              3.637313,
+              3.8804995,
+              3.670542
+            ]
+          }
+        },
+        "observed_baseline_over_paired": 1.4836649464847427
+      },
+      {
+        "shape": [
+          196608
+        ],
+        "axis": 0,
+        "history": true,
+        "output_fnv1a64": "50ba37d4a217a9d0",
+        "alpha_gradient_f32_bits": 1080582320,
+        "versions": {
+          "baseline": {
+            "files": [
+              "rust-baseline-repeat1.jsonl",
+              "rust-baseline-repeat2.jsonl",
+              "rust-baseline-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 5.502854,
+            "min_process_median_ms": 5.422896,
+            "max_process_median_ms": 5.56825,
+            "process_medians_ms": [
+              5.502854,
+              5.422896,
+              5.56825
+            ]
+          },
+          "paired": {
+            "files": [
+              "rust-paired-repeat1.jsonl",
+              "rust-paired-repeat2.jsonl",
+              "rust-paired-repeat3.jsonl"
+            ],
+            "median_of_process_medians_ms": 3.680333,
+            "min_process_median_ms": 3.663021,
+            "max_process_median_ms": 3.714896,
+            "process_medians_ms": [
+              3.680333,
+              3.714896,
+              3.663021
+            ]
+          }
+        },
+        "observed_baseline_over_paired": 1.4952054610275756
+      }
+    ]
+  },
+  "host_cpu_idle_percent_range": [
+    33.33,
+    70.62
+  ],
+  "scope": "Same finite GL and requested alpha VJP. This complete rerun excludes the interrupted matrix and exploratory timings. Local CPU ambient load only; not isolated host, model/GPU/WASM throughput or quality."
+}
