@@ -1,10 +1,9 @@
 //! Immutable learning snapshots of the existing causal GL operator.
 
 use crate::{
-    checked_f32, fracdiff_gl_nd_alpha_derivative_config, fracdiff_gl_nd_config,
-    fracdiff_gl_nd_vjp_config, fracdiff_gl_nd_vjp_with_coeffs, fracdiff_gl_nd_with_coeffs,
-    gl_coeffs_and_scaled_alpha_derivative, validate_alpha, validate_slice, FracErr,
-    FracdiffGlConfig, Pad,
+    checked_f32, fracdiff_gl_nd_config, fracdiff_gl_nd_vjp_config, fracdiff_gl_nd_vjp_with_coeffs,
+    fracdiff_gl_nd_with_coeffs, gl_coeffs_and_scaled_alpha_derivative, validate_alpha,
+    validate_slice, zeroed_vec, FracErr, FracdiffGlConfig, Pad,
 };
 use ndarray::{ArrayD, IxDyn};
 
@@ -142,33 +141,89 @@ impl FractionalGlKernel {
                 history_coefficients: Some(Vec::new()),
             });
         }
-        let input = ArrayD::from_shape_vec(IxDyn(shape), input.to_vec())
-            .map_err(|_| FractionalLearningError::Shape)?;
-        let (output, alpha_derivative, history_coefficients) = if history_only {
-            let (mut coefficients, mut derivatives, scale) =
-                gl_coeffs_and_scaled_alpha_derivative(config)?;
+        let (mut coefficients, mut derivatives, scale) =
+            gl_coeffs_and_scaled_alpha_derivative(config)?;
+        if history_only {
             // Remove both zero-lag terms, including the sample-spacing derivative.
             coefficients[0] = 0.0;
             derivatives[0] = 0.0;
-            (
-                fracdiff_gl_nd_with_coeffs(&input, axis, &coefficients, Pad::Zero, Some(scale))?,
-                fracdiff_gl_nd_with_coeffs(&input, axis, &derivatives, Pad::Zero, None)?,
-                Some(coefficients),
-            )
-        } else {
-            (
-                fracdiff_gl_nd_config(&input, config)?,
-                fracdiff_gl_nd_alpha_derivative_config(&input, config)?,
-                None,
-            )
-        };
+        }
+        let (output, alpha_derivative) =
+            paired_zero_forward(input, shape, axis, &coefficients, &derivatives, scale)?;
         Ok(FractionalGlLearningBatch {
             config,
             output,
             alpha_derivative,
-            history_coefficients,
+            history_coefficients: history_only.then_some(coefficients),
         })
     }
+}
+
+// Learning inputs are checked, C-order slices. Share reads across both maps,
+// keeping each accumulator's original increasing-lag order and f64 arithmetic.
+fn paired_zero_forward(
+    input: &[f32],
+    shape: &[usize],
+    axis: usize,
+    coefficients: &[f32],
+    derivatives: &[f32],
+    scale: f32,
+) -> Result<(ArrayD<f32>, ArrayD<f32>)> {
+    validate_slice("fractional input", input)?;
+    let inner: usize = shape[axis + 1..].iter().product();
+    let axis_len = shape[axis];
+    let lane_block = inner * axis_len;
+    let mut output = zeroed_vec("fractional learning output", input.len())?;
+    let mut differential = zeroed_vec("fractional learning differential", input.len())?;
+    let scale = f64::from(scale);
+    for base in (0..input.len()).step_by(lane_block) {
+        for time in 0..axis_len {
+            let taps = coefficients.len().min(time + 1);
+            let destination = base + time * inner;
+            if inner == 1 {
+                let mut value = 0.0f64;
+                let mut derivative = 0.0f64;
+                for lag in 0..taps {
+                    let sample = f64::from(input[destination - lag]);
+                    value += f64::from(coefficients[lag]) * sample;
+                    derivative += f64::from(derivatives[lag]) * sample;
+                }
+                output[destination] = checked_f32("fractional output", scale * value)?;
+                differential[destination] = checked_f32("fractional output", derivative)?;
+                continue;
+            }
+            const TILE: usize = 64;
+            for first in (0..inner).step_by(TILE) {
+                let width = TILE.min(inner - first);
+                let mut values = [0.0f64; TILE];
+                let mut differentials = [0.0f64; TILE];
+                for lag in 0..taps {
+                    let source = destination - lag * inner + first;
+                    let coefficient = f64::from(coefficients[lag]);
+                    let derivative = f64::from(derivatives[lag]);
+                    for ((value, differential), &sample) in values[..width]
+                        .iter_mut()
+                        .zip(&mut differentials[..width])
+                        .zip(&input[source..source + width])
+                    {
+                        let sample = f64::from(sample);
+                        *value += coefficient * sample;
+                        *differential += derivative * sample;
+                    }
+                }
+                for index in 0..width {
+                    let destination = destination + first + index;
+                    output[destination] = checked_f32("fractional output", scale * values[index])?;
+                    differential[destination] =
+                        checked_f32("fractional output", differentials[index])?;
+                }
+            }
+        }
+    }
+    let shaped = |values| {
+        ArrayD::from_shape_vec(IxDyn(shape), values).map_err(|_| FractionalLearningError::Shape)
+    };
+    Ok((shaped(output)?, shaped(differential)?))
 }
 
 impl FractionalGlLearningBatch {
@@ -261,5 +316,157 @@ impl FractionalGlLearningBatch {
                 .map_err(Into::into)
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference(
+        input: &[f32],
+        shape: &[usize],
+        axis: usize,
+        alpha: f32,
+        kernel_len: usize,
+        step: f32,
+        history: bool,
+    ) -> FractionalGlLearningBatch {
+        let config = FracdiffGlConfig::new(alpha, axis, kernel_len, Pad::Zero).with_step(step);
+        let input = ArrayD::from_shape_vec(IxDyn(shape), input.to_vec()).unwrap();
+        let (output, alpha_derivative, history_coefficients) = if history {
+            let (mut coefficients, mut derivatives, scale) =
+                gl_coeffs_and_scaled_alpha_derivative(config).unwrap();
+            coefficients[0] = 0.;
+            derivatives[0] = 0.;
+            (
+                fracdiff_gl_nd_with_coeffs(&input, axis, &coefficients, Pad::Zero, Some(scale))
+                    .unwrap(),
+                fracdiff_gl_nd_with_coeffs(&input, axis, &derivatives, Pad::Zero, None).unwrap(),
+                Some(coefficients),
+            )
+        } else {
+            (
+                fracdiff_gl_nd_config(&input, config).unwrap(),
+                crate::fracdiff_gl_nd_alpha_derivative_config(&input, config).unwrap(),
+                None,
+            )
+        };
+        FractionalGlLearningBatch {
+            config,
+            output,
+            alpha_derivative,
+            history_coefficients,
+        }
+    }
+
+    fn bits(values: impl IntoIterator<Item = f32>) -> Vec<u32> {
+        values.into_iter().map(f32::to_bits).collect()
+    }
+
+    fn compare(
+        shape: &[usize],
+        axis: usize,
+        alpha: f32,
+        kernel_len: usize,
+        step: f32,
+        history: bool,
+    ) {
+        let len: usize = shape.iter().product();
+        let input: Vec<f32> = (0..len)
+            .map(|i| (i * 37 % 127) as f32 / 97. - 0.65)
+            .collect();
+        let direction: Vec<f32> = (0..len).map(|i| (i * 13 % 31) as f32 / 31. - 0.5).collect();
+        let kernel = FractionalGlKernel::new(kernel_len, step, len, len * kernel_len).unwrap();
+        let actual = if history {
+            kernel.forward_history(&input, shape, axis, alpha)
+        } else {
+            kernel.forward(&input, shape, axis, alpha)
+        }
+        .unwrap();
+        let reference = reference(&input, shape, axis, alpha, kernel_len, step, history);
+        assert_eq!(
+            bits(actual.output.iter().copied()),
+            bits(reference.output.iter().copied())
+        );
+        assert_eq!(
+            bits(actual.alpha_derivative.iter().copied()),
+            bits(reference.alpha_derivative.iter().copied())
+        );
+        let a = actual.vjp(&direction).unwrap();
+        let r = reference.vjp(&direction).unwrap();
+        assert_eq!(bits(a.input), bits(r.input));
+        assert_eq!(a.alpha.to_bits(), r.alpha.to_bits());
+        assert_eq!(
+            bits(actual.jvp(&direction, 0.3).unwrap()),
+            bits(reference.jvp(&direction, 0.3).unwrap())
+        );
+    }
+
+    #[test]
+    fn paired_forward_is_bit_exact_across_axes_and_tile_boundaries() {
+        for shape in [
+            vec![9],
+            vec![2, 5, 3],
+            vec![2, 7, 63],
+            vec![2, 7, 64],
+            vec![2, 7, 65],
+            vec![2, 3, 129],
+            vec![1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1],
+        ] {
+            for axis in 0..shape.len() {
+                for alpha in [0.01, 0.5, 1., 2., 2.1, 4.] {
+                    for step in [0.7, 1., 1.4] {
+                        for kernel_len in [1, 2, 5, 32] {
+                            for history in [false, true] {
+                                compare(&shape, axis, alpha, kernel_len, step, history);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn paired_forward_is_bit_exact_at_lm_training_shape() {
+        for history in [false, true] {
+            compare(&[2, 128, 768], 1, 0.9, 32, 1., history);
+        }
+    }
+
+    #[test]
+    fn paired_forward_preserves_signed_zero_and_subnormal_values() {
+        let input: Vec<f32> = [
+            0.,
+            -0.,
+            f32::from_bits(1),
+            -f32::from_bits(1),
+            f32::MIN_POSITIVE,
+        ]
+        .into_iter()
+        .cycle()
+        .take(130)
+        .collect();
+        for axis in 0..2 {
+            for history in [false, true] {
+                let kernel = FractionalGlKernel::new(8, 0.7, 130, 1040).unwrap();
+                let actual = if history {
+                    kernel.forward_history(&input, &[2, 65], axis, 1.)
+                } else {
+                    kernel.forward(&input, &[2, 65], axis, 1.)
+                }
+                .unwrap();
+                let reference = reference(&input, &[2, 65], axis, 1., 8, 0.7, history);
+                assert_eq!(
+                    bits(actual.output.iter().copied()),
+                    bits(reference.output.iter().copied())
+                );
+                assert_eq!(
+                    bits(actual.alpha_derivative.iter().copied()),
+                    bits(reference.alpha_derivative.iter().copied())
+                );
+            }
+        }
     }
 }

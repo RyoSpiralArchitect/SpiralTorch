@@ -264,6 +264,26 @@ selective path reduces observed work versus joint backward, but remains slower
 than the ordinary Torch convolution reference. These ambient-load measurements
 do not establish model throughput, GPU performance or a general speedup.
 
+The [paired-forward follow-up](../benchmarks/results/2026-10-03-fractional-paired-forward/README.md)
+now shares input reads between the output and cached alpha differential in
+`FractionalGlKernel`. Contiguous trailing features are tiled in groups of 64,
+with fixed-size f64 scratch accumulators; each output retains increasing-lag
+accumulation order. The C-order input is borrowed rather than cloned. Public
+shapes, budgets, full/history semantics and VJP/JVP methods are unchanged, as
+are the general ND operators used as independent regression references. The
+same Rust implementation reaches native Python and WASM, without a second
+production formula in either client.
+
+All 24 matched native-binary processes pass output/gradient hash equality.
+Under this host's ambient load, Python-inclusive selective forward/backward
+falls from roughly 21-22 ms to 16-17 ms. It still trails the Torch convolution
+reference; list/Tensor transport is the next measured bottleneck, not a reason
+to replace the mathematical operator. Six copied pretrained adapters also
+preserve loss, gradients and Adam updates bit-for-bit across the two binaries.
+These short regression probes are not additional quality runs or proof of
+model-level throughput. The actual wasm32 tiled/scalar regression covers 128
+axis, feature-width, order and spacing combinations in CI.
+
 The [paired language-model study](fractional_memory_study.md) implements these
 controls with the public adapter and the existing restartable HF driver. It
 isolates fixed and learned order without adding another geometric mechanism.

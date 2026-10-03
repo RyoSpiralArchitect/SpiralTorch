@@ -1,0 +1,274 @@
+{
+  "schema": "spiraltorch.fractional_forward_pretrained_parity.v1",
+  "status": "passed",
+  "baseline_native_sha256": "03688b35493309801bcd1c269fcd09442d0b9af572c043a97e7fdeee3dd76d0b",
+  "paired_native_sha256": "fc4bd21dbd8c79a95104e464f4b83860b5c891fc7a29cf5daaddcd25bd7f9eee",
+  "probe_sha256": "d6eb2e0d4034e9821a360dfff8328d9e4e8e53596f9835a55dca010f25f0870d",
+  "comparator_sha256": "8cc4fcf9edf6e3b14faea8e1d07948e3f5bf65aecffb58722d316709c1987ec5",
+  "local_tensor_payload_sha256": {
+    "baseline": "47ee26d5009b663b7441d9923dfcaa5159ec1dfbe27fe0cdd586aef17e71a134",
+    "paired": "ca86cfe3fcee2cbee47e9856191fff7bf7ef113c5bcdaec0e5ab2b7535599c2f"
+  },
+  "adapters": 6,
+  "updates_per_binary": 12,
+  "total_auxiliary_updates": 24,
+  "all_loss_gradient_parameter_adam_bits_equal": true,
+  "frozen_base_unchanged": true,
+  "original_studies_unchanged": true,
+  "heldout_losses_computed": false,
+  "runs": [
+    {
+      "family": "fractional-lag-study",
+      "run_key": "41:history_learned_one",
+      "source_study_id": "b5264d2ea676d408f407f702b302b002f1bb6ea72b64a9660848c6d7e982d0a4",
+      "checkpoint": {
+        "filename": "checkpoint-exq86npd.pt",
+        "sha256": "f9dd0be2dccf94837b32a763d7fd49ec8a2faebbf919e96eb9b0d65484b74d93"
+      },
+      "auxiliary_updates": 2,
+      "records": [
+        {
+          "loss": 3.997591018676758,
+          "conditioning": null,
+          "gate_gradient_l2": 0.006533198524266481,
+          "gate_before_update_l2": 3.840686559677124,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.7408236861228943,
+          "alpha_before_update": 2.0976626873016357,
+          "log_alpha_gradient": -0.005071958526968956,
+          "log_alpha_gradient_l2": 0.005071958526968956,
+          "log_alpha_before_update_l2": 0.7408236861228943,
+          "local_gate_gradient_l2": 0.0029720261227339506,
+          "local_gate_before_update_l2": 5.027153015136719,
+          "log_alpha_after_update": 0.7425256371498108,
+          "alpha_after_update": 2.101235866546631
+        },
+        {
+          "loss": 3.9975452423095703,
+          "conditioning": null,
+          "gate_gradient_l2": 0.006553408224135637,
+          "gate_before_update_l2": 3.8477962017059326,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.7425256371498108,
+          "alpha_before_update": 2.101235866546631,
+          "log_alpha_gradient": -0.005120281130075455,
+          "log_alpha_gradient_l2": 0.005120281130075455,
+          "log_alpha_before_update_l2": 0.7425256371498108,
+          "local_gate_gradient_l2": 0.0029727481305599213,
+          "local_gate_before_update_l2": 5.036228656768799,
+          "log_alpha_after_update": 0.7441921830177307,
+          "alpha_after_update": 2.104740619659424
+        }
+      ]
+    },
+    {
+      "family": "fractional-lag-study",
+      "run_key": "43:history_learned_one",
+      "source_study_id": "b5264d2ea676d408f407f702b302b002f1bb6ea72b64a9660848c6d7e982d0a4",
+      "checkpoint": {
+        "filename": "checkpoint-cqje6fia.pt",
+        "sha256": "a0c76f728fc5049c078e68e67293479fafe6ee236fa061320e6c36a5b09f2548"
+      },
+      "auxiliary_updates": 2,
+      "records": [
+        {
+          "loss": 3.854935646057129,
+          "conditioning": null,
+          "gate_gradient_l2": 0.014861485920846462,
+          "gate_before_update_l2": 3.831190586090088,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.6673708558082581,
+          "alpha_before_update": 1.9491060972213745,
+          "log_alpha_gradient": -0.007658593822270632,
+          "log_alpha_gradient_l2": 0.007658593822270632,
+          "log_alpha_before_update_l2": 0.6673708558082581,
+          "local_gate_gradient_l2": 0.007292773574590683,
+          "local_gate_before_update_l2": 5.048694610595703,
+          "log_alpha_after_update": 0.669240415096283,
+          "alpha_after_update": 1.9527534246444702
+        },
+        {
+          "loss": 3.8547754287719727,
+          "conditioning": null,
+          "gate_gradient_l2": 0.014892000705003738,
+          "gate_before_update_l2": 3.840735912322998,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.669240415096283,
+          "alpha_before_update": 1.9527534246444702,
+          "log_alpha_gradient": -0.007761874236166477,
+          "log_alpha_gradient_l2": 0.007761874236166477,
+          "log_alpha_before_update_l2": 0.669240415096283,
+          "local_gate_gradient_l2": 0.007286824285984039,
+          "local_gate_before_update_l2": 5.060174942016602,
+          "log_alpha_after_update": 0.6711357235908508,
+          "alpha_after_update": 1.9564580917358398
+        }
+      ]
+    },
+    {
+      "family": "fractional-lag-study",
+      "run_key": "47:history_learned_one",
+      "source_study_id": "b5264d2ea676d408f407f702b302b002f1bb6ea72b64a9660848c6d7e982d0a4",
+      "checkpoint": {
+        "filename": "checkpoint-4_mnvmr7.pt",
+        "sha256": "351452bef592c3557332e2509e9eaf42aa0ec77d70541d4aaee2f9f24e668e3e"
+      },
+      "auxiliary_updates": 2,
+      "records": [
+        {
+          "loss": 4.266582012176514,
+          "conditioning": null,
+          "gate_gradient_l2": 0.008865763433277607,
+          "gate_before_update_l2": 3.8410048484802246,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.6943355798721313,
+          "alpha_before_update": 2.002378225326538,
+          "log_alpha_gradient": -0.01012575812637806,
+          "log_alpha_gradient_l2": 0.01012575812637806,
+          "log_alpha_before_update_l2": 0.6943355798721313,
+          "local_gate_gradient_l2": 0.004048553295433521,
+          "local_gate_before_update_l2": 5.0946269035339355,
+          "log_alpha_after_update": 0.6957509517669678,
+          "alpha_after_update": 2.005214214324951
+        },
+        {
+          "loss": 4.266497611999512,
+          "conditioning": null,
+          "gate_gradient_l2": 0.008882270194590092,
+          "gate_before_update_l2": 3.8489186763763428,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.6957509517669678,
+          "alpha_before_update": 2.005214214324951,
+          "log_alpha_gradient": -0.010201643221080303,
+          "log_alpha_gradient_l2": 0.010201643221080303,
+          "log_alpha_before_update_l2": 0.6957509517669678,
+          "local_gate_gradient_l2": 0.004048221278935671,
+          "local_gate_before_update_l2": 5.104565143585205,
+          "log_alpha_after_update": 0.6972846388816833,
+          "alpha_after_update": 2.0082919597625732
+        }
+      ]
+    },
+    {
+      "family": "fractional-memory-study",
+      "run_key": "41:fractional_learned",
+      "source_study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+      "checkpoint": {
+        "filename": "checkpoint-tmvu24pu.pt",
+        "sha256": "1080ad88f9528833abb9b029ddb71356edb635fe5cb9a8171ecbfeb3e0fb0837"
+      },
+      "auxiliary_updates": 2,
+      "records": [
+        {
+          "loss": 4.002847671508789,
+          "conditioning": null,
+          "gate_gradient_l2": 0.0034594149328768253,
+          "gate_before_update_l2": 4.548302173614502,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.1900874376296997,
+          "alpha_before_update": 0.8268868327140808,
+          "log_alpha_gradient": -0.0007129740552045405,
+          "log_alpha_gradient_l2": 0.0007129740552045405,
+          "log_alpha_before_update_l2": 0.1900874376296997,
+          "log_alpha_after_update": -0.18857412040233612,
+          "alpha_after_update": 0.8281391263008118
+        },
+        {
+          "loss": 4.002834320068359,
+          "conditioning": null,
+          "gate_gradient_l2": 0.003461049869656563,
+          "gate_before_update_l2": 4.556902885437012,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.18857412040233612,
+          "alpha_before_update": 0.8281391263008118,
+          "log_alpha_gradient": -0.0007172968471422791,
+          "log_alpha_gradient_l2": 0.0007172968471422791,
+          "log_alpha_before_update_l2": 0.18857412040233612,
+          "log_alpha_after_update": -0.18713343143463135,
+          "alpha_after_update": 0.8293330669403076
+        }
+      ]
+    },
+    {
+      "family": "fractional-memory-study",
+      "run_key": "43:fractional_learned",
+      "source_study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+      "checkpoint": {
+        "filename": "checkpoint-stdpucx6.pt",
+        "sha256": "a0183b3e519b78dfce929a31520035c96267e5687a3f5275fbf3baa15d40fb5d"
+      },
+      "auxiliary_updates": 2,
+      "records": [
+        {
+          "loss": 3.874241828918457,
+          "conditioning": null,
+          "gate_gradient_l2": 0.00717052910476923,
+          "gate_before_update_l2": 4.606479167938232,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.25704455375671387,
+          "alpha_before_update": 0.7733337879180908,
+          "log_alpha_gradient": 0.000373670132830739,
+          "log_alpha_gradient_l2": 0.000373670132830739,
+          "log_alpha_before_update_l2": 0.25704455375671387,
+          "log_alpha_after_update": -0.25601786375045776,
+          "alpha_after_update": 0.7741281390190125
+        },
+        {
+          "loss": 3.8741931915283203,
+          "conditioning": null,
+          "gate_gradient_l2": 0.0071702091954648495,
+          "gate_before_update_l2": 4.61705207824707,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.25601786375045776,
+          "alpha_before_update": 0.7741281390190125,
+          "log_alpha_gradient": 0.0003683673858176917,
+          "log_alpha_gradient_l2": 0.0003683673858176917,
+          "log_alpha_before_update_l2": 0.25601786375045776,
+          "log_alpha_after_update": -0.2551366984844208,
+          "alpha_after_update": 0.7748105525970459
+        }
+      ]
+    },
+    {
+      "family": "fractional-memory-study",
+      "run_key": "47:fractional_learned",
+      "source_study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+      "checkpoint": {
+        "filename": "checkpoint-3gqvz8w8.pt",
+        "sha256": "fe88f8d25d7d435c5a84350919ca00e419a12d66601acf77242720356f1b2f94"
+      },
+      "auxiliary_updates": 2,
+      "records": [
+        {
+          "loss": 4.280191421508789,
+          "conditioning": null,
+          "gate_gradient_l2": 0.0044064633548259735,
+          "gate_before_update_l2": 4.6374311447143555,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.20697221159934998,
+          "alpha_before_update": 0.8130422234535217,
+          "log_alpha_gradient": -0.00022899683972354978,
+          "log_alpha_gradient_l2": 0.00022899683972354978,
+          "log_alpha_before_update_l2": 0.20697221159934998,
+          "log_alpha_after_update": -0.20629897713661194,
+          "alpha_after_update": 0.8135898113250732
+        },
+        {
+          "loss": 4.28016996383667,
+          "conditioning": null,
+          "gate_gradient_l2": 0.004407436121255159,
+          "gate_before_update_l2": 4.646360397338867,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.20629897713661194,
+          "alpha_before_update": 0.8135898113250732,
+          "log_alpha_gradient": -0.0002336292964173481,
+          "log_alpha_gradient_l2": 0.0002336292964173481,
+          "log_alpha_before_update_l2": 0.20629897713661194,
+          "log_alpha_after_update": -0.2056666910648346,
+          "alpha_after_update": 0.8141043782234192
+        }
+      ]
+    }
+  ],
+  "scope": "Separate native binaries, identical copied checkpoints and two training updates per adapter. No new primary training, endpoint scoring, quality or speed claim."
+}

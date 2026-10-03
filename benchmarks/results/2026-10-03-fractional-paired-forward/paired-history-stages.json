@@ -1,0 +1,137 @@
+{
+  "schema": "spiraltorch.fractional_stage_diagnostic.v1",
+  "map": "history",
+  "shape": [
+    2,
+    128,
+    768
+  ],
+  "kernel_len": 32,
+  "alpha": 0.9,
+  "step": 1,
+  "seed": 239,
+  "threads": 2,
+  "native_sha256": "fc4bd21dbd8c79a95104e464f4b83860b5c891fc7a29cf5daaddcd25bd7f9eee",
+  "profile_sha256": "421d9074e3a28bf4ef439c3984a20a90119b36aad9a65713b76a98b62bbe4e76",
+  "public_output_and_order_gradient_exact": true,
+  "measurements_ms": [
+    {
+      "input_to_list": 1.455292,
+      "native_forward_including_input_conversion": 2.445875,
+      "native_output_to_list": 2.075292,
+      "list_to_output_tensor": 5.225333,
+      "upstream_to_list": 1.489583,
+      "native_order_vjp_including_direction_conversion": 1.41675,
+      "scalar_to_tensor": 0.058833
+    },
+    {
+      "input_to_list": 1.413708,
+      "native_forward_including_input_conversion": 2.771958,
+      "native_output_to_list": 2.135709,
+      "list_to_output_tensor": 5.179333,
+      "upstream_to_list": 1.574708,
+      "native_order_vjp_including_direction_conversion": 1.398625,
+      "scalar_to_tensor": 0.017833
+    },
+    {
+      "input_to_list": 1.170209,
+      "native_forward_including_input_conversion": 2.435833,
+      "native_output_to_list": 2.003375,
+      "list_to_output_tensor": 5.097541,
+      "upstream_to_list": 1.605792,
+      "native_order_vjp_including_direction_conversion": 1.388792,
+      "scalar_to_tensor": 0.012166
+    },
+    {
+      "input_to_list": 1.151542,
+      "native_forward_including_input_conversion": 2.421625,
+      "native_output_to_list": 2.034042,
+      "list_to_output_tensor": 5.1345,
+      "upstream_to_list": 1.463459,
+      "native_order_vjp_including_direction_conversion": 1.340417,
+      "scalar_to_tensor": 0.009959
+    },
+    {
+      "input_to_list": 1.111708,
+      "native_forward_including_input_conversion": 2.437542,
+      "native_output_to_list": 1.722125,
+      "list_to_output_tensor": 5.085459,
+      "upstream_to_list": 1.551875,
+      "native_order_vjp_including_direction_conversion": 1.330291,
+      "scalar_to_tensor": 0.008834
+    },
+    {
+      "input_to_list": 1.117583,
+      "native_forward_including_input_conversion": 2.432292,
+      "native_output_to_list": 1.671584,
+      "list_to_output_tensor": 5.115166,
+      "upstream_to_list": 1.491958,
+      "native_order_vjp_including_direction_conversion": 1.394125,
+      "scalar_to_tensor": 0.016333
+    },
+    {
+      "input_to_list": 1.127,
+      "native_forward_including_input_conversion": 2.419042,
+      "native_output_to_list": 1.641042,
+      "list_to_output_tensor": 5.113041,
+      "upstream_to_list": 1.506083,
+      "native_order_vjp_including_direction_conversion": 1.345625,
+      "scalar_to_tensor": 0.011125
+    },
+    {
+      "input_to_list": 1.153042,
+      "native_forward_including_input_conversion": 2.359791,
+      "native_output_to_list": 1.637292,
+      "list_to_output_tensor": 5.152542,
+      "upstream_to_list": 1.457875,
+      "native_order_vjp_including_direction_conversion": 1.371584,
+      "scalar_to_tensor": 0.010875
+    },
+    {
+      "input_to_list": 1.123041,
+      "native_forward_including_input_conversion": 2.449291,
+      "native_output_to_list": 1.619833,
+      "list_to_output_tensor": 5.211958,
+      "upstream_to_list": 1.304084,
+      "native_order_vjp_including_direction_conversion": 1.324666,
+      "scalar_to_tensor": 0.009833
+    },
+    {
+      "input_to_list": 1.084709,
+      "native_forward_including_input_conversion": 2.437083,
+      "native_output_to_list": 1.616875,
+      "list_to_output_tensor": 5.238,
+      "upstream_to_list": 1.281084,
+      "native_order_vjp_including_direction_conversion": 1.603917,
+      "scalar_to_tensor": 0.011625
+    },
+    {
+      "input_to_list": 1.146,
+      "native_forward_including_input_conversion": 2.510166,
+      "native_output_to_list": 1.578292,
+      "list_to_output_tensor": 5.173875,
+      "upstream_to_list": 1.240458,
+      "native_order_vjp_including_direction_conversion": 1.346709,
+      "scalar_to_tensor": 0.012791
+    },
+    {
+      "input_to_list": 1.123458,
+      "native_forward_including_input_conversion": 2.467541,
+      "native_output_to_list": 1.642416,
+      "list_to_output_tensor": 5.081458,
+      "upstream_to_list": 1.206042,
+      "native_order_vjp_including_direction_conversion": 1.422,
+      "scalar_to_tensor": 0.025167
+    }
+  ],
+  "stage_median_ms": {
+    "input_to_list": 1.1364999999999998,
+    "native_forward_including_input_conversion": 2.4373125,
+    "native_output_to_list": 1.657,
+    "list_to_output_tensor": 5.143521,
+    "upstream_to_list": 1.476521,
+    "native_order_vjp_including_direction_conversion": 1.380188,
+    "scalar_to_tensor": 0.0118955
+  },
+  "scope": "Instrumented staged route under ambient load, not a speed claim or additive model of public autograd latency. Native call stages include PyO3 list extraction; pure Rust timings are needed to isolate convolution."
+}
