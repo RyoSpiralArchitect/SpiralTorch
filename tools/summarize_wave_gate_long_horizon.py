@@ -136,6 +136,46 @@ def contrast_report(config, measured, sets, contrasts):
     return report
 
 
+def order_trajectory(row, initial, learned):
+    records = row["records"]
+    before = [r.get("log_alpha_before_update") for r in records]
+    after = [r.get("log_alpha_after_update") for r in records]
+    alpha_before = [r.get("alpha_before_update") for r in records]
+    alpha_after = [r.get("alpha_after_update") for r in records]
+    final_log, final_alpha = row.get("final_log_alpha"), row.get("final_alpha")
+    require(bool(records) and all(type(v) in (int, float) and math.isfinite(v)
+                for v in before + after + alpha_before + alpha_after + [final_log, final_alpha]),
+            "missing or nonfinite order trajectory")
+    for log_alpha, alpha in zip(before + after, alpha_before + alpha_after):
+        try:
+            expected = math.exp(log_alpha)
+        except OverflowError:
+            expected = math.inf
+        require(alpha > 0 and math.isfinite(expected)
+                and math.isclose(alpha, expected, rel_tol=2e-6, abs_tol=2**-149),
+                "alpha does not match positive f32 order")
+    require(math.isclose(alpha_before[0], initial, rel_tol=2e-6)
+            and before[1:] == after[:-1] and alpha_before[1:] == alpha_after[:-1]
+            and final_log == after[-1] and final_alpha == alpha_after[-1],
+            "order trajectory or endpoint differs")
+    require(all(r.get("log_alpha_trainable") is learned for r in records),
+            "order training mode differs")
+    gradients = [r.get("log_alpha_gradient") for r in records]
+    if learned:
+        require(all(type(v) in (int, float) and math.isfinite(v) for v in gradients)
+                and gradients[0] == 0, "invalid learned order gradients")
+    else:
+        require(all(v is None for v in gradients) and all(v == before[0] for v in before + after),
+                "fixed fractional order changed")
+    return {
+        "learnable_order": learned, "initial_alpha": alpha_before[0],
+        "final_alpha": final_alpha, "final_log_alpha": final_log,
+        "min_alpha": min(alpha_before + alpha_after),
+        "max_alpha": max(alpha_before + alpha_after),
+        "nonzero_order_gradient_steps": sum(v not in (None, 0) for v in gradients),
+    }
+
+
 def fractional_report(config, runs, measured, sets):
     history = config.get("schema") == "spiraltorch.fractional_history_protocol.v1"
     fixed, learned_arm = (("history_fixed", "history_learned") if history
@@ -165,43 +205,7 @@ def fractional_report(config, runs, measured, sets):
                     "fractional parameter counts differ")
             if arm not in (fixed, learned_arm):
                 continue
-            records = row["records"]
-            before = [r.get("log_alpha_before_update") for r in records]
-            after = [r.get("log_alpha_after_update") for r in records]
-            alpha_before = [r.get("alpha_before_update") for r in records]
-            alpha_after = [r.get("alpha_after_update") for r in records]
-            final_log, final_alpha = row.get("final_log_alpha"), row.get("final_alpha")
-            require(all(type(v) in (int, float) and math.isfinite(v)
-                        for v in before + after + alpha_before + alpha_after + [final_log, final_alpha]),
-                    "missing or nonfinite order trajectory")
-            for log_alpha, alpha in zip(before + after, alpha_before + alpha_after):
-                try:
-                    expected = math.exp(log_alpha)
-                except OverflowError:
-                    expected = math.inf
-                require(alpha > 0 and math.isfinite(expected)
-                        and math.isclose(alpha, expected, rel_tol=2e-6, abs_tol=2**-149),
-                        "alpha does not match positive f32 order")
-            require(math.isclose(alpha_before[0], initial, rel_tol=2e-6)
-                    and before[1:] == after[:-1] and alpha_before[1:] == alpha_after[:-1]
-                    and final_log == after[-1] and final_alpha == alpha_after[-1],
-                    "order trajectory or endpoint differs")
-            require(all(r.get("log_alpha_trainable") is learned for r in records),
-                    "order training mode differs")
-            gradients = [r.get("log_alpha_gradient") for r in records]
-            if learned:
-                require(all(type(v) in (int, float) and math.isfinite(v) for v in gradients)
-                        and gradients[0] == 0, "invalid learned order gradients")
-            else:
-                require(all(v is None for v in gradients) and all(v == before[0] for v in before + after),
-                        "fixed fractional order changed")
-            trajectories[f"{seed}:{arm}"] = {
-                "learnable_order": learned, "initial_alpha": alpha_before[0],
-                "final_alpha": final_alpha, "final_log_alpha": final_log,
-                "min_alpha": min(alpha_before + alpha_after),
-                "max_alpha": max(alpha_before + alpha_after),
-                "nonzero_order_gradient_steps": sum(v not in (None, 0) for v in gradients),
-            }
+            trajectories[f"{seed}:{arm}"] = order_trajectory(row, initial, learned)
     contrasts = {"fixed_minus_pointwise": {fixed: 1, "pointwise": -1},
                  "learned_minus_fixed": {learned_arm: 1, fixed: -1},
                  "learned_minus_pointwise": {learned_arm: 1, "pointwise": -1}}
@@ -209,6 +213,63 @@ def fractional_report(config, runs, measured, sets):
         contrasts.update(learned_minus_ema={learned_arm: 1, "ema_learned": -1},
                          ema_minus_pointwise={"ema_learned": 1, "pointwise": -1})
     return contrast_report(config, measured, sets, contrasts), trajectories
+
+
+def fractional_lag_report(config, runs, measured, sets):
+    initial_orders = {"history_fixed_one": 1.0, "history_learned_one": 1.0,
+                      "history_learned_half": 0.5}
+    arms = {"lag1", *initial_orders}
+    require(set(config["arms"]) == arms and config.get("reference_arm") == "lag1",
+            "incomplete lag design")
+    require(config.get("initial_orders") == initial_orders
+            and all(type(v) in (int, float) for v in config["initial_orders"].values()),
+            "lag initial orders differ")
+    require(type(config.get("features")) is int and config["features"] > 0,
+            "invalid lag feature count")
+    kernel = config.get("kernel", {})
+    require(type(kernel.get("step")) in (int, float) and kernel["step"] == 1
+            and type(kernel.get("kernel_len")) is int and kernel["kernel_len"] > 1,
+            "lag kernel differs")
+    trajectories, parity = {}, {}
+    common_fields = ("loss", "gate_gradient_l2", "local_gate_gradient_l2",
+                     "gate_before_update_l2", "local_gate_before_update_l2")
+    for seed in config["seeds"]:
+        hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256")
+                  for arm in ("history_fixed_one", "history_learned_one")}
+        require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
+                "alpha-one initial parameters are not paired")
+        for arm in config["arms"]:
+            row = runs[f"{seed}:{arm}"]
+            learned = arm.startswith("history_learned_")
+            gate_count = 2 * config["features"]
+            require(type(row.get("parameter_count")) is int
+                    and type(row.get("trainable_parameter_count")) is int
+                    and row["parameter_count"] == gate_count + int(arm != "lag1")
+                    and row["trainable_parameter_count"] == gate_count + int(learned),
+                    "lag parameter counts differ")
+            require(bool(row["records"]) and all(
+                type(r.get(k)) in (int, float) and math.isfinite(r[k]) and r[k] >= 0
+                for r in row["records"] for k in common_fields), "invalid lag update receipt")
+            if arm in initial_orders:
+                trajectories[f"{seed}:{arm}"] = order_trajectory(row, initial_orders[arm], learned)
+        ordinary, fixed = (runs[f"{seed}:{arm}"] for arm in ("lag1", "history_fixed_one"))
+        parity[str(seed)] = {
+            "update_receipts_equal":
+                [[r[k] for k in common_fields] for r in ordinary["records"]]
+                == [[r[k] for k in common_fields] for r in fixed["records"]],
+            "development_equal": ordinary["development"] == fixed["development"],
+            "endpoint_block_losses_equal": {
+                name: ordinary["scores"][name]["block_losses"] == fixed["scores"][name]["block_losses"]
+                for name in sets
+            },
+        }
+    contrasts = {
+        "fixed_one_minus_lag1": {"history_fixed_one": 1, "lag1": -1},
+        "learned_one_minus_fixed_one": {"history_learned_one": 1, "history_fixed_one": -1},
+        "learned_half_minus_learned_one": {"history_learned_half": 1, "history_learned_one": -1},
+        "learned_half_minus_lag1": {"history_learned_half": 1, "lag1": -1},
+    }
+    return contrast_report(config, measured, sets, contrasts), trajectories, parity
 
 
 def ema_trajectories(config, runs):
@@ -494,6 +555,10 @@ def summarize(plan, result, journal, result_sha256):
         )
         if config["schema"] == "spiraltorch.fractional_history_protocol.v1":
             summary["decay_trajectories"] = ema_trajectories(config, runs)
+    if config.get("schema") == "spiraltorch.fractional_lag_protocol.v1":
+        summary["reference_arm"] = reference
+        (summary["paired_fractional_contrasts"], summary["order_trajectories"],
+         summary["same_math_receipt_parity"]) = fractional_lag_report(config, runs, measured, sets)
     if config.get("schema") == "spiraltorch.elliptic_chart_step_protocol.v1":
         summary["reference_arm"] = reference
         summary["paired_factorial_contrasts"], summary["chart_step_trajectories"] = chart_step_report(config, runs, measured, sets)
