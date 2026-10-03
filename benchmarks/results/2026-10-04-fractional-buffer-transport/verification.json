@@ -1,0 +1,106 @@
+{
+  "schema": "spiraltorch.fractional_buffer_verification.v1",
+  "status": "validated_local",
+  "parent_revision": "987a05bae5d8b47f95ee3c9e56eec3ed72253577",
+  "source_sha256": {
+    "bindings/st-py/src/f32_buffer.rs": "3e5dd4cff1a0c5b4d1138d26303bc9dbf2b629c94d33bebb572e338c691273c8",
+    "bindings/st-py/src/fractional_learning.rs": "c3ff0fa8e6da07984a6359839badae0a7cf8c450564b723567671647aac67154",
+    "bindings/st-py/src/lib.rs": "9dd4af186a65690597f1825c9d44968bc78697c4699a0eee3e2b08da45dafcf0",
+    "bindings/st-py/spiraltorch/fractional_autograd.py": "40353142cf73192c3c704645bb75e3fe1eb591b8fe871e05b29693b8c4dc8531",
+    "bindings/st-py/spiraltorch/__init__.pyi": "b4f726e03075d82a10c8727fb89ad94683652aba263c4b724d39361f8b416fe8",
+    "bindings/st-py/tests/test_fractional_buffers.py": "df26f43059f04dc1ed84bce9a3452e89a183204379e584888e1b20ade7367d6d",
+    "bindings/st-py/tests/test_fractional_selective_vjp.py": "5afd8414122d0ac95fb46e15641863510d3d1086f6ba60845358badac081eda1",
+    "bindings/st-py/tests/test_geometry_optional_dependency.py": "50c5aabf9b44380647d2df89341d596608dad7561066337e74aaad5c8e729b56",
+    "tools/benchmark_fractional_learning.py": "f83a1a4f340bb95a78af85084195d4c52616f11b03df7f0877c324b54d63d315",
+    "tools/test_benchmark_fractional_learning.py": "4d72663a3cd56c0901aff5ee81f434aa8b3adbb5e59cbfdacd207f1ad1461292",
+    "crates/st-frac/src/learning.rs": "1a9b4882bc36e85e6b265c77c194ecc4f01b49d087474bf3f8527fd86b405b99",
+    ".github/workflows/ci.yml": "cde57a8dabdd83351a02740459bc6e2b0a10c7edcaa4120f2f2be428f78cea5c"
+  },
+  "private_log_sha256": {
+    "native-release-build-final.log": "41029e434373bd4b27bc173b3e228c60a6268a040f2296dc8889b8a2f1e077aa",
+    "python-regression-final.log": "d9a7b7c3e9245396edf6155a5cb27ff7117fa1b046ca384a41af5e344fe7055d",
+    "benchmark-tests-sealed.log": "acdef294020d18769a4744402215b72888c14ec14f3fd45a51cc4bcc0d44dcdc",
+    "clippy.log": "08fec3c7770a504dc6fadc09a489792212bcc42be298ad7c9b0849234a8baedb",
+    "clippy-scoped.log": "12743596acfe276c82e19ab13f1264c25829e24e6496ba815494efcabeec8e7f",
+    "cpu-text-check.log": "9507eb8abf9dee31ec6cf5ec426d579e8b441b705aec785e888ffcdc241db3e2",
+    "pretrained-baseline.log": "dd7251c4683735475823c05df9476aa020d517f42648dbfeee5eb431a8d52a8d",
+    "pretrained-paired.log": "dd7251c4683735475823c05df9476aa020d517f42648dbfeee5eb431a8d52a8d",
+    "pretrained-parity.log": "a3fd865be1df3f6976ea785e353a08cd3a164461c90fca3c9150cc7358658471",
+    "benchmark-tests-publication.log": "0fba15b2aed86b48f838b8c127454fd2ae973b2ede4a89b8e656ba4c6d9f0a53"
+  },
+  "runtime": {
+    "chip": "Apple M4",
+    "cpu_cores": 10,
+    "memory_bytes": 25769803776,
+    "python": "3.12",
+    "torch": "2.12.1",
+    "rust": "1.98.0",
+    "native_profile": "release",
+    "native_sha256": "5caece088b275f15f83a1bfb8e7216613c9470faf3f01f46ddf4b0f95f05f8f4",
+    "abi": "abi3-py38",
+    "frozen_package_files": 70,
+    "package_unchanged_after_tests_probes_and_timing": true
+  },
+  "checks": {
+    "native_python": {
+      "passed": 399,
+      "skipped": 0,
+      "log": "python-regression-final.log"
+    },
+    "benchmark_prepublication": {
+      "passed": 32,
+      "skipped": 0,
+      "log": "benchmark-tests-sealed.log"
+    },
+    "default_release_build": "passed",
+    "cpu_text_only_check": "passed",
+    "workspace_format": "passed",
+    "clippy": {
+      "scoped_status": "passed",
+      "command": "cargo +1.98.0 clippy --locked --offline -p spiraltorch-py --lib --no-deps -- -D warnings -A clippy::too_many_arguments -A clippy::type_complexity",
+      "strict_status": "not_green",
+      "note": "Initial strict run found two new chunks_exact style findings (fixed before the frozen build) and nine existing unrelated too_many_arguments/type_complexity findings; no project lint policy change."
+    },
+    "wasm": "not_rerun; Rust core and WASM sources unchanged",
+    "primary_training": "not_run; auxiliary copied-checkpoint regression only",
+    "benchmark_publication": {
+      "passed": 34,
+      "skipped": 0,
+      "log": "benchmark-tests-publication.log",
+      "includes": "Full numeric reconstruction, condition/identity/receipt/hash checks; no timed CI assertions"
+    }
+  },
+  "timing": {
+    "plan": "timing-plan.json",
+    "results": "summary.json",
+    "successful_processes": 12,
+    "failed_processes": 0,
+    "rounds_per_process": 12,
+    "own_builds_tests_probes_concurrent": false,
+    "other_host_activity_present": true
+  },
+  "pretrained": {
+    "receipt": "pretrained-parity.json",
+    "adapters": 6,
+    "total_auxiliary_updates": 24,
+    "heldout_losses_computed": false,
+    "legacy_candidate_hash_field": "paired_native_sha256"
+  },
+  "publication": {
+    "includes": [
+      "sources",
+      "all numeric timing conditions",
+      "pretrained numeric parity receipt",
+      "verification records",
+      "hashes"
+    ],
+    "excludes": [
+      "weights",
+      "corpus text",
+      "tensor payloads",
+      "native packages",
+      "raw host/build logs",
+      "private filesystem paths"
+    ]
+  }
+}

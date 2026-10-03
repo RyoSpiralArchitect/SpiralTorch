@@ -1,0 +1,203 @@
+{
+  "schema": "spiraltorch.fractional_buffer_timing_summary.v1",
+  "status": "measured_under_ambient_load",
+  "comparison": "list_vs_buffer",
+  "successful_processes": 12,
+  "failed_processes": 0,
+  "bit_exact_list_buffer": true,
+  "groups": {
+    "full-2x128x768": {
+      "map": "full",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "files": [
+        "full-2x128x768-repeat1.json",
+        "full-2x128x768-repeat2.json",
+        "full-2x128x768-repeat3.json"
+      ],
+      "routes": {
+        "rust_list": {
+          "median_of_process_medians_ms": 16.408917000000002,
+          "min_process_median_ms": 15.5001875,
+          "max_process_median_ms": 17.049187500000002,
+          "process_medians_ms": [
+            15.5001875,
+            16.408917000000002,
+            17.049187500000002
+          ]
+        },
+        "rust_buffer": {
+          "median_of_process_medians_ms": 2.462875,
+          "min_process_median_ms": 2.3578539999999997,
+          "max_process_median_ms": 2.627958,
+          "process_medians_ms": [
+            2.3578539999999997,
+            2.462875,
+            2.627958
+          ]
+        },
+        "torch_conv1d": {
+          "median_of_process_medians_ms": 3.2373955,
+          "min_process_median_ms": 2.9272295,
+          "max_process_median_ms": 3.2646249999999997,
+          "process_medians_ms": [
+            2.9272295,
+            3.2646249999999997,
+            3.2373955
+          ]
+        }
+      },
+      "observed_list_over_buffer": 6.6625049992386955,
+      "observed_buffer_over_torch": 0.7607581464791682
+    },
+    "history-2x128x768": {
+      "map": "history",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "files": [
+        "history-2x128x768-repeat1.json",
+        "history-2x128x768-repeat2.json",
+        "history-2x128x768-repeat3.json"
+      ],
+      "routes": {
+        "rust_list": {
+          "median_of_process_medians_ms": 17.0233125,
+          "min_process_median_ms": 16.5347085,
+          "max_process_median_ms": 17.283229,
+          "process_medians_ms": [
+            16.5347085,
+            17.283229,
+            17.0233125
+          ]
+        },
+        "rust_buffer": {
+          "median_of_process_medians_ms": 2.5473125,
+          "min_process_median_ms": 2.5444795,
+          "max_process_median_ms": 2.640729,
+          "process_medians_ms": [
+            2.5473125,
+            2.5444795,
+            2.640729
+          ]
+        },
+        "torch_conv1d": {
+          "median_of_process_medians_ms": 3.3020625,
+          "min_process_median_ms": 3.177917,
+          "max_process_median_ms": 3.4065625,
+          "process_medians_ms": [
+            3.4065625,
+            3.3020625,
+            3.177917
+          ]
+        }
+      },
+      "observed_list_over_buffer": 6.6828520254189465,
+      "observed_buffer_over_torch": 0.7714307345787671
+    },
+    "full-1x256x768": {
+      "map": "full",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "files": [
+        "full-1x256x768-repeat1.json",
+        "full-1x256x768-repeat2.json",
+        "full-1x256x768-repeat3.json"
+      ],
+      "routes": {
+        "rust_list": {
+          "median_of_process_medians_ms": 17.0085625,
+          "min_process_median_ms": 16.894708,
+          "max_process_median_ms": 17.063291999999997,
+          "process_medians_ms": [
+            17.063291999999997,
+            17.0085625,
+            16.894708
+          ]
+        },
+        "rust_buffer": {
+          "median_of_process_medians_ms": 2.641979,
+          "min_process_median_ms": 2.604375,
+          "max_process_median_ms": 2.6760205,
+          "process_medians_ms": [
+            2.641979,
+            2.6760205,
+            2.604375
+          ]
+        },
+        "torch_conv1d": {
+          "median_of_process_medians_ms": 2.7886875,
+          "min_process_median_ms": 2.745021,
+          "max_process_median_ms": 2.8184375,
+          "process_medians_ms": [
+            2.745021,
+            2.8184375,
+            2.7886875
+          ]
+        }
+      },
+      "observed_list_over_buffer": 6.43781139062801,
+      "observed_buffer_over_torch": 0.9473915596494767
+    },
+    "history-1x256x768": {
+      "map": "history",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "files": [
+        "history-1x256x768-repeat1.json",
+        "history-1x256x768-repeat2.json",
+        "history-1x256x768-repeat3.json"
+      ],
+      "routes": {
+        "rust_list": {
+          "median_of_process_medians_ms": 17.161020999999998,
+          "min_process_median_ms": 17.057854499999998,
+          "max_process_median_ms": 17.1834165,
+          "process_medians_ms": [
+            17.1834165,
+            17.057854499999998,
+            17.161020999999998
+          ]
+        },
+        "rust_buffer": {
+          "median_of_process_medians_ms": 2.6231245000000003,
+          "min_process_median_ms": 2.579479,
+          "max_process_median_ms": 2.6938755,
+          "process_medians_ms": [
+            2.6231245000000003,
+            2.6938755,
+            2.579479
+          ]
+        },
+        "torch_conv1d": {
+          "median_of_process_medians_ms": 2.8906669999999997,
+          "min_process_median_ms": 2.8615625,
+          "max_process_median_ms": 2.9020625,
+          "process_medians_ms": [
+            2.9020625,
+            2.8906669999999997,
+            2.8615625
+          ]
+        }
+      },
+      "observed_list_over_buffer": 6.5422060599868574,
+      "observed_buffer_over_torch": 0.907446101539887
+    }
+  },
+  "host_cpu_idle_percent_range": [
+    47.74,
+    69.62
+  ],
+  "scope": "Same Rust kernel/binary/math, explicit list vs buffer transport with selective order VJP; CPU float32 interfaces; full host transport included. Fresh processes, all route permutations twice. Ambient-load diagnostic, not isolated/model/GPU throughput."
+}

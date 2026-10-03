@@ -711,6 +711,7 @@ jobs:
             bindings/st-py/tests/test_fractional_learning.py \
             bindings/st-py/tests/test_fractional_history.py \
             bindings/st-py/tests/test_fractional_selective_vjp.py \
+            bindings/st-py/tests/test_fractional_buffers.py \
             bindings/st-py/tests/test_fractional_memory_study.py \
             bindings/st-py/tests/test_fractional_history_study.py \
             bindings/st-py/tests/test_fractional_lag_study.py \
