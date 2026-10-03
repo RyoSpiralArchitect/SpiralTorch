@@ -98,6 +98,14 @@ impl FractionalGlLearningBatch {
             .map_err(js_error)
     }
 
+    pub fn vjp_input(&self, upstream: &[f32]) -> Result<Vec<f32>, JsValue> {
+        self.inner.vjp_input(upstream).map_err(js_error)
+    }
+
+    pub fn vjp_alpha(&self, upstream: &[f32]) -> Result<f32, JsValue> {
+        self.inner.vjp_alpha(upstream).map_err(js_error)
+    }
+
     pub fn jvp(&self, input_tangent: &[f32], alpha_tangent: Number) -> Result<Vec<f32>, JsValue> {
         self.inner
             .jvp(input_tangent, number(&alpha_tangent, "alpha_tangent")?)

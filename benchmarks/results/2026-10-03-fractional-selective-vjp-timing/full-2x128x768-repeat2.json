@@ -1,0 +1,157 @@
+{
+  "schema": "spiraltorch.fractional_learning_benchmark.v1",
+  "status": "measured",
+  "shape": [
+    2,
+    128,
+    768
+  ],
+  "kernel_len": 32,
+  "alpha": 0.9,
+  "step": 1.0,
+  "map": "full",
+  "seed": 239,
+  "input_requires_grad": false,
+  "alpha_requires_grad": true,
+  "dtype": "float32",
+  "device": "cpu",
+  "threads": 2,
+  "native_profile_declared": "release",
+  "native_sha256": "03688b35493309801bcd1c269fcd09442d0b9af572c043a97e7fdeee3dd76d0b",
+  "bridge_sha256": "c0e9e68e31d6ded0540cd2c5f431d69a18e578e218c9e66cc7cb2b8f5c046447",
+  "benchmark_sha256": "615567ec1d98a11a6130dbcf9a8194fd00c4fd6dae369accaca1f19fec8247b3",
+  "input_sha256": "5734e5cf9522cfc656a3ad1e46fba3ef3258be2165e551532f869838f21dee9f",
+  "upstream_sha256": "3dab55a6cc65fa11ddeeee742c0a018ad12fc0c76f77cb3b758c92f3e2dd2c4b",
+  "torch": "2.12.1",
+  "machine": "arm64",
+  "correctness": {
+    "rust_joint": {
+      "max_abs_output_error": 0.0,
+      "abs_alpha_gradient_error": 0.0,
+      "alpha_gradient": -29.853527069091797
+    },
+    "rust_selective": {
+      "max_abs_output_error": 0.0,
+      "abs_alpha_gradient_error": 0.0,
+      "alpha_gradient": -29.853527069091797
+    },
+    "torch_conv1d": {
+      "max_abs_output_error": 4.76837158203125e-07,
+      "abs_alpha_gradient_error": 0.000324249267578125,
+      "alpha_gradient": -29.85320281982422
+    }
+  },
+  "round_order": [
+    [
+      "rust_joint",
+      "rust_selective",
+      "torch_conv1d"
+    ],
+    [
+      "rust_joint",
+      "torch_conv1d",
+      "rust_selective"
+    ],
+    [
+      "rust_selective",
+      "rust_joint",
+      "torch_conv1d"
+    ],
+    [
+      "rust_selective",
+      "torch_conv1d",
+      "rust_joint"
+    ],
+    [
+      "torch_conv1d",
+      "rust_joint",
+      "rust_selective"
+    ],
+    [
+      "torch_conv1d",
+      "rust_selective",
+      "rust_joint"
+    ],
+    [
+      "rust_joint",
+      "rust_selective",
+      "torch_conv1d"
+    ],
+    [
+      "rust_joint",
+      "torch_conv1d",
+      "rust_selective"
+    ],
+    [
+      "rust_selective",
+      "rust_joint",
+      "torch_conv1d"
+    ],
+    [
+      "rust_selective",
+      "torch_conv1d",
+      "rust_joint"
+    ],
+    [
+      "torch_conv1d",
+      "rust_joint",
+      "rust_selective"
+    ],
+    [
+      "torch_conv1d",
+      "rust_selective",
+      "rust_joint"
+    ]
+  ],
+  "warmup_per_route": 2,
+  "measurements_ms": {
+    "rust_joint": [
+      35.803541,
+      34.347167,
+      34.65775,
+      35.253458,
+      35.491292,
+      40.823208,
+      34.921666,
+      33.871208,
+      32.820584,
+      40.045833,
+      34.376666,
+      33.077625
+    ],
+    "rust_selective": [
+      21.534,
+      24.950459,
+      23.414042,
+      22.351375,
+      21.910667,
+      21.002375,
+      20.844667,
+      20.852584,
+      21.00075,
+      20.507083,
+      21.204875,
+      20.844125
+    ],
+    "torch_conv1d": [
+      3.243833,
+      2.962375,
+      3.200791,
+      3.440916,
+      3.60125,
+      2.915541,
+      2.953334,
+      3.205625,
+      3.351208,
+      3.097709,
+      3.435792,
+      3.548208
+    ]
+  },
+  "median_ms": {
+    "rust_joint": 34.789708000000005,
+    "rust_selective": 21.103625,
+    "torch_conv1d": 3.224729
+  },
+  "scope": "Same finite GL map and requested order VJP; forward, AD and native host transport included. CPU float32 interfaces; backend accumulation differs within declared tolerance. Not a quality, GPU, adapter/model throughput or general-library speed claim. Native profile is declared, not inferred from the binary."
+}

@@ -37,11 +37,18 @@ if torch is not None:
         @torch.autograd.function.once_differentiable
         def backward(ctx: Any, upstream: Any) -> tuple[Any, ...]:
             value, alpha = ctx.saved_tensors
-            dx, da = ctx.snapshot.vjp(_values(upstream))
+            need_input, need_alpha = ctx.needs_input_grad[1:3]
+            dx = da = None
+            if need_input and need_alpha:
+                dx, da = ctx.snapshot.vjp(_values(upstream))
+            elif need_input:
+                dx = ctx.snapshot.vjp_input(_values(upstream))
+            elif need_alpha:
+                da = ctx.snapshot.vjp_alpha(_values(upstream))
             return (
                 None,
-                torch.tensor(dx, dtype=value.dtype, device=value.device).reshape_as(value),
-                torch.tensor(da, dtype=alpha.dtype, device=alpha.device),
+                None if dx is None else torch.tensor(dx, dtype=value.dtype, device=value.device).reshape_as(value),
+                None if da is None else torch.tensor(da, dtype=alpha.dtype, device=alpha.device),
                 None,
                 None,
             )
