@@ -165,7 +165,7 @@ jobs:
         run: bash scripts/run_rust_clippy_strict.sh
       - name: build + test core
         run: |
-          cargo test --locked -p st-frac --release --test fft_numerics
+          cargo test --locked -p st-frac --release --test fft_numerics --test learning --test history_learning --test selective_learning
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
       - name: test upper stack
@@ -196,7 +196,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: build + test core
         run: |
-          cargo test --locked -p st-frac --release --test fft_numerics
+          cargo test --locked -p st-frac --release --test fft_numerics --test learning --test history_learning --test selective_learning
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
   wgpu-macos:
@@ -352,6 +352,7 @@ jobs:
           node bindings/st-wasm/tests/rank_adaptation.cjs "$module"
           node bindings/st-wasm/tests/fractional_learning.mjs "$module"
           node bindings/st-wasm/tests/fractional_history.mjs "$module"
+          node bindings/st-wasm/tests/fractional_selective_vjp.mjs "$module"
           node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
       - name: Portable NN plans without WebGPU
@@ -703,8 +704,10 @@ jobs:
           python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "EllipticCausalLearningBatch"); assert hasattr(st, "EllipticCausalResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
+            bindings/st-py/tests/test_geometry_optional_dependency.py \
             bindings/st-py/tests/test_fractional_learning.py \
             bindings/st-py/tests/test_fractional_history.py \
+            bindings/st-py/tests/test_fractional_selective_vjp.py \
             bindings/st-py/tests/test_fractional_memory_study.py \
             bindings/st-py/tests/test_fractional_history_study.py \
             bindings/st-py/tests/test_elliptic_gated_causal.py \
@@ -724,3 +727,4 @@ jobs:
             bindings/st-py/tests/test_wave_gate_long_horizon_summary.py \
             bindings/st-py/tests/test_elliptic_nonlinear_study.py \
             bindings/st-py/tests/test_elliptic_causal_study.py
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py

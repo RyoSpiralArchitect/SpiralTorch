@@ -176,38 +176,64 @@ impl FractionalGlLearningBatch {
         &self.output
     }
 
-    fn shaped(&self, values: &[f32]) -> Result<ArrayD<f32>> {
+    fn validate_direction(&self, values: &[f32]) -> Result<()> {
         if values.len() != self.output.len() {
             return Err(FractionalLearningError::Shape);
         }
         validate_slice("fractional learning direction", values)?;
+        Ok(())
+    }
+
+    fn shaped(&self, values: &[f32]) -> Result<ArrayD<f32>> {
+        self.validate_direction(values)?;
         ArrayD::from_shape_vec(self.output.raw_dim(), values.to_vec())
             .map_err(|_| FractionalLearningError::Shape)
     }
 
-    /// True input/shared-alpha VJP; no optimizer policy or gradient normalization.
-    pub fn vjp(&self, upstream: &[f32]) -> Result<FractionalGlGradients> {
-        let upstream = self.shaped(upstream)?;
+    fn input_pullback(&self, upstream: &ArrayD<f32>) -> Result<Vec<f32>> {
         let input = match &self.history_coefficients {
             Some(coefficients) if coefficients.is_empty() => ArrayD::zeros(self.output.raw_dim()),
             Some(coefficients) => fracdiff_gl_nd_vjp_with_coeffs(
-                &upstream,
+                upstream,
                 self.config.axis,
                 coefficients,
                 self.config.pad,
                 Some(self.config.scale_multiplier()?),
             )?,
-            None => fracdiff_gl_nd_vjp_config(&upstream, self.config)?,
+            None => fracdiff_gl_nd_vjp_config(upstream, self.config)?,
         };
+        Ok(input.iter().copied().collect())
+    }
+
+    fn alpha_pullback(&self, upstream: &[f32]) -> Result<f32> {
         let alpha = upstream
             .iter()
             .zip(self.alpha_derivative.iter())
             .map(|(&g, &d)| f64::from(g) * f64::from(d))
             .sum();
+        Ok(checked_f32("fractional learning alpha gradient", alpha)?)
+    }
+
+    /// True input/shared-alpha VJP; no optimizer policy or gradient normalization.
+    pub fn vjp(&self, upstream: &[f32]) -> Result<FractionalGlGradients> {
+        let shaped = self.shaped(upstream)?;
         Ok(FractionalGlGradients {
-            input: input.iter().copied().collect(),
-            alpha: checked_f32("fractional learning alpha gradient", alpha)?,
+            input: self.input_pullback(&shaped)?,
+            alpha: self.alpha_pullback(upstream)?,
         })
+    }
+
+    /// Input VJP only. Does not reduce or check the unrequested alpha gradient.
+    pub fn vjp_input(&self, upstream: &[f32]) -> Result<Vec<f32>> {
+        self.input_pullback(&self.shaped(upstream)?)
+    }
+
+    /// Shared-alpha VJP only: no input adjoint convolution or input-gradient allocation.
+    /// The direction is still shape/finite checked; only this requested component
+    /// must be representable as f32. Forward snapshots and joint VJP are unchanged.
+    pub fn vjp_alpha(&self, upstream: &[f32]) -> Result<f32> {
+        self.validate_direction(upstream)?;
+        self.alpha_pullback(upstream)
     }
 
     pub fn jvp(&self, input_tangent: &[f32], alpha_tangent: f32) -> Result<Vec<f32>> {

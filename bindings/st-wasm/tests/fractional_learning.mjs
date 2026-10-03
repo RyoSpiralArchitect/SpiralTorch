@@ -32,10 +32,10 @@ for (let step = 0; step <= 100; step++) {
     const residual = batch.output.map((v, i) => v - target[i]);
     losses.push(dot(residual, residual) / x.length);
     if (step === 100) { batch.free(); break; }
-    const gradient = batch.vjp(f32(residual.map(v => 2*v/x.length)));
-    alpha -= .05 * gradient.alpha;
+    const alphaGradient = batch.vjp_alpha(f32(residual.map(v => 2*v/x.length)));
+    alpha -= .05 * alphaGradient;
     assert.ok(Number.isFinite(alpha) && alpha > 0);
-    gradient.free(); batch.free();
+    batch.free();
 }
 kernel.free();
 assert.ok(losses.every(Number.isFinite) && losses.at(-1) < losses[0] * .01);

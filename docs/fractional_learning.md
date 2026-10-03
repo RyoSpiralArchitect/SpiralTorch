@@ -36,11 +36,25 @@ fn main() -> Result<(), FractionalLearningError> {
     let kernel = FractionalGlKernel::new(8, 0.7, 128, 1024)?;
     let saved = kernel.forward(&[1.0, 2.0, 3.0, 4.0], &[1, 4, 1], 1, 0.5)?;
     let gradients = saved.vjp(&[0.0, 0.0, 0.0, 1.0])?;
+    let alpha_only = saved.vjp_alpha(&[0.0, 0.0, 0.0, 1.0])?;
+    let input_only = saved.vjp_input(&[0.0, 0.0, 0.0, 1.0])?;
+    assert_eq!(alpha_only, gradients.alpha);
+    assert_eq!(input_only, gradients.input);
     let tangent = saved.jvp(&[1.0; 4], 0.1)?;
     assert!(gradients.alpha.is_finite() && tangent.iter().all(|v| v.is_finite()));
     Ok(())
 }
 ```
+
+Both snapshots expose `vjp_input` and `vjp_alpha` in Rust, Python and WASM.
+The alpha-only path validates and reduces the saved order differential without
+computing an input-adjoint convolution or allocating its gradient tensor.
+The input-only path omits the order reduction. Each requires a finite,
+shape-matching upstream direction and a representable requested result;
+overflow in an **unrequested** component does not reject a valid component.
+Joint `vjp` still requires both, with unchanged component mathematics and
+accumulation order. Forward snapshots still compute the order differential;
+this is not a forward-only or resident-GPU optimization.
 
 ## Python And HF
 
@@ -57,6 +71,21 @@ y = st.fractional_gl_autograd(x, alpha, axis=1,
     kernel=st.FractionalGlKernel(kernel_len=8, step=0.7))
 y.square().mean().backward()  # input and alpha gradients come from Rust
 ```
+
+The AD bridge follows Torch's input-gradient requirements. For frozen hidden
+states with trainable alpha, backward selects `vjp_alpha`; for trainable input
+with frozen alpha, it selects `vjp_input`; when both are trainable it uses the
+joint VJP. It does not drop older-lag order derivatives at integer alpha.
+This changes unnecessary work, not the loss, optimizer or intended gradients.
+Host transport remains explicit; a speed claim needs matched measurement.
+The [selective-VJP validation](../benchmarks/results/2026-10-03-fractional-selective-vjp/README.md)
+records native/WASM component parity and exact updates of saved pretrained
+adapters, separately from timing or quality claims.
+`tools/benchmark_fractional_learning.py` compares full forward plus the requested
+order VJP through the joint Rust route, selective Rust route and a float32 Torch
+causal-convolution reference. Use `--validate-only` before timing, a verified
+release native build, and an idle host. It includes the native host transport;
+it is not an end-to-end adapter/model or resident GPU benchmark.
 
 `FractionalMemoryAdapter(F)` is an identity-initialized residual:
 

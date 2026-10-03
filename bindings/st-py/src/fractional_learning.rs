@@ -79,6 +79,16 @@ impl PyFractionalGlLearningBatch {
             .map_err(value_error)
     }
 
+    fn vjp_input(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.vjp_input(&upstream))
+            .map_err(value_error)
+    }
+
+    fn vjp_alpha(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<f32> {
+        py.detach(|| self.inner.vjp_alpha(&upstream))
+            .map_err(value_error)
+    }
+
     fn jvp(
         &self,
         py: Python<'_>,

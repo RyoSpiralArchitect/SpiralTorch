@@ -1,0 +1,279 @@
+{
+  "schema": "spiraltorch.fractional_selective_pretrained_parity.v1",
+  "status": "passed",
+  "native_sha256": "b76fd92971447690d639b4258e9727730a7bf6d40ac97ec9b5ca0d9e45ed884e",
+  "base_parameter_sha256": "e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9",
+  "reference_route": "joint VJP in the same native binary",
+  "comparison_route": "alpha-only VJP selected by Torch autograd",
+  "actual_shape": [
+    2,
+    128,
+    768
+  ],
+  "threads": 2,
+  "runs": [
+    {
+      "family": "fractional-history-study",
+      "run_key": "41:history_learned",
+      "source_study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+      "checkpoint": {
+        "filename": "checkpoint-usuwy2vu.pt",
+        "sha256": "7a39bbe4f33bd11d8e619baee31d52efeb997420f959e2970d599bcbaf2e16ee"
+      },
+      "updates_per_route": 2,
+      "losses_gradients_gates_and_adam_exact": true,
+      "records": [
+        {
+          "loss": 3.999262809753418,
+          "conditioning": null,
+          "gate_gradient_l2": 0.003033963730558753,
+          "gate_before_update_l2": 4.336144924163818,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.03420611470937729,
+          "alpha_before_update": 1.0347979068756104,
+          "log_alpha_gradient": -0.0013077616458758712,
+          "log_alpha_gradient_l2": 0.0013077616458758712,
+          "log_alpha_before_update_l2": 0.03420611470937729,
+          "local_gate_gradient_l2": 0.0029265109915286303,
+          "local_gate_before_update_l2": 5.029987335205078,
+          "log_alpha_after_update": 0.035726916044950485,
+          "alpha_after_update": 1.0363727807998657
+        },
+        {
+          "loss": 3.999234199523926,
+          "conditioning": null,
+          "gate_gradient_l2": 0.0030383507255464792,
+          "gate_before_update_l2": 4.343969345092773,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": 0.035726916044950485,
+          "alpha_before_update": 1.0363727807998657,
+          "log_alpha_gradient": -0.001317438087426126,
+          "log_alpha_gradient_l2": 0.001317438087426126,
+          "log_alpha_before_update_l2": 0.035726916044950485,
+          "local_gate_gradient_l2": 0.0029267878271639347,
+          "local_gate_before_update_l2": 5.039073467254639,
+          "log_alpha_after_update": 0.03716462478041649,
+          "alpha_after_update": 1.037863850593567
+        }
+      ]
+    },
+    {
+      "family": "fractional-history-study",
+      "run_key": "43:history_learned",
+      "source_study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+      "checkpoint": {
+        "filename": "checkpoint-7l5exopc.pt",
+        "sha256": "1d7fc364ef1b89905026c21379c7320646fa04c608554a2278d6642e42425666"
+      },
+      "updates_per_route": 2,
+      "losses_gradients_gates_and_adam_exact": true,
+      "records": [
+        {
+          "loss": 3.857414484024048,
+          "conditioning": null,
+          "gate_gradient_l2": 0.007245113141834736,
+          "gate_before_update_l2": 4.324892997741699,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.011350685730576515,
+          "alpha_before_update": 0.9887135028839111,
+          "log_alpha_gradient": -0.005062610376626253,
+          "log_alpha_gradient_l2": 0.005062610376626253,
+          "log_alpha_before_update_l2": 0.011350685730576515,
+          "local_gate_gradient_l2": 0.007329885847866535,
+          "local_gate_before_update_l2": 5.049515724182129,
+          "log_alpha_after_update": -0.00957790669053793,
+          "alpha_after_update": 0.9904677867889404
+        },
+        {
+          "loss": 3.857292652130127,
+          "conditioning": null,
+          "gate_gradient_l2": 0.007249234709888697,
+          "gate_before_update_l2": 4.3354692459106445,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.00957790669053793,
+          "alpha_before_update": 0.9904677867889404,
+          "log_alpha_gradient": -0.005097162444144487,
+          "log_alpha_gradient_l2": 0.005097162444144487,
+          "log_alpha_before_update_l2": 0.00957790669053793,
+          "local_gate_gradient_l2": 0.007324916310608387,
+          "local_gate_before_update_l2": 5.061044692993164,
+          "log_alpha_after_update": -0.007726544979959726,
+          "alpha_after_update": 0.9923032522201538
+        }
+      ]
+    },
+    {
+      "family": "fractional-history-study",
+      "run_key": "47:history_learned",
+      "source_study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+      "checkpoint": {
+        "filename": "checkpoint-kwboh8fm.pt",
+        "sha256": "12bf4262ed6c88b1dd00f95129b13520729c6218154745b4ab4485fa9874617d"
+      },
+      "updates_per_route": 2,
+      "losses_gradients_gates_and_adam_exact": true,
+      "records": [
+        {
+          "loss": 4.27023983001709,
+          "conditioning": null,
+          "gate_gradient_l2": 0.004694899544119835,
+          "gate_before_update_l2": 4.340447425842285,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.004332618787884712,
+          "alpha_before_update": 0.9956767559051514,
+          "log_alpha_gradient": -0.002986619481816888,
+          "log_alpha_gradient_l2": 0.002986619481816888,
+          "log_alpha_before_update_l2": 0.004332618787884712,
+          "local_gate_gradient_l2": 0.0040344963781535625,
+          "local_gate_before_update_l2": 5.09745454788208,
+          "log_alpha_after_update": -0.00305259320884943,
+          "alpha_after_update": 0.9969520568847656
+        },
+        {
+          "loss": 4.270188331604004,
+          "conditioning": null,
+          "gate_gradient_l2": 0.00469865882769227,
+          "gate_before_update_l2": 4.349348545074463,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.00305259320884943,
+          "alpha_before_update": 0.9969520568847656,
+          "log_alpha_gradient": -0.003005822654813528,
+          "log_alpha_gradient_l2": 0.003005822654813528,
+          "log_alpha_before_update_l2": 0.00305259320884943,
+          "local_gate_gradient_l2": 0.004033920355141163,
+          "local_gate_before_update_l2": 5.107394218444824,
+          "log_alpha_after_update": -0.0017409496940672398,
+          "alpha_after_update": 0.9982605576515198
+        }
+      ]
+    },
+    {
+      "family": "fractional-memory-study",
+      "run_key": "41:fractional_learned",
+      "source_study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+      "checkpoint": {
+        "filename": "checkpoint-tmvu24pu.pt",
+        "sha256": "1080ad88f9528833abb9b029ddb71356edb635fe5cb9a8171ecbfeb3e0fb0837"
+      },
+      "updates_per_route": 2,
+      "losses_gradients_gates_and_adam_exact": true,
+      "records": [
+        {
+          "loss": 4.002847671508789,
+          "conditioning": null,
+          "gate_gradient_l2": 0.0034594149328768253,
+          "gate_before_update_l2": 4.548302173614502,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.1900874376296997,
+          "alpha_before_update": 0.8268868327140808,
+          "log_alpha_gradient": -0.0007129740552045405,
+          "log_alpha_gradient_l2": 0.0007129740552045405,
+          "log_alpha_before_update_l2": 0.1900874376296997,
+          "log_alpha_after_update": -0.18857412040233612,
+          "alpha_after_update": 0.8281391263008118
+        },
+        {
+          "loss": 4.002834320068359,
+          "conditioning": null,
+          "gate_gradient_l2": 0.003461049869656563,
+          "gate_before_update_l2": 4.556902885437012,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.18857412040233612,
+          "alpha_before_update": 0.8281391263008118,
+          "log_alpha_gradient": -0.0007172968471422791,
+          "log_alpha_gradient_l2": 0.0007172968471422791,
+          "log_alpha_before_update_l2": 0.18857412040233612,
+          "log_alpha_after_update": -0.18713343143463135,
+          "alpha_after_update": 0.8293330669403076
+        }
+      ]
+    },
+    {
+      "family": "fractional-memory-study",
+      "run_key": "43:fractional_learned",
+      "source_study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+      "checkpoint": {
+        "filename": "checkpoint-stdpucx6.pt",
+        "sha256": "a0183b3e519b78dfce929a31520035c96267e5687a3f5275fbf3baa15d40fb5d"
+      },
+      "updates_per_route": 2,
+      "losses_gradients_gates_and_adam_exact": true,
+      "records": [
+        {
+          "loss": 3.874241828918457,
+          "conditioning": null,
+          "gate_gradient_l2": 0.00717052910476923,
+          "gate_before_update_l2": 4.606479167938232,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.25704455375671387,
+          "alpha_before_update": 0.7733337879180908,
+          "log_alpha_gradient": 0.000373670132830739,
+          "log_alpha_gradient_l2": 0.000373670132830739,
+          "log_alpha_before_update_l2": 0.25704455375671387,
+          "log_alpha_after_update": -0.25601786375045776,
+          "alpha_after_update": 0.7741281390190125
+        },
+        {
+          "loss": 3.8741931915283203,
+          "conditioning": null,
+          "gate_gradient_l2": 0.0071702091954648495,
+          "gate_before_update_l2": 4.61705207824707,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.25601786375045776,
+          "alpha_before_update": 0.7741281390190125,
+          "log_alpha_gradient": 0.0003683673858176917,
+          "log_alpha_gradient_l2": 0.0003683673858176917,
+          "log_alpha_before_update_l2": 0.25601786375045776,
+          "log_alpha_after_update": -0.2551366984844208,
+          "alpha_after_update": 0.7748105525970459
+        }
+      ]
+    },
+    {
+      "family": "fractional-memory-study",
+      "run_key": "47:fractional_learned",
+      "source_study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+      "checkpoint": {
+        "filename": "checkpoint-3gqvz8w8.pt",
+        "sha256": "fe88f8d25d7d435c5a84350919ca00e419a12d66601acf77242720356f1b2f94"
+      },
+      "updates_per_route": 2,
+      "losses_gradients_gates_and_adam_exact": true,
+      "records": [
+        {
+          "loss": 4.280191421508789,
+          "conditioning": null,
+          "gate_gradient_l2": 0.0044064633548259735,
+          "gate_before_update_l2": 4.6374311447143555,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.20697221159934998,
+          "alpha_before_update": 0.8130422234535217,
+          "log_alpha_gradient": -0.00022899683972354978,
+          "log_alpha_gradient_l2": 0.00022899683972354978,
+          "log_alpha_before_update_l2": 0.20697221159934998,
+          "log_alpha_after_update": -0.20629897713661194,
+          "alpha_after_update": 0.8135898113250732
+        },
+        {
+          "loss": 4.28016996383667,
+          "conditioning": null,
+          "gate_gradient_l2": 0.004407436121255159,
+          "gate_before_update_l2": 4.646360397338867,
+          "log_alpha_trainable": true,
+          "log_alpha_before_update": -0.20629897713661194,
+          "alpha_before_update": 0.8135898113250732,
+          "log_alpha_gradient": -0.0002336292964173481,
+          "log_alpha_gradient_l2": 0.0002336292964173481,
+          "log_alpha_before_update_l2": 0.20629897713661194,
+          "log_alpha_after_update": -0.2056666910648346,
+          "alpha_after_update": 0.8141043782234192
+        }
+      ]
+    }
+  ],
+  "frozen_base_unchanged": true,
+  "original_study_files_unchanged": true,
+  "primary_study_updates": 0,
+  "heldout_losses_computed": false,
+  "scope": "24 auxiliary updates on copies of six completed adapters. Wiring parity, not quality or timing evidence."
+}
