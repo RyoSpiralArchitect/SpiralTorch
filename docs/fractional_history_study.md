@@ -12,7 +12,8 @@ of `-0.000950204` on Pride and `-0.000715551` on Alice, in all three seeds.
 EMA also beats fixed-order GL. Learned alpha ends at `0.9887..1.0348`: at
 exactly alpha 1 and step 1, strictly-past GL reduces to `-x[t-1]`. The small
 advantage therefore does not establish that long fractional memory is needed;
-an ordinary single-lag control is the next discriminating comparison. No
+the [ordinary single-lag control](fractional_lag_study.md) is the next
+discriminating comparison. No
 default changes or speed/significance/general-LLM claims follow from this run.
 
 ## Controls
