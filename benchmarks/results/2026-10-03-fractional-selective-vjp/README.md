@@ -26,6 +26,12 @@ Forward snapshots, including their cached order differential, are unchanged.
 - Rustfmt, Clippy with the WGPU feature and TypeScript declarations passed.
   Existing vendored-WGPU warnings and Torch deprecation warnings remain.
 
+After integrating the reviewed single-lag protocol from #2198, the expanded
+release-package regression suite passed **354 tests, zero skipped**. The CI
+suite now includes those lag controls explicitly. `integration-validation.json`
+binds this later check separately; the initial `validation.json` and its source
+hashes remain the original pre-integration record.
+
 `pretrained-parity.json` records all auxiliary update scalars and original
 checkpoint identities. The reference is the **joint VJP in the same new native
 binary**, not a concurrently loaded old extension. Tests also verify that an
