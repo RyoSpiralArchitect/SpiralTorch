@@ -97,3 +97,19 @@ Publish all numeric outcomes, input/source hashes and verification receipts,
 including failed criteria and losing results. Keep corpora, weights,
 checkpoints, native packages and raw logs local. Implementation tests and a
 running process are not completed pretrained quality results.
+
+## Completed Result
+
+The [twelve-run result](../benchmarks/results/2026-10-03-fractional-lag-study/README.md)
+completed all 6,144 primary updates and 24 continuation checks. Ordinary lag1
+and fixed-one Rust GL matched exactly through saved gates, named Adam states
+and per-block endpoints. Learning from one improved CE in all three seeds on
+both reused sets (mean differences -0.002840618 / -0.001799345 versus lag1)
+and outperformed initialization at one-half. The repeated half-order arms
+exactly reproduce the preceding study; they are not additional independent seeds.
+
+The one-initialized orders finish around 1.95-2.10, at their observed maxima,
+not at a demonstrated optimum. At exactly two, strictly-past GL becomes the
+ordinary two-tap map `-2*x[t-1] + x[t-2]`. Fixed-two controls and truncated-history
+comparisons are the next separation to test before attributing the result to
+long fractional memory. No such follow-up or speed claim is included here.
