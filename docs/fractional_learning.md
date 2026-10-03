@@ -258,6 +258,12 @@ Report parameter counts explicitly: learning order adds one scalar. Their
 extra history compute and host transfers must also be reported. Pure speed
 comparisons remain restricted to the **same** mathematical computation.
 
+The [matched operator timing](../benchmarks/results/2026-10-03-fractional-selective-vjp-timing/README.md)
+records full/history forward plus order-only VJP on a release CPU build. The
+selective path reduces observed work versus joint backward, but remains slower
+than the ordinary Torch convolution reference. These ambient-load measurements
+do not establish model throughput, GPU performance or a general speedup.
+
 The [paired language-model study](fractional_memory_study.md) implements these
 controls with the public adapter and the existing restartable HF driver. It
 isolates fixed and learned order without adding another geometric mechanism.

@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.fractional_learning_timing_validation.v1",
+  "status": "passed",
+  "benchmark_source_revision": "a63282316ef65ccc4dbf780e16f4aa88d392ecaf",
+  "source_sha256": {
+    "tools/benchmark_fractional_learning.py": "615567ec1d98a11a6130dbcf9a8194fd00c4fd6dae369accaca1f19fec8247b3",
+    "tools/test_benchmark_fractional_learning.py": "c3fbca32aa6d1cac963348f387def21942c6123bd634c449a562057008ce307b"
+  },
+  "native_sha256": "03688b35493309801bcd1c269fcd09442d0b9af572c043a97e7fdeee3dd76d0b",
+  "bridge_sha256": "c0e9e68e31d6ded0540cd2c5f431d69a18e578e218c9e66cc7cb2b8f5c046447",
+  "plan_sha256": "f7aaefca09148b54d5d46882888a8e89c7a96a1e2f1c413e5a858967585dec87",
+  "successful_processes": 12,
+  "failed_processes": 0,
+  "all_rust_joint_selective_checks_exact": true,
+  "torch_reference_rtol": 0.00003,
+  "torch_reference_atol": 0.00003,
+  "all_torch_comparisons_passed": true,
+  "tests_passed": 14,
+  "tests_skipped": 0,
+  "tests_execute_timings": false,
+  "timing_publication_tests_log_sha256": "8f91a2c1e444c79591ec433c7bedcd1cb1c587f6a6369dc0ddd805b037a2691d",
+  "scope": "Numerical equality, frozen condition coverage and published statistics reconstruction. Ambient-load timing only; not isolated performance, GPU, model throughput or quality evidence."
+}

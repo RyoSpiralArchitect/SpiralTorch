@@ -1,6 +1,8 @@
 # Selective Fractional VJP Validation
 
 This is correctness and learning-path evidence, **not a throughput benchmark**.
+The later [ambient-load timing record](../2026-10-03-fractional-selective-vjp-timing/README.md)
+is separate; the original validation below remains untimed.
 Rust now exposes `vjp_input` and `vjp_alpha` alongside the unchanged joint VJP.
 The order-only path skips the input-adjoint convolution and its gradient
 allocation. Python selects the requested components from Torch's gradient
@@ -48,6 +50,9 @@ The `benchmark-validation-release-*.json` files contain **no timings**. No timin
 to claim a speedup over PyTorch, the old bridge or an end-to-end model. The
 running twelve-run single-lag study kept its original frozen package and
 client files; this change was not hot-loaded into it.
+
+Those launch-time boundaries remain historical. The later timing record was
+collected after the primary process exited and completed-state checks finished.
 
 Rebuild the Python extension and run `test_fractional_selective_vjp.py` with
 `--import-mode=importlib` against that installed package. The test reproduces

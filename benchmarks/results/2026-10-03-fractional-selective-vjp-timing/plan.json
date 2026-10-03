@@ -1,0 +1,40 @@
+{
+  "schema": "spiraltorch.fractional_learning_timing_plan.v1",
+  "status": "planned_not_measured",
+  "implementation_revision": "a63282316ef65ccc4dbf780e16f4aa88d392ecaf",
+  "shapes": [
+    [
+      2,
+      128,
+      768
+    ],
+    [
+      1,
+      256,
+      768
+    ]
+  ],
+  "maps": [
+    "full",
+    "history"
+  ],
+  "repetitions": 3,
+  "kernel_len": 32,
+  "alpha": 0.9,
+  "step": 1,
+  "seed": 239,
+  "threads": 2,
+  "warmup_per_route": 2,
+  "rounds": 12,
+  "routes": [
+    "rust_joint",
+    "rust_selective",
+    "torch_conv1d"
+  ],
+  "native_profile": "release",
+  "native_sha256": "03688b35493309801bcd1c269fcd09442d0b9af572c043a97e7fdeee3dd76d0b",
+  "bridge_sha256": "c0e9e68e31d6ded0540cd2c5f431d69a18e578e218c9e66cc7cb2b8f5c046447",
+  "benchmark_sha256": "615567ec1d98a11a6130dbcf9a8194fd00c4fd6dae369accaca1f19fec8247b3",
+  "timing_scope": "CPU float32 interfaces; forward, requested order VJP and host transport. Two complete route-permutation cycles per repetition. No concurrent local study, build or tests from this task; record foreground contention and all failures.",
+  "exclusions": "No model quality, adapter/model throughput, GPU or general-library ranking. Rust uses wider accumulators; requested results must meet frozen benchmark tolerance."
+}
