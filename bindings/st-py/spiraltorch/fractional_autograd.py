@@ -2,12 +2,15 @@
 
 CPU f32 host copies are explicit. Sequence adapters require complete unpadded
 prefixes, no KV cache, and no packed-document boundaries within one sequence.
+Bulk buffers avoid Python scalar boxing when Torch/NumPy interop is available;
+the sequence transport remains available without that optional capability.
 """
 
 from __future__ import annotations
 
 import json
 import math
+from functools import lru_cache
 from typing import Any
 
 from .geometry_autograd import _input, _require_torch, _strength, _values, torch
@@ -22,32 +25,62 @@ def _kernel(**options: Any) -> Any:
     return FractionalGlKernel(**options)
 
 
+@lru_cache(maxsize=1)
+def _buffer_transport_available() -> bool:
+    if torch is None:
+        return False
+    try:
+        torch.empty(0, dtype=torch.float32, device="cpu").numpy()
+    except (ImportError, RuntimeError):
+        return False
+    return True
+
+
+def _buffer_values(value: Any) -> Any:
+    return value.detach().to(device="cpu").resolve_neg().contiguous().numpy()
+
+
+def _transport_output(values: Any, like: Any, buffers: bool) -> Any:
+    if buffers:
+        # Retain an exported view so the bytearray cannot resize under a CPU Tensor.
+        return torch.frombuffer(memoryview(values), dtype=like.dtype).to(device=like.device).reshape_as(like)
+    return torch.tensor(values, dtype=like.dtype, device=like.device).reshape_as(like)
+
+
 if torch is not None:
     class _FractionalGlFunction(torch.autograd.Function):
         @staticmethod
         def forward(ctx: Any, kernel: Any, value: Any, alpha: Any, axis: int,
                     history_only: bool) -> Any:
-            operation = kernel.forward_history if history_only else kernel.forward
-            ctx.snapshot = operation(_values(value), list(value.shape), axis, alpha.detach().item())
+            ctx.buffer_transport = _buffer_transport_available()
+            name = "forward_history" if history_only else "forward"
+            operation = getattr(kernel, name + ("_buffer" if ctx.buffer_transport else ""))
+            values = _buffer_values(value) if ctx.buffer_transport else _values(value)
+            ctx.snapshot = operation(values, list(value.shape), axis, alpha.detach().item())
             ctx.save_for_backward(value, alpha)
             ctx.save_for_forward(value, alpha)
-            return torch.tensor(ctx.snapshot.output, dtype=value.dtype, device=value.device).reshape_as(value)
+            result = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
+            return _transport_output(result, value, ctx.buffer_transport)
 
         @staticmethod
         @torch.autograd.function.once_differentiable
         def backward(ctx: Any, upstream: Any) -> tuple[Any, ...]:
             value, alpha = ctx.saved_tensors
             need_input, need_alpha = ctx.needs_input_grad[1:3]
+            if not (need_input or need_alpha):
+                return None, None, None, None, None
             dx = da = None
+            suffix = "_buffer" if ctx.buffer_transport else ""
+            direction = _buffer_values(upstream) if ctx.buffer_transport else _values(upstream)
             if need_input and need_alpha:
-                dx, da = ctx.snapshot.vjp(_values(upstream))
+                dx, da = getattr(ctx.snapshot, "vjp" + suffix)(direction)
             elif need_input:
-                dx = ctx.snapshot.vjp_input(_values(upstream))
+                dx = getattr(ctx.snapshot, "vjp_input" + suffix)(direction)
             elif need_alpha:
-                da = ctx.snapshot.vjp_alpha(_values(upstream))
+                da = getattr(ctx.snapshot, "vjp_alpha" + suffix)(direction)
             return (
                 None,
-                None if dx is None else torch.tensor(dx, dtype=value.dtype, device=value.device).reshape_as(value),
+                None if dx is None else _transport_output(dx, value, ctx.buffer_transport),
                 None if da is None else torch.tensor(da, dtype=alpha.dtype, device=alpha.device),
                 None,
                 None,
@@ -58,8 +91,10 @@ if torch is not None:
                 _history_only: Any) -> Any:
             value, _ = ctx.saved_tensors
             dx = torch.zeros_like(value) if dx is None else dx
-            result = ctx.snapshot.jvp(_values(dx), 0.0 if da is None else da.detach().item())
-            return torch.tensor(result, dtype=value.dtype, device=value.device).reshape_as(value)
+            operation = ctx.snapshot.jvp_buffer if ctx.buffer_transport else ctx.snapshot.jvp
+            direction = _buffer_values(dx) if ctx.buffer_transport else _values(dx)
+            result = operation(direction, 0.0 if da is None else da.detach().item())
+            return _transport_output(result, value, ctx.buffer_transport)
 
 
 def fractional_gl_autograd(value: Any, alpha: Any, *, axis: int, kernel: Any = None) -> Any:

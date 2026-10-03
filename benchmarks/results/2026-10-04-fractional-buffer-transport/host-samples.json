@@ -1,0 +1,198 @@
+{
+  "schema": "spiraltorch.numeric_host_samples.v1",
+  "samples": [
+    {
+      "timing_file": "full-1x256x768-repeat1.json",
+      "raw_host_log_sha256": "b355815bb63d38ca0d5ff06bde97b0ebd817564861070948bec2621f09bdbffb",
+      "samples": [
+        {
+          "user_percent": 24.81,
+          "system_percent": 16.64,
+          "idle_percent": 58.54
+        },
+        {
+          "user_percent": 22.78,
+          "system_percent": 11.21,
+          "idle_percent": 66
+        }
+      ]
+    },
+    {
+      "timing_file": "full-1x256x768-repeat2.json",
+      "raw_host_log_sha256": "08fcf3927959fd88b213af4df22bbdb0e5f6fc1fdcefaa381020d2aecd3b0c9a",
+      "samples": [
+        {
+          "user_percent": 17.2,
+          "system_percent": 18.66,
+          "idle_percent": 64.12
+        },
+        {
+          "user_percent": 24.84,
+          "system_percent": 13.95,
+          "idle_percent": 61.2
+        }
+      ]
+    },
+    {
+      "timing_file": "full-1x256x768-repeat3.json",
+      "raw_host_log_sha256": "0fe55bf0e51ff68f1a313a5adbe2438ec8b0baa3c94da307375703c96eed29e7",
+      "samples": [
+        {
+          "user_percent": 25.78,
+          "system_percent": 21.13,
+          "idle_percent": 53.7
+        },
+        {
+          "user_percent": 22.19,
+          "system_percent": 10.23,
+          "idle_percent": 67.57
+        }
+      ]
+    },
+    {
+      "timing_file": "full-2x128x768-repeat1.json",
+      "raw_host_log_sha256": "acb1d0ee2fbe5ea966d7f6278fbbcf859e0ab07dbbf46b1d4d4f4dde132ad441",
+      "samples": [
+        {
+          "user_percent": 24.33,
+          "system_percent": 20.35,
+          "idle_percent": 55.3
+        },
+        {
+          "user_percent": 22.52,
+          "system_percent": 12.62,
+          "idle_percent": 64.85
+        }
+      ]
+    },
+    {
+      "timing_file": "full-2x128x768-repeat2.json",
+      "raw_host_log_sha256": "5c5f5b8972cc43c07a808b985a83a039318b04be5b427f44a9f35bb3b7ac342e",
+      "samples": [
+        {
+          "user_percent": 26.25,
+          "system_percent": 20.15,
+          "idle_percent": 53.58
+        },
+        {
+          "user_percent": 22.59,
+          "system_percent": 12.44,
+          "idle_percent": 64.95
+        }
+      ]
+    },
+    {
+      "timing_file": "full-2x128x768-repeat3.json",
+      "raw_host_log_sha256": "636bc17b4d09d94a57c984f23b0c7479c961dbe67ec0c87ae2882571f1eff26d",
+      "samples": [
+        {
+          "user_percent": 27.8,
+          "system_percent": 23.5,
+          "idle_percent": 48.69
+        },
+        {
+          "user_percent": 22.59,
+          "system_percent": 7.8,
+          "idle_percent": 69.6
+        }
+      ]
+    },
+    {
+      "timing_file": "history-1x256x768-repeat1.json",
+      "raw_host_log_sha256": "45a2f18aeb7f9419f81f2afd1e00de2863d2852d5c027836d98b4a21bed0d737",
+      "samples": [
+        {
+          "user_percent": 22.45,
+          "system_percent": 17.14,
+          "idle_percent": 60.39
+        },
+        {
+          "user_percent": 25.35,
+          "system_percent": 15.23,
+          "idle_percent": 59.4
+        }
+      ]
+    },
+    {
+      "timing_file": "history-1x256x768-repeat2.json",
+      "raw_host_log_sha256": "feb504ea9dd807d8ba1b24a14f11b319197b6cb98e92832ada37594349a9c0e5",
+      "samples": [
+        {
+          "user_percent": 25.9,
+          "system_percent": 21.83,
+          "idle_percent": 52.25
+        },
+        {
+          "user_percent": 22.44,
+          "system_percent": 11.4,
+          "idle_percent": 66.15
+        }
+      ]
+    },
+    {
+      "timing_file": "history-1x256x768-repeat3.json",
+      "raw_host_log_sha256": "78f27055c896bed685ee664cadd246e3d3c967d9de512f91b3bbbce398812296",
+      "samples": [
+        {
+          "user_percent": 28.91,
+          "system_percent": 23.34,
+          "idle_percent": 47.74
+        },
+        {
+          "user_percent": 24.66,
+          "system_percent": 11.38,
+          "idle_percent": 63.95
+        }
+      ]
+    },
+    {
+      "timing_file": "history-2x128x768-repeat1.json",
+      "raw_host_log_sha256": "89829d770f5f62a7c5f4678b6d5aae37f29fa337e9c8ee2c931e61f35ac5ed4a",
+      "samples": [
+        {
+          "user_percent": 14.94,
+          "system_percent": 15.43,
+          "idle_percent": 69.62
+        },
+        {
+          "user_percent": 22.4,
+          "system_percent": 9.56,
+          "idle_percent": 68.39
+        }
+      ]
+    },
+    {
+      "timing_file": "history-2x128x768-repeat2.json",
+      "raw_host_log_sha256": "b3bdd5af57575f80ce9900025e71f67546f7cccc7d96fa5ea9325cd2a405321e",
+      "samples": [
+        {
+          "user_percent": 29.32,
+          "system_percent": 20.67,
+          "idle_percent": 50
+        },
+        {
+          "user_percent": 22.81,
+          "system_percent": 12.36,
+          "idle_percent": 64.81
+        }
+      ]
+    },
+    {
+      "timing_file": "history-2x128x768-repeat3.json",
+      "raw_host_log_sha256": "2e09a8cc13f7433b108246136497f87da29fb9cda5dfda603243d844f6287afe",
+      "samples": [
+        {
+          "user_percent": 21.24,
+          "system_percent": 16.54,
+          "idle_percent": 62.21
+        },
+        {
+          "user_percent": 24.88,
+          "system_percent": 8.11,
+          "idle_percent": 66.99
+        }
+      ]
+    }
+  ],
+  "scope": "Two pre-process numeric CPU samples; raw host logs retained privately. Not an isolated-host claim."
+}

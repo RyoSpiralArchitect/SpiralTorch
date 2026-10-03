@@ -1,6 +1,9 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyByteArray;
 use st_frac::learning::{FractionalGlKernel, FractionalGlLearningBatch};
+
+use crate::f32_buffer::{read_f32, write_f32};
 
 fn value_error(error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(error.to_string())
@@ -64,6 +67,31 @@ impl PyFractionalGlKernel {
             .map(|inner| PyFractionalGlLearningBatch { inner })
             .map_err(value_error)
     }
+
+    /// C-contiguous native-f32 buffer, copied before Rust releases the GIL.
+    fn forward_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+    ) -> PyResult<PyFractionalGlLearningBatch> {
+        let input = read_f32(input, self.inner.max_values(), None)?;
+        self.forward(py, input, shape, axis, alpha)
+    }
+
+    fn forward_history_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+    ) -> PyResult<PyFractionalGlLearningBatch> {
+        let input = read_f32(input, self.inner.max_values(), None)?;
+        self.forward_history(py, input, shape, axis, alpha)
+    }
 }
 
 #[pymethods]
@@ -71,6 +99,11 @@ impl PyFractionalGlLearningBatch {
     #[getter]
     fn output(&self) -> Vec<f32> {
         self.inner.output().iter().copied().collect()
+    }
+
+    /// Fresh writable native-f32 bytes, independent of this immutable snapshot.
+    fn output_buffer<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyByteArray>> {
+        write_f32(py, self.inner.output().iter().copied())
     }
 
     fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, f32)> {
@@ -97,6 +130,53 @@ impl PyFractionalGlLearningBatch {
     ) -> PyResult<Vec<f32>> {
         py.detach(|| self.inner.jvp(&input_tangent, alpha_tangent))
             .map_err(value_error)
+    }
+
+    fn vjp_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<(Bound<'py, PyByteArray>, f32)> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        let gradient = py
+            .detach(|| self.inner.vjp(&upstream))
+            .map_err(value_error)?;
+        Ok((write_f32(py, gradient.input.into_iter())?, gradient.alpha))
+    }
+
+    fn vjp_input_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyByteArray>> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        let gradient = py
+            .detach(|| self.inner.vjp_input(&upstream))
+            .map_err(value_error)?;
+        write_f32(py, gradient.into_iter())
+    }
+
+    fn vjp_alpha_buffer(&self, py: Python<'_>, upstream: &Bound<'_, PyAny>) -> PyResult<f32> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        py.detach(|| self.inner.vjp_alpha(&upstream))
+            .map_err(value_error)
+    }
+
+    fn jvp_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        input_tangent: &Bound<'_, PyAny>,
+        alpha_tangent: f32,
+    ) -> PyResult<Bound<'py, PyByteArray>> {
+        let len = self.inner.output().len();
+        let tangent = read_f32(input_tangent, len, Some(len))?;
+        let output = py
+            .detach(|| self.inner.jvp(&tangent, alpha_tangent))
+            .map_err(value_error)?;
+        write_f32(py, output.into_iter())
     }
 }
 

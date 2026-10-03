@@ -12,6 +12,7 @@ mod dataset;
 mod elliptic;
 mod export;
 mod frac;
+mod f32_buffer;
 mod fractional_learning;
 mod hpo;
 mod inference;
