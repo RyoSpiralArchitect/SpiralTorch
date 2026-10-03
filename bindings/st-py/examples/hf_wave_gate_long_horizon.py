@@ -421,6 +421,9 @@ def run_endpoints(
         if hasattr(adapter, "log_alpha"):
             gated_metadata["final_log_alpha"] = float(adapter.log_alpha.detach())
             gated_metadata["final_alpha"] = float(adapter.log_alpha.detach().exp())
+        if hasattr(adapter, "logit_decay"):
+            gated_metadata["final_logit_decay"] = float(adapter.logit_decay.detach())
+            gated_metadata["final_decay"] = float(adapter.logit_decay.detach().sigmoid())
         radius = getattr(adapter, "log_radius", None)
         parent.add_module(child, torch.nn.Sequential(original, adapter))
         try:

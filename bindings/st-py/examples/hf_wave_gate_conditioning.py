@@ -164,7 +164,7 @@ def update(model, adapter, optimizer, batch):
             raise ValueError(f"invalid {name} gradient")
         record[f"{name}_gradient_l2"] = float(parameter.grad.norm())
         record[f"{name}_before_update_l2"] = float(parameter.detach().norm())
-        if name in {"log_radius", "raw_mix", "log_alpha"}:
+        if name in {"log_radius", "raw_mix", "log_alpha", "logit_decay"}:
             record[f"{name}_gradient"] = float(parameter.grad)
             record[f"{name}_before_update"] = float(parameter.detach())
     optimizer.step()
@@ -180,6 +180,12 @@ def update(model, adapter, optimizer, batch):
         if not bool(torch.isfinite(alpha)) or not bool(alpha > 0):
             raise ValueError("updated alpha is not representable as positive finite f32")
         record["alpha_after_update"] = float(alpha)
+    if hasattr(adapter, "logit_decay"):
+        record["logit_decay_after_update"] = float(adapter.logit_decay.detach())
+        decay = adapter.logit_decay.detach().sigmoid()
+        if not bool(torch.isfinite(decay)) or not bool((decay > 0) & (decay < 1)):
+            raise ValueError("updated decay is not representable in (0,1)")
+        record["decay_after_update"] = float(decay)
     return record
 
 

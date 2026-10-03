@@ -112,8 +112,17 @@ input/order derivatives reach Rust, Python AD and WASM, without subtracting
 large rounded current values. `FractionalHistoryAdapter` is an experimental
 `2*F+1`-parameter alternative, not a replacement for the `F+1` full-GL adapter
 or a capacity-matched quality win. Its causal, joint-learning and resume
-fixtures precede a pretrained comparison with ordinary causal controls; do
-not mix different mathematics into the PyTorch speed track.
+fixtures are complemented by a pretrained comparison with ordinary causal
+controls; do not mix different mathematics into the PyTorch speed track.
+The [completed independent-history study](fractional_history_study.md) compares pointwise,
+learned ordinary EMA, fixed GL history and learned GL history under the same
+three-seed/512-update schedule. Matching the learned arms' parameter count is
+not matching their filter prior or compute. All twelve runs and exact Adam
+continuations completed: learned GL slightly improves over learned EMA in
+every seed on both reused evaluation sets, while EMA beats fixed-order GL.
+Learned alpha moves near 1, where strict GL becomes a single previous-step
+map. Test an ordinary single-lag control next; this is not proof that long
+fractional memory, rather than short causal mixing, explains the difference.
 
 ## Restarted execution slice: vision across Rust, Python, and browser
 

@@ -1,0 +1,544 @@
+{
+  "schema": "spiraltorch.fractional_history_summary.v1",
+  "study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+  "steps_per_run": 512,
+  "runs": 12,
+  "primary_updates": 6144,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "pointwise": {
+          "mean_ce": 4.063162281778124,
+          "mean_delta_vs_baseline": -0.010550987058215888,
+          "mean_delta_vs_pointwise": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.063169747591019,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.06321660677592,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.063100490967432,
+              "delta_vs_pointwise": 0.0
+            }
+          ]
+        },
+        "ema_learned": {
+          "mean_ce": 4.057392899195353,
+          "mean_delta_vs_baseline": -0.0163203696409866,
+          "mean_delta_vs_pointwise": -0.005769382582770414,
+          "paired_delta_sample_sd": 5.1079750996377875e-05,
+          "seeds_better_than_pointwise": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.057349423567454,
+              "delta_vs_pointwise": -0.0058203240235643605
+            },
+            {
+              "seed": 43,
+              "ce": 4.057498441139857,
+              "delta_vs_pointwise": -0.005718165636062977
+            },
+            {
+              "seed": 47,
+              "ce": 4.0573308328787485,
+              "delta_vs_pointwise": -0.005769658088683904
+            }
+          ]
+        },
+        "history_fixed": {
+          "mean_ce": 4.058227339718077,
+          "mean_delta_vs_baseline": -0.015485929118262298,
+          "mean_delta_vs_pointwise": -0.004934942060046706,
+          "paired_delta_sample_sd": 3.752656735701099e-05,
+          "seeds_better_than_pointwise": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.058203973372778,
+              "delta_vs_pointwise": -0.004965774218240959
+            },
+            {
+              "seed": 43,
+              "ce": 4.058323448896408,
+              "delta_vs_pointwise": -0.004893157879512167
+            },
+            {
+              "seed": 47,
+              "ce": 4.058154596885045,
+              "delta_vs_pointwise": -0.004945894082386992
+            }
+          ]
+        },
+        "history_learned": {
+          "mean_ce": 4.05644269519382,
+          "mean_delta_vs_baseline": -0.01727057364251916,
+          "mean_delta_vs_pointwise": -0.006719586584302976,
+          "paired_delta_sample_sd": 0.00010581257862432248,
+          "seeds_better_than_pointwise": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.056335266431173,
+              "delta_vs_pointwise": -0.006834481159845751
+            },
+            {
+              "seed": 43,
+              "ce": 4.056590463717779,
+              "delta_vs_pointwise": -0.006626143058141132
+            },
+            {
+              "seed": 47,
+              "ce": 4.05640235543251,
+              "delta_vs_pointwise": -0.006698135534922045
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "pointwise": {
+          "mean_ce": 4.005609318614006,
+          "mean_delta_vs_baseline": -0.00619816780090332,
+          "mean_delta_vs_pointwise": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_pointwise": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.005642734467983,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.005637861788273,
+              "delta_vs_pointwise": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.005547359585762,
+              "delta_vs_pointwise": 0.0
+            }
+          ]
+        },
+        "ema_learned": {
+          "mean_ce": 4.002461868027846,
+          "mean_delta_vs_baseline": -0.009345618387063048,
+          "mean_delta_vs_pointwise": -0.003147450586160024,
+          "paired_delta_sample_sd": 5.332219866701395e-05,
+          "seeds_better_than_pointwise": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.002441689372063,
+              "delta_vs_pointwise": -0.0032010450959205627
+            },
+            {
+              "seed": 43,
+              "ce": 4.002543456852436,
+              "delta_vs_pointwise": -0.003094404935836792
+            },
+            {
+              "seed": 47,
+              "ce": 4.002400457859039,
+              "delta_vs_pointwise": -0.0031469017267227173
+            }
+          ]
+        },
+        "history_fixed": {
+          "mean_ce": 4.00290980686744,
+          "mean_delta_vs_baseline": -0.008897679547469117,
+          "mean_delta_vs_pointwise": -0.0026995117465655008,
+          "paired_delta_sample_sd": 3.79850016416617e-05,
+          "seeds_better_than_pointwise": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.002913847565651,
+              "delta_vs_pointwise": -0.002728886902332306
+            },
+            {
+              "seed": 43,
+              "ce": 4.002981245517731,
+              "delta_vs_pointwise": -0.0026566162705421448
+            },
+            {
+              "seed": 47,
+              "ce": 4.00283432751894,
+              "delta_vs_pointwise": -0.002713032066822052
+            }
+          ]
+        },
+        "history_learned": {
+          "mean_ce": 4.001746316750844,
+          "mean_delta_vs_baseline": -0.01006116966406534,
+          "mean_delta_vs_pointwise": -0.0038630018631617227,
+          "paired_delta_sample_sd": 9.850759751959009e-05,
+          "seeds_better_than_pointwise": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.001679040491581,
+              "delta_vs_pointwise": -0.003963693976402283
+            },
+            {
+              "seed": 43,
+              "ce": 4.0018710270524025,
+              "delta_vs_pointwise": -0.0037668347358703613
+            },
+            {
+              "seed": 47,
+              "ce": 4.0016888827085495,
+              "delta_vs_pointwise": -0.0038584768772125244
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "The frozen no-adapter model is the shared zero-update baseline. All four arms start at the identical function with zero feature gates; seeds vary paired minibatch order and finite-budget coverage.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "Pointwise has 768 trainable parameters. EMA and learned history have 1537; fixed history has 1536 trainable plus one frozen alpha scalar. No dummy parameters. History versus pointwise includes additional capacity; EMA versus learned history matches count but not initialization of the filter, mathematical prior, conditioning or compute.",
+    "All history arms use independent local and history gates. GL uses Rust forward_history with K=32, step=1, initial alpha=0.5. EMA uses ordinary Torch operations with strictly-past weights (1-d)*d^(k-1), k=1..31, initial d=0.5, with d=sigmoid(logit_decay). Neither renormalizes truncated prefixes.",
+    "Primary contrasts: learned history minus EMA for fractional versus ordinary mixing; learned minus fixed history for order adaptation; fixed history minus pointwise and EMA minus pointwise for each history-plus-capacity change.",
+    "Complete all twelve 512-update runs and exact next-update continuation before endpoint evaluation. Development scores do not select hyperparameters, checkpoints or run length.",
+    "Pride/Alice are reused exploratory endpoints, not untouched confirmation. Report all seeds and losing outcomes; do not claim significance or unique geometric advantage from a quality difference.",
+    "CPU float32, frozen local GPT-2, full unpadded contexts, no KV cache. History resets at each 128-token block. Extra work and host transfers are not a throughput benchmark. Prior full-GL results remain a separate historical comparison, not extra independently rerun arms.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "reference_arm": "pointwise",
+  "paired_fractional_contrasts": {
+    "pride_unused_tail": {
+      "fixed_minus_pointwise": {
+        "weights": {
+          "history_fixed": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": -0.004934942060046706,
+        "paired_sample_sd": 3.752656735701099e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.004965774218240959
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.004893157879512167
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.004945894082386992
+          }
+        ]
+      },
+      "learned_minus_fixed": {
+        "weights": {
+          "history_learned": 1,
+          "history_fixed": -1
+        },
+        "mean_ce_difference": -0.0017846445242562699,
+        "paired_sample_sd": 7.343411011951042e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.001868706941604792
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0017329851786289652
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0017522414525350527
+          }
+        ]
+      },
+      "learned_minus_pointwise": {
+        "weights": {
+          "history_learned": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": -0.006719586584302976,
+        "paired_sample_sd": 0.00010581257862432248,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.006834481159845751
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.006626143058141132
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.006698135534922045
+          }
+        ]
+      },
+      "learned_minus_ema": {
+        "weights": {
+          "history_learned": 1,
+          "ema_learned": -1
+        },
+        "mean_ce_difference": -0.0009502040015325619,
+        "paired_sample_sd": 5.6325530008970035e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0010141571362813906
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0009079774220781545
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0009284774462381407
+          }
+        ]
+      },
+      "ema_minus_pointwise": {
+        "weights": {
+          "ema_learned": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": -0.005769382582770414,
+        "paired_sample_sd": 5.1079750996377875e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0058203240235643605
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.005718165636062977
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.005769658088683904
+          }
+        ]
+      }
+    },
+    "alice_transfer": {
+      "fixed_minus_pointwise": {
+        "weights": {
+          "history_fixed": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": -0.0026995117465655008,
+        "paired_sample_sd": 3.79850016416617e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.002728886902332306
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0026566162705421448
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.002713032066822052
+          }
+        ]
+      },
+      "learned_minus_fixed": {
+        "weights": {
+          "history_learned": 1,
+          "history_fixed": -1
+        },
+        "mean_ce_difference": -0.001163490116596222,
+        "paired_sample_sd": 6.42246460799614e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0012348070740699768
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0011102184653282166
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0011454448103904724
+          }
+        ]
+      },
+      "learned_minus_pointwise": {
+        "weights": {
+          "history_learned": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": -0.0038630018631617227,
+        "paired_sample_sd": 9.850759751959009e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.003963693976402283
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0037668347358703613
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0038584768772125244
+          }
+        ]
+      },
+      "learned_minus_ema": {
+        "weights": {
+          "history_learned": 1,
+          "ema_learned": -1
+        },
+        "mean_ce_difference": -0.0007155512770016988,
+        "paired_sample_sd": 4.524077591903564e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.00076264888048172
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0006724298000335693
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0007115751504898071
+          }
+        ]
+      },
+      "ema_minus_pointwise": {
+        "weights": {
+          "ema_learned": 1,
+          "pointwise": -1
+        },
+        "mean_ce_difference": -0.003147450586160024,
+        "paired_sample_sd": 5.332219866701395e-05,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0032010450959205627
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.003094404935836792
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0031469017267227173
+          }
+        ]
+      }
+    }
+  },
+  "order_trajectories": {
+    "41:history_fixed": {
+      "learnable_order": false,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.5,
+      "final_log_alpha": -0.6931471824645996,
+      "min_alpha": 0.5,
+      "max_alpha": 0.5,
+      "nonzero_order_gradient_steps": 0
+    },
+    "41:history_learned": {
+      "learnable_order": true,
+      "initial_alpha": 0.5,
+      "final_alpha": 1.0347979068756104,
+      "final_log_alpha": 0.03420611470937729,
+      "min_alpha": 0.5,
+      "max_alpha": 1.0347979068756104,
+      "nonzero_order_gradient_steps": 511
+    },
+    "43:history_fixed": {
+      "learnable_order": false,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.5,
+      "final_log_alpha": -0.6931471824645996,
+      "min_alpha": 0.5,
+      "max_alpha": 0.5,
+      "nonzero_order_gradient_steps": 0
+    },
+    "43:history_learned": {
+      "learnable_order": true,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.9887135028839111,
+      "final_log_alpha": -0.011350685730576515,
+      "min_alpha": 0.5,
+      "max_alpha": 0.9887135028839111,
+      "nonzero_order_gradient_steps": 511
+    },
+    "47:history_fixed": {
+      "learnable_order": false,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.5,
+      "final_log_alpha": -0.6931471824645996,
+      "min_alpha": 0.5,
+      "max_alpha": 0.5,
+      "nonzero_order_gradient_steps": 0
+    },
+    "47:history_learned": {
+      "learnable_order": true,
+      "initial_alpha": 0.5,
+      "final_alpha": 0.9956767559051514,
+      "final_log_alpha": -0.004332618787884712,
+      "min_alpha": 0.4996410310268402,
+      "max_alpha": 0.9956767559051514,
+      "nonzero_order_gradient_steps": 511
+    }
+  },
+  "decay_trajectories": {
+    "41:ema_learned": {
+      "initial_decay": 0.5,
+      "final_decay": 0.3412865102291107,
+      "final_logit_decay": -0.6575664281845093,
+      "nonzero_decay_gradient_steps": 511
+    },
+    "43:ema_learned": {
+      "initial_decay": 0.5,
+      "final_decay": 0.3524857461452484,
+      "final_logit_decay": -0.6081305742263794,
+      "nonzero_decay_gradient_steps": 511
+    },
+    "47:ema_learned": {
+      "initial_decay": 0.5,
+      "final_decay": 0.3568528890609741,
+      "final_logit_decay": -0.5890498757362366,
+      "nonzero_decay_gradient_steps": 511
+    }
+  },
+  "input_sha256": {
+    "plan": "93376a2879e520917aa9759e4c0fda5c923776a70893d433d74ec25a811922a8",
+    "results": "14d2cc0a85fa3185c954896b3af708b706d9fe1b2d12cf8ce11a60c3b6e1c1a2",
+    "journal": "86ba12c0d1f6f11fdde2726554c0cb7901dce0bee2f6ac7d8e00880a684f0465"
+  }
+}

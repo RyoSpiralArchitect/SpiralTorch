@@ -1,0 +1,56 @@
+{
+  "schema": "spiraltorch.fractional_history_study_validation.v1",
+  "status": "completed_and_verified",
+  "study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+  "training_process_exit_code": 0,
+  "training_source_revision": "e8eff55fd3ae211b51fe3f91b516a1a58344fd2e",
+  "frozen_native_source_revision": "237143ce368fed5d6df2d2be22f42f10c338beb4",
+  "frozen_native_sha256": "7478a93aae719681e03cf0580df61b0bb98f941f31f051eadb6fcb11a33168b3",
+  "runs": 12,
+  "primary_updates": 6144,
+  "continuation_only_updates": 24,
+  "completed_resume_exit_code": 0,
+  "completed_resume_rescored_endpoints": false,
+  "sealed_files_unchanged_after_completed_resume": true,
+  "sealed_input_sha256": {
+    "plan.json": "93376a2879e520917aa9759e4c0fda5c923776a70893d433d74ec25a811922a8",
+    "journal.json": "86ba12c0d1f6f11fdde2726554c0cb7901dce0bee2f6ac7d8e00880a684f0465",
+    "results.json": "14d2cc0a85fa3185c954896b3af708b706d9fe1b2d12cf8ce11a60c3b6e1c1a2"
+  },
+  "checkpoints_verified": 12,
+  "frozen_client_files_verified": 6,
+  "frozen_package_files_verified": 67,
+  "actual_parameter_and_adam_contents_checked": true,
+  "scalar_trajectories_agree_with_saved_parameters": true,
+  "ordinary_controls_exactly_reproduce_prior_study": true,
+  "prior_full_gl_arms_are_not_pooled": true,
+  "deterministic_summary_sha256": "51ccd7b842ebf5badb977d652ad9e26dc95631263fb1d1f8e56351c3da7d7a9e",
+  "summary_hash_seeds": [
+    1,
+    42
+  ],
+  "checkpoint_verifier_sha256": "915fb573ba98d052ada2ad64d9e1c4b98c42fa3d6f0090ce8572ebdb96453f53",
+  "original_launch_preflight_sha256": "2ee02ce7f60a8b97561d58f303ffe63f55a457fd6280b56e4c2c931b2866dc17",
+  "postlaunch_regression_checks": {
+    "implementation_revision": "873630d4b568024df5ecb9916f4373b74335b5f5",
+    "publication_addition": "The 299-test run adds the new committed-summary fixture to this implementation; only docs, numeric records and that golden test change afterward.",
+    "isolated_native_sha256": "841680660aae22f5244c05c50a43d59cdca896037be2d38f484644ec6a13a1a5",
+    "note": "Contains the reviewed empty-history fix, not hot-loaded into the frozen experiment.",
+    "python_tests_passed": 299,
+    "python_tests_skipped": 0,
+    "golden_summary_rebuild": "byte-identical",
+    "rust_tests_passed": 115,
+    "clippy": "passed",
+    "rustfmt": "passed",
+    "actual_wasm_history_and_full_gl": "passed"
+  },
+  "local_log_sha256": {
+    "training.log": "d834137498729b578d1e0a94e5a20bfa457b6a8f33cb7c6e1b0fbac8994a30f5",
+    "checkpoint-verification.log": "3d9e78847e452e51a659fa5c91b63b955eefd6907b934fd40bbcac94d7e79016",
+    "completed-resume.log": "acb8f6860081926f1f1d50ce994344850bac00624ccbc75687186c8f7343337a",
+    "ordinary-control-verification.log": "80df61f4ad8945ddce23bab7e994d103e1a335c0d80bfd2c88f74b3114ee71cf",
+    "publication-tests.log": "12bbbdfd282662d24253780e1e01764ed645408172dbf3970ffdc56ad6ad9f4a",
+    "python-integrated-isolated.log": "4a9c15c66779e446c6fecc0d13790fcc759eb0ffe2710dd1163e3e23ca6dc5bc"
+  },
+  "scope": "Completed offline reused-book experiment and saved-content checks, not significance, speed, a unique fractional-memory explanation, or general LLM improvement. Raw logs, native packages, model weights, corpora and checkpoints remain local."
+}

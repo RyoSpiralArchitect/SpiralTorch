@@ -137,7 +137,10 @@ def contrast_report(config, measured, sets, contrasts):
 
 
 def fractional_report(config, runs, measured, sets):
-    arms = {"pointwise", "fractional_fixed", "fractional_learned"}
+    history = config.get("schema") == "spiraltorch.fractional_history_protocol.v1"
+    fixed, learned_arm = (("history_fixed", "history_learned") if history
+                          else ("fractional_fixed", "fractional_learned"))
+    arms = {"pointwise", fixed, learned_arm} | ({"ema_learned"} if history else set())
     require(set(config["arms"]) == arms and config.get("reference_arm") == "pointwise",
             "incomplete fractional design")
     require(type(config.get("features")) is int and config["features"] > 0,
@@ -148,18 +151,19 @@ def fractional_report(config, runs, measured, sets):
     trajectories = {}
     for seed in config["seeds"]:
         hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256")
-                  for arm in arms if arm != "pointwise"}
+                  for arm in (fixed, learned_arm)}
         require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
                 "fractional initial parameters are not paired")
         for arm in config["arms"]:
             row = runs[f"{seed}:{arm}"]
-            learned = arm == "fractional_learned"
+            learned = arm == learned_arm
+            gate_count = config["features"] * (2 if history and arm != "pointwise" else 1)
             require(type(row.get("parameter_count")) is int
                     and type(row.get("trainable_parameter_count")) is int
-                    and row["parameter_count"] == config["features"] + int(arm != "pointwise")
-                    and row.get("trainable_parameter_count") == config["features"] + int(learned),
+                    and row["parameter_count"] == gate_count + int(arm != "pointwise")
+                    and row["trainable_parameter_count"] == gate_count + int(learned or arm == "ema_learned"),
                     "fractional parameter counts differ")
-            if arm == "pointwise":
+            if arm not in (fixed, learned_arm):
                 continue
             records = row["records"]
             before = [r.get("log_alpha_before_update") for r in records]
@@ -198,10 +202,47 @@ def fractional_report(config, runs, measured, sets):
                 "max_alpha": max(alpha_before + alpha_after),
                 "nonzero_order_gradient_steps": sum(v not in (None, 0) for v in gradients),
             }
-    contrasts = {"fixed_minus_pointwise": {"fractional_fixed": 1, "pointwise": -1},
-                 "learned_minus_fixed": {"fractional_learned": 1, "fractional_fixed": -1},
-                 "learned_minus_pointwise": {"fractional_learned": 1, "pointwise": -1}}
+    contrasts = {"fixed_minus_pointwise": {fixed: 1, "pointwise": -1},
+                 "learned_minus_fixed": {learned_arm: 1, fixed: -1},
+                 "learned_minus_pointwise": {learned_arm: 1, "pointwise": -1}}
+    if history:
+        contrasts.update(learned_minus_ema={learned_arm: 1, "ema_learned": -1},
+                         ema_minus_pointwise={"ema_learned": 1, "pointwise": -1})
     return contrast_report(config, measured, sets, contrasts), trajectories
+
+
+def ema_trajectories(config, runs):
+    initial = config.get("initial_decay")
+    require(type(initial) in (int, float) and math.isfinite(initial) and 0 < initial < 1,
+            "invalid initial decay")
+
+    def sigmoid(value):
+        z = math.exp(-abs(value))
+        return 1 / (1 + z) if value >= 0 else z / (1 + z)
+
+    report = {}
+    for seed in config["seeds"]:
+        key = f"{seed}:ema_learned"
+        row = runs[key]
+        records = row["records"]
+        before = [r.get("logit_decay_before_update") for r in records]
+        after = [r.get("logit_decay_after_update") for r in records]
+        decay = [r.get("decay_after_update") for r in records]
+        gradients = [r.get("logit_decay_gradient") for r in records]
+        final_logit, final_decay = row.get("final_logit_decay"), row.get("final_decay")
+        require(bool(records) and all(type(v) in (int, float) and math.isfinite(v)
+                for v in before + after + decay + gradients + [final_logit, final_decay]),
+                "missing or nonfinite EMA trajectory")
+        require(math.isclose(sigmoid(before[0]), initial, rel_tol=2e-6)
+                and before[1:] == after[:-1] and gradients[0] == 0
+                and final_logit == after[-1] and final_decay == decay[-1],
+                "EMA trajectory or endpoint differs")
+        require(all(0 < d < 1 and math.isclose(d, sigmoid(v), rel_tol=2e-6, abs_tol=2**-149)
+                    for v, d in zip(after, decay)), "EMA decay differs from logit")
+        report[key] = {"initial_decay": initial, "final_decay": final_decay,
+                       "final_logit_decay": final_logit,
+                       "nonzero_decay_gradient_steps": sum(v != 0 for v in gradients)}
+    return report
 
 
 def chart_step_report(config, runs, measured, sets):
@@ -445,11 +486,14 @@ def summarize(plan, result, journal, result_sha256):
             config, runs, measured, sets
         )
         summary["gate_trajectories"] = gated_trajectories(config, runs, arms)
-    if config.get("schema") == "spiraltorch.fractional_memory_protocol.v1":
+    if config.get("schema") in {"spiraltorch.fractional_memory_protocol.v1",
+                                "spiraltorch.fractional_history_protocol.v1"}:
         summary["reference_arm"] = reference
         summary["paired_fractional_contrasts"], summary["order_trajectories"] = fractional_report(
             config, runs, measured, sets
         )
+        if config["schema"] == "spiraltorch.fractional_history_protocol.v1":
+            summary["decay_trajectories"] = ema_trajectories(config, runs)
     if config.get("schema") == "spiraltorch.elliptic_chart_step_protocol.v1":
         summary["reference_arm"] = reference
         summary["paired_factorial_contrasts"], summary["chart_step_trajectories"] = chart_step_report(config, runs, measured, sets)
