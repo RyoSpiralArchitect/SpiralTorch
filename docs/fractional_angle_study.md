@@ -94,6 +94,15 @@ run. Completed resume verifies existing artifacts without retraining or
 rescoring. Summarize the completed plan/results/journal with the frozen
 Torch-free summary tool; save into a fresh output outside primary artifacts.
 
+After terminal success, use `tools/verify_fractional_gain_study.py --coordinate
+angle` with the frozen client/runtime inventories and derived summary to
+verify saved parameters and named Adam states without retraining or scoring.
+It separately compares final ordinary-short and GL-short parameter/Adam
+tensors at the preflight tolerance (rtol=3e-6, atol=3e-7), reports byte and
+value equality separately, and retains failed tolerance checks. Valid saved
+states do not imply paired-state equivalence. This does not compare full
+gradient trajectories or establish long-run bitwise parity.
+
 These are exploratory reused books, not pristine confirmation. Three
 minibatch-order seeds do not establish significance or general LLM superiority.
 Full-history normalization changes short taps too, so even a positive result

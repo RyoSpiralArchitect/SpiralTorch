@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify saved learned-gain states without training or scoring a base model.
+"""Verify saved log-order/angular gain states without training or scoring a model.
 
 Use the frozen client/runtime before the repository tools on PYTHONPATH.
 The shared verifier helpers are read-only; previous studies are not inputs.
@@ -28,6 +28,23 @@ def tensor_receipt(value):
             "sha256": hashlib.sha256(raw).hexdigest()}
 
 
+def compare_tensor_maps(left, right):
+    """Fixed preflight tolerance, reported separately from saved-state validity."""
+    require(bool(left) and left.keys() == right.keys(), "paired tensor names differ")
+    errors, byte_equal, value_equal, close = {}, True, True, True
+    for name, a in left.items():
+        b = right[name]
+        ra, rb = tensor_receipt(a), tensor_receipt(b)
+        require(ra["shape"] == rb["shape"], "paired tensor shapes differ")
+        byte_equal = byte_equal and ra == rb
+        value_equal = value_equal and torch.equal(a, b)
+        close = close and torch.allclose(a, b, rtol=3e-6, atol=3e-7)
+        errors[name] = float((a.detach() - b.detach()).abs().max())
+    return {"status": "passed" if close else "failed", "allclose": bool(close),
+            "byte_equal": bool(byte_equal), "value_equal": bool(value_equal),
+            "rtol": 3e-6, "atol": 3e-7, "max_abs_error": errors}
+
+
 def inspect_run(client, plan, row, entry, saved):
     config, driver = plan["config"], client.study
     seed, arm = row["run_key"].split(":")
@@ -37,7 +54,8 @@ def inspect_run(client, plan, row, entry, saved):
     require(driver.pilot.model_digest(adapter) == saved["initial_parameter_sha256"]
             == row["initial_parameter_sha256"], "saved initialization differs")
     parameters = dict(adapter.named_parameters())
-    shape_name = "history_angle" if arm == client.ARMS[0] else "log_alpha"
+    angular = config.get("schema") == "spiraltorch.fractional_angle_protocol.v1"
+    shape_name = "history_angle" if angular or arm == client.ARMS[0] else "log_alpha"
     require(set(parameters) == {"gate", "local_gate", "log_gain", shape_name}
             and set(saved["adapter"]) == set(parameters) | {"_extra_state"},
             "adapter parameter names differ")
@@ -71,7 +89,9 @@ def inspect_run(client, plan, row, entry, saved):
             == sum(p.numel() for p in parameters.values()) == 2 * config["features"] + 2
             and all(p.requires_grad for p in parameters.values()), "saved capacity differs")
     final = driver.pilot.gain_snapshot(adapter)
-    if shape_name == "history_angle":
+    if angular:
+        final.update(driver.pilot.angle_snapshot(adapter))
+    elif shape_name == "history_angle":
         final[shape_name] = float(adapter.history_angle.detach())
     else:
         final[shape_name] = float(adapter.log_alpha.detach())
@@ -91,18 +111,26 @@ def inspect_run(client, plan, row, entry, saved):
 def verify(study, summary_path, client, summary):
     plan, journal, result, rows = common.completed(study, client)
     client.validate_protocol(plan["config"])
-    require(result["schema"] == "spiraltorch.fractional_gain_study.v1",
+    family = ("angle" if plan["config"]["schema"] == "spiraltorch.fractional_angle_protocol.v1"
+              else "gain")
+    require(result["schema"] == f"spiraltorch.fractional_{family}_study.v1",
             "gain study result schema differs")
     input_hashes = {key: digest(study / f"{key}.json") for key in ("plan", "results", "journal")}
     rebuilt = summary.summarize(plan, result, journal, input_hashes["results"])
     rebuilt["input_sha256"] = input_hashes
     require((json.dumps(rebuilt, indent=2, allow_nan=False) + "\n").encode() == summary_path.read_bytes(),
             "summary artifact differs from reconstruction")
-    runs = {}
+    runs, states = {}, {}
     for key, row in rows.items():
         entry = journal["runs"][key]
         saved = client.study.load_checkpoint(study, entry["checkpoint"], plan["study_id"], key)
         adapter, moments, final = inspect_run(client, plan, row, entry, saved)
+        if family == "angle":
+            states[key] = {
+                "parameters": {name: p.detach() for name, p in adapter.named_parameters()},
+                "adam": {f"{name}/{field}": tensor for name, value in moments.items()
+                         for field, tensor in value.items()},
+            }
         runs[key] = {"checkpoint": entry["checkpoint"], "cursor": saved["cursor"],
                      "restored_adapter_and_adam_equal": True,
                      "final_parameter_sha256": client.study.pilot.model_digest(adapter),
@@ -112,7 +140,13 @@ def verify(study, summary_path, client, summary):
                      "named_adam": {name: {field: tensor_receipt(tensor)
                                            for field, tensor in value.items()}
                                     for name, value in moments.items()}}
-    return {"schema": "spiraltorch.fractional_gain_checkpoint_verification.v1",
+    paired = {}
+    if family == "angle":
+        for seed in plan["config"]["seeds"]:
+            left, right = (states[f"{seed}:{arm}"] for arm in client.ARMS[:2])
+            paired[str(seed)] = {field: compare_tensor_maps(left[field], right[field])
+                                 for field in ("parameters", "adam")}
+    report = {"schema": f"spiraltorch.fractional_{family}_checkpoint_verification.v1",
             "status": "passed", "study_id": plan["study_id"],
             "training_source_revision": plan["source_revision"], "planned_runs_verified": len(runs),
             "primary_updates": sum(r["cursor"] for r in runs.values()),
@@ -124,6 +158,14 @@ def verify(study, summary_path, client, summary):
             "summary_rebuilt_byte_identical": True, "runs": runs,
             "scope": "Saved tensors, recipes, named Adam and sealed receipts; not reexecution of "
                      "continuation or model scoring. No historical replay or cross-arm state parity is claimed."}
+    if family == "angle":
+        report.update(paired_short_states=paired,
+                      paired_short_state_status=("passed" if all(
+                          item["allclose"] for row in paired.values() for item in row.values()) else "failed"),
+                      scope="Saved recipes/tensors/named Adam and sealed receipts, plus a separately reported "
+                            "fixed-tolerance comparison of final ordinary/GL short states. Not replay, full "
+                            "gradient trajectory parity, bitwise equivalence, quality or process termination.")
+    return report
 
 
 def verify_environment(plan, client, summary, client_manifest, runtime_manifest):
@@ -132,6 +174,14 @@ def verify_environment(plan, client, summary, client_manifest, runtime_manifest)
     import spiraltorch.geometry_autograd as geometry
 
     client_root, package_root = Path(client.__file__).parent, Path(st.__file__).parent.parent
+    angular = hasattr(client, "gain")
+    require((plan["config"].get("schema") == "spiraltorch.fractional_angle_protocol.v1") == angular,
+            "client coordinate schema differs")
+    control = client.gain if angular else client
+    sources = ({"angle_study": client, "gain_control": control} if angular
+               else {"gain_study": client})
+    sources.update(lag_control=control.lag, fractional_bridge=control.fractional_bridge)
+    config_name = "hf_fractional_pride_angle.json" if angular else "hf_fractional_pride_gain.json"
     runtime = json.loads(runtime_manifest.read_bytes())
     require(set(runtime) == {"source_revision", "files"}
             and isinstance(runtime["source_revision"], str)
@@ -141,20 +191,19 @@ def verify_environment(plan, client, summary, client_manifest, runtime_manifest)
     counts = {"client": common.verify_files(client_root, json.loads(client_manifest.read_bytes())),
               "runtime": common.verify_files(package_root, runtime["files"])}
     require(all(Path(module.__file__).parent == client_root
-                for module in (client.lag, client.study, client.study.pilot, summary)),
+                for module in (control, control.lag, client.study, client.study.pilot, summary)),
             "helpers and summary must come from the frozen client")
     require(all(Path(module.__file__).parent == package_root / "spiraltorch"
-                for module in (native, geometry, client.fractional_bridge)),
+                for module in (native, geometry, control.fractional_bridge)),
             "native and bridges must come from the frozen package")
     for key, path in (("native_sha256", Path(native.__file__)), ("bridge_sha256", Path(geometry.__file__)),
                       ("script_sha256", Path(client.study.__file__)),
                       ("helper_sha256", Path(client.study.pilot.__file__)),
-                      ("config_sha256", client_root / "hf_fractional_pride_gain.json")):
+                      ("config_sha256", client_root / config_name)):
         require(plan[key] == digest(path), f"runtime differs: {key}")
-    require(plan["adapter_sources_sha256"] == {
-        "gain_study": digest(Path(client.__file__)), "lag_control": digest(Path(client.lag.__file__)),
-        "fractional_bridge": digest(Path(client.fractional_bridge.__file__))}, "adapter source differs")
-    require(plan["config"] == json.loads((client_root / "hf_fractional_pride_gain.json").read_bytes()),
+    require(plan["adapter_sources_sha256"] == {key: digest(Path(module.__file__))
+                                              for key, module in sources.items()}, "adapter source differs")
+    require(plan["config"] == json.loads((client_root / config_name).read_bytes()),
             "plan recipe differs from frozen config")
     require(plan["torch"] == str(torch.__version__)
             and plan["transformers"] == str(client.study.pilot.transformers.__version__),
@@ -168,9 +217,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("study", "client-manifest", "runtime-manifest", "summary", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
+    parser.add_argument("--coordinate", choices=("log-order", "angle"), default="log-order")
     args = parser.parse_args()
     require(not args.output.exists(), "verification output already exists")
-    import hf_fractional_gain_study as client
+    if args.coordinate == "angle":
+        import hf_fractional_angle_study as client
+    else:
+        import hf_fractional_gain_study as client
     import summarize_wave_gate_long_horizon as summary
     import spiraltorch as st
 

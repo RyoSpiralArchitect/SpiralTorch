@@ -18,17 +18,18 @@ def load(name, path):
     return module
 
 
-@pytest.fixture(scope="module")
-def completed_study(tmp_path_factory):
+@pytest.fixture(scope="module", params=["gain", "angle"])
+def completed_study(tmp_path_factory, request):
+    family = request.param
     directory = tmp_path_factory.mktemp("gain-verification")
     with pytest.MonkeyPatch.context() as patch:
         examples = ROOT / "bindings/st-py/examples"
         patch.syspath_prepend(str(examples))
         patch.syspath_prepend(str(ROOT / "tools"))
-        client = load("gain_verify_client", examples / "hf_fractional_gain_study.py")
+        client = load("gain_verify_client", examples / f"hf_fractional_{family}_study.py")
         summary = load("gain_verify_summary", ROOT / "tools/summarize_wave_gate_long_horizon.py")
         verifier = load("gain_verify", ROOT / "tools/verify_fractional_gain_study.py")
-        config = json.loads((examples / "hf_fractional_pride_gain.json").read_text())
+        config = json.loads((examples / f"hf_fractional_pride_{family}.json").read_text())
         config.update(features=8, steps=2, block_size=6, batch_size=2, seeds=[41],
                       checkpoint_every=2, evaluate_every=2, learning_rate=.01)
         torch.manual_seed(197)
@@ -53,7 +54,7 @@ def completed_study(tmp_path_factory):
                             journal, adapter_factory=client.adapter_for)
         driver.run_endpoints(model, parent, "mlp", original, {"probe": tokens[:2]}, plan,
                              study, journal, adapter_factory=client.adapter_for,
-                             result_schema="spiraltorch.fractional_gain_study.v1")
+                             result_schema=f"spiraltorch.fractional_{family}_study.v1")
         current = verifier.common.completed(study, client)
         plan, journal, result, _ = current
         report = summary.summarize(plan, result, journal, journal["results_sha256"])
@@ -75,8 +76,13 @@ def test_saved_tensors_named_adam_and_summary_are_verified_without_scoring(compl
     assert report["status"] == "passed" and report["summary_rebuilt_byte_identical"]
     assert report["primary_updates"] == report["continuation_only_updates"] == 6
     assert report["planned_runs_verified"] == 3
+    if report["schema"] == "spiraltorch.fractional_angle_checkpoint_verification.v1":
+        assert report["paired_short_state_status"] == "passed"
+        assert set(report["paired_short_states"]) == {"41"}
+        for row in report["paired_short_states"]["41"].values():
+            assert row["allclose"] is True and row["rtol"] == 3e-6 and row["atol"] == 3e-7
     for key, row in report["runs"].items():
-        shape = "history_angle" if "ordinary" in key else "log_alpha"
+        shape = "history_angle" if "ordinary" in key or "angle" in key else "log_alpha"
         assert set(row["parameters"]) == set(row["named_adam"]) == {"gate", "local_gate", "log_gain", shape}
         assert row["parameters"]["log_gain"]["shape"] == []
         assert row["parameters"]["gate"]["shape"] == [8]
@@ -85,18 +91,19 @@ def test_saved_tensors_named_adam_and_summary_are_verified_without_scoring(compl
     assert before == {p.name: verifier.digest(p) for p in (directory / "study").iterdir()}
 
 
-@pytest.mark.parametrize("arm", ["ordinary_gain_short", "history_gain_short", "history_gain_full"])
+@pytest.mark.parametrize("arm_index", [0, 1, 2])
 @pytest.mark.parametrize("corruption", ["gain", "shape_coordinate", "gate_scale", "recipe", "adam_mapping"])
-def test_each_arm_is_bound_to_its_saved_coordinates_and_recipe(completed_study, arm, corruption):
+def test_each_arm_is_bound_to_its_saved_coordinates_and_recipe(completed_study, arm_index, corruption):
     directory, client, _, verifier, current = completed_study
     plan, journal, _, rows = current
+    arm = client.ARMS[arm_index]
     key = f"41:{arm}"
     row, entry = copy.deepcopy(rows[key]), copy.deepcopy(journal["runs"][key])
     saved = client.study.load_checkpoint(directory / "study", entry["checkpoint"], plan["study_id"], key)
     if corruption == "gain":
         saved["adapter"]["log_gain"] += .01
     elif corruption == "shape_coordinate":
-        saved["adapter"]["history_angle" if arm.startswith("ordinary") else "log_alpha"] += .01
+        saved["adapter"]["history_angle" if arm.startswith("ordinary") or "angle" in arm else "log_alpha"] += .01
     elif corruption == "gate_scale":
         saved["adapter"]["gate"] += .01
     elif corruption == "recipe":
@@ -113,7 +120,7 @@ def test_each_arm_is_bound_to_its_saved_coordinates_and_recipe(completed_study, 
 def test_invalid_saved_state_is_rejected(completed_study, corruption):
     directory, client, _, verifier, current = completed_study
     plan, journal, _, rows = current
-    key = "41:history_gain_full"
+    key = f"41:{client.ARMS[-1]}"
     row, entry = copy.deepcopy(rows[key]), copy.deepcopy(journal["runs"][key])
     saved = client.study.load_checkpoint(directory / "study", entry["checkpoint"], plan["study_id"], key)
     state = saved["optimizer"]["state"][0]
@@ -156,7 +163,7 @@ def test_incomplete_study_cannot_be_verified(completed_study, tmp_path):
 def test_changed_checkpoint_bytes_are_rejected_before_loading(completed_study, tmp_path):
     directory, client, _, verifier, current = completed_study
     plan, journal, _, _ = current
-    key = "41:history_gain_full"
+    key = f"41:{client.ARMS[-1]}"
     receipt = journal["runs"][key]["checkpoint"]
     data = (directory / "study" / receipt["filename"]).read_bytes()
     (tmp_path / receipt["filename"]).write_bytes(data + b"changed")
@@ -169,6 +176,18 @@ def test_tensor_receipts_are_bitwise_including_signed_zero(completed_study):
     assert verifier.tensor_receipt(torch.tensor(0.))["sha256"] != verifier.tensor_receipt(torch.tensor(-0.))["sha256"]
 
 
+def test_paired_state_comparison_retains_tolerance_failure_and_signed_zero(completed_study):
+    verifier = completed_study[3]
+    zero = verifier.compare_tensor_maps({"x": torch.tensor(0.)}, {"x": torch.tensor(-0.)})
+    assert zero["allclose"] and zero["value_equal"] and not zero["byte_equal"]
+    near = verifier.compare_tensor_maps({"x": torch.tensor(1.)}, {"x": torch.tensor(1.000001)})
+    assert near["allclose"] and not near["value_equal"]
+    far = verifier.compare_tensor_maps({"x": torch.tensor(1.)}, {"x": torch.tensor(1.01)})
+    assert far["status"] == "failed" and not far["allclose"]
+    with pytest.raises(ValueError):
+        verifier.compare_tensor_maps({"x": torch.tensor(1.)}, {"x": torch.tensor(float("nan"))})
+
+
 @pytest.fixture
 def bound_environment(completed_study, tmp_path, monkeypatch):
     import spiraltorch as st
@@ -176,6 +195,7 @@ def bound_environment(completed_study, tmp_path, monkeypatch):
     import spiraltorch.geometry_autograd as geometry
 
     verifier = completed_study[3]
+    angular = completed_study[-1][0]["config"]["schema"] == "spiraltorch.fractional_angle_protocol.v1"
     client_root, package_root = tmp_path / "client", tmp_path / "runtime"
     client_root.mkdir()
     (package_root / "spiraltorch").mkdir(parents=True)
@@ -186,21 +206,25 @@ def bound_environment(completed_study, tmp_path, monkeypatch):
     package = package_root / "spiraltorch"
     for target, name in ((st, "__init__.py"), (native, "spiraltorch.so"), (geometry, "geometry_autograd.py")):
         monkeypatch.setattr(target, "__file__", module(package, name).__file__)
-    client = module(client_root, "hf_fractional_gain_study.py")
-    client.lag = module(client_root, "hf_fractional_lag_study.py")
+    client = module(client_root, "hf_fractional_angle_study.py" if angular else "hf_fractional_gain_study.py")
+    if angular:
+        client.gain = module(client_root, "hf_fractional_gain_study.py")
+    control = client.gain if angular else client
+    control.lag = module(client_root, "hf_fractional_lag_study.py")
     client.study = module(client_root, "hf_wave_gate_long_horizon.py")
     client.study.pilot = module(client_root, "hf_wave_gate_conditioning.py")
     client.study.pilot.transformers = transformers
-    client.fractional_bridge = module(package, "fractional_autograd.py")
+    control.fractional_bridge = module(package, "fractional_autograd.py")
     summary = module(client_root, "summarize_wave_gate_long_horizon.py")
-    config = {"recipe": "fixed fixture"}
-    config_path = client_root / "hf_fractional_pride_gain.json"
+    config = {"recipe": "fixed fixture", "schema": "spiraltorch.fractional_angle_protocol.v1" if angular else "fixture"}
+    config_path = client_root / ("hf_fractional_pride_angle.json" if angular else "hf_fractional_pride_gain.json")
     config_path.write_text(json.dumps(config))
     plan = {"config": config, "torch": str(torch.__version__), "transformers": transformers.__version__,
             "source_revision": "b" * 40,
-            "adapter_sources_sha256": {"gain_study": verifier.digest(Path(client.__file__)),
-                                      "lag_control": verifier.digest(Path(client.lag.__file__)),
-                                      "fractional_bridge": verifier.digest(Path(client.fractional_bridge.__file__))}}
+            "adapter_sources_sha256": {"lag_control": verifier.digest(Path(control.lag.__file__)),
+                                      "fractional_bridge": verifier.digest(Path(control.fractional_bridge.__file__))}}
+    sources = {"angle_study": client, "gain_control": control} if angular else {"gain_study": client}
+    plan["adapter_sources_sha256"].update({key: verifier.digest(Path(module.__file__)) for key, module in sources.items()})
     for key, path in (("native_sha256", native.__file__), ("bridge_sha256", geometry.__file__),
                       ("script_sha256", client.study.__file__), ("helper_sha256", client.study.pilot.__file__),
                       ("config_sha256", config_path)):
@@ -221,7 +245,8 @@ def test_build_and_launch_revisions_are_separate_but_executable_bytes_are_bound(
     cache.mkdir()
     (cache / "summary.pyc").write_bytes(b"generated")
     report = verifier.verify_environment(plan, client, summary, *manifests)
-    assert report["frozen_files_verified"] == {"client": 6, "runtime": 4}
+    angular = plan["config"]["schema"] == "spiraltorch.fractional_angle_protocol.v1"
+    assert report["frozen_files_verified"] == {"client": 7 if angular else 6, "runtime": 4}
     assert report["runtime_build_source_revision"] != plan["source_revision"]
 
 
