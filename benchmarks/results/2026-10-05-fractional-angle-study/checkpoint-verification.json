@@ -1,0 +1,1228 @@
+{
+  "schema": "spiraltorch.fractional_angle_checkpoint_verification.v1",
+  "status": "passed",
+  "study_id": "4cb29fe3a588f7d46df6df775f781141c847b8dac6a8351450b03452c7ae917a",
+  "training_source_revision": "758bc416d6e885e4c227464b385d474794f50a41",
+  "planned_runs_verified": 9,
+  "primary_updates": 4608,
+  "continuation_only_updates": 18,
+  "artifacts": {
+    "plan": "298162f333c29f11c20cd4a8f88cb984fc4ddcb97378616179ee6b844a4f9931",
+    "results": "7693b247c1d346f4caed477b58d1c561d012e1a31be998a06c4649998c6f602c",
+    "journal": "796b1a7f9c9c936fb44d5515161346c0844155156f49157b5496d7d16dd5caa0"
+  },
+  "summary_artifact_sha256": "8ed669f25e04768b80e5f242592a1fa7b852750c098f30d0bc4cfaede679dc56",
+  "summary_source_sha256": "a9d35eea5ea4a3e07fd3081b193982ba4fedf022717b3eae7c24114f919e27c7",
+  "verifier_sha256": "b3fdabd2be11c840573d4883ec94c1b09b435eb9fc05ec4e93c74e0570344085",
+  "verifier_helper_sha256": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f",
+  "summary_rebuilt_byte_identical": true,
+  "runs": {
+    "41:ordinary_angle_short": {
+      "checkpoint": {
+        "filename": "checkpoint-8a293c48.pt",
+        "sha256": "c60b49d7644fc3dd716c7091e316d1d9f6eae17567cc640180a9d1e986d293c8"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "cc1ae0303377fa3961d2a27e5642db1b03356ae4647a44797bfb843f9227aaac",
+      "final_coordinates": {
+        "log_gain": 1.6490446329116821,
+        "gain": 5.20200777053833,
+        "effective_history_gate_l2": 2.175660165931466,
+        "history_angle": -0.2484588772058487,
+        "alpha": 0.4925980865955353
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "826aeef9cb0216e06b973b539e96fb641b52efbb235aefe69b6d8a8d7e086acc"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "50247678f485188fa38fc2e9305c3cbf488f6ae3fde7e4ccf469cfefbb98363f"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "9c2b7e3d54d122a7c0d7724e2584057c4ed086ca3aac6a725479b6d825f032b2"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "dfeade4f41bc6772a10f33e4da22248a4d462203ee210d08d36eb9e554bea0de"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "fb1bc857704f19c15401afd37755da0f1baf20b2078d8da3dba5b33d2559c31a"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "b2310e606d125d8afd0dc9dd1bbac6418c58efed19af6e690a9dc5c1f8609fc0"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "aae6ba167e7c4f2fbf14b585f45456c2f02bc1c1b7ad7e392d58b0db20e0107d"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "c4c957f77d7e8ba3c6606b7ffd36712fb4d74a2c621f82565e326c5e3323f597"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "e5185e2237faab09d48058b0172e2d5a892c249a920a9f2950b15cfe228ad1ae"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "84459d51b80e30aa4ffa11b66e613e8139fb942b7646cf6451359e1b83be699f"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "b33c1d4c805b02122bc0553afad8665c27613105716f2b0088f867c63479de6b"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "84b873b68b24e225ed1c2c6a0ee9e3faf7a6075e3061b960ebe5e4a9242c2ec1"
+          }
+        }
+      }
+    },
+    "41:history_angle_short": {
+      "checkpoint": {
+        "filename": "checkpoint-nid2qniu.pt",
+        "sha256": "372137e12981a203477e5e6971d26d5b8a98bc3b5440362931b0a38affc359d7"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "880410431d369e54b0a07d2f774f009e9d9bfe24c75512fb3268ec1f68a30b0a",
+      "final_coordinates": {
+        "log_gain": 1.6490446329116821,
+        "gain": 5.20200777053833,
+        "effective_history_gate_l2": 2.1756595663913023,
+        "history_angle": -0.24845881760120392,
+        "alpha": 0.49259820580482483
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "dc2635942f86944a585b1d739c2648d286d7eeeb9f691480788c4313c7827a6c"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "024fe787f8ff9a13ab8a92349c398608edf4bf52d54da42e93663581ba173c86"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "5c6b587132f8154edde8440435a01266c7d39f883ceccaece80f62f7e4f1d5b8"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "dfeade4f41bc6772a10f33e4da22248a4d462203ee210d08d36eb9e554bea0de"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "cd4732b86ed35c503e79b8ce889c65de1601508db64d3aaf6a1e50a97ff0d6dd"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "86ad7dbe9a835fcc41d3a3e82096343d97a09615eff5c9de1e62751347d9820a"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "48db1a08bce8d8192908868c77c3bcfb32af136aea7460ab46cf7f1e67117410"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "a5dc5c1aeab514dba11b4856e375185d8f33e3eb92f0f082b43451bf83a3fc9f"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "b2fccb7bfa4706854d2ebf13d1a953a105acda6732161c0016a9d998e333d5a1"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "eb1af04fa6d014ce7235fd32ea5f767bed3f189639c4fdc775fc577c7fc1f577"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "89f8c85df2067ed56a106bd9ab8f3457c418d1a66be89a8c7b7fb2cc2e612731"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "751af387b69ddd301c550d9b97171f4b1d3863a298331be20fe861e26baddcf4"
+          }
+        }
+      }
+    },
+    "41:history_angle_full": {
+      "checkpoint": {
+        "filename": "checkpoint-i0sy8tyd.pt",
+        "sha256": "6ebbf86ab15299fe1a93a47d2edace01aa8359c5830d8e00aa1009c47dc45eae"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "9c5e834f35febe15d64baf1f2ac4fb40cfc1c3d6d7429328809e478f74526165",
+      "final_coordinates": {
+        "log_gain": 1.6783044338226318,
+        "gain": 5.356465816497803,
+        "effective_history_gate_l2": 2.341968991051026,
+        "history_angle": -0.42785146832466125,
+        "alpha": 0.08795371651649475
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "e8b9e2d69ffde9a79ebf3ba58ab8622bbe15fc4fa6074d3e3e992bfe8daeba5e"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "ee6cb340f53d8cdcfeb95f4be77eb92d8452cc4d33bb597cac650e3c5aad1030"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "54b1733105991bd597c5927d4b49f904d45b2c23f2275a44f7315b57b266ea6a"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "e4b5373be6f010ebe6ab287397ae3844271f1c328780818d2c525f783a56fe1c"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "660003865e57612b2339721921e3f988fbaac2fec69b428a34c8465b5e88394e"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "2462f3292b88afe80ed5a4b98f2987c9e267cebf9d2321e902fe86dc9951b2d3"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "7c81d4f70a1ca9208100fe410a72cdfe01b44a23d3b8a86c3d208b006e625c47"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "f55a71f571c098db9b31de8424fadacc786feae4e9f7f956393901efd79f3600"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "32635505677289c5f4a4bb2aa5b6140d1562fea0d9c2e9497dd55903a68b56ae"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "72213a8bb4e1717b8fd381bbb0800e23b6a239d21d7a4ea8860bb49063bf0cad"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "494f9dd6923e2553441d17a665f36e8bed99047224924bcc16fb8b73e4cc9032"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "0c9e11ae5dadf989a0d6f19af5b92b0d540819850101418ea110ea46b9b9d4a5"
+          }
+        }
+      }
+    },
+    "43:ordinary_angle_short": {
+      "checkpoint": {
+        "filename": "checkpoint-6u6a_1ds.pt",
+        "sha256": "cae7b5da0c23be947670e28bfefde55eff58a8ea2b14cba3d4ed8889ee7a4474"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "09ccb7f846bc11f08b59fc5e7fd49ca8b1ad39cc11fa58de07c6d2d48d51cbfb",
+      "final_coordinates": {
+        "log_gain": 1.6130138635635376,
+        "gain": 5.017911911010742,
+        "effective_history_gate_l2": 2.0851648093372335,
+        "history_angle": -0.23631715774536133,
+        "alpha": 0.5183663964271545
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "3b0fb1249ef0f501bc005fa1e78a7154096da349706225e8dd25bf7f28d75030"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "bde04b09bb61f86ff4157c72e5d5286a1907853499baf77fe24499c43a8fa4b5"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "f11f359a4e2696792465a3210c8476fca8aea41833c00773fb44d77a909e26e1"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "c44c5ce642fce5815620304f5df7eea2a35595662b79da9b20ebe910f8b7fd34"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "0faaff647edf0ec3175f5a21a0383f768e78740dacb503363067fc92c3560404"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "08da1999d9ff64015bb8184d92ba0e8b2d3e800fa0636a7898737b4a3d6c7ac2"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "26803852802cc82315daebc78134d4ab62700d225d4da3c18869fae162d9ecb0"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "c60d7785facd6cca545bf483330d865b4900a144c0557aab70662e051b51ac85"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "59c80e996408532f7e04ca8b4afc65348121af7d3f1a054f816e9c1c771a4d94"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "b0f923d66a20a94ee4b3cecaf70b6e77f7a0d760346bccbac4f9aa49c3dc26f5"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "9bd35c136efc850d9d187997f55514a5b47bbcc4662261fd458efdc69a8b9530"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "1a7bfb20bd4886d4fffac05303d7d3c02240ede88637c7ef78552ff9c49ecaeb"
+          }
+        }
+      }
+    },
+    "43:history_angle_short": {
+      "checkpoint": {
+        "filename": "checkpoint-ktungjz0.pt",
+        "sha256": "9deeabc22c816ef43b88fa4d9ee1ad42ffe764903d745efb1dbc3f802858bdb3"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "3ba7d951f6b83b1680729e2b7d1f9267fdc4a4ebebf4b892cd8bed23eec868ab",
+      "final_coordinates": {
+        "log_gain": 1.613013744354248,
+        "gain": 5.017910957336426,
+        "effective_history_gate_l2": 2.085163945766487,
+        "history_angle": -0.23631702363491058,
+        "alpha": 0.5183666944503784
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "e71cc78648b9155776d77824dd5197a329d60976c629d7428735cc1e64b6f6a8"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "a6b63937731ab6cb096c21d9e3833237ecad27754c8aa6de892c66a6f05a38ed"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "f61810a568f7f520701b03954d54de6612bb547e58f83e9ab7c0c5a2c0bbced5"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "2e2a25a7b30d18ac8c9a3dc38edc3cf0062d262af036cdabd58ec947cbd09c1d"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d86efb5477ffe7f6a2a89796148f42a0e57eb2bab941bca17233eb7c5e94d4df"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "9c4982ef1400ca07b2827da1f39a495d46840b68ee27fda321dfea95a3b10579"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "51f850ccbf6a842a7721b469e2f0797d21bc016d245fddda039acb6b0fa98e4a"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "64c53e2f323789a61f510564c600f2ef4d6370a003b3d0624f8c67a39a00b9b5"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "6923198e73a02e8da08ac0fdd2452bace3c5282e4a7cbeddab0561af9a7e73f4"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "5b63d5cb83386a7e81a4239224baa1cd7214b44ecce567081797facec1fcd351"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "73c8bb9338a9c8ca9c2b765eb6c62524b34743a8ac38c7096869dc43cbff9182"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "79e7984be959a37e086f04d1eb461a37ee8fef43d508362a0fc0c396ff815179"
+          }
+        }
+      }
+    },
+    "43:history_angle_full": {
+      "checkpoint": {
+        "filename": "checkpoint-kjnfrv4o.pt",
+        "sha256": "9176bcbcf22b88c50df1c7edfc3971e502ceed3078a3c518ba575f7a9dccd149"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "fe7f206ec765d9bf4e8d2206d84985e8fe8f382c06a5e29fa6fee7522dfd753f",
+      "final_coordinates": {
+        "log_gain": 1.643717646598816,
+        "gain": 5.174370288848877,
+        "effective_history_gate_l2": 2.243330930359378,
+        "history_angle": -0.416423499584198,
+        "alpha": 0.11542076617479324
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "fbd0a05416f8650a1c230ad17e4af735ce8fe1c1783e8d6f8ef5f219423e6ec7"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "1538d5ac161ebb7a7d54396fbb8dde1ecd7b3d88e4c059999201d031e9da9608"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "f89539265ac834c26cfa748f252f952ee31edc8005a98337c36f676ab53a7cfd"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "a1aeb11f05cd5dcd5221f090ee36f49c88955937b9625abd78ef409a0e28df4a"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "40087772c2ab5db5012694301b250a93817564cb9cc75064c71e07d5d3d2d6f5"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "4a67984680083767975bd6ecbb337c745eddba60143b16157eded8681101e512"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "e09b9984dc343484b46628755f4358ff479d65685ef31ede94480c7110e3a610"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "1678db2136993bec5049174b82d3a5367c1ef622e3ab601e6302a0b7e8a5a374"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "4e66a9299f6e2ec72126c7f4a1987b3987089bfafec682662e87bd441bf7ecc9"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "d5f42d52e206f2e97baa7414d5ab2ff4b5ffc64228a45f0374de4badfad4230f"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "a499bc79feeae075162f6727f8d0355837488194bf7071a3c8d6ac65b9ce94ee"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "8dee85688aad6cc15ee5f162868ea391394d67d55c8c0ce5b7ec3a54925198cb"
+          }
+        }
+      }
+    },
+    "47:ordinary_angle_short": {
+      "checkpoint": {
+        "filename": "checkpoint-_micuhbl.pt",
+        "sha256": "02605c846657fbceea399201248d276c907e9a4be26910a3206e4bcb2f01df87"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "aeeb9d71ab7db8e073336abc3711fd5d5241eff288383284e6e3c47071df7373",
+      "final_coordinates": {
+        "log_gain": 1.6354988813400269,
+        "gain": 5.132017612457275,
+        "effective_history_gate_l2": 2.1401976502576914,
+        "history_angle": -0.2443860024213791,
+        "alpha": 0.5012592077255249
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "00ff45dd7a8163fda8686ddab7aea66afe859196dd94638a69ae807a8f02d185"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "440603f9dfd474328101c40c4daaa96f2b7f1eb8052472dde0edfa0b09f055ef"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "b039c863dea74c24a952059b96657f8d2c3722e0c1253f965e600f608d7c5064"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "46dad35978838d86430376cc66f6099be511f108612fb4a60254a9097ca82b11"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "72668df63aecd5391201eacba41c87b0a4cdce1836090c326c3aa60b9dd97c81"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "3c9f4766c8eda3c5da0387c56acd5a94fa24373ccd5daa5a9f78eb34cd5fe6f9"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "e3befa09a3b01cd6d4f4af4c23197c3bf404791c6d4e58edd0c305e506911076"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d24be443a945ac1ec762abc1f50e2093393eb36f54370c1c5b5b0436fd091048"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "ca96bde57362573ec84869e0a4d318cde425d1c42e52a74da051b850ee0d9d3f"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "0870762d006511f6dcc1febbdfb3cc7aca8cc41ac2beb8ba8384b279290dd8e5"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "0fb0e8909f145720da8a8cf0f8ecc9b69b578adea77651e006b43d888a2e69e7"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "d7b1e02eb2885653984a413da3730919e22465735273a5f0b6507cff4cc6bc1f"
+          }
+        }
+      }
+    },
+    "47:history_angle_short": {
+      "checkpoint": {
+        "filename": "checkpoint-0ras48m6.pt",
+        "sha256": "21772fc2cce22071f43da7bf3febd50b30de9d01bd1fcc524abd4c0d967c1c95"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "64db60c2eddebc0fa2f33aec749fc6cb745b541c8f8057582e6256f4d1fa8795",
+      "final_coordinates": {
+        "log_gain": 1.6354985237121582,
+        "gain": 5.132015705108643,
+        "effective_history_gate_l2": 2.1401964175181805,
+        "history_angle": -0.24438591301441193,
+        "alpha": 0.5012593865394592
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "592b61cdff6a7f86da550f06365e592bdddf0008dc5ced406c81f462a668ab98"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "c87c73efe3fb7286a6daf5e60e15364d5506de49e760620346a98752aeabc47e"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "98dc87fa5fbc8bd5dde6b6d88681e21c210737e995a4516cc98ce4d8c645640b"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "5dad6935a2f6bb2952ed6e37eaaf44f51e12fdba8edb384447b79ea7a0ad0224"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "ba54c935b5d6a468545e275a44778bfdeb31a0efe536aea3d3f4a84ebd057a92"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "f1be3d6369a960ac33a7cd5ac294f3d17e19b6d890d62d84d2559c8341800343"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "ce50d0022b3fa225ba29e8ef7b2fe8f92174dcec709c268368c3b6ddda340e6f"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d9bf8a0c904337702138f73c71238e248ae7ed38988dc14ee1b610c7e26c409d"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "8d94b6a4f8200c97f303b3949cc270a271f0e5f85d67bff1a8fc429c38cdf197"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "88a9628fe4363c4166ac2023268cdf6d6bd37f78e3182876b213b52c5f7df96d"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "98146226e51724799fdb82147ba2a3ba2778d158c3d431ce078ef3b312866e45"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "6ba1ad393da7a9461fd1b13c926626d1373d9e66345f1defe3c5fe9e0adbb6f3"
+          }
+        }
+      }
+    },
+    "47:history_angle_full": {
+      "checkpoint": {
+        "filename": "checkpoint-3zb_ixjp.pt",
+        "sha256": "b60aab79e9ba965b7417ecb197e5ca594901b3c5ecbb330e131c01b37aeab160"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "709ff030a98bc8d53a5f1826d4877004094a2c1cb7289eeabd45d000421fec4f",
+      "final_coordinates": {
+        "log_gain": 1.6647961139678955,
+        "gain": 5.284595489501953,
+        "effective_history_gate_l2": 2.2939817498187525,
+        "history_angle": -0.4232233762741089,
+        "alpha": 0.09911132603883743
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "e23076ea72efbf0ee727b26339defe840a9e3d7ee8eb4960363c74aa4fa2aee0"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "2b5d81c97e03868d1b55a80fff629fb1b19179444e13e6a850790c4bb2541086"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "3adde4a014a82a008da3fca935a20c537a1c92e4c68ab8569e646fa4c76274d1"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "50e053434805be7583cd6547b2a77b54784faa1b747e82b69ac53e37f99d80ee"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "fb320d060996d2e145e5fd10df151966f63ad4169550438f38611361b819a946"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "1a965aa68b252b8b8d0652b199c59abd25b54168f589a6aac0b400f2ff6bb8c3"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "c31ee6386afd73aac0ee26dbd8b97d6b4b902988cba479009217eb3d84dd9665"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "6c596ff415a2830fadc570ee29249467db3e8f107a6faad60c8157ace89255b4"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "185beceb6d6c82afa8bba13518f1fa968829dccdc106436d1dc32a6e96f7715a"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "ed9a9d793360e9f650dfc45708337b2022e9e219f07658550b0c2e0c0954a403"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "2619225fd4ac0acaf58d1ed20ce124d1a7298d03e7f1fa50ca9b9d2f9a7e3b86"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "89f70ca679d76f15e417799db2b5b179efeca50038bb455de6dfa5b07d869682"
+          }
+        }
+      }
+    }
+  },
+  "scope": "Saved recipes/tensors/named Adam and sealed receipts, plus a separately reported fixed-tolerance comparison of final ordinary/GL short states. Not replay, full gradient trajectory parity, bitwise equivalence, quality or process termination.",
+  "paired_short_states": {
+    "41": {
+      "parameters": {
+        "status": "failed",
+        "allclose": false,
+        "byte_equal": false,
+        "value_equal": false,
+        "rtol": 3e-06,
+        "atol": 3e-07,
+        "max_abs_error": {
+          "gate": 1.1920928955078125e-06,
+          "local_gate": 1.2069940567016602e-06,
+          "history_angle": 5.960464477539063e-08,
+          "log_gain": 0.0
+        }
+      },
+      "adam": {
+        "status": "passed",
+        "allclose": true,
+        "byte_equal": false,
+        "value_equal": false,
+        "rtol": 3e-06,
+        "atol": 3e-07,
+        "max_abs_error": {
+          "gate/step": 0.0,
+          "gate/exp_avg": 9.685754776000977e-08,
+          "gate/exp_avg_sq": 1.2078089639544487e-09,
+          "local_gate/step": 0.0,
+          "local_gate/exp_avg": 1.8917489796876907e-09,
+          "local_gate/exp_avg_sq": 3.410605131648481e-12,
+          "history_angle/step": 0.0,
+          "history_angle/exp_avg": 1.6763806343078613e-08,
+          "history_angle/exp_avg_sq": 3.2741809263825417e-11,
+          "log_gain/step": 0.0,
+          "log_gain/exp_avg": 4.0978193283081055e-08,
+          "log_gain/exp_avg_sq": 1.4551915228366852e-10
+        }
+      }
+    },
+    "43": {
+      "parameters": {
+        "status": "failed",
+        "allclose": false,
+        "byte_equal": false,
+        "value_equal": false,
+        "rtol": 3e-06,
+        "atol": 3e-07,
+        "max_abs_error": {
+          "gate": 9.5367431640625e-07,
+          "local_gate": 6.258487701416016e-07,
+          "history_angle": 1.341104507446289e-07,
+          "log_gain": 1.1920928955078125e-07
+        }
+      },
+      "adam": {
+        "status": "passed",
+        "allclose": true,
+        "byte_equal": false,
+        "value_equal": false,
+        "rtol": 3e-06,
+        "atol": 3e-07,
+        "max_abs_error": {
+          "gate/step": 0.0,
+          "gate/exp_avg": 1.30385160446167e-08,
+          "gate/exp_avg_sq": 1.1641532182693481e-10,
+          "local_gate/step": 0.0,
+          "local_gate/exp_avg": 1.6880221664905548e-09,
+          "local_gate/exp_avg_sq": 4.547473508864641e-12,
+          "history_angle/step": 0.0,
+          "history_angle/exp_avg": 1.0244548320770264e-08,
+          "history_angle/exp_avg_sq": 1.4551915228366852e-11,
+          "log_gain/step": 0.0,
+          "log_gain/exp_avg": 4.470348358154297e-08,
+          "log_gain/exp_avg_sq": 1.8917489796876907e-10
+        }
+      }
+    },
+    "47": {
+      "parameters": {
+        "status": "failed",
+        "allclose": false,
+        "byte_equal": false,
+        "value_equal": false,
+        "rtol": 3e-06,
+        "atol": 3e-07,
+        "max_abs_error": {
+          "gate": 8.065253496170044e-07,
+          "local_gate": 8.717179298400879e-07,
+          "history_angle": 8.940696716308594e-08,
+          "log_gain": 3.5762786865234375e-07
+        }
+      },
+      "adam": {
+        "status": "passed",
+        "allclose": true,
+        "byte_equal": false,
+        "value_equal": false,
+        "rtol": 3e-06,
+        "atol": 3e-07,
+        "max_abs_error": {
+          "gate/step": 0.0,
+          "gate/exp_avg": 3.3527612686157227e-08,
+          "gate/exp_avg_sq": 1.4260876923799515e-09,
+          "local_gate/step": 0.0,
+          "local_gate/exp_avg": 2.3283064365386963e-09,
+          "local_gate/exp_avg_sq": 2.2737367544323206e-12,
+          "history_angle/step": 0.0,
+          "history_angle/exp_avg": 1.1175870895385742e-08,
+          "history_angle/exp_avg_sq": 7.639755494892597e-11,
+          "log_gain/step": 0.0,
+          "log_gain/exp_avg": 1.862645149230957e-08,
+          "log_gain/exp_avg_sq": 2.764863893389702e-10
+        }
+      }
+    }
+  },
+  "paired_short_state_status": "failed",
+  "frozen_files_verified": {
+    "client": 8,
+    "runtime": 71
+  },
+  "runtime_build_source_revision": "f8e8e6aa60f7c9a4211243e91f1f1a565d26e50b",
+  "manifest_sha256": {
+    "client": "870c48984a93a15a67dec37bd3ee9ab800662f4af63fa92eec8deaca91695390",
+    "runtime": "c83e8d6a5612e927b6fae8df191396d2560f8e2176f121190233cd041c3ecaf0"
+  }
+}

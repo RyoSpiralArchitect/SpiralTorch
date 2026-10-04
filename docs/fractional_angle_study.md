@@ -6,6 +6,12 @@ That result remains unchanged. This new experiment removes the angle versus
 log-order optimizer-coordinate difference using the [Rust chart](fractional_angle_chart.md).
 It does not assume that fractional history will improve language quality.
 
+The [completed nine-run comparison](../benchmarks/results/2026-10-05-fractional-angle-study/README.md)
+finds lower endpoint loss for GL full on both sets in all seeds, while the
+short-filter loss gap nearly disappears. Final short-parameter tolerance
+checks nevertheless fail in all seeds; that result is preserved separately
+from successful saved-state verification and the quality measurements.
+
 ## Fixed Comparison
 
 | Arm | History | Shape Coordinate |

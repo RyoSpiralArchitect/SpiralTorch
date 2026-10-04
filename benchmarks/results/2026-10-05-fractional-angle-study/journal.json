@@ -1,0 +1,106 @@
+{
+  "study_id": "4cb29fe3a588f7d46df6df775f781141c847b8dac6a8351450b03452c7ae917a",
+  "status": "completed",
+  "runs": {
+    "41:ordinary_angle_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-8a293c48.pt",
+        "sha256": "c60b49d7644fc3dd716c7091e316d1d9f6eae17567cc640180a9d1e986d293c8"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:history_angle_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-nid2qniu.pt",
+        "sha256": "372137e12981a203477e5e6971d26d5b8a98bc3b5440362931b0a38affc359d7"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:history_angle_full": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-i0sy8tyd.pt",
+        "sha256": "6ebbf86ab15299fe1a93a47d2edace01aa8359c5830d8e00aa1009c47dc45eae"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:ordinary_angle_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-6u6a_1ds.pt",
+        "sha256": "cae7b5da0c23be947670e28bfefde55eff58a8ea2b14cba3d4ed8889ee7a4474"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:history_angle_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-ktungjz0.pt",
+        "sha256": "9deeabc22c816ef43b88fa4d9ee1ad42ffe764903d745efb1dbc3f802858bdb3"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:history_angle_full": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-kjnfrv4o.pt",
+        "sha256": "9176bcbcf22b88c50df1c7edfc3971e502ceed3078a3c518ba575f7a9dccd149"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:ordinary_angle_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-_micuhbl.pt",
+        "sha256": "02605c846657fbceea399201248d276c907e9a4be26910a3206e4bcb2f01df87"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:history_angle_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-0ras48m6.pt",
+        "sha256": "21772fc2cce22071f43da7bf3febd50b30de9d01bd1fcc524abd4c0d967c1c95"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:history_angle_full": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-3zb_ixjp.pt",
+        "sha256": "b60aab79e9ba965b7417ecb197e5ca594901b3c5ecbb330e131c01b37aeab160"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    }
+  },
+  "results_sha256": "7693b247c1d346f4caed477b58d1c561d012e1a31be998a06c4649998c6f602c"
+}

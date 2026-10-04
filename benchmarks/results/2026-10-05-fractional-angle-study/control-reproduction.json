@@ -1,0 +1,39 @@
+{
+  "schema": "spiraltorch.angular_control_endpoint_reproduction.v1",
+  "scope": "Post-hoc numerical consistency of the unchanged ordinary control across two separately completed studies, not extra independent seeds or a new training run.",
+  "prior_results_sha256": "033e91e40afc741730812c1c3f08089eb173702ed69700a03df785a2898be58a",
+  "current_results_sha256": "7693b247c1d346f4caed477b58d1c561d012e1a31be998a06c4649998c6f602c",
+  "baseline_equal": true,
+  "runs": {
+    "41": {
+      "pride_unused_tail": {
+        "mean_equal": true,
+        "block_losses_equal": true
+      },
+      "alice_transfer": {
+        "mean_equal": true,
+        "block_losses_equal": true
+      }
+    },
+    "43": {
+      "pride_unused_tail": {
+        "mean_equal": true,
+        "block_losses_equal": true
+      },
+      "alice_transfer": {
+        "mean_equal": true,
+        "block_losses_equal": true
+      }
+    },
+    "47": {
+      "pride_unused_tail": {
+        "mean_equal": true,
+        "block_losses_equal": true
+      },
+      "alice_transfer": {
+        "mean_equal": true,
+        "block_losses_equal": true
+      }
+    }
+  }
+}
