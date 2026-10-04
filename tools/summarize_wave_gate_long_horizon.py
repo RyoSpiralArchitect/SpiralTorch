@@ -216,10 +216,16 @@ def fractional_report(config, runs, measured, sets):
 
 
 def fractional_lag_report(config, runs, measured, sets):
-    initial_orders = {"history_fixed_one": 1.0, "history_learned_one": 1.0,
-                      "history_learned_half": 0.5}
-    arms = {"lag1", *initial_orders}
-    require(set(config["arms"]) == arms and config.get("reference_arm") == "lag1",
+    two_lag = config.get("schema") == "spiraltorch.fractional_two_lag_protocol.v1"
+    ordinary_arm = "lag2" if two_lag else "lag1"
+    fixed_arm = "history_fixed_two" if two_lag else "history_fixed_one"
+    paired_arm = "history_learned_two" if two_lag else "history_learned_one"
+    initial_orders = ({"history_fixed_two": 2.0, "history_learned_two": 2.0,
+                       "history_learned_one": 1.0} if two_lag else
+                      {"history_fixed_one": 1.0, "history_learned_one": 1.0,
+                       "history_learned_half": 0.5})
+    arms = {ordinary_arm, *initial_orders}
+    require(set(config["arms"]) == arms and config.get("reference_arm") == ordinary_arm,
             "incomplete lag design")
     require(config.get("initial_orders") == initial_orders
             and all(type(v) in (int, float) for v in config["initial_orders"].values()),
@@ -228,23 +234,23 @@ def fractional_lag_report(config, runs, measured, sets):
             "invalid lag feature count")
     kernel = config.get("kernel", {})
     require(type(kernel.get("step")) in (int, float) and kernel["step"] == 1
-            and type(kernel.get("kernel_len")) is int and kernel["kernel_len"] > 1,
+            and type(kernel.get("kernel_len")) is int and kernel["kernel_len"] > (2 if two_lag else 1),
             "lag kernel differs")
     trajectories, parity = {}, {}
     common_fields = ("loss", "gate_gradient_l2", "local_gate_gradient_l2",
                      "gate_before_update_l2", "local_gate_before_update_l2")
     for seed in config["seeds"]:
         hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256")
-                  for arm in ("history_fixed_one", "history_learned_one")}
+                  for arm in (fixed_arm, paired_arm)}
         require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
-                "alpha-one initial parameters are not paired")
+                "integer-order initial parameters are not paired")
         for arm in config["arms"]:
             row = runs[f"{seed}:{arm}"]
             learned = arm.startswith("history_learned_")
             gate_count = 2 * config["features"]
             require(type(row.get("parameter_count")) is int
                     and type(row.get("trainable_parameter_count")) is int
-                    and row["parameter_count"] == gate_count + int(arm != "lag1")
+                    and row["parameter_count"] == gate_count + int(arm != ordinary_arm)
                     and row["trainable_parameter_count"] == gate_count + int(learned),
                     "lag parameter counts differ")
             require(bool(row["records"]) and all(
@@ -252,7 +258,7 @@ def fractional_lag_report(config, runs, measured, sets):
                 for r in row["records"] for k in common_fields), "invalid lag update receipt")
             if arm in initial_orders:
                 trajectories[f"{seed}:{arm}"] = order_trajectory(row, initial_orders[arm], learned)
-        ordinary, fixed = (runs[f"{seed}:{arm}"] for arm in ("lag1", "history_fixed_one"))
+        ordinary, fixed = (runs[f"{seed}:{arm}"] for arm in (ordinary_arm, fixed_arm))
         parity[str(seed)] = {
             "update_receipts_equal":
                 [[r[k] for k in common_fields] for r in ordinary["records"]]
@@ -264,6 +270,11 @@ def fractional_lag_report(config, runs, measured, sets):
             },
         }
     contrasts = {
+        "fixed_two_minus_lag2": {"history_fixed_two": 1, "lag2": -1},
+        "learned_two_minus_fixed_two": {"history_learned_two": 1, "history_fixed_two": -1},
+        "learned_one_minus_learned_two": {"history_learned_one": 1, "history_learned_two": -1},
+        "learned_one_minus_lag2": {"history_learned_one": 1, "lag2": -1},
+    } if two_lag else {
         "fixed_one_minus_lag1": {"history_fixed_one": 1, "lag1": -1},
         "learned_one_minus_fixed_one": {"history_learned_one": 1, "history_fixed_one": -1},
         "learned_half_minus_learned_one": {"history_learned_half": 1, "history_learned_one": -1},
@@ -555,7 +566,8 @@ def summarize(plan, result, journal, result_sha256):
         )
         if config["schema"] == "spiraltorch.fractional_history_protocol.v1":
             summary["decay_trajectories"] = ema_trajectories(config, runs)
-    if config.get("schema") == "spiraltorch.fractional_lag_protocol.v1":
+    if config.get("schema") in ("spiraltorch.fractional_lag_protocol.v1",
+                               "spiraltorch.fractional_two_lag_protocol.v1"):
         summary["reference_arm"] = reference
         (summary["paired_fractional_contrasts"], summary["order_trajectories"],
          summary["same_math_receipt_parity"]) = fractional_lag_report(config, runs, measured, sets)

@@ -97,3 +97,8 @@ Publish all numeric outcomes, input/source hashes and verification receipts,
 including failed criteria and losing results. Keep corpora, weights,
 checkpoints, native packages and raw logs local. Implementation tests and a
 running process are not completed pretrained quality results.
+
+The [two-lag follow-up protocol](fractional_two_lag_study.md) tests whether the
+learned-from-one movement toward alpha=2 can be explained by an ordinary
+two-tap filter. It reruns the learned-one arm with matched inputs instead of
+reusing historical endpoints as independent evidence.

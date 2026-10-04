@@ -715,6 +715,7 @@ jobs:
             bindings/st-py/tests/test_fractional_memory_study.py \
             bindings/st-py/tests/test_fractional_history_study.py \
             bindings/st-py/tests/test_fractional_lag_study.py \
+            bindings/st-py/tests/test_fractional_two_lag_study.py \
             bindings/st-py/tests/test_elliptic_gated_causal.py \
             bindings/st-py/tests/test_elliptic_anchored.py \
             bindings/st-py/tests/test_elliptic_gated_study.py \
