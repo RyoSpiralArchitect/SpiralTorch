@@ -316,6 +316,80 @@ At step 1 that limit is the single-lag map `-x[t-1]`, so this is not evidence
 that a long fractional tail is necessary; the next control should test that
 ordinary short-memory explanation directly.
 
+## Independently Learned Gain
+
+The completed [history/energy factorial](fractional_history_factorial.md)
+shows that fixing coefficient norm changes both the learned order and the
+benefit of longer available history. `FractionalGainHistoryAdapter` makes
+that amplitude an independent trainable parameter instead of silently
+changing the fixed-gain operator:
+
+```text
+gain = exp(log_gain)
+q(alpha, log_gain) = gain * c(alpha) / ||c(alpha)||_2
+H(x) = causal strictly-past convolution with q
+dH/dlog_gain = H(x)
+```
+
+Rust owns the exponential, normalized coefficients and input/alpha/log-gain
+VJPs and joint JVP. The existing fixed-energy forward computes the map and
+alpha differential; the new snapshot reuses its captured output for the
+log-gain differential without a third full-size saved array. Shape and
+amplitude coordinates are independent, **not guaranteed identifiable or
+orthogonal under the data distribution**. Feature gates still modulate the
+residual, so changing gain also changes their effective scale.
+
+`log_gain` must be finite and `exp(log_gain)` must be positive and finite in
+float32. Invalid/overflowing/underflowing gains fail rather than clamp,
+including when history is empty. The positive step scale still cancels.
+Only requested pullbacks are evaluated: `vjp_parameters` returns alpha and
+log-gain gradients without allocating an input gradient; input-only,
+alpha-only and log-gain-only methods are also available. Unrequested
+pullback overflow does not invalidate a requested finite component.
+
+```python
+adapter = st.FractionalGainHistoryAdapter(
+    model.config.n_embd, initial_alpha=2.0, initial_gain=5.0**0.5,
+    strength=0.1, kernel_len=32,
+).to(next(model.parameters()).device)
+
+# Or use the differentiable low-level map on a complete float32 prefix:
+y = st.fractional_gl_history_log_gain_autograd(
+    x, alpha, log_gain, axis=1, kernel=st.FractionalGlKernel(kernel_len=32),
+)
+```
+
+`alpha` and `log_gain` are scalar float32 Torch tensors; normal autograd
+chains the adapter's log-alpha chart to the native alpha derivative.
+All gates start at zero, so the adapter is identity initially and the two
+scalar gradients are initially zero. Its `2*F+2` parameters include one
+more scalar than the raw/fixed-energy adapters. The distinct extra-state
+schema `spiraltorch.fractional_gain_history_adapter.v1` and saved `log_gain`
+prevent silently interpreting old checkpoints with the new semantics.
+Save and restore the optimizer as well. Float32 log/exp round trips need
+not reproduce an arbitrary requested initial gain bit-for-bit.
+
+Rust/Python/WASM use `kernel.forward_history_log_gain(input, shape, axis,
+alpha, log_gain)`, returning `FractionalGlGainLearningBatch` with `output`
+and the effective `gain`. Python also provides the native-f32 `_buffer`
+transport. Joint VJP returns `(input, alpha, log_gain)` in Python and named
+fields in Rust/WASM; `vjp_parameters` returns `(alpha, log_gain)` in Python
+and a two-element `Float32Array` in WASM. `jvp(dx, da, dlog_gain)` shares
+the same controls on all clients. WASM handles must be freed explicitly.
+
+Finite-difference/adjoint checks, an independent ordinary Torch reference,
+all seven nonempty reverse-AD combinations, forward AD, buffer ownership,
+optional-Torch imports and frozen tiny-HF Adam continuation are tested.
+`fractional_history_log_gain.mjs` fits a synthetic shape/amplitude target
+through the compiled wasm32 module. No additional pretrained study or
+speed benchmark is implied. Before a new quality comparison, match initial
+maps, data/update budgets and scalar capacity with an ordinary short-filter
+control, and account for the remaining gate/gain redundancy.
+
+Raw and constant-gain operators/checkpoint schemas remain unchanged. All
+host-float32, first-order-only, complete-prefix, no-padding/packed-document
+and no-KV-cache limits below also apply to this new path.
+
 ## WASM
 
 The same classes expose explicit float32 arrays and owned handles:

@@ -42,6 +42,8 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                 try:
                     if name.endswith('Adapter'):
                         namespace[name](8)
+                    elif name == 'fractional_gl_history_log_gain_autograd':
+                        namespace[name](None, None, None, axis=1)
                     else:
                         namespace[name](None, None, axis=1)
                 except RuntimeError as error:
@@ -63,6 +65,11 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                 array('f', [1., 2.]), [2], 0, .5, 1.5)
             assert normalized.output == [0., -1.5]
             assert normalized.vjp_alpha([1., 1.]) == 0.
+            learned = st.FractionalGlKernel(kernel_len=2).forward_history_log_gain_buffer(
+                array('f', [1., 2.]), [2], 0, .5, 0.)
+            assert isinstance(learned, st.FractionalGlGainLearningBatch)
+            assert learned.output == [0., -1.]
+            assert learned.vjp_parameters([1., 1.]) == (0., -1.)
         """)
         completed = subprocess.run(
             [

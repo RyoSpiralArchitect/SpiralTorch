@@ -15,6 +15,8 @@ pub enum FractionalLearningError {
     Budget,
     #[error("fractional history L2 gain must be finite and positive")]
     NormalizationGain,
+    #[error("fractional history log-gain must be finite with positive finite f32 exp(log_gain)")]
+    LogGain,
     #[error(transparent)]
     Operator(#[from] FracErr),
 }
@@ -47,6 +49,21 @@ pub struct FractionalGlLearningBatch {
 pub struct FractionalGlGradients {
     pub input: Vec<f32>,
     pub alpha: f32,
+}
+
+/// Normalized history shape with an independently learned positive amplitude.
+/// The logarithmic amplitude differential is the captured output itself.
+#[derive(Clone, Debug)]
+pub struct FractionalGlGainLearningBatch {
+    history: FractionalGlLearningBatch,
+    gain: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct FractionalGlGainGradients {
+    pub input: Vec<f32>,
+    pub alpha: f32,
+    pub log_gain: f32,
 }
 
 impl FractionalGlKernel {
@@ -152,6 +169,27 @@ impl FractionalGlKernel {
             alpha_derivative,
             history_coefficients: Some(coefficients),
             input_scale: Some(1.0),
+        })
+    }
+
+    /// `exp(log_gain) * c(alpha) / ||c(alpha)||_2`, with both scalar VJPs.
+    /// No order/amplitude clipping or optimizer policy is applied. The positive
+    /// amplitude must remain representable in f32, including on a zero map.
+    pub fn forward_history_log_gain(
+        &self,
+        input: &[f32],
+        shape: &[usize],
+        axis: usize,
+        alpha: f32,
+        log_gain: f32,
+    ) -> Result<FractionalGlGainLearningBatch> {
+        let gain = log_gain.exp();
+        if !log_gain.is_finite() || !gain.is_finite() || gain <= 0.0 {
+            return Err(FractionalLearningError::LogGain);
+        }
+        Ok(FractionalGlGainLearningBatch {
+            history: self.forward_history_l2(input, shape, axis, alpha, gain)?,
+            gain,
         })
     }
 
@@ -390,10 +428,9 @@ impl FractionalGlLearningBatch {
         self.alpha_pullback(upstream)
     }
 
-    pub fn jvp(&self, input_tangent: &[f32], alpha_tangent: f32) -> Result<Vec<f32>> {
-        validate_slice("fractional alpha tangent", &[alpha_tangent])?;
+    fn input_pushforward(&self, input_tangent: &[f32]) -> Result<ArrayD<f32>> {
         let tangent = self.shaped(input_tangent)?;
-        let input = match &self.history_coefficients {
+        Ok(match &self.history_coefficients {
             Some(coefficients) if coefficients.is_empty() => ArrayD::zeros(self.output.raw_dim()),
             Some(coefficients) => fracdiff_gl_nd_with_coeffs(
                 &tangent,
@@ -403,14 +440,101 @@ impl FractionalGlLearningBatch {
                 Some(self.input_multiplier()?),
             )?,
             None => fracdiff_gl_nd_config(&tangent, self.config)?,
-        };
-        input
+        })
+    }
+
+    pub fn jvp(&self, input_tangent: &[f32], alpha_tangent: f32) -> Result<Vec<f32>> {
+        validate_slice("fractional alpha tangent", &[alpha_tangent])?;
+        self.input_pushforward(input_tangent)?
             .iter()
             .zip(self.alpha_derivative.iter())
             .map(|(&dx, &da)| {
                 checked_f32(
                     "fractional learning tangent",
                     f64::from(dx) + f64::from(alpha_tangent) * f64::from(da),
+                )
+                .map_err(Into::into)
+            })
+            .collect()
+    }
+}
+
+impl FractionalGlGainLearningBatch {
+    pub fn output(&self) -> &ArrayD<f32> {
+        self.history.output()
+    }
+
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+
+    pub fn vjp(&self, upstream: &[f32]) -> Result<FractionalGlGainGradients> {
+        let gradient = self.history.vjp(upstream)?;
+        Ok(FractionalGlGainGradients {
+            input: gradient.input,
+            alpha: gradient.alpha,
+            log_gain: self.vjp_log_gain(upstream)?,
+        })
+    }
+
+    pub fn vjp_input(&self, upstream: &[f32]) -> Result<Vec<f32>> {
+        self.history.vjp_input(upstream)
+    }
+
+    pub fn vjp_alpha(&self, upstream: &[f32]) -> Result<f32> {
+        self.history.vjp_alpha(upstream)
+    }
+
+    /// Only reduce the requested amplitude component; no input adjoint allocation.
+    pub fn vjp_log_gain(&self, upstream: &[f32]) -> Result<f32> {
+        self.history.validate_direction(upstream)?;
+        let gradient = upstream
+            .iter()
+            .zip(self.output())
+            .map(|(&g, &y)| f64::from(g) * f64::from(y))
+            .sum();
+        Ok(checked_f32("fractional log-gain gradient", gradient)?)
+    }
+
+    /// Shared scalar gradients without computing the unrequested input VJP.
+    pub fn vjp_parameters(&self, upstream: &[f32]) -> Result<(f32, f32)> {
+        self.history.validate_direction(upstream)?;
+        let (mut alpha, mut log_gain) = (0.0f64, 0.0f64);
+        for ((&g, &da), &y) in upstream
+            .iter()
+            .zip(&self.history.alpha_derivative)
+            .zip(self.output())
+        {
+            alpha += f64::from(g) * f64::from(da);
+            log_gain += f64::from(g) * f64::from(y);
+        }
+        Ok((
+            checked_f32("fractional learning alpha gradient", alpha)?,
+            checked_f32("fractional log-gain gradient", log_gain)?,
+        ))
+    }
+
+    pub fn jvp(
+        &self,
+        input_tangent: &[f32],
+        alpha_tangent: f32,
+        log_gain_tangent: f32,
+    ) -> Result<Vec<f32>> {
+        validate_slice(
+            "fractional scalar tangents",
+            &[alpha_tangent, log_gain_tangent],
+        )?;
+        self.history
+            .input_pushforward(input_tangent)?
+            .iter()
+            .zip(&self.history.alpha_derivative)
+            .zip(self.output())
+            .map(|((&dx, &da), &y)| {
+                checked_f32(
+                    "fractional gain learning tangent",
+                    f64::from(dx)
+                        + f64::from(alpha_tangent) * f64::from(da)
+                        + f64::from(log_gain_tangent) * f64::from(y),
                 )
                 .map_err(Into::into)
             })
@@ -754,5 +878,155 @@ mod tests {
         assert!(kernel
             .forward_history_l2(&[1.; 3], &[3], 0, f32::MAX, 1.)
             .is_err());
+    }
+
+    #[test]
+    fn log_gain_matches_fixed_energy_forward_and_existing_differentials() {
+        let kernel = FractionalGlKernel::new(6, 0.2, 24, 144).unwrap();
+        let x: Vec<_> = (0..24).map(|i| (i as f32 * 0.3).sin()).collect();
+        for log_gain in [-1., 0., 0.8] {
+            let learned = kernel
+                .forward_history_log_gain(&x, &[2, 4, 3], 1, 2., log_gain)
+                .unwrap();
+            let fixed = kernel
+                .forward_history_l2(&x, &[2, 4, 3], 1, 2., learned.gain())
+                .unwrap();
+            assert_eq!(
+                bits(learned.output().iter().copied()),
+                bits(fixed.output().iter().copied())
+            );
+            assert_eq!(
+                bits(learned.vjp_input(&x).unwrap()),
+                bits(fixed.vjp_input(&x).unwrap())
+            );
+            assert_eq!(
+                learned.vjp_alpha(&x).unwrap().to_bits(),
+                fixed.vjp_alpha(&x).unwrap().to_bits()
+            );
+            assert_eq!(
+                bits(learned.jvp(&x, 0.3, 0.).unwrap()),
+                bits(fixed.jvp(&x, 0.3).unwrap())
+            );
+            let joint = learned.vjp(&x).unwrap();
+            assert_eq!(
+                learned.vjp_parameters(&x).unwrap(),
+                (joint.alpha, joint.log_gain)
+            );
+        }
+    }
+
+    #[test]
+    fn log_gain_joint_jvp_matches_finite_differences_and_adjoint() {
+        let shape = [2, 3, 4];
+        let x: Vec<_> = (0..24).map(|i| (i as f32 * 0.31).sin()).collect();
+        let dx: Vec<_> = x.iter().map(|x| x.cos()).collect();
+        let u: Vec<_> = x.iter().map(|x| 0.2 - x * 0.3).collect();
+        let kernel = FractionalGlKernel::new(5, 0.7, 24, 120).unwrap();
+        let dot = |a: &[f32], b: &[f32]| {
+            a.iter()
+                .zip(b)
+                .map(|(&a, &b)| f64::from(a) * f64::from(b))
+                .sum::<f64>()
+        };
+        for axis in 0..3 {
+            for alpha in [0.1, 0.7, 1., 2., 3.2] {
+                let h = kernel
+                    .forward_history_log_gain(&x, &shape, axis, alpha, 0.3)
+                    .unwrap();
+                let vjp = h.vjp(&u).unwrap();
+                let jvp = h.jvp(&dx, 0.2, -0.4).unwrap();
+                let adjoint = dot(&u, &jvp) - dot(&vjp.input, &dx) - 0.2 * f64::from(vjp.alpha)
+                    + 0.4 * f64::from(vjp.log_gain);
+                assert!(adjoint.abs() < 2e-6, "{adjoint}");
+                let eps = 0.001;
+                let plus: Vec<_> = x.iter().zip(&dx).map(|(x, dx)| x + eps * dx).collect();
+                let minus: Vec<_> = x.iter().zip(&dx).map(|(x, dx)| x - eps * dx).collect();
+                let yp = kernel
+                    .forward_history_log_gain(
+                        &plus,
+                        &shape,
+                        axis,
+                        alpha + eps * 0.2,
+                        0.3 - eps * 0.4,
+                    )
+                    .unwrap();
+                let ym = kernel
+                    .forward_history_log_gain(
+                        &minus,
+                        &shape,
+                        axis,
+                        alpha - eps * 0.2,
+                        0.3 + eps * 0.4,
+                    )
+                    .unwrap();
+                for ((dy, yp), ym) in jvp.iter().zip(yp.output()).zip(ym.output()) {
+                    assert!((dy - (yp - ym) / (2. * eps)).abs() < 3e-4);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn log_gain_selective_vjps_do_not_evaluate_unrequested_overflow() {
+        let kernel = FractionalGlKernel::new(2, 1., 2, 4).unwrap();
+        let h = kernel
+            .forward_history_log_gain(&[f32::MAX, 0.], &[2], 0, 1., 0.)
+            .unwrap();
+        assert_eq!(h.vjp_input(&[0., 2.]).unwrap(), vec![-2., 0.]);
+        assert_eq!(h.vjp_alpha(&[0., 2.]).unwrap(), 0.);
+        assert!(h.vjp_log_gain(&[0., 2.]).is_err());
+        assert!(h.vjp(&[0., 2.]).is_err());
+        let h = kernel
+            .forward_history_log_gain(&[0., 0.], &[2], 0, 1., 2f32.ln())
+            .unwrap();
+        assert!(h.vjp_input(&[0., f32::MAX]).is_err());
+        assert_eq!(h.vjp_parameters(&[0., f32::MAX]).unwrap(), (0., 0.));
+    }
+
+    #[test]
+    fn log_gain_empty_maps_still_validate_gain_and_directions() {
+        for (len, shape) in [(1, [2, 3]), (8, [6, 1])] {
+            let kernel = FractionalGlKernel::new(len, 1e-30, 6, 48).unwrap();
+            let h = kernel
+                .forward_history_log_gain(&[1.; 6], &shape, 1, f32::MAX, 0.)
+                .unwrap();
+            assert_eq!(h.vjp_parameters(&[1.; 6]).unwrap(), (0., 0.));
+            assert_eq!(h.jvp(&[1.; 6], 1., 1.).unwrap(), vec![0.; 6]);
+            for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 100., -200.] {
+                assert!(kernel
+                    .forward_history_log_gain(&[1.; 6], &shape, 1, 1., bad)
+                    .is_err());
+            }
+            assert!(h.vjp_log_gain(&[1.]).is_err());
+            assert!(h.vjp_parameters(&[f32::NAN; 6]).is_err());
+            assert!(h.jvp(&[1.; 6], 0., f32::INFINITY).is_err());
+        }
+    }
+
+    #[test]
+    fn log_gain_is_owned_causal_and_sample_spacing_invariant() {
+        let mut x = vec![1., 2., 3., 4., 5., 6.];
+        let mut reference = None;
+        for step in [1e-40, 1., 1e38] {
+            let kernel = FractionalGlKernel::new(5, step, 6, 30).unwrap();
+            let h = kernel
+                .forward_history_log_gain(&x, &[2, 3], 1, 0.7, 0.3)
+                .unwrap();
+            let current = (h.output().clone(), h.vjp_parameters(&x).unwrap());
+            if let Some(ref old) = reference {
+                assert_eq!(&current, old);
+            }
+            reference = Some(current);
+            let saved = h.output().clone();
+            let old = x.clone();
+            x[1..].fill(90.);
+            let changed = kernel
+                .forward_history_log_gain(&x, &[2, 3], 1, 0.7, 0.3)
+                .unwrap();
+            assert_eq!(h.output(), &saved);
+            assert_eq!(changed.output()[IxDyn(&[0, 0])], saved[IxDyn(&[0, 0])]);
+            assert_eq!(changed.output()[IxDyn(&[0, 1])], saved[IxDyn(&[0, 1])]);
+            x = old;
+        }
     }
 }
