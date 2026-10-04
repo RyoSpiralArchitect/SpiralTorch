@@ -39,7 +39,7 @@ def compare_tensor_maps(left, right):
         byte_equal = byte_equal and ra == rb
         value_equal = value_equal and torch.equal(a, b)
         close = close and torch.allclose(a, b, rtol=3e-6, atol=3e-7)
-        errors[name] = float((a.detach() - b.detach()).abs().max())
+        errors[name] = float((a.detach().double() - b.detach().double()).abs().max())
     return {"status": "passed" if close else "failed", "allclose": bool(close),
             "byte_equal": bool(byte_equal), "value_equal": bool(value_equal),
             "rtol": 3e-6, "atol": 3e-7, "max_abs_error": errors}

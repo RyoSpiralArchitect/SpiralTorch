@@ -184,6 +184,10 @@ def test_paired_state_comparison_retains_tolerance_failure_and_signed_zero(compl
     assert near["allclose"] and not near["value_equal"]
     far = verifier.compare_tensor_maps({"x": torch.tensor(1.)}, {"x": torch.tensor(1.01)})
     assert far["status"] == "failed" and not far["allclose"]
+    limit = torch.tensor(torch.finfo(torch.float32).max)
+    extreme = verifier.compare_tensor_maps({"x": limit}, {"x": -limit})
+    assert extreme["max_abs_error"]["x"] == 2 * float(limit)
+    json.dumps(extreme, allow_nan=False)
     with pytest.raises(ValueError):
         verifier.compare_tensor_maps({"x": torch.tensor(1.)}, {"x": torch.tensor(float("nan"))})
 
