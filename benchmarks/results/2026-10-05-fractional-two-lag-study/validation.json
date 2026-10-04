@@ -1,0 +1,49 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_study_validation.v1",
+  "status": "completed_and_verified",
+  "study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
+  "training_process_exit_code": 0,
+  "training_source_revision": "92d6d7d5ef36d25413132d192a853e6983041382",
+  "frozen_native_sha256": "5caece088b275f15f83a1bfb8e7216613c9470faf3f01f46ddf4b0f95f05f8f4",
+  "runs": 12,
+  "primary_updates": 6144,
+  "continuation_only_updates": 24,
+  "completed_resume_exit_code": 0,
+  "completed_resume_rescored_endpoints": false,
+  "sealed_files_unchanged_after_completed_resume": true,
+  "sealed_files_verified": 100,
+  "sealed_input_sha256": {
+    "plan.json": "bf418233415131764cc8148920d2c5172fcfc8e4700f4656c5d0738baf51da43",
+    "journal.json": "fe8f28f894be56836919e610f7ff3cd37633f0d6416fa91380ac1ffc30ee67f7",
+    "results.json": "5aa9df87bf7678043967bfbed06b0f6a3ea430da121432dc0750613738c89b72"
+  },
+  "checkpoints_verified": 12,
+  "frozen_client_files_verified": 6,
+  "frozen_package_files_verified": 70,
+  "actual_parameter_and_adam_contents_checked": true,
+  "same_math_lag2_fixed_two_exact": true,
+  "one_initialized_replay_exact_all_three_seeds": true,
+  "repeated_one_initialized_runs_are_not_additional_independent_seeds": true,
+  "analysis_source_revision": "a25aa224c472be1851f17e4a956e8c846039e3ef",
+  "summary_sha256": "5ea2d9c09183c9a1df85fab890fa48c509c99a4c297dd220bb115a6f05adce72",
+  "receipt_only_summary_sha256": "69e516b7e3a1aab9221845e2b82a573fc2fe671ea989774bdf80541b4d757dcc",
+  "summary_hash_seeds": [
+    1,
+    42
+  ],
+  "checkpoint_verifier_sha256": "c7b1c545cf74079b53b4cf4df1f428e7c986f5531ee9aaa44c47c8cdc6a9ac13",
+  "one_replay_verifier_sha256": "d9cf48f9408fa62c6f195c08d69743ba4fe62dc287e10b30e10454e2526e0e93",
+  "original_preflight_sha256": "1bdd267c1ad1dcb0deae57a91a86ce8611b3615cf742ff2e4672c699d7de500a",
+  "review_fix_validation_sha256": "8cfa0f0537937ab239be02066b27049df0273682f4fa58789a4c3315761747e5",
+  "local_log_sha256": {
+    "primary-training.log": "fcca063416a44f1aef571e07712902b5809e25284d3848b20aec92aec1ad41c2",
+    "checkpoint-verification.log": "7758883c3bcaf3985953d78a21e91150baa8c21efb906ad6e89ede95a009580e",
+    "completed-resume.log": "e42791c41edf0448ff96f6a574d1038064b9ab5bd4b8166ff63acb2963a722f2",
+    "one-replay-verification.log": "879b298bd63eb879af83483b51c17b3dd07affdbd3da284a250aaa44998e0949",
+    "incomplete-guard.log": "39632f974f08dde26bd64a5a2e551f834fb79c6404a5c56401f538c0d9650070"
+  },
+  "scope": "Completed exploratory frozen-GPT-2 adapter study and saved-content checks. Not significance, convergence, unique long-memory causation, generation quality, speed or general LLM evidence. Models, corpora, checkpoints, runtime packages and raw logs remain local.",
+  "native_evidence_revision": "3011102debc116e15860f439827225dbe0a718e3",
+  "native_evidence_record": "../2026-10-04-fractional-buffer-transport/verification.json",
+  "native_evidence_record_sha256": "e99be2dcb1ade9bfe26b4fa151a63728bcf8bf84ec73379fa0e3564294433cef"
+}

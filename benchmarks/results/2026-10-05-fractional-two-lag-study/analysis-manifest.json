@@ -1,0 +1,9 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_offline_analysis.v1",
+  "training_source_revision": "92d6d7d5ef36d25413132d192a853e6983041382",
+  "analysis_source_revision": "a25aa224c472be1851f17e4a956e8c846039e3ef",
+  "study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
+  "summary_sha256": "dd1dea6d2f7b5deaeb2a41eb49a51875a952d1c08eeafe51a9715429034d6477",
+  "training_client_manifest_sha256": "c1999da6b89d57fb67025929fb102b608c296af243bf88818368aca50eb749f3",
+  "scope": "Read-only corrected analysis. Primary training and frozen sources are unchanged; not a fresh replicate."
+}
