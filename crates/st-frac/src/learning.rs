@@ -1,5 +1,8 @@
 //! Immutable learning snapshots of the existing causal GL operator.
 
+mod angle;
+pub use angle::FractionalGlAngleChart;
+
 use crate::{
     checked_f32, fracdiff_gl_nd_config, fracdiff_gl_nd_vjp_config, fracdiff_gl_nd_vjp_with_coeffs,
     fracdiff_gl_nd_with_coeffs, gl_coeffs_and_scaled_alpha_derivative, validate_alpha,
@@ -17,6 +20,8 @@ pub enum FractionalLearningError {
     NormalizationGain,
     #[error("fractional history log-gain must be finite with positive finite f32 exp(log_gain)")]
     LogGain,
+    #[error("fractional history angle must satisfy -atan(1/2) < angle < pi/2")]
+    HistoryAngle,
     #[error(transparent)]
     Operator(#[from] FracErr),
 }

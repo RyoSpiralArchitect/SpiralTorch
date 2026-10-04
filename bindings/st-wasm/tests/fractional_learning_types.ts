@@ -1,5 +1,11 @@
 /// <reference path="../types/spiraltorch-wasm.d.ts" />
-import { FractionalGlKernel, FractionalGlLearningBatch, FractionalGlGradients } from 'spiraltorch-wasm';
+import { FractionalGlAngleChart, FractionalGlKernel, FractionalGlLearningBatch, FractionalGlGradients } from 'spiraltorch-wasm';
+const chart = new FractionalGlAngleChart(.3);
+const chartDerivative: number = chart.alpha_derivative;
+const chartUpstream: number = chart.vjp(.2);
+const chartTangent: number = chart.jvp(.2);
+void chartDerivative; void chartUpstream; void chartTangent;
+chart.free();
 const kernel = new FractionalGlKernel(8, 1, 128, 1024);
 const nativeGain: number = FractionalGlKernel.gain_from_log_gain(.3);
 void nativeGain;

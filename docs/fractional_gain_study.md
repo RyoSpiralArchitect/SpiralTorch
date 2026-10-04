@@ -12,6 +12,10 @@ endpoint sets in all three seeds, while GL full beats GL short. This is not
 evidence of a distinctive GL quality advantage; shape-chart differences
 remain an explicit follow-up question.
 
+[Angular GL coordinates](fractional_angle_chart.md) now provide the native
+map and first-order differentials for that follow-up. They do not change
+this frozen study or retroactively remove its optimizer-chart caveat.
+
 ## Matched Arms
 
 | Arm | Strictly Past Filter | Trainable Parameters |

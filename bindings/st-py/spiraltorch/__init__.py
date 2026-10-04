@@ -9553,7 +9553,8 @@ def __getattr__(name: str) -> _Any:
     if name in {"FractionalMemoryAdapter", "fractional_gl_autograd",
                 "FractionalHistoryAdapter", "fractional_gl_history_autograd",
                 "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd",
-                "FractionalGainHistoryAdapter", "fractional_gl_history_log_gain_autograd"}:
+                "FractionalGainHistoryAdapter", "fractional_gl_history_log_gain_autograd",
+                "FractionalAngleGainHistoryAdapter", "fractional_gl_angle_autograd"}:
         module = import_module("spiraltorch.fractional_autograd")
         value = getattr(module, name)
         globals()[name] = value
@@ -9642,6 +9643,7 @@ _EXPORTED.update(
      "FractionalHistoryAdapter", "fractional_gl_history_autograd",
      "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd",
      "FractionalGainHistoryAdapter", "fractional_gl_history_log_gain_autograd",
+     "FractionalAngleGainHistoryAdapter", "fractional_gl_angle_autograd",
      "ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter",
      "EllipticCausalResidualAdapter", "elliptic_causal_autograd",
      "EllipticGatedCausalResidualAdapter", "elliptic_gated_causal_autograd",

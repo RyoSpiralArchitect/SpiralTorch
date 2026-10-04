@@ -2,13 +2,47 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
 use st_frac::learning::{
-    FractionalGlGainLearningBatch, FractionalGlKernel, FractionalGlLearningBatch,
+    FractionalGlAngleChart, FractionalGlGainLearningBatch, FractionalGlKernel,
+    FractionalGlLearningBatch,
 };
 
 use crate::f32_buffer::{read_f32, write_f32};
 
 fn value_error(error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(error.to_string())
+}
+
+#[pyclass(name = "FractionalGlAngleChart", module = "spiraltorch", frozen)]
+pub struct PyFractionalGlAngleChart {
+    inner: FractionalGlAngleChart,
+}
+
+#[pymethods]
+impl PyFractionalGlAngleChart {
+    #[new]
+    fn new(angle: f32) -> PyResult<Self> {
+        FractionalGlAngleChart::new(angle)
+            .map(|inner| Self { inner })
+            .map_err(value_error)
+    }
+    #[getter]
+    fn angle(&self) -> f32 {
+        self.inner.angle()
+    }
+    #[getter]
+    fn alpha(&self) -> f32 {
+        self.inner.alpha()
+    }
+    #[getter]
+    fn alpha_derivative(&self) -> f64 {
+        self.inner.alpha_derivative()
+    }
+    fn vjp(&self, alpha_upstream: f32) -> PyResult<f32> {
+        self.inner.vjp(alpha_upstream).map_err(value_error)
+    }
+    fn jvp(&self, angle_tangent: f32) -> PyResult<f32> {
+        self.inner.jvp(angle_tangent).map_err(value_error)
+    }
 }
 
 #[pyclass(name = "FractionalGlKernel", module = "spiraltorch", frozen)]
@@ -382,6 +416,7 @@ impl PyFractionalGlGainLearningBatch {
 }
 
 pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    parent.add_class::<PyFractionalGlAngleChart>()?;
     parent.add_class::<PyFractionalGlKernel>()?;
     parent.add_class::<PyFractionalGlLearningBatch>()?;
     parent.add_class::<PyFractionalGlGainLearningBatch>()

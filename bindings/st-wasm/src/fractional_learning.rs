@@ -1,9 +1,9 @@
 use crate::utils::{js_error, js_u32};
 use js_sys::Number;
 use st_frac::learning::{
-    FractionalGlGainGradients as CoreGainGradients, FractionalGlGainLearningBatch as CoreGainBatch,
-    FractionalGlGradients as CoreGradients, FractionalGlKernel as CoreKernel,
-    FractionalGlLearningBatch as CoreBatch,
+    FractionalGlAngleChart as CoreAngleChart, FractionalGlGainGradients as CoreGainGradients,
+    FractionalGlGainLearningBatch as CoreGainBatch, FractionalGlGradients as CoreGradients,
+    FractionalGlKernel as CoreKernel, FractionalGlLearningBatch as CoreBatch,
 };
 use wasm_bindgen::prelude::*;
 
@@ -37,6 +37,43 @@ fn number(value: &Number, label: &str) -> Result<f32, JsValue> {
     raw.as_f64()
         .map(|v| v as f32)
         .ok_or_else(|| js_error(format!("{label} must be a number")))
+}
+
+#[wasm_bindgen]
+pub struct FractionalGlAngleChart {
+    inner: CoreAngleChart,
+}
+
+#[wasm_bindgen]
+impl FractionalGlAngleChart {
+    #[wasm_bindgen(constructor)]
+    pub fn new(angle: Number) -> Result<Self, JsValue> {
+        CoreAngleChart::new(number(&angle, "angle")?)
+            .map(|inner| Self { inner })
+            .map_err(js_error)
+    }
+    #[wasm_bindgen(getter)]
+    pub fn angle(&self) -> f32 {
+        self.inner.angle()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn alpha(&self) -> f32 {
+        self.inner.alpha()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn alpha_derivative(&self) -> f64 {
+        self.inner.alpha_derivative()
+    }
+    pub fn vjp(&self, alpha_upstream: Number) -> Result<f32, JsValue> {
+        self.inner
+            .vjp(number(&alpha_upstream, "alpha_upstream")?)
+            .map_err(js_error)
+    }
+    pub fn jvp(&self, angle_tangent: Number) -> Result<f32, JsValue> {
+        self.inner
+            .jvp(number(&angle_tangent, "angle_tangent")?)
+            .map_err(js_error)
+    }
 }
 
 #[wasm_bindgen]

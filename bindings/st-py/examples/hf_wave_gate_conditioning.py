@@ -157,6 +157,21 @@ def gain_snapshot(adapter):
     return {"log_gain": log_gain, "gain": gain, "effective_history_gate_l2": scale}
 
 
+def angle_snapshot(adapter):
+    if not hasattr(adapter, "history_angle"):
+        return {}
+    coordinate = adapter.history_angle
+    if coordinate.ndim != 0 or coordinate.dtype != torch.float32:
+        raise ValueError("angle telemetry requires scalar float32")
+    result = {"history_angle": float(coordinate.detach())}
+    alpha = getattr(adapter, "alpha", None)
+    if alpha is not None:
+        if not math.isfinite(alpha) or alpha <= 0:
+            raise ValueError("angle chart must return a positive finite order")
+        result["alpha"] = float(alpha)
+    return result
+
+
 def update(model, adapter, optimizer, batch):
     optimizer.zero_grad()
     loss = model(batch, labels=batch).loss
@@ -168,6 +183,7 @@ def update(model, adapter, optimizer, batch):
         "conditioning": getattr(adapter, "last_conditioning", None),
     }
     record.update({f"{key}_before_update": value for key, value in gain_snapshot(adapter).items()})
+    record.update({f"{key}_before_update": value for key, value in angle_snapshot(adapter).items()})
     for name, parameter in adapter.named_parameters():
         if name == "log_gain":
             record["log_gain_trainable"] = parameter.requires_grad
@@ -194,8 +210,7 @@ def update(model, adapter, optimizer, batch):
     if not all(torch.isfinite(p).all() for p in adapter.parameters()):
         raise ValueError("nonfinite adapter update")
     record.update({f"{key}_after_update": value for key, value in gain_snapshot(adapter).items()})
-    if hasattr(adapter, "history_angle"):
-        record["history_angle_after_update"] = float(adapter.history_angle.detach())
+    record.update({f"{key}_after_update": value for key, value in angle_snapshot(adapter).items()})
     if hasattr(adapter, "raw_mix"):
         record["raw_mix_after_update"] = float(adapter.raw_mix.detach())
     if hasattr(adapter, "log_alpha"):
