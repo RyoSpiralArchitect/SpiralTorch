@@ -40,6 +40,9 @@ def test_public_summary_rebuilds_without_model_libraries(publication, source_kin
     spec = importlib.util.spec_from_file_location("published_gain_summary", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    def no_platform_atan(_):
+        raise AssertionError("platform atan must not enter serialized angular receipts")
+    monkeypatch.setattr(module.math, "atan", no_platform_atan)
     inputs = {key: (gzip.decompress((publication / f"{key}.json.gz").read_bytes())
                     if key != "journal" else (publication / "journal.json").read_bytes())
               for key in ("plan", "results", "journal")}
@@ -82,7 +85,8 @@ def test_complete_publication_has_bound_source_outputs_and_all_three_contrasts(p
     assert verification["training_source_revision"] == plan["source_revision"] == validation["training_source_revision"]
     assert verification["study_id"] == summary["study_id"] == journal["study_id"] == plan["study_id"] == validation["study_id"]
     assert verification["runtime_build_source_revision"] == read(publication, "frozen-runtime-sha256.json")["source_revision"]
-    for name, filename in (("client", "client-sha256.json"), ("runtime", "frozen-runtime-sha256.json")):
+    client_manifest = "verification-client-sha256.json" if angular else "client-sha256.json"
+    for name, filename in (("client", client_manifest), ("runtime", "frozen-runtime-sha256.json")):
         assert verification["manifest_sha256"][name] == sha(publication / filename)
     assert len(summary["gain_trajectories"]) == 9
     assert len(summary["order_trajectories"]) == (0 if angular else 6)
@@ -118,6 +122,32 @@ def test_complete_publication_has_bound_source_outputs_and_all_three_contrasts(p
                             ("adam", "paired_short_adam_checks")):
             statuses = [pair[field]["status"] for pair in verification["paired_short_states"].values()]
             assert validation[name] == {status: statuses.count(status) for status in ("passed", "failed")}
+
+
+def test_portable_angular_summary_preserves_originals_and_changes_only_derived_lower_distances():
+    directory = ROOT / "benchmarks/results/2026-10-05-fractional-angle-study"
+    original = read(directory, "original-summary.json")
+    corrected = read(directory, "summary.json")
+    previous = read(directory, "original-checkpoint-verification.json")
+    current = read(directory, "checkpoint-verification.json")
+    assert previous["summary_artifact_sha256"] == sha(directory / "original-summary.json")
+    assert previous["summary_source_sha256"] == sha(directory / "original-summarize_wave_gate_long_horizon.py")
+    assert previous["manifest_sha256"]["client"] == sha(directory / "client-sha256.json")
+    assert previous["artifacts"] == current["artifacts"] == original["input_sha256"] == corrected["input_sha256"]
+    assert previous["runs"] == current["runs"]
+    assert previous["paired_short_states"] == current["paired_short_states"]
+    old_client = read(directory, "client-sha256.json")
+    new_client = read(directory, "verification-client-sha256.json")
+    assert set(old_client) == set(new_client)
+    assert {name for name in old_client if old_client[name] != new_client[name]} == {"summarize_wave_gate_long_horizon.py"}
+    assert new_client["summarize_wave_gate_long_horizon.py"] == current["summary_source_sha256"]
+    assert old_client["summarize_wave_gate_long_horizon.py"] == previous["summary_source_sha256"]
+    key = "min_angle_distance_to_lower_boundary"
+    assert len(original["angular_order_trajectories"]) == len(corrected["angular_order_trajectories"]) == 9
+    for run, row in original["angular_order_trajectories"].items():
+        old, new = row.pop(key), corrected["angular_order_trajectories"][run].pop(key)
+        assert abs(old - new) <= math.ulp(0.4636476090008061)
+    assert original == corrected
 
 
 def test_angular_control_reproduction_matches_every_prior_endpoint_block():

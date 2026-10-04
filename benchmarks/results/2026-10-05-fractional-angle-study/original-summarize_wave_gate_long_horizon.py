@@ -11,10 +11,6 @@ import statistics
 from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
 from pathlib import Path
 
-# Nearest binary64 representations of -atan(1/2) and pi/2, not host libm.
-ANGLE_LOWER_BOUND = -float.fromhex("0x1.dac670561bb4fp-2")
-ANGLE_UPPER_BOUND = float.fromhex("0x1.921fb54442d18p+0")
-
 
 def require(condition, message):
     if not condition:
@@ -456,7 +452,7 @@ def angular_order_trajectory(row):
               for phase in ("before", "after") for r in records]
     require(bool(records) and all(type(v) in (int, float) and math.isfinite(v)
             for v in angles + orders + [row.get("final_alpha")]), "invalid angular order receipt")
-    require(all(ANGLE_LOWER_BOUND < v < ANGLE_UPPER_BOUND for v in angles), "recorded angle left domain")
+    require(all(-math.atan(.5) < v < math.pi / 2 for v in angles), "recorded angle left domain")
     require(all(0 < alpha <= float.fromhex("0x1.fffffep127")
                 and math.isclose(alpha, 1 + 2*math.tan(angle), rel_tol=2e-6, abs_tol=2**-149)
                 for angle, alpha in zip(angles, orders)), "angle and native order receipts differ")
@@ -466,8 +462,8 @@ def angular_order_trajectory(row):
                     for a, b in zip(records, records[1:])), "angular order continuity differs")
     return {"initial_alpha": orders[0], "final_alpha": row["final_alpha"],
             "min_alpha": min(orders), "max_alpha": max(orders),
-            "min_angle_distance_to_lower_boundary": min(angles) - ANGLE_LOWER_BOUND,
-            "min_angle_distance_to_upper_boundary": ANGLE_UPPER_BOUND - max(angles),
+            "min_angle_distance_to_lower_boundary": min(angles) + math.atan(.5),
+            "min_angle_distance_to_upper_boundary": math.pi / 2 - max(angles),
             "chart_domain_observations_valid": True}
 
 
