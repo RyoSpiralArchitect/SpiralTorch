@@ -176,9 +176,9 @@ fn empty_or_unobservable_windows_are_checked_zero_maps() {
 #[test]
 fn window_and_declared_kernel_budgets_are_not_silently_relaxed() {
     let kernel = FractionalGlKernel::new(8, 1.0, 8, 32).unwrap();
-    for lags in [0..3, 4..3, 1..9, usize::MAX..usize::MAX] {
+    for (start, end) in [(0, 3), (4, 3), (1, 9), (usize::MAX, usize::MAX)] {
         assert!(matches!(
-            kernel.validate_history_window(lags),
+            kernel.validate_history_window(start..end),
             Err(FractionalLearningError::HistoryWindow)
         ));
     }

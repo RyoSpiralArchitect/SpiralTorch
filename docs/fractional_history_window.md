@@ -62,6 +62,15 @@ adapter = st.FractionalAngleGainHistoryAdapter(
     768, initial_angle=-0.2, kernel_len=32, lag_window=(3, 32))
 ```
 
+With zero feature gates, a tail-only window at integer order can be dormant:
+if every retained tap is zero, gate gradients vanish and the nonzero order
+differential cannot pass through the zero gate. The angular default (order
+one) has this property for `(3,K)`. The explicit noninteger initialization
+above avoids it while retaining identity output. No automatic jitter or
+hidden change of initialization is applied. To compare removal of long
+history at the frozen study's order-two initialization, retain `(1,3)` with
+full K normalization rather than training an initially zero tail alone.
+
 Windowed state records the exact lag bounds and rejects silent loading into
 a full-history or differently windowed adapter. Default `lag_window=None`
 keeps the old state shape and computation. Restore using the same window;

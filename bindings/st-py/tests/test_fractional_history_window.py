@@ -111,6 +111,22 @@ def test_window_recipe_cannot_silently_replace_full_or_other_window(kind):
     assert set(kind(3).get_extra_state()) == {"schema", "features", "strength", "kernel"}
 
 
+def test_tail_learning_needs_active_initial_support_when_feature_gates_are_zero():
+    x = torch.arange(1, 13, dtype=torch.float32).reshape(1, 6, 2)
+    dormant = st.FractionalAngleGainHistoryAdapter(2, kernel_len=8, lag_window=(3, 8))
+    history = dormant._history(x, dormant._alpha_tensor())
+    assert torch.count_nonzero(history) == 0
+    assert torch.autograd.grad(history.sum(), dormant.history_angle)[0] != 0
+    dormant(x).sum().backward()
+    # A nonzero operator differential alone cannot cross a zero feature gate.
+    assert torch.count_nonzero(dormant.gate.grad) == 0
+    assert dormant.history_angle.grad == dormant.log_gain.grad == 0
+    active = st.FractionalAngleGainHistoryAdapter(2, initial_angle=-.2, kernel_len=8, lag_window=(3, 8))
+    assert torch.equal(active(x), x)
+    active(x).sum().backward()
+    assert torch.count_nonzero(active.gate.grad) == 2
+
+
 @pytest.mark.parametrize("kind", [st.FractionalGainHistoryAdapter, st.FractionalAngleGainHistoryAdapter])
 @pytest.mark.parametrize("window", [(1, 3), (3, 8)])
 def test_window_learns_in_hf_and_resumes_exactly_without_training_the_base(kind, window):
