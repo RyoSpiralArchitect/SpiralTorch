@@ -1,12 +1,15 @@
 """Replay public numeric evidence without loading private weights or importing Torch."""
 
 import builtins
+import copy
 import gzip
 import hashlib
 import importlib.util
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 RESULT = ROOT / "benchmarks/results/2026-10-05-fractional-two-lag-study"
@@ -18,6 +21,19 @@ def read(name):
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def assert_analysis_hashes(analysis, verification):
+    for field, filename in (
+        ("summary_source_sha256", "summarize_wave_gate_long_horizon.py"),
+        ("summary_artifact_sha256", "summary.json"),
+        ("receipt_summary_artifact_sha256", "summary-receipts.json"),
+    ):
+        assert analysis[field] == verification[field] == sha(RESULT / filename)
+    assert verification["verifier_sha256"] == sha(RESULT / "verify_completed.py")
+    assert verification["analysis_manifest_sha256"] == sha(RESULT / "analysis-manifest.json")
+    assert verification["published_summary_rebuilt_from_saved_states_byte_identical"] is True
+    assert verification["published_receipt_summary_rebuilt_byte_identical"] is True
 
 
 def test_public_receipt_summary_is_reproducible_but_not_private_state_verification(monkeypatch, tmp_path):
@@ -100,7 +116,23 @@ def test_publication_binds_every_numeric_file_and_completion_claim():
     analysis = read("analysis-manifest.json")
     assert analysis["training_source_revision"] == plan["source_revision"] == validation["training_source_revision"]
     assert analysis["analysis_source_revision"] == verification["analysis_source_revision"]
-    assert analysis["summary_sha256"] == verification["summary_sha256"]
+    assert_analysis_hashes(analysis, verification)
+    assert validation["summary_artifact_sha256"] == sha(RESULT / "summary.json")
+    assert validation["summary_source_sha256"] == sha(RESULT / "summarize_wave_gate_long_horizon.py")
+    assert validation["checkpoint_verifier_sha256"] == verification["verifier_sha256"]
+    assert validation["checkpoint_verification_sha256"] == sha(RESULT / "checkpoint-verification.json")
+
+
+@pytest.mark.parametrize("field,substitute", [
+    ("summary_artifact_sha256", "summary_source_sha256"),
+    ("summary_source_sha256", "summary_artifact_sha256"),
+    ("receipt_summary_artifact_sha256", "summary_artifact_sha256"),
+])
+def test_matching_claims_do_not_pass_when_the_artifact_bytes_differ(field, substitute):
+    analysis, verification = copy.deepcopy(read("analysis-manifest.json")), copy.deepcopy(read("checkpoint-verification.json"))
+    analysis[field] = verification[field] = analysis[substitute]
+    with pytest.raises(AssertionError):
+        assert_analysis_hashes(analysis, verification)
 
 
 def test_repeated_one_initialization_is_labeled_as_replay_not_extra_seeds():

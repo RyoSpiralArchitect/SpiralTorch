@@ -1,5 +1,5 @@
 {
-  "schema": "spiraltorch.fractional_two_lag_study_validation.v1",
+  "schema": "spiraltorch.fractional_two_lag_study_validation.v2",
   "status": "completed_and_verified",
   "study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
   "training_process_exit_code": 0,
@@ -25,13 +25,11 @@
   "one_initialized_replay_exact_all_three_seeds": true,
   "repeated_one_initialized_runs_are_not_additional_independent_seeds": true,
   "analysis_source_revision": "a25aa224c472be1851f17e4a956e8c846039e3ef",
-  "summary_sha256": "5ea2d9c09183c9a1df85fab890fa48c509c99a4c297dd220bb115a6f05adce72",
-  "receipt_only_summary_sha256": "69e516b7e3a1aab9221845e2b82a573fc2fe671ea989774bdf80541b4d757dcc",
   "summary_hash_seeds": [
     1,
     42
   ],
-  "checkpoint_verifier_sha256": "c7b1c545cf74079b53b4cf4df1f428e7c986f5531ee9aaa44c47c8cdc6a9ac13",
+  "checkpoint_verifier_sha256": "fc7f911dd41142888ed91d26e3217de84566a3e6e402367b6126ce0a34f43b9a",
   "one_replay_verifier_sha256": "d9cf48f9408fa62c6f195c08d69743ba4fe62dc287e10b30e10454e2526e0e93",
   "original_preflight_sha256": "1bdd267c1ad1dcb0deae57a91a86ce8611b3615cf742ff2e4672c699d7de500a",
   "review_fix_validation_sha256": "8cfa0f0537937ab239be02066b27049df0273682f4fa58789a4c3315761747e5",
@@ -45,5 +43,25 @@
   "scope": "Completed exploratory frozen-GPT-2 adapter study and saved-content checks. Not significance, convergence, unique long-memory causation, generation quality, speed or general LLM evidence. Models, corpora, checkpoints, runtime packages and raw logs remain local.",
   "native_evidence_revision": "3011102debc116e15860f439827225dbe0a718e3",
   "native_evidence_record": "../2026-10-04-fractional-buffer-transport/verification.json",
-  "native_evidence_record_sha256": "e99be2dcb1ade9bfe26b4fa151a63728bcf8bf84ec73379fa0e3564294433cef"
+  "native_evidence_record_sha256": "e99be2dcb1ade9bfe26b4fa151a63728bcf8bf84ec73379fa0e3564294433cef",
+  "summary_source_sha256": "dd1dea6d2f7b5deaeb2a41eb49a51875a952d1c08eeafe51a9715429034d6477",
+  "summary_artifact_sha256": "5ea2d9c09183c9a1df85fab890fa48c509c99a4c297dd220bb115a6f05adce72",
+  "receipt_summary_artifact_sha256": "69e516b7e3a1aab9221845e2b82a573fc2fe671ea989774bdf80541b4d757dcc",
+  "checkpoint_verification_sha256": "ec1eadd85df5d718c7a9d59b5683d0d5251e58af765078d193964af3777f09b8",
+  "analysis_manifest_sha256": "2ab9d0d4bdd20454ff45e62ca2cc1aac1a8ad77594f2ae470ff04f8adb7f8cdf",
+  "published_summaries_rebuilt_byte_identical": true,
+  "artifact_binding_correction": {
+    "supersedes": {
+      "publication_revision": "3f08cb4a545f906b7b111cba857c3ff0a32df4e2",
+      "analysis_manifest_sha256": "3c940b6e8cb72015803179a13ddd71c1188ba118e39b1ce50f75fc8d0fb9a74b",
+      "checkpoint_verification_sha256": "28f87136cb84fe301411232a5497771a49f0bcc3d3db7f6bfc6807ce7af38bba",
+      "validation_sha256": "1a6181379b76ba2e1770408076fd7947163aba6b9b23254c3130c7d8134ba5e8"
+    },
+    "primary_inputs_unchanged": true,
+    "summary_outputs_unchanged": true,
+    "negative_test": "modified output with matching manifest hash rejected by saved-state reconstruction",
+    "negative_test_exit_code": 1,
+    "negative_test_success_artifact_absent": true,
+    "negative_test_log_sha256": "4edf5a034c554d59062aba1555bb674af938dad59ffa19315797291278d5dec0"
+  }
 }

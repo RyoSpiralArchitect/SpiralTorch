@@ -1,9 +1,17 @@
 {
-  "schema": "spiraltorch.fractional_two_lag_offline_analysis.v1",
+  "schema": "spiraltorch.fractional_two_lag_offline_analysis.v2",
   "training_source_revision": "92d6d7d5ef36d25413132d192a853e6983041382",
   "analysis_source_revision": "a25aa224c472be1851f17e4a956e8c846039e3ef",
   "study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
-  "summary_sha256": "dd1dea6d2f7b5deaeb2a41eb49a51875a952d1c08eeafe51a9715429034d6477",
+  "summary_source_sha256": "dd1dea6d2f7b5deaeb2a41eb49a51875a952d1c08eeafe51a9715429034d6477",
+  "summary_artifact_sha256": "5ea2d9c09183c9a1df85fab890fa48c509c99a4c297dd220bb115a6f05adce72",
+  "receipt_summary_artifact_sha256": "69e516b7e3a1aab9221845e2b82a573fc2fe671ea989774bdf80541b4d757dcc",
   "training_client_manifest_sha256": "c1999da6b89d57fb67025929fb102b608c296af243bf88818368aca50eb749f3",
-  "scope": "Read-only corrected analysis. Primary training and frozen sources are unchanged; not a fresh replicate."
+  "supersedes": {
+    "publication_revision": "3f08cb4a545f906b7b111cba857c3ff0a32df4e2",
+    "analysis_manifest_sha256": "3c940b6e8cb72015803179a13ddd71c1188ba118e39b1ce50f75fc8d0fb9a74b",
+    "checkpoint_verification_sha256": "28f87136cb84fe301411232a5497771a49f0bcc3d3db7f6bfc6807ce7af38bba",
+    "validation_sha256": "1a6181379b76ba2e1770408076fd7947163aba6b9b23254c3130c7d8134ba5e8"
+  },
+  "scope": "Read-only verification correction separating source and output identities. Both published summaries must byte-match independent reconstruction. No training, endpoint rescoring or frozen-input changes."
 }

@@ -97,6 +97,18 @@ and intentionally labels full same-math parity `unverified`: it has not read
 the private checkpoint tensors. Public verification receipts and hashes do
 not substitute for third-party access to those tensors.
 
+The artifact-binding review correction separates `summary_source_sha256`
+(the frozen postprocessor) from `summary_artifact_sha256` (the actual full-state
+JSON) and `receipt_summary_artifact_sha256`. The verifier independently rebuilds
+both outputs and requires byte equality, rather than trusting matching claimed
+hashes. A changed CE with a correspondingly updated manifest hash is rejected.
+Both frozen Python sources are included for inspection. The superseded derived
+records remain available in commit `3f08cb4a`; their hashes are recorded in
+`supersedes`. Training inputs, checkpoints and both summary outputs are unchanged.
+The correction reran 456 geometry/study/publication tests and 34 benchmark
+tests, with no skips. Executing the published verifier reproduces the corrected
+receipt byte-for-byte; optimized Python is also checked to fail closed.
+
 ## Reproduce
 
 Rebuild the receipt-only report without Torch, models, scoring or network:
@@ -111,6 +123,12 @@ cmp "$NEW_RECEIPT_SUMMARY_JSON" "$RESULT/summary-receipts.json"
 
 To reproduce local full-state verification, add `--checkpoint-dir` pointing
 to the original hash-matching study checkpoints and compare with `summary.json`.
+The included `verify_completed.py` additionally restores every adapter/Adam
+state and binds the published output bytes; with the original frozen client
+and package on `PYTHONPATH`, supply `--study`, `--manifest` (the frozen-runtime
+manifest), `--analysis-manifest` and a fresh `--output`. The local launch/client
+manifest records must remain beside the frozen-runtime manifest. Assertions
+must be enabled; the verifier refuses optimized Python execution.
 For fresh training, follow the linked protocol with existing hash-matching
 assets and an isolated frozen runtime. Do not resume with modified clients.
 CI checks numeric reconstruction, completion receipts and publication hashes;
