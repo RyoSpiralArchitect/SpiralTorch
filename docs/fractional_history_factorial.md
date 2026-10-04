@@ -115,3 +115,14 @@ prove a long-memory quality benefit.
 Publish complete numerical outcomes, verification records, hashes and
 reproduction instructions. Keep weights, corpus text, runtime packages and
 raw logs local. Passing preflight or a running job is not a completed study.
+
+## Completed Exploratory Run
+
+[The first completed run](../benchmarks/results/2026-10-05-fractional-history-factorial/README.md)
+publishes all 12 endpoints and every predeclared contrast. Longer available
+history improves CE in both raw and fixed-energy variants on both endpoint
+sets, but the benefit is much smaller at fixed energy. Normalization helps
+the short arm and hurts the full arm; raw full remains best in this budget.
+The three raw-full runs exactly replay the previous learned-from-two study,
+including saved parameters and named Adam states, not new independent seeds.
+Do not infer unique long-memory benefit, general superiority or convergence.

@@ -1,0 +1,31 @@
+{
+  "schema": "spiraltorch.fractional_history_factorial_preflight_validation.v1",
+  "status": "passed",
+  "preflight_sha256": "b1cc258f3523f705ef2e167168269af82ff094842d3e9601b6d4bca58d54c966",
+  "client_sha256": {
+    "hf_fractional_history_factorial.py": "536685a1592f1e1f4af58ff8406de07cb6c9ad561c0ac9cee2c0272aa993eeab",
+    "hf_wave_gate_long_horizon.py": "565e0436ade3a28214671700a8a31a69ae8b10c8cea1bbfba6cd0b213af3e122",
+    "hf_wave_gate_conditioning.py": "2a07de62a5eb165325d4b79e90268686fd72a66250ce3dac2f7f787212f765b2",
+    "hf_fractional_pride_history_factorial.json": "819975a0c9bc73652f0587941751897236a67ef7f34ded6d2b77e25b8ede0b96",
+    "summarize_wave_gate_long_horizon.py": "25af45fd5a45830332e3792f3f805ba0d9e59b1ae54db15506f11d8d01527e67"
+  },
+  "private_runtime_manifest_sha256": "74eaa67d2fc61d707b92528531e759ffc9f9dd64b9d361490dbab859cd9a5cff",
+  "native_sha256": "3b5d230bae85eafa0e0a156931197bdb45a50334c6045fcc35870ff50f1ccb9a",
+  "native_evidence_revision": "9deb9b247ef4e4f18c70e57a5b2d95a388b3e557",
+  "model_files": 7,
+  "tests": {
+    "factorial": 29,
+    "geometry_regressions": 533,
+    "benchmark_correctness": 34,
+    "skipped": 0
+  },
+  "pretrained": {
+    "auxiliary_updates": 12,
+    "initial_filter_and_first_update_bitwise_equal": true,
+    "historical_raw_full_first_three_receipts_equal": true,
+    "frozen_base_unchanged": true,
+    "heldout_losses_computed": false
+  },
+  "primary_study": "not_yet_launched",
+  "scope": "Preflight only, not primary outcomes or performance"
+}
