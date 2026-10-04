@@ -148,7 +148,8 @@ def equal_tree(left, right):
     return left == right
 
 
-def test_tiny_hf_learns_both_gates_and_order_with_exact_adam_resume():
+@pytest.mark.parametrize("normalized", [False, True])
+def test_tiny_hf_learns_both_gates_and_order_with_exact_adam_resume(normalized):
     transformers = pytest.importorskip("transformers")
     torch.manual_seed(37)
     torch.set_num_threads(2)
@@ -161,7 +162,9 @@ def test_tiny_hf_learns_both_gates_and_order_with_exact_adam_resume():
     with torch.no_grad():
         original_logits = model(tokens).logits.clone()
     parent, original = model.transformer.h[0], model.transformer.h[0].mlp
-    adapter = st.FractionalHistoryAdapter(12, kernel_len=5, step=.8)
+    adapter_type = st.FractionalL2HistoryAdapter if normalized else st.FractionalHistoryAdapter
+    options = {"gain": 1.5} if normalized else {}
+    adapter = adapter_type(12, kernel_len=5, step=.8, **options)
     initial_alpha = adapter.log_alpha.detach().clone()
     parent.mlp = torch.nn.Sequential(original, adapter)
     with torch.no_grad():
@@ -184,7 +187,7 @@ def test_tiny_hf_learns_both_gates_and_order_with_exact_adam_resume():
     assert not torch.equal(adapter.log_alpha.detach(), initial_alpha)
     parameters, moments = copy.deepcopy(adapter.state_dict()), copy.deepcopy(optimizer.state_dict())
     update(optimizer)
-    restored = st.FractionalHistoryAdapter(12, kernel_len=2)
+    restored = adapter_type(12, kernel_len=2)
     restored.load_state_dict(parameters)
     resumed = torch.optim.Adam(restored.parameters(), lr=.02)
     resumed.load_state_dict(moments)

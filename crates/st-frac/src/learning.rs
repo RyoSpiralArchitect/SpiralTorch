@@ -13,6 +13,8 @@ pub enum FractionalLearningError {
     Shape,
     #[error("fractional learning value/product budget exceeded or invalid")]
     Budget,
+    #[error("fractional history L2 gain must be finite and positive")]
+    NormalizationGain,
     #[error(transparent)]
     Operator(#[from] FracErr),
 }
@@ -37,6 +39,8 @@ pub struct FractionalGlLearningBatch {
     alpha_derivative: ArrayD<f32>,
     // Some(empty) is the zero map: no coefficient or step-scale evaluation is needed.
     history_coefficients: Option<Vec<f32>>,
+    // Normalized history cancels the positive h^-alpha multiplier analytically.
+    input_scale: Option<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -105,14 +109,53 @@ impl FractionalGlKernel {
         self.forward_part(input, shape, axis, alpha, true)
     }
 
-    fn forward_part(
+    /// Strictly-past GL with coefficient L2 norm fixed to `gain`.
+    ///
+    /// For c = (0, c_1(alpha), ..., c_{K-1}(alpha)), use gain*c/||c||_2.
+    /// The denominator covers the declared kernel, not just taps available at a
+    /// prefix boundary. This fixes filter energy, not variance on correlated data.
+    /// Positive sample-spacing scale cancels, including its alpha differential.
+    /// After factoring out -alpha, the coefficient polynomial and its derivative
+    /// must fit the f32 range. Recurrences and normalization accumulate in f64;
+    /// this bounded operator does not clamp orders or normalize gradients.
+    pub fn forward_history_l2(
         &self,
         input: &[f32],
         shape: &[usize],
         axis: usize,
         alpha: f32,
-        history_only: bool,
+        gain: f32,
     ) -> Result<FractionalGlLearningBatch> {
+        self.validate_shape_budget(input, shape, axis)?;
+        validate_alpha(alpha)?;
+        validate_slice("fractional input", input)?;
+        if !gain.is_finite() || gain <= 0.0 {
+            return Err(FractionalLearningError::NormalizationGain);
+        }
+        let config =
+            FracdiffGlConfig::new(alpha, axis, self.kernel_len, Pad::Zero).with_step(self.step);
+        if self.kernel_len == 1 || shape[axis] == 1 {
+            return Ok(FractionalGlLearningBatch {
+                config,
+                output: ArrayD::zeros(IxDyn(shape)),
+                alpha_derivative: ArrayD::zeros(IxDyn(shape)),
+                history_coefficients: Some(Vec::new()),
+                input_scale: Some(1.0),
+            });
+        }
+        let (coefficients, derivatives) = history_l2_coefficients(alpha, self.kernel_len, gain)?;
+        let (output, alpha_derivative) =
+            paired_zero_forward(input, shape, axis, &coefficients, &derivatives, 1.0)?;
+        Ok(FractionalGlLearningBatch {
+            config,
+            output,
+            alpha_derivative,
+            history_coefficients: Some(coefficients),
+            input_scale: Some(1.0),
+        })
+    }
+
+    fn validate_shape_budget(&self, input: &[f32], shape: &[usize], axis: usize) -> Result<()> {
         if shape.is_empty()
             || shape.len() > 16
             || shape.contains(&0)
@@ -129,6 +172,18 @@ impl FractionalGlKernel {
         {
             return Err(FractionalLearningError::Budget);
         }
+        Ok(())
+    }
+
+    fn forward_part(
+        &self,
+        input: &[f32],
+        shape: &[usize],
+        axis: usize,
+        alpha: f32,
+        history_only: bool,
+    ) -> Result<FractionalGlLearningBatch> {
+        self.validate_shape_budget(input, shape, axis)?;
         let config =
             FracdiffGlConfig::new(alpha, axis, self.kernel_len, Pad::Zero).with_step(self.step);
         if history_only && (self.kernel_len == 1 || shape[axis] == 1) {
@@ -139,6 +194,7 @@ impl FractionalGlKernel {
                 output: ArrayD::zeros(IxDyn(shape)),
                 alpha_derivative: ArrayD::zeros(IxDyn(shape)),
                 history_coefficients: Some(Vec::new()),
+                input_scale: None,
             });
         }
         let (mut coefficients, mut derivatives, scale) =
@@ -155,8 +211,44 @@ impl FractionalGlKernel {
             output,
             alpha_derivative,
             history_coefficients: history_only.then_some(coefficients),
+            input_scale: None,
         })
     }
+}
+
+fn history_l2_coefficients(alpha: f32, len: usize, gain: f32) -> Result<(Vec<f32>, Vec<f32>)> {
+    // c_k = -alpha*p_k for k >= 1. Cancel positive alpha analytically rather
+    // than subtracting two O(1/alpha) derivative terms near zero.
+    let mut polynomial = zeroed_vec::<f64>("history L2 polynomial", len)?;
+    let mut differential = zeroed_vec::<f64>("history L2 differential", len)?;
+    polynomial[1] = 1.0;
+    for index in 2..len {
+        let order = index as f64;
+        let factor = (order - 1.0 - f64::from(alpha)) / order;
+        polynomial[index] = factor * polynomial[index - 1];
+        differential[index] = factor * differential[index - 1] - polynomial[index - 1] / order;
+        checked_f32("history L2 polynomial", polynomial[index])?;
+        checked_f32("history L2 differential", differential[index])?;
+    }
+    let norm_squared: f64 = polynomial.iter().map(|p| p * p).sum();
+    let radial = polynomial
+        .iter()
+        .zip(&differential)
+        .map(|(p, d)| p * d)
+        .sum::<f64>()
+        / norm_squared;
+    let factor = -f64::from(gain) / norm_squared.sqrt();
+    let mut coefficients = zeroed_vec("normalized history coefficient", len)?;
+    let mut derivatives = zeroed_vec("normalized history alpha derivative", len)?;
+    for index in 1..len {
+        coefficients[index] =
+            checked_f32("normalized history coefficient", factor * polynomial[index])?;
+        derivatives[index] = checked_f32(
+            "normalized history alpha derivative",
+            factor * (differential[index] - polynomial[index] * radial),
+        )?;
+    }
+    Ok((coefficients, derivatives))
 }
 
 // Learning inputs are checked, C-order slices. Share reads across both maps,
@@ -231,6 +323,13 @@ impl FractionalGlLearningBatch {
         &self.output
     }
 
+    fn input_multiplier(&self) -> Result<f32> {
+        match self.input_scale {
+            Some(scale) => Ok(scale),
+            None => Ok(self.config.scale_multiplier()?),
+        }
+    }
+
     fn validate_direction(&self, values: &[f32]) -> Result<()> {
         if values.len() != self.output.len() {
             return Err(FractionalLearningError::Shape);
@@ -253,7 +352,7 @@ impl FractionalGlLearningBatch {
                 self.config.axis,
                 coefficients,
                 self.config.pad,
-                Some(self.config.scale_multiplier()?),
+                Some(self.input_multiplier()?),
             )?,
             None => fracdiff_gl_nd_vjp_config(upstream, self.config)?,
         };
@@ -301,7 +400,7 @@ impl FractionalGlLearningBatch {
                 self.config.axis,
                 coefficients,
                 self.config.pad,
-                Some(self.config.scale_multiplier()?),
+                Some(self.input_multiplier()?),
             )?,
             None => fracdiff_gl_nd_config(&tangent, self.config)?,
         };
@@ -357,6 +456,7 @@ mod tests {
             output,
             alpha_derivative,
             history_coefficients,
+            input_scale: None,
         }
     }
 
@@ -468,5 +568,191 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn near(actual: f64, expected: f64, tolerance: f64) {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{actual} != {expected} (tolerance {tolerance})"
+        );
+    }
+
+    #[test]
+    fn history_l2_fixes_coefficient_norm_and_removes_radial_derivative() {
+        for alpha in [f32::from_bits(1), 0.01, 0.5, 1., 2., 4.] {
+            for len in [2, 3, 5, 32] {
+                for gain in [0.3, 1., 5.] {
+                    let (c, d) = history_l2_coefficients(alpha, len, gain).unwrap();
+                    assert_eq!(c[0], 0.);
+                    assert_eq!(d[0], 0.);
+                    let norm = c.iter().map(|&c| f64::from(c).powi(2)).sum::<f64>().sqrt();
+                    near(norm, f64::from(gain), f64::from(gain) * 1e-7);
+                    let radial = c
+                        .iter()
+                        .zip(&d)
+                        .map(|(&c, &d)| f64::from(c) * f64::from(d))
+                        .sum();
+                    near(radial, 0., f64::from(gain).powi(2) * 1e-7);
+                }
+            }
+        }
+        let (c, d) = history_l2_coefficients(2., 5, 1.).unwrap();
+        assert_eq!(c[3], 0.);
+        near(f64::from(d[3]), -1. / (3. * 5f64.sqrt()), 1e-8);
+    }
+
+    #[test]
+    fn history_l2_one_past_tap_has_exactly_zero_order_gradient() {
+        for alpha in [f32::from_bits(1), 1e-30, 0.01, 1., 4., f32::MAX] {
+            let kernel = FractionalGlKernel::new(2, f32::MIN_POSITIVE, 4, 8).unwrap();
+            let batch = kernel
+                .forward_history_l2(&[1., 2., 3., 4.], &[4], 0, alpha, 0.5)
+                .unwrap();
+            assert_eq!(batch.output.as_slice().unwrap(), &[0., -0.5, -1., -1.5]);
+            assert_eq!(batch.vjp_alpha(&[1.; 4]).unwrap(), 0.);
+            assert_eq!(batch.jvp(&[0.; 4], 1.).unwrap(), [0.; 4]);
+        }
+    }
+
+    #[test]
+    fn history_l2_matches_finite_differences_and_adjoint_across_axes() {
+        for shape in [vec![9], vec![2, 5, 3], vec![2, 5, 65]] {
+            let n: usize = shape.iter().product();
+            let x: Vec<f32> = (0..n).map(|i| (i % 13) as f32 / 11. - 0.4).collect();
+            let dx: Vec<f32> = (0..n).map(|i| (i % 7) as f32 / 5. - 0.6).collect();
+            let upstream: Vec<f32> = (0..n).map(|i| (i % 11) as f32 / 9. - 0.5).collect();
+            let kernel = FractionalGlKernel::new(5, 0.7, n, n * 5).unwrap();
+            for axis in 0..shape.len() {
+                for alpha in [0.1, 1., 2., 4.] {
+                    let batch = kernel
+                        .forward_history_l2(&x, &shape, axis, alpha, 1.7)
+                        .unwrap();
+                    let grad = batch.vjp(&upstream).unwrap();
+                    assert_eq!(grad.input, batch.vjp_input(&upstream).unwrap());
+                    assert_eq!(grad.alpha, batch.vjp_alpha(&upstream).unwrap());
+                    let tangent = batch.jvp(&dx, 0.3).unwrap();
+                    let lhs: f64 = tangent
+                        .iter()
+                        .zip(&upstream)
+                        .map(|(&d, &u)| f64::from(d) * f64::from(u))
+                        .sum();
+                    let rhs: f64 = grad
+                        .input
+                        .iter()
+                        .zip(&dx)
+                        .map(|(&g, &d)| f64::from(g) * f64::from(d))
+                        .sum::<f64>()
+                        + f64::from(grad.alpha) * 0.3;
+                    near(lhs, rhs, 1e-5);
+                    let eps = 0.001;
+                    let plus: Vec<f32> = x.iter().zip(&dx).map(|(&x, &d)| x + eps * d).collect();
+                    let minus: Vec<f32> = x.iter().zip(&dx).map(|(&x, &d)| x - eps * d).collect();
+                    let p = kernel
+                        .forward_history_l2(&plus, &shape, axis, alpha + eps * 0.3, 1.7)
+                        .unwrap();
+                    let m = kernel
+                        .forward_history_l2(&minus, &shape, axis, alpha - eps * 0.3, 1.7)
+                        .unwrap();
+                    for ((&p, &m), &d) in p.output.iter().zip(m.output.iter()).zip(&tangent) {
+                        near(f64::from((p - m) / (2. * eps)), f64::from(d), 3e-4);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn history_l2_cancels_step_and_uses_whole_kernel_at_prefix_boundaries() {
+        let mut baseline: Option<(Vec<u32>, Vec<u32>, FractionalGlGradients)> = None;
+        for step in [f32::from_bits(1), 0.7, 1., 1e38] {
+            let kernel = FractionalGlKernel::new(5, step, 8, 40).unwrap();
+            let batch = kernel
+                .forward_history_l2(&[1., 0., 0., 0., 0.], &[5], 0, 4., 1.)
+                .unwrap();
+            let short = kernel
+                .forward_history_l2(&[1., 0.], &[2], 0, 4., 1.)
+                .unwrap();
+            assert_eq!(short.output[IxDyn(&[1])], batch.output[IxDyn(&[1])]);
+            let result = (
+                bits(batch.output.iter().copied()),
+                bits(batch.jvp(&[0.2; 5], 0.3).unwrap()),
+                batch.vjp(&[0.5; 5]).unwrap(),
+            );
+            if let Some((values, tangent, gradient)) = &baseline {
+                assert_eq!(&result.0, values);
+                assert_eq!(&result.1, tangent);
+                assert_eq!(result.2.input, gradient.input);
+                assert_eq!(result.2.alpha, gradient.alpha);
+            } else {
+                baseline = Some(result);
+            }
+        }
+    }
+
+    #[test]
+    fn history_l2_has_no_current_future_or_cross_sample_dependency() {
+        let kernel = FractionalGlKernel::new(5, 1., 6, 30).unwrap();
+        let batch = kernel
+            .forward_history_l2(&[1., 2., 3., 4., 5., 6.], &[2, 3], 1, 0.7, 1.)
+            .unwrap();
+        let changed = kernel
+            .forward_history_l2(&[1., 80., 90., -1., -2., -3.], &[2, 3], 1, 0.7, 1.)
+            .unwrap();
+        assert_eq!(batch.output[IxDyn(&[0, 1])], changed.output[IxDyn(&[0, 1])]);
+        let dx = batch.vjp_input(&[0., 1., 0., 0., 0., 0.]).unwrap();
+        assert_ne!(dx[0], 0.);
+        assert_eq!(&dx[1..], &[0.; 5]);
+    }
+
+    #[test]
+    fn history_l2_empty_maps_still_validate_inputs_and_directions() {
+        for (len, shape) in [(1, vec![2, 3]), (8, vec![2, 1])] {
+            let n: usize = shape.iter().product();
+            let kernel = FractionalGlKernel::new(len, 0.1, n, n * len).unwrap();
+            let batch = kernel
+                .forward_history_l2(&vec![1.; n], &shape, 1, f32::MAX, 1.)
+                .unwrap();
+            assert!(batch.output.iter().all(|&v| v == 0.));
+            assert_eq!(batch.vjp_alpha(&vec![1.; n]).unwrap(), 0.);
+            assert_eq!(batch.jvp(&vec![1.; n], 1.).unwrap(), vec![0.; n]);
+            assert!(batch.vjp_input(&[1.]).is_err());
+            assert!(batch.vjp_alpha(&vec![f32::NAN; n]).is_err());
+            assert!(batch.jvp(&vec![0.; n], f32::INFINITY).is_err());
+            assert!(kernel
+                .forward_history_l2(&vec![f32::NAN; n], &shape, 1, 1., 1.)
+                .is_err());
+            for invalid in [0., -1., f32::NAN, f32::INFINITY] {
+                assert!(kernel
+                    .forward_history_l2(&vec![1.; n], &shape, 1, invalid, 1.)
+                    .is_err());
+                assert!(kernel
+                    .forward_history_l2(&vec![1.; n], &shape, 1, 1., invalid)
+                    .is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn history_l2_rejects_shapes_budgets_and_unrepresentable_arithmetic() {
+        let kernel = FractionalGlKernel::new(5, 1., 3, 15).unwrap();
+        assert!(kernel
+            .forward_history_l2(&[1.; 3], &[3], 1, 1., 1.)
+            .is_err());
+        assert!(kernel
+            .forward_history_l2(&[1.; 3], &[4], 0, 1., 1.)
+            .is_err());
+        assert!(kernel
+            .forward_history_l2(&[1.; 4], &[4], 0, 1., 1.)
+            .is_err());
+        let limited = FractionalGlKernel::new(5, 1., 3, 5).unwrap();
+        assert!(limited
+            .forward_history_l2(&[1.; 2], &[2], 0, 1., 1.)
+            .is_err());
+        assert!(kernel
+            .forward_history_l2(&[f32::MAX; 3], &[3], 0, 1., 2.)
+            .is_err());
+        assert!(kernel
+            .forward_history_l2(&[1.; 3], &[3], 0, f32::MAX, 1.)
+            .is_err());
     }
 }

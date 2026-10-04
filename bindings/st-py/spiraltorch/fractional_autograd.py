@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import json
 import math
+import struct
 from functools import lru_cache
 from typing import Any
 
 from .geometry_autograd import _input, _require_torch, _strength, _values, torch
 
 __all__ = ["fractional_gl_autograd", "fractional_gl_history_autograd",
-           "FractionalMemoryAdapter", "FractionalHistoryAdapter"]
+           "fractional_gl_history_l2_autograd", "FractionalMemoryAdapter",
+           "FractionalHistoryAdapter", "FractionalL2HistoryAdapter"]
 
 
 def _kernel(**options: Any) -> Any:
@@ -47,20 +49,37 @@ def _transport_output(values: Any, like: Any, buffers: bool) -> Any:
     return torch.tensor(values, dtype=like.dtype, device=like.device).reshape_as(like)
 
 
+def _capture_fractional(ctx: Any, kernel: Any, value: Any, alpha: Any,
+                        axis: int, name: str, *options: Any) -> Any:
+    ctx.buffer_transport = _buffer_transport_available()
+    operation = getattr(kernel, name + ("_buffer" if ctx.buffer_transport else ""))
+    values = _buffer_values(value) if ctx.buffer_transport else _values(value)
+    ctx.snapshot = operation(values, list(value.shape), axis, alpha.detach().item(), *options)
+    ctx.save_for_backward(value, alpha)
+    ctx.save_for_forward(value, alpha)
+    result = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
+    return _transport_output(result, value, ctx.buffer_transport)
+
+
+def _history_gain(gain: float) -> float:
+    if isinstance(gain, bool) or not isinstance(gain, (int, float)):
+        raise TypeError("history gain must be a constant number, not a tensor")
+    try:
+        gain = struct.unpack("=f", struct.pack("=f", gain))[0]
+    except (OverflowError, struct.error) as error:
+        raise ValueError("history gain must be finite and positive in float32") from error
+    if not math.isfinite(gain) or gain <= 0:
+        raise ValueError("history gain must be finite and positive in float32")
+    return gain
+
+
 if torch is not None:
     class _FractionalGlFunction(torch.autograd.Function):
         @staticmethod
         def forward(ctx: Any, kernel: Any, value: Any, alpha: Any, axis: int,
                     history_only: bool) -> Any:
-            ctx.buffer_transport = _buffer_transport_available()
             name = "forward_history" if history_only else "forward"
-            operation = getattr(kernel, name + ("_buffer" if ctx.buffer_transport else ""))
-            values = _buffer_values(value) if ctx.buffer_transport else _values(value)
-            ctx.snapshot = operation(values, list(value.shape), axis, alpha.detach().item())
-            ctx.save_for_backward(value, alpha)
-            ctx.save_for_forward(value, alpha)
-            result = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
-            return _transport_output(result, value, ctx.buffer_transport)
+            return _capture_fractional(ctx, kernel, value, alpha, axis, name)
 
         @staticmethod
         @torch.autograd.function.once_differentiable
@@ -97,6 +116,14 @@ if torch is not None:
             return _transport_output(result, value, ctx.buffer_transport)
 
 
+    class _FractionalGlHistoryL2Function(_FractionalGlFunction):
+        @staticmethod
+        def forward(ctx: Any, kernel: Any, value: Any, alpha: Any, axis: int,
+                    gain: float) -> Any:
+            return _capture_fractional(ctx, kernel, value, alpha, axis,
+                                       "forward_history_l2", gain)
+
+
 def fractional_gl_autograd(value: Any, alpha: Any, *, axis: int, kernel: Any = None) -> Any:
     """Causal zero-padded GL on an ND axis, with true input and scalar-alpha VJPs.
 
@@ -118,6 +145,24 @@ def fractional_gl_history_autograd(value: Any, alpha: Any, *, axis: int,
 
 def _fractional_apply(value: Any, alpha: Any, axis: int, kernel: Any,
                       history_only: bool) -> Any:
+    kernel = _checked_kernel(value, alpha, axis, kernel)
+    return _FractionalGlFunction.apply(kernel, value, alpha, axis, history_only)
+
+
+def fractional_gl_history_l2_autograd(value: Any, alpha: Any, *, axis: int,
+                                     kernel: Any = None, gain: float = 1.0) -> Any:
+    """Strictly-past GL with full-kernel coefficient L2 norm fixed to gain.
+
+    Rust differentiates both taps and normalization with respect to alpha.
+    Positive sample-spacing scale cancels. Gain is constant, not trainable;
+    this fixes filter energy, not the variance of correlated hidden states.
+    Same first-order AD and complete-prefix limits as the raw history route.
+    """
+    kernel = _checked_kernel(value, alpha, axis, kernel)
+    return _FractionalGlHistoryL2Function.apply(kernel, value, alpha, axis, _history_gain(gain))
+
+
+def _checked_kernel(value: Any, alpha: Any, axis: int, kernel: Any) -> Any:
     _input(value)
     if not isinstance(alpha, torch.Tensor) or alpha.ndim != 0 or alpha.dtype != torch.float32:
         raise TypeError("alpha must be a scalar float32 tensor")
@@ -128,7 +173,7 @@ def _fractional_apply(value: Any, alpha: Any, axis: int, kernel: Any,
     kernel = _kernel() if kernel is None else kernel
     if not isinstance(kernel, FractionalGlKernel):
         raise TypeError("kernel must be an immutable Rust FractionalGlKernel")
-    return _FractionalGlFunction.apply(kernel, value, alpha, axis, history_only)
+    return kernel
 
 
 if torch is None:
@@ -137,6 +182,9 @@ if torch is None:
             _require_torch()
 
     class FractionalHistoryAdapter(FractionalMemoryAdapter):
+        pass
+
+    class FractionalL2HistoryAdapter(FractionalHistoryAdapter):
         pass
 else:
     class FractionalMemoryAdapter(torch.nn.Module):
@@ -216,6 +264,9 @@ else:
                              **kernel_options)
             self.local_gate = torch.nn.Parameter(torch.zeros_like(self.gate))
 
+        def _history(self, value: Any, alpha: Any) -> Any:
+            return fractional_gl_history_autograd(value, alpha, axis=1, kernel=self._kernel)
+
         def forward(self, value: Any) -> Any:
             strength = self._checked_input(value)
             if self.local_gate.dtype != value.dtype:
@@ -224,7 +275,42 @@ else:
                 raise ValueError("input and adapter parameters must share a device")
             if strength == 0.0:
                 return value
-            history = fractional_gl_history_autograd(
-                value, self.log_alpha.exp(), axis=1, kernel=self._kernel)
+            history = self._history(value, self.log_alpha.exp())
             local = value + strength * self.local_gate.tanh() * value
             return local + strength * self.gate.tanh() * history
+
+    class FractionalL2HistoryAdapter(FractionalHistoryAdapter):
+        """Separate local/history gates with a fixed-energy fractional filter.
+
+        2*F+1 parameters, identity initialization and explicit full-prefix use.
+        The constant gain and distinct state schema prevent silent loading as
+        raw GL history. Normalization and its differentials live in Rust.
+        """
+
+        _state_schema = "spiraltorch.fractional_l2_history_adapter.v1"
+
+        def __init__(self, features: int, *, initial_alpha: float = 0.5,
+                     strength: float = 0.1, gain: float = 1.0, **kernel_options: Any) -> None:
+            gain = _history_gain(gain)
+            super().__init__(features, initial_alpha=initial_alpha, strength=strength,
+                             **kernel_options)
+            self._history_gain = gain
+
+        @property
+        def gain(self) -> float:
+            return self._history_gain
+
+        def _history(self, value: Any, alpha: Any) -> Any:
+            return fractional_gl_history_l2_autograd(
+                value, alpha, axis=1, kernel=self._kernel, gain=self.gain)
+
+        def get_extra_state(self) -> dict[str, Any]:
+            return {**super().get_extra_state(), "gain": self.gain}
+
+        def set_extra_state(self, state: dict[str, Any]) -> None:
+            if (not isinstance(state, dict)
+                    or set(state) != {"schema", "features", "strength", "kernel", "gain"}):
+                raise ValueError("incompatible fractional L2 history adapter state")
+            gain = _history_gain(state["gain"])
+            super().set_extra_state({key: value for key, value in state.items() if key != "gain"})
+            self._history_gain = gain

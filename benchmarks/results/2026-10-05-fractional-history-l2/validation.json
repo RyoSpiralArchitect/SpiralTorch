@@ -1,0 +1,144 @@
+{
+  "schema": "spiraltorch.fractional_history_l2_validation.v1",
+  "base_revision": "5a724cf1a03a1d00856104f94767d309f9258007",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "f9eb8b1b8421d39b71c23222d0e61aee014e42e9bd13d15ac2da8c412b17d2ba",
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "crates/st-frac/src/learning.rs": "ec061a26ca9277a35c192c5a9e47cbded04750d5546f726b8ca7a875c4c2145a",
+    "bindings/st-py/src/fractional_learning.rs": "8c20c4ca4d766a9eda1cace358c5195dc1fb7b3085bedc1b1659eb21a98cab6c",
+    "bindings/st-wasm/src/fractional_learning.rs": "b43c595f01c4da72999f20b8cec38154f62fe3b8bc3806b8c5532316c48f7058",
+    "bindings/st-py/spiraltorch/fractional_autograd.py": "d0c95517b17e48d75746db2a55267851b78baee80a4ee79e6cb163eae8e1b4a6",
+    "bindings/st-py/spiraltorch/__init__.py": "13f0240ebc56946555bac97d8d04ab05cfb3ae8d474ebdab64f144ae636d9c6f",
+    "bindings/st-py/spiraltorch/__init__.pyi": "758a86ad5cafba0c4dfeb3ce462f2ca21d7cee201c9e56bd5fa106ecf6511b89",
+    "bindings/st-py/tests/test_fractional_history.py": "afbe88ee05773dad21834d79061a374ddc6d0fd4ec1a81482358ae8479cf0eee",
+    "bindings/st-py/tests/test_fractional_history_l2.py": "3ceb2d4ffe641463ddb8446dcf4e5a8a41239d71d07a5d9ae7528f39056cf403",
+    "bindings/st-py/tests/test_geometry_optional_dependency.py": "0da30f58094613a9ddd1db74af8eb4b996fa1feb353aaae642ec344033f39115",
+    "bindings/st-wasm/tests/fractional_history_l2.mjs": "6c442a1d9d90a22be9367fc4a9ee992fcfa1c7f022fffb9f026355f16c891176",
+    "bindings/st-wasm/tests/fractional_learning_types.ts": "2d08cc4228e77c11ff5c866743addc0e8dc9986a4332317b4b4277b2db0d1e51",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "1e7e6db36e5d5fce5973994cc9a0f552bb42e8cc4c50f155a3eba8ff077eaaa7",
+    "docs/fractional_learning.md": "3c08d5f6e84da45692c4f2444165cfb41ad90ccf689c3c1ff3b3358138d2aa6b"
+  },
+  "runtime": {
+    "rust": "1.98.0",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "backend": "rust_f32_cpu",
+    "native_profile": "release",
+    "native_sha256": "3b5d230bae85eafa0e0a156931197bdb45a50334c6045fcc35870ff50f1ccb9a",
+    "final_native_matches_initial": true,
+    "private_runtime_files": 71,
+    "private_runtime_manifest_sha256": "74eaa67d2fc61d707b92528531e759ffc9f9dd64b9d361490dbab859cd9a5cff",
+    "wasm_bindgen": "0.2.104",
+    "wasm_sha256": "2a2abf6dc9d267ed2a92db4774f5caac3dbcfca77dd996c713bb2aabdc765b27"
+  },
+  "checks": {
+    "rust_tests": {
+      "passed": 130,
+      "failed": 0
+    },
+    "python_regression": {
+      "passed": 504,
+      "failed": 0,
+      "skipped": 0,
+      "files": [
+        "bindings/st-py/tests/test_geometry_autograd.py",
+        "bindings/st-py/tests/test_geometry_optional_dependency.py",
+        "bindings/st-py/tests/test_fractional_learning.py",
+        "bindings/st-py/tests/test_fractional_history.py",
+        "bindings/st-py/tests/test_fractional_selective_vjp.py",
+        "bindings/st-py/tests/test_fractional_buffers.py",
+        "bindings/st-py/tests/test_fractional_memory_study.py",
+        "bindings/st-py/tests/test_fractional_history_study.py",
+        "bindings/st-py/tests/test_fractional_lag_study.py",
+        "bindings/st-py/tests/test_fractional_two_lag_study.py",
+        "bindings/st-py/tests/test_elliptic_gated_causal.py",
+        "bindings/st-py/tests/test_elliptic_anchored.py",
+        "bindings/st-py/tests/test_elliptic_gated_study.py",
+        "bindings/st-py/tests/test_elliptic_anchored_study.py",
+        "bindings/st-py/tests/test_elliptic_context_ablation.py",
+        "bindings/st-py/tests/test_elliptic_learning.py",
+        "bindings/st-py/tests/test_elliptic_directional.py",
+        "bindings/st-py/tests/test_elliptic_chart_step.py",
+        "bindings/st-py/tests/test_elliptic_causal_learning.py",
+        "bindings/st-py/tests/test_wave_gate_vjp.py",
+        "bindings/st-py/tests/test_wave_gate_learning.py",
+        "bindings/st-py/tests/test_wave_gate_radius.py",
+        "bindings/st-py/tests/test_wave_gate_conditioning_example.py",
+        "bindings/st-py/tests/test_wave_gate_long_horizon.py",
+        "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py",
+        "bindings/st-py/tests/test_elliptic_nonlinear_study.py",
+        "bindings/st-py/tests/test_elliptic_causal_study.py",
+        "bindings/st-py/tests/test_fractional_two_lag_results.py",
+        "bindings/st-py/tests/test_fractional_history_l2.py"
+      ]
+    },
+    "benchmark_correctness": {
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "file": "tools/test_benchmark_fractional_learning.py",
+      "new_timings": false
+    },
+    "wasm_fixtures": [
+      "fractional_learning.mjs",
+      "fractional_history.mjs",
+      "fractional_history_l2.mjs",
+      "fractional_selective_vjp.mjs",
+      "fractional_tiled_forward.mjs",
+      "numeric_boundaries.cjs"
+    ],
+    "wasm_synthetic": {
+      "schema": "spiraltorch.fractional_history_l2_wasm.v1",
+      "updates": 500,
+      "initial_loss": 0.2195702135724794,
+      "final_loss": 0.0000676152559847477,
+      "learned_alpha": 0.7231869829086626,
+      "nonzero_order_steps": 499,
+      "scope": "Synthetic learning through compiled WASM, not pretrained quality, unique order recovery, browser or GPU evidence"
+    },
+    "typescript": "passed",
+    "native_release": "passed",
+    "cpu_text_check": "passed with existing dead-code warning",
+    "workspace_rustfmt": "passed",
+    "rust_clippy_native": "passed strict",
+    "rust_clippy_wasm32": "passed strict",
+    "binding_clippy_strict": {
+      "status": "failed_existing_findings",
+      "count": 9,
+      "files": [
+        "bindings/st-py/src/kv.rs",
+        "bindings/st-py/src/nn.rs",
+        "bindings/st-py/src/pure.rs",
+        "bindings/st-py/src/wave_gate_learning.rs",
+        "bindings/st-py/src/vision.rs",
+        "bindings/st-py/src/wgpu.rs"
+      ]
+    },
+    "binding_clippy_scoped": {
+      "status": "passed",
+      "no_deps": true,
+      "allowed_existing_categories": [
+        "clippy::too_many_arguments",
+        "clippy::type_complexity"
+      ]
+    }
+  },
+  "scope": {
+    "first_order_ad_only": true,
+    "full_unpadded_prefixes": true,
+    "constant_gain": true,
+    "ordinary_torch_role": "independent mathematical reference, not production backend",
+    "pretrained_quality_claim": false,
+    "new_primary_study": false,
+    "speed_claim": false,
+    "browser_execution_verified": false,
+    "gpu_execution_verified": false,
+    "primary_artifacts_modified": false
+  },
+  "notes": [
+    "Initial unscoped benchmark invocation failed on an unrelated ancestor package; the CI-isolated tools invocation passed all 34 tests.",
+    "Initial focused tests corrected BufferError expectation and a one-ULP comparison across different near-zero orders; final focused run passed 70 tests.",
+    "Strict binding lint does not certify the entire workspace. Build and test logs, packages and runtime file manifest remain private."
+  ]
+}

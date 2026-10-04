@@ -9551,7 +9551,8 @@ def __getattr__(name: str) -> _Any:
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
     if name in {"FractionalMemoryAdapter", "fractional_gl_autograd",
-                "FractionalHistoryAdapter", "fractional_gl_history_autograd"}:
+                "FractionalHistoryAdapter", "fractional_gl_history_autograd",
+                "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd"}:
         module = import_module("spiraltorch.fractional_autograd")
         value = getattr(module, name)
         globals()[name] = value
@@ -9638,6 +9639,7 @@ _EXPORTED.update(
     ["hg", "rg", "z", "__version__", "model_zoo",
      "FractionalMemoryAdapter", "fractional_gl_autograd",
      "FractionalHistoryAdapter", "fractional_gl_history_autograd",
+     "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd",
      "ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter",
      "EllipticCausalResidualAdapter", "elliptic_causal_autograd",
      "EllipticGatedCausalResidualAdapter", "elliptic_gated_causal_autograd",
