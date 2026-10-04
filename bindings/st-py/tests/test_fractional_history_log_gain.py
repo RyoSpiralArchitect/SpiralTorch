@@ -88,6 +88,8 @@ def test_buffer_snapshots_are_owned_and_transport_matches():
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf"), 100., -200.])
 def test_unrepresentable_gain_fails_even_for_empty_history(bad):
+    with pytest.raises(ValueError, match="log-gain"):
+        st.FractionalGlKernel.gain_from_log_gain(bad)
     for length in (1, 5):
         kernel = st.FractionalGlKernel(kernel_len=length)
         with pytest.raises(ValueError, match="log-gain"):
@@ -116,6 +118,7 @@ def test_adapter_identity_recipe_separation_and_dtype_guards():
     x = torch.ones(2, 4, 3)
     assert torch.equal(adapter(x), x)
     assert adapter.get_extra_state()["schema"] == "spiraltorch.fractional_gain_history_adapter.v1"
+    assert adapter.gain == st.FractionalGlKernel.gain_from_log_gain(float(adapter.log_gain.detach()))
     for old in (st.FractionalHistoryAdapter(3), st.FractionalL2HistoryAdapter(3)):
         with pytest.raises((ValueError, RuntimeError)):
             old.load_state_dict(adapter.state_dict())

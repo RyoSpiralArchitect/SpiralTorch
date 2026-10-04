@@ -9,6 +9,7 @@ const near = (a, b, tolerance=3e-6) => assert.ok(Math.abs(a-b)<=tolerance, `${a}
 const x = f32(Array.from({length:72}, (_,i) => Math.sin(.31*i)+.3*Math.cos(.17*i)));
 const shape = dims([2,12,3]), kernel = new FractionalGlKernel(5,.7,128,640);
 const h = kernel.forward_history_log_gain(x,shape,1,2,.3);
+assert.equal(FractionalGlKernel.gain_from_log_gain(.3),h.gain);
 const fixed = kernel.forward_history_l2(x,shape,1,2,h.gain);
 assert.deepEqual(h.output, fixed.output);
 const upstream=f32(x.map(v=>v*.3-.2)), dx=f32(x.map(v=>Math.cos(v)));
@@ -27,6 +28,7 @@ const owned=h.output; owned.fill(99);
 assert.deepEqual(h.output,fixed.output);
 for(const handle of [h,fixed,g,plus,minus])handle.free();
 for(const bad of [NaN,Infinity,-Infinity,100,-200,'0',true,1e50]) {
+    assert.throws(()=>FractionalGlKernel.gain_from_log_gain(bad));
     assert.throws(()=>kernel.forward_history_log_gain(x,shape,1,2,bad));
 }
 assert.throws(()=>kernel.forward_history_log_gain(x,shape,.5,2,0));

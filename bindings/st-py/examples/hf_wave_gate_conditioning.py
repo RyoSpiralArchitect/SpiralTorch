@@ -140,6 +140,23 @@ def evaluate(model, blocks, batch_size):
     return total / targets
 
 
+def gain_snapshot(adapter):
+    """Read the adapter's actual gain; native adapters delegate its chart to Rust."""
+    if not hasattr(adapter, "log_gain"):
+        return {}
+    coordinate = adapter.log_gain
+    if coordinate.ndim != 0 or coordinate.dtype != torch.float32:
+        raise ValueError("gain telemetry requires scalar float32 log_gain")
+    log_gain, gain = float(coordinate.detach()), float(adapter.gain)
+    if not math.isfinite(log_gain) or not math.isfinite(gain) or gain <= 0:
+        raise ValueError("gain must be positive finite f32")
+    gate = adapter.gate.detach().double().tanh() * adapter.strength * gain
+    scale = float(gate.norm())
+    if not math.isfinite(scale):
+        raise ValueError("nonfinite effective history gate scale")
+    return {"log_gain": log_gain, "gain": gain, "effective_history_gate_l2": scale}
+
+
 def update(model, adapter, optimizer, batch):
     optimizer.zero_grad()
     loss = model(batch, labels=batch).loss
@@ -150,7 +167,11 @@ def update(model, adapter, optimizer, batch):
         "loss": float(loss.detach()),
         "conditioning": getattr(adapter, "last_conditioning", None),
     }
+    record.update({f"{key}_before_update": value for key, value in gain_snapshot(adapter).items()})
     for name, parameter in adapter.named_parameters():
+        if name == "log_gain":
+            record["log_gain_trainable"] = parameter.requires_grad
+            record["log_gain_gradient"] = None
         if name == "log_alpha":
             record["log_alpha_trainable"] = parameter.requires_grad
             record["log_alpha_before_update"] = float(parameter.detach())
@@ -164,7 +185,7 @@ def update(model, adapter, optimizer, batch):
             raise ValueError(f"invalid {name} gradient")
         record[f"{name}_gradient_l2"] = float(parameter.grad.norm())
         record[f"{name}_before_update_l2"] = float(parameter.detach().norm())
-        if name in {"log_radius", "raw_mix", "log_alpha", "logit_decay"}:
+        if name in {"log_radius", "raw_mix", "log_alpha", "logit_decay", "log_gain", "history_angle"}:
             record[f"{name}_gradient"] = float(parameter.grad)
             record[f"{name}_before_update"] = float(parameter.detach())
     optimizer.step()
@@ -172,6 +193,9 @@ def update(model, adapter, optimizer, batch):
         record["optimizer_step"] = optimizer.last_step_diagnostics
     if not all(torch.isfinite(p).all() for p in adapter.parameters()):
         raise ValueError("nonfinite adapter update")
+    record.update({f"{key}_after_update": value for key, value in gain_snapshot(adapter).items()})
+    if hasattr(adapter, "history_angle"):
+        record["history_angle_after_update"] = float(adapter.history_angle.detach())
     if hasattr(adapter, "raw_mix"):
         record["raw_mix_after_update"] = float(adapter.raw_mix.detach())
     if hasattr(adapter, "log_alpha"):

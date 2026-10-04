@@ -58,6 +58,10 @@ impl FractionalGlKernel {
         .map_err(js_error)
     }
 
+    pub fn gain_from_log_gain(log_gain: Number) -> Result<f32, JsValue> {
+        CoreKernel::gain_from_log_gain(number(&log_gain, "log_gain")?).map_err(js_error)
+    }
+
     pub fn forward(
         &self,
         input: &[f32],

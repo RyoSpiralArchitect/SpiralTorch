@@ -19,6 +19,8 @@ from .fractional_autograd import (
 )
 
 class FractionalGlKernel:
+    @staticmethod
+    def gain_from_log_gain(log_gain: float) -> float: ...
     def __init__(self, *, kernel_len: int = ..., step: float = ...,
                  max_values: int = ..., max_products: int = ...) -> None: ...
     @property

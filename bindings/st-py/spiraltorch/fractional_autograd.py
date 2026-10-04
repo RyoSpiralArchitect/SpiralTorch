@@ -396,6 +396,13 @@ else:
             super().__init__(features, initial_alpha=initial_alpha, strength=strength, **kernel_options)
             self.log_gain = torch.nn.Parameter(torch.tensor(math.log(initial_gain), dtype=torch.float32))
 
+        @property
+        def gain(self) -> float:
+            """Current checked Rust f32 amplitude, without a history allocation."""
+            if self.log_gain.ndim != 0 or self.log_gain.dtype != torch.float32:
+                raise TypeError("fractional history log_gain must remain scalar float32")
+            return self._kernel.gain_from_log_gain(float(self.log_gain.detach()))
+
         def _checked_input(self, value: Any) -> float:
             strength = super()._checked_input(value)
             if self.log_gain.dtype != value.dtype:

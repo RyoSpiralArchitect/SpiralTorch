@@ -1,6 +1,8 @@
 /// <reference path="../types/spiraltorch-wasm.d.ts" />
 import { FractionalGlKernel, FractionalGlLearningBatch, FractionalGlGradients } from 'spiraltorch-wasm';
 const kernel = new FractionalGlKernel(8, 1, 128, 1024);
+const nativeGain: number = FractionalGlKernel.gain_from_log_gain(.3);
+void nativeGain;
 const batch: FractionalGlLearningBatch = kernel.forward(new Float32Array(24), new Uint32Array([2,4,3]), 1, .5);
 const derivative: FractionalGlGradients = batch.vjp(new Float32Array(24));
 const alpha: number = derivative.alpha;

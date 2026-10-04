@@ -416,6 +416,10 @@ def run_endpoints(
             )
             gated_metadata["initial_projection_sha256"] = saved["initial_projection_sha256"]
         adapter.load_state_dict(saved["adapter"])
+        gated_metadata.update({f"final_{key}": value
+                               for key, value in pilot.gain_snapshot(adapter).items()})
+        if hasattr(adapter, "history_angle"):
+            gated_metadata["final_history_angle"] = float(adapter.history_angle.detach())
         if hasattr(adapter, "raw_mix"):
             gated_metadata["final_raw_mix"] = float(adapter.raw_mix.detach())
         if hasattr(adapter, "log_alpha"):

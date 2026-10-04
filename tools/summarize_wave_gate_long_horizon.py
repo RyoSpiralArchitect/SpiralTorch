@@ -337,6 +337,107 @@ def history_factorial_report(config, runs, measured, sets):
     return contrast_report(config, measured, sets, contrasts), trajectories, initial_parity
 
 
+def gain_trajectory(row, initial):
+    records = row["records"]
+    names = ("log_gain", "gain", "effective_history_gate_l2")
+    before = {name: [r.get(f"{name}_before_update") for r in records] for name in names}
+    after = {name: [r.get(f"{name}_after_update") for r in records] for name in names}
+    gradients = [r.get("log_gain_gradient") for r in records]
+    values = gradients + [row.get(f"final_{name}") for name in names]
+    values += [v for name in names for v in before[name] + after[name]]
+    require(bool(records) and all(type(v) in (int, float) and math.isfinite(v) for v in values),
+            "missing or nonfinite gain trajectory")
+    for log_gain, gain in zip(before["log_gain"] + after["log_gain"], before["gain"] + after["gain"]):
+        try:
+            expected = math.exp(log_gain)
+        except OverflowError:
+            expected = math.inf
+        require(0 < gain <= float.fromhex("0x1.fffffep127") and math.isfinite(expected)
+                and math.isclose(gain, expected, rel_tol=2e-6, abs_tol=2**-149),
+                "gain does not match positive f32 amplitude")
+    require(math.isclose(before["gain"][0], initial, rel_tol=2e-6)
+            and before["effective_history_gate_l2"][0] == 0
+            and all(v >= 0 for v in before["effective_history_gate_l2"] + after["effective_history_gate_l2"])
+            and all(before[name][1:] == after[name][:-1]
+                    and row[f"final_{name}"] == after[name][-1] for name in names),
+            "gain trajectory or endpoint differs")
+    require(all(r.get("log_gain_trainable") is True for r in records) and gradients[0] == 0,
+            "gain learning mode or initial gradient differs")
+    return {"initial_gain": before["gain"][0], "final_gain": after["gain"][-1],
+            "final_log_gain": after["log_gain"][-1],
+            "min_gain": min(before["gain"] + after["gain"]),
+            "max_gain": max(before["gain"] + after["gain"]),
+            "final_effective_history_gate_l2": after["effective_history_gate_l2"][-1],
+            "nonzero_gain_gradient_steps": sum(v != 0 for v in gradients)}
+
+
+def angle_trajectory(row, initial):
+    before = [r.get("history_angle_before_update") for r in row["records"]]
+    after = [r.get("history_angle_after_update") for r in row["records"]]
+    gradients = [r.get("history_angle_gradient") for r in row["records"]]
+    require(bool(before) and all(type(v) in (int, float) and math.isfinite(v)
+            for v in before + after + gradients + [row.get("final_history_angle")]),
+            "missing or nonfinite angle trajectory")
+    require(math.isclose(before[0], initial, rel_tol=2e-6) and before[1:] == after[:-1]
+            and row["final_history_angle"] == after[-1] and gradients[0] == 0,
+            "angle trajectory or endpoint differs")
+    return {"initial_angle": before[0], "final_angle": after[-1],
+            "min_angle": min(before + after), "max_angle": max(before + after),
+            "nonzero_angle_gradient_steps": sum(v != 0 for v in gradients)}
+
+
+def gain_study_report(config, runs, measured, sets):
+    arms = ["ordinary_gain_short", "history_gain_short", "history_gain_full"]
+    require(config["arms"] == arms and config.get("reference_arm") == arms[0],
+            "incomplete gain design")
+    for name, expected in (("initial_alpha", 2.), ("initial_gain", math.sqrt(5)),
+                           ("initial_history_angle", 0.4636476090008061)):
+        require(type(config.get(name)) in (int, float) and config[name] == expected,
+                "gain study initial coordinates differ")
+    kernel = config.get("kernel", {})
+    require(type(config.get("features")) is int and config["features"] > 0
+            and type(config.get("short_kernel_len")) is int and config["short_kernel_len"] == 3
+            and type(kernel.get("kernel_len")) is int and kernel["kernel_len"] > 3
+            and type(kernel.get("step")) in (int, float) and kernel["step"] == 1,
+            "gain study dimensions differ")
+    orders, angles, gains, initial = {}, {}, {}, {}
+    fields = ("loss", "gate_gradient_l2", "local_gate_gradient_l2",
+              "gate_before_update_l2", "local_gate_before_update_l2")
+    for seed in config["seeds"]:
+        hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256") for arm in arms[1:]}
+        require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
+                "GL gain initial parameters are not paired")
+        first = {}
+        for arm in arms:
+            key = f"{seed}:{arm}"
+            row = runs[key]
+            require(type(row.get("parameter_count")) is int and type(row.get("trainable_parameter_count")) is int
+                    and row["parameter_count"] == row["trainable_parameter_count"] == 2*config["features"]+2,
+                    "gain study parameter counts differ")
+            require(bool(row["records"]) and all(type(r.get(k)) in (int, float)
+                    and math.isfinite(r[k]) and r[k] >= 0 for r in row["records"] for k in fields),
+                    "invalid gain-study update receipt")
+            first[arm] = {field: row["records"][0][field] for field in fields}
+            require(first[arm]["gate_before_update_l2"] == first[arm]["local_gate_before_update_l2"] == 0,
+                    "gain study gates are not identity initialized")
+            gains[key] = gain_trajectory(row, config["initial_gain"])
+            if arm == arms[0]:
+                angles[key] = angle_trajectory(row, config["initial_history_angle"])
+            else:
+                orders[key] = order_trajectory(row, config["initial_alpha"], True)
+        equal_loss = all(first[arm]["loss"] == first[arms[0]]["loss"] for arm in arms)
+        close_gates = all(math.isclose(first[arm][field], first[arms[0]][field], rel_tol=2e-6, abs_tol=2e-7)
+                          for arm in arms for field in ("gate_gradient_l2", "local_gate_gradient_l2"))
+        initial[str(seed)] = {"first_update_loss_equal": equal_loss,
+                              "gate_gradient_norms_close": close_gates,
+                              "gate_gradient_rtol": 2e-6, "gate_gradient_atol": 2e-7,
+                              "receipts": first, "status": "passed" if equal_loss and close_gates else "failed"}
+    contrasts = {"gl_short_minus_ordinary_short": {arms[1]: 1, arms[0]: -1},
+                 "gl_full_minus_ordinary_short": {arms[2]: 1, arms[0]: -1},
+                 "gl_full_minus_gl_short": {arms[2]: 1, arms[1]: -1}}
+    return contrast_report(config, measured, sets, contrasts), orders, angles, gains, initial
+
+
 def two_lag_state_parity(plan, runs, checkpoint_dir):
     """Read hash-bound final states, not scalar norms or validation-update states."""
     if checkpoint_dir is None:
@@ -746,6 +847,14 @@ def summarize(plan, result, journal, result_sha256, *, checkpoint_dir=None):
         summary["reference_arm"] = reference
         (summary["paired_factorial_contrasts"], summary["order_trajectories"],
          summary["initial_filter_receipt_parity"]) = history_factorial_report(config, runs, measured, sets)
+        summary["initial_filter_receipt_status"] = (
+            "passed" if all(row["status"] == "passed" for row in summary["initial_filter_receipt_parity"].values())
+            else "failed")
+    if config.get("schema") == "spiraltorch.fractional_gain_protocol.v1":
+        summary["reference_arm"] = reference
+        (summary["paired_gain_contrasts"], summary["order_trajectories"],
+         summary["angle_trajectories"], summary["gain_trajectories"],
+         summary["initial_filter_receipt_parity"]) = gain_study_report(config, runs, measured, sets)
         summary["initial_filter_receipt_status"] = (
             "passed" if all(row["status"] == "passed" for row in summary["initial_filter_receipt_parity"].values())
             else "failed")
