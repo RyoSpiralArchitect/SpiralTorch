@@ -92,3 +92,8 @@ that is executable learning evidence, not pretrained language quality.
 A subsequent real-model comparison must freeze its own recipe and client,
 report all outcomes and preserve the preceding completed studies. No
 held-out outcome or speed improvement is established by this API addition.
+
+The [completed training-only preflight](../benchmarks/results/2026-10-05-fractional-angle-chart/README.md)
+checks 48 real-GPT-2 updates and 12 exact continuation updates. Full gradient,
+parameter and Adam tensors agree within the declared tolerances across
+three seeds; this is not long-run or bitwise cross-arm equivalence.
