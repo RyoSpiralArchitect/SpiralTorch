@@ -1,0 +1,21 @@
+{
+  "schema": "spiraltorch.fractional_gain_publication_tests.v1",
+  "status": "passed",
+  "baseline_source_revision": "2f963250ce973c7e2da48a76a0fe1a751a01d428",
+  "final_python_regressions": {
+    "passed": 649,
+    "skipped": 0,
+    "existing_jit_deprecation_warnings": 18,
+    "log_sha256": "239e3574063af3262806690839d289ae72df964b85fdbe5b584fe50213bf4a0b"
+  },
+  "publication_consistency": {
+    "passed": 13,
+    "skipped": 0,
+    "includes_previous_two_lag_and_factorial": true,
+    "private_checkpoints_reexecuted": false,
+    "log_sha256": "6adde25cbc2bad6b02c7a00071a6cbeb636b7919276acdfb6b1d7b85109bf9b3"
+  },
+  "publication_test_source_sha256": "1942c9b92d3e7309e731f9c4344fdeb55d8f87a56f26a7b499bda962f25bd3f1",
+  "current_sealed_files_rehashed_unchanged": 154,
+  "scope": "Tests validate public hash consistency and summary reconstruction, not independent replay of private model/checkpoint execution."
+}

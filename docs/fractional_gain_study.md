@@ -6,6 +6,12 @@ benefit of a longer available history. This follow-up gives amplitude its own
 parameter and asks whether that mechanism does more than an ordinary learned
 short filter. It is a quality experiment, not a throughput comparison.
 
+The [completed nine-run comparison](../benchmarks/results/2026-10-05-fractional-gain-study/README.md)
+retains all outcomes: ordinary learned short beats both GL arms on both
+endpoint sets in all three seeds, while GL full beats GL short. This is not
+evidence of a distinctive GL quality advantage; shape-chart differences
+remain an explicit follow-up question.
+
 ## Matched Arms
 
 | Arm | Strictly Past Filter | Trainable Parameters |
@@ -136,5 +142,5 @@ Float32, complete unpadded prefixes and no KV cache or packed documents;
 history resets at each block. All paths are host/CPU, not resident GPU.
 Publish numeric outcomes, verification records, hashes and reproduction only,
 not weights, corpus, native packages or raw private logs. The included tiny
-random-HF fixtures validate the learning path, not pretrained quality; this
-protocol document is not a claim that the nine long runs have completed.
+random-HF fixtures validate the learning path, not pretrained quality. The
+separate completed comparison above contains the real-model outcomes.
