@@ -16,7 +16,7 @@
   "primary_updates": 4608,
   "continuation_only_updates": 18,
   "runs": 9,
-  "checkpoint_verification_sha256": "d22b1716f66843fec1952f23348352e85955942ab30dd379862d3e58af5f3734",
+  "checkpoint_verification_sha256": "fcf57f3fc1848bf193d8c5b04698c8940d0db6eeb446927cea5aa32d11edb818",
   "results_sha256": "7693b247c1d346f4caed477b58d1c561d012e1a31be998a06c4649998c6f602c",
   "initial_filter_receipts": "passed",
   "paired_short_state_status": "failed",
@@ -76,7 +76,10 @@
     "timing": false,
     "final_publication_inclusive_regressions": 755,
     "final_publication_numeric_checks": 7,
-    "final_publication_regressions_exit_code": 0
+    "final_publication_regressions_exit_code": 0,
+    "portable_summary_regressions": 756,
+    "portable_summary_publication_checks": 8,
+    "portable_summary_regressions_exit_code": 0
   },
   "private_log_sha256": {
     "primary-training.log": "03739b1033c53853b8d9d2d8d0785ac232273074a2a3a63d168d3867203d0b35",
@@ -87,8 +90,26 @@
     "verifier-regression.log": "69d942d9b7b62fc29a4e75b660cf1ea41c7f84cf263e08bd7ebc6c6d092bcb52",
     "verifier-f64-check.log": "e3075b3c617a302f1761491bfcf4ae9d4272f6504d6f4ca6d00853aeb7a18f1a",
     "benchmark-correctness.log": "392db196ea980165449b6bb03f42336197cc8d53f362d50b77fb192e7657a7cb",
-    "publication-regressions.log": "576376b96eb5359fadfc271a66afae7faf8d8125f0b240b103d8614c5cd4c4b9"
+    "publication-regressions.log": "576376b96eb5359fadfc271a66afae7faf8d8125f0b240b103d8614c5cd4c4b9",
+    "portable-summary.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "portable-verification.log": "205c9e35f49b88f3c01bc1592c4bd328add8663e10379c30a45bc89782788a26",
+    "review-boundary-regression-before.log": "aabbc93a1e7d360f532d23d9a5b977cc52e59e38df4a6ad51e286d89b3cdb70f",
+    "portable-regressions.log": "6cb49055c9d6816796ba9862a62d61ee0d6cd2dbc876390ff186bd6bd8b1866c"
   },
   "scope": "All predeclared arms/seeds and endpoint outcomes retained. Saved states are valid, but the preflight-tolerance final short-parameter equivalence criterion failed in every seed. No tolerance was widened. Not bitwise trajectory equality, statistical significance, long-memory causation, pristine/general LLM quality, convergence, browser/GPU residency or speed evidence.",
-  "publication_test_sha256": "8475df88b75d9cd3b84bf39ed322a7eefafe871ae4a6f427fee0250c01469067"
+  "publication_test_sha256": "add0b854b70648f3f06fc86ed3610fe6e167352ade45bf55cf6596e8cd45587f",
+  "portable_summary_correction": {
+    "reason": "Host libm atan(0.5) can vary by one ULP; derived boundaries now use fixed binary64 constants.",
+    "original_summary_sha256": "8ed669f25e04768b80e5f242592a1fa7b852750c098f30d0bc4cfaede679dc56",
+    "corrected_summary_sha256": "7a5f1022106a39b4efc77fc717c7adfeb76710922ff3793b03c11e8dc347b5ef",
+    "original_verification_sha256": "d22b1716f66843fec1952f23348352e85955942ab30dd379862d3e58af5f3734",
+    "verification_client_manifest_sha256": "df089c798217d29ff1c3d629bd8fb72cca2c9b8ca307e180bf8a3d6f89f62e32",
+    "only_client_source_changed": "summarize_wave_gate_long_horizon.py",
+    "training_client_manifest_unchanged": true,
+    "primary_outputs_unchanged": true,
+    "retrained": false,
+    "rescored": false,
+    "verification_process_exit_code": 0,
+    "changed_numeric_fields": "nine derived lower-bound distances only"
+  }
 }

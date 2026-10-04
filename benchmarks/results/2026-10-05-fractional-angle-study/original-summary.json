@@ -569,7 +569,7 @@
       "final_alpha": 0.4925980865955353,
       "min_alpha": 0.4925980865955353,
       "max_alpha": 2.0,
-      "min_angle_distance_to_lower_boundary": 0.2151887317949574,
+      "min_angle_distance_to_lower_boundary": 0.21518873179495746,
       "min_angle_distance_to_upper_boundary": 1.107148722806249,
       "chart_domain_observations_valid": true
     },
@@ -578,7 +578,7 @@
       "final_alpha": 0.49259820580482483,
       "min_alpha": 0.49259820580482483,
       "max_alpha": 2.0,
-      "min_angle_distance_to_lower_boundary": 0.21518879139960218,
+      "min_angle_distance_to_lower_boundary": 0.21518879139960223,
       "min_angle_distance_to_upper_boundary": 1.107148722806249,
       "chart_domain_observations_valid": true
     },
@@ -587,7 +587,7 @@
       "final_alpha": 0.08795371651649475,
       "min_alpha": 0.08795371651649475,
       "max_alpha": 2.0,
-      "min_angle_distance_to_lower_boundary": 0.03579614067614484,
+      "min_angle_distance_to_lower_boundary": 0.035796140676144894,
       "min_angle_distance_to_upper_boundary": 1.107148722806249,
       "chart_domain_observations_valid": true
     },
@@ -596,7 +596,7 @@
       "final_alpha": 0.5183663964271545,
       "min_alpha": 0.5183663964271545,
       "max_alpha": 2.0,
-      "min_angle_distance_to_lower_boundary": 0.22733045125544477,
+      "min_angle_distance_to_lower_boundary": 0.22733045125544482,
       "min_angle_distance_to_upper_boundary": 1.107148722806249,
       "chart_domain_observations_valid": true
     },
@@ -605,7 +605,7 @@
       "final_alpha": 0.5183666944503784,
       "min_alpha": 0.5183666944503784,
       "max_alpha": 2.0,
-      "min_angle_distance_to_lower_boundary": 0.2273305853658955,
+      "min_angle_distance_to_lower_boundary": 0.22733058536589557,
       "min_angle_distance_to_upper_boundary": 1.107148722806249,
       "chart_domain_observations_valid": true
     },
@@ -614,7 +614,7 @@
       "final_alpha": 0.11542076617479324,
       "min_alpha": 0.11542076617479324,
       "max_alpha": 2.0,
-      "min_angle_distance_to_lower_boundary": 0.047224109416608095,
+      "min_angle_distance_to_lower_boundary": 0.04722410941660815,
       "min_angle_distance_to_upper_boundary": 1.107148722806249,
       "chart_domain_observations_valid": true
     },
@@ -623,7 +623,7 @@
       "final_alpha": 0.5012592077255249,
       "min_alpha": 0.5012592077255249,
       "max_alpha": 2.008530378341675,
-      "min_angle_distance_to_lower_boundary": 0.219261606579427,
+      "min_angle_distance_to_lower_boundary": 0.21926160657942706,
       "min_angle_distance_to_upper_boundary": 1.1037424067643027,
       "chart_domain_observations_valid": true
     },
@@ -632,7 +632,7 @@
       "final_alpha": 0.5012593865394592,
       "min_alpha": 0.5012593865394592,
       "max_alpha": 2.008530378341675,
-      "min_angle_distance_to_lower_boundary": 0.21926169598639417,
+      "min_angle_distance_to_lower_boundary": 0.21926169598639422,
       "min_angle_distance_to_upper_boundary": 1.1037424067643027,
       "chart_domain_observations_valid": true
     },
@@ -641,7 +641,7 @@
       "final_alpha": 0.09911132603883743,
       "min_alpha": 0.09911132603883743,
       "max_alpha": 2.0096328258514404,
-      "min_angle_distance_to_lower_boundary": 0.04042423272669721,
+      "min_angle_distance_to_lower_boundary": 0.04042423272669726,
       "min_angle_distance_to_upper_boundary": 1.1033029715206961,
       "chart_domain_observations_valid": true
     }

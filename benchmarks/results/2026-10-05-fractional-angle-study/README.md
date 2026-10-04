@@ -111,6 +111,24 @@ That is a follow-up proposal, not an intervention performed in this study.
 
 ## Verification And Reproduction
 
+### Portable Summary Correction
+
+Review identified a host-libm dependency: `atan(0.5)` differs by one ULP
+between supported environments. The current and archived summary tools
+now use fixed binary64 chart bounds. Only the nine derived lower-bound
+distances change; no losses, training records, saved tensors or tolerance
+decisions change. The original summary, summarizer and verification are
+retained as `original-*` files, with their source/artifact hashes intact.
+
+`client-sha256.json` still describes the original frozen training client.
+`verification-client-sha256.json` describes a separate read-only mirror
+whose sole changed file is the portable summarizer. The saved-state
+verifier was rerun against that mirror and the unchanged runtime/study,
+producing the current `checkpoint-verification.json`. This is derived
+reanalysis, not retraining, rescoring or a replacement of primary evidence.
+Public reconstruction tests forbid platform `atan` for both the current
+and archived tool; a lineage test bounds the correction to those nine fields.
+
 Training, completed resume and saved-state verification exited zero. The
 completed resume did not retrain or rescore; all 76 primary files, including
 72 checkpoints, remained unchanged through resume and verification. Eight
@@ -119,8 +137,9 @@ All 584 checked earlier study/client/runtime/preflight files were unchanged.
 
 The recipe passed 707 Python regressions. The verifier expansion passed
 751 regressions; its final finite-error hardening passed 86 targeted tests.
-The final publication-inclusive suite passed 755 tests without skips,
-including seven Torch-free public-data checks.
+The initial publication-inclusive suite passed 755 tests without skips.
+After the portability correction, 756 regressions and eight Torch-free
+public-data checks passed without skips.
 The diagnostics subtract f32 inputs in f64 so even large valid differences
 remain finite JSON values; training and comparison tolerances are unchanged.
 34 benchmark correctness tests passed without timing. Existing JIT
@@ -140,7 +159,8 @@ shasum -a 256 -c SHA256SUMS
 
 Private-state verification uses the frozen client/runtime and saved study:
 follow the protocol's `verify_fractional_gain_study.py --coordinate angle`
-command. Keep both verifier files together. Native and client build/launch
+command, with the separately inventoried verification-client mirror for
+the corrected summary. Keep both verifier files together. Native and client build/launch
 revisions differ intentionally; executable bytes are hash-bound.
 
 No weights, corpus text, native packages or raw private logs are published.
