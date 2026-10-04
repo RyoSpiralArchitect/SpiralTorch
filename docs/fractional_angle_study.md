@@ -12,6 +12,11 @@ short-filter loss gap nearly disappears. Final short-parameter tolerance
 checks nevertheless fail in all seeds; that result is preserved separately
 from successful saved-state verification and the quality measurements.
 
+[Full-normalization history windows](fractional_history_window.md) now provide
+the shared Rust/Python/WASM primitive for a separate mechanism test without
+silently replacing K=32 normalization with K=3. No such intervention is part
+of the frozen comparison above.
+
 ## Fixed Comparison
 
 | Arm | History | Shape Coordinate |

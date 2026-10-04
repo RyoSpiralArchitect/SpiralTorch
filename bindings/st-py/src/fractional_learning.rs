@@ -88,6 +88,12 @@ impl PyFractionalGlKernel {
         .to_string()
     }
 
+    fn validate_history_window(&self, lag_start: usize, lag_end: usize) -> PyResult<()> {
+        self.inner
+            .validate_history_window(lag_start..lag_end)
+            .map_err(value_error)
+    }
+
     fn forward(
         &self,
         py: Python<'_>,
@@ -203,6 +209,50 @@ impl PyFractionalGlKernel {
     ) -> PyResult<PyFractionalGlGainLearningBatch> {
         let input = read_f32(input, self.inner.max_values(), None)?;
         self.forward_history_log_gain(py, input, shape, axis, alpha, log_gain)
+    }
+
+    #[allow(clippy::too_many_arguments)] // The shared ND operator plus a half-open lag window.
+    fn forward_history_log_gain_window(
+        &self,
+        py: Python<'_>,
+        input: Vec<f32>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+        log_gain: f32,
+        lag_start: usize,
+        lag_end: usize,
+    ) -> PyResult<PyFractionalGlGainLearningBatch> {
+        py.detach(|| {
+            self.inner.forward_history_log_gain_window(
+                &input,
+                &shape,
+                axis,
+                alpha,
+                log_gain,
+                lag_start..lag_end,
+            )
+        })
+        .map(|inner| PyFractionalGlGainLearningBatch { inner })
+        .map_err(value_error)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Same controls as sequence transport.
+    fn forward_history_log_gain_window_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+        log_gain: f32,
+        lag_start: usize,
+        lag_end: usize,
+    ) -> PyResult<PyFractionalGlGainLearningBatch> {
+        let input = read_f32(input, self.inner.max_values(), None)?;
+        self.forward_history_log_gain_window(
+            py, input, shape, axis, alpha, log_gain, lag_start, lag_end,
+        )
     }
 }
 

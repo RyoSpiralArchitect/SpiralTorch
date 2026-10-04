@@ -1,6 +1,7 @@
 //! Immutable learning snapshots of the existing causal GL operator.
 
 mod angle;
+mod window;
 pub use angle::FractionalGlAngleChart;
 
 use crate::{
@@ -22,6 +23,8 @@ pub enum FractionalLearningError {
     LogGain,
     #[error("fractional history angle must satisfy -atan(1/2) < angle < pi/2")]
     HistoryAngle,
+    #[error("fractional history window requires 1 <= start <= end <= kernel_len")]
+    HistoryWindow,
     #[error(transparent)]
     Operator(#[from] FracErr),
 }

@@ -356,6 +356,7 @@ jobs:
           node bindings/st-wasm/tests/fractional_history.mjs "$module"
           node bindings/st-wasm/tests/fractional_history_l2.mjs "$module"
           node bindings/st-wasm/tests/fractional_history_log_gain.mjs "$module"
+          node bindings/st-wasm/tests/fractional_history_window.mjs "$module"
           node bindings/st-wasm/tests/fractional_angle_chart.mjs "$module"
           node bindings/st-wasm/tests/fractional_selective_vjp.mjs "$module"
           node bindings/st-wasm/tests/fractional_tiled_forward.mjs "$module"
@@ -715,6 +716,7 @@ jobs:
             bindings/st-py/tests/test_fractional_history.py \
             bindings/st-py/tests/test_fractional_history_l2.py \
             bindings/st-py/tests/test_fractional_history_log_gain.py \
+            bindings/st-py/tests/test_fractional_history_window.py \
             bindings/st-py/tests/test_fractional_gain_study.py \
             bindings/st-py/tests/test_fractional_gain_verification.py \
             bindings/st-py/tests/test_fractional_gain_results.py \

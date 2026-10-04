@@ -27,6 +27,8 @@ declare module "spiraltorch-wasm" {
         forward_history(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
         forward_history_l2(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, gain: number): FractionalGlLearningBatch;
         forward_history_log_gain(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, log_gain: number): FractionalGlGainLearningBatch;
+        validate_history_window(lag_start: number, lag_end: number): void;
+        forward_history_log_gain_window(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, log_gain: number, lag_start: number, lag_end: number): FractionalGlGainLearningBatch;
         free(): void;
     }
     export class FractionalGlGainLearningBatch {

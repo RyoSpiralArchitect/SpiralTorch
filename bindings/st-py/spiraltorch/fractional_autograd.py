@@ -75,6 +75,15 @@ def _history_gain(gain: float) -> float:
     return gain
 
 
+def _history_lag_window(window: Any, kernel: Any) -> tuple[int, int] | None:
+    if window is None:
+        return None
+    if not isinstance(window, (tuple, list)) or len(window) != 2 or any(type(v) is not int for v in window):
+        raise TypeError("lag_window must contain two integer bounds")
+    kernel.validate_history_window(*window)
+    return tuple(window)
+
+
 if torch is not None:
     class _FractionalGlAngleFunction(torch.autograd.Function):
         @staticmethod
@@ -152,11 +161,14 @@ if torch is not None:
 
     class _FractionalGlLogGainFunction(torch.autograd.Function):
         @staticmethod
-        def forward(ctx: Any, kernel: Any, value: Any, alpha: Any, log_gain: Any, axis: int) -> Any:
+        def forward(ctx: Any, kernel: Any, value: Any, alpha: Any, log_gain: Any, axis: int,
+                    lag_window: tuple[int, int] | None) -> Any:
             ctx.buffer_transport = _buffer_transport_available()
-            operation = getattr(kernel, "forward_history_log_gain" + ("_buffer" if ctx.buffer_transport else ""))
+            name = "forward_history_log_gain" + ("_window" if lag_window is not None else "")
+            operation = getattr(kernel, name + ("_buffer" if ctx.buffer_transport else ""))
             values = _buffer_values(value) if ctx.buffer_transport else _values(value)
-            ctx.snapshot = operation(values, list(value.shape), axis, alpha.detach().item(), log_gain.detach().item())
+            ctx.snapshot = operation(values, list(value.shape), axis, alpha.detach().item(),
+                                     log_gain.detach().item(), *(lag_window or ()))
             ctx.save_for_backward(value, alpha, log_gain)
             ctx.save_for_forward(value, alpha, log_gain)
             output = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
@@ -183,10 +195,10 @@ if torch is not None:
                     dg = getattr(ctx.snapshot, "vjp_log_gain" + suffix)(direction)
             return (None, None if dx is None else _transport_output(dx, value, ctx.buffer_transport),
                     None if da is None else torch.tensor(da, dtype=alpha.dtype, device=alpha.device),
-                    None if dg is None else torch.tensor(dg, dtype=log_gain.dtype, device=log_gain.device), None)
+                    None if dg is None else torch.tensor(dg, dtype=log_gain.dtype, device=log_gain.device), None, None)
 
         @staticmethod
-        def jvp(ctx: Any, _kernel: Any, dx: Any, da: Any, dg: Any, _axis: Any) -> Any:
+        def jvp(ctx: Any, _kernel: Any, dx: Any, da: Any, dg: Any, _axis: Any, _lag_window: Any) -> Any:
             value, _, _ = ctx.saved_tensors
             dx = torch.zeros_like(value) if dx is None else dx
             direction = _buffer_values(dx) if ctx.buffer_transport else _values(dx)
@@ -262,17 +274,21 @@ def _checked_kernel(value: Any, alpha: Any, axis: int, kernel: Any) -> Any:
 
 
 def fractional_gl_history_log_gain_autograd(value: Any, alpha: Any, log_gain: Any, *,
-                                           axis: int, kernel: Any = None) -> Any:
+                                           axis: int, kernel: Any = None,
+                                           lag_window: tuple[int, int] | None = None) -> Any:
     """Rust normalized history with independently differentiable log amplitude.
 
     Rust owns exp(log_gain), normalization and all three first-order derivatives.
     Alpha and log_gain must be scalar float32 tensors. Gain overflow/underflow
     fails closed; no clipping, higher-order AD or persistent prefix cache.
+    Optional half-open lag_window masks taps after full-kernel normalization;
+    it does not shorten or renormalize the kernel. Rust also masks its VJP/JVP.
     """
     kernel = _checked_kernel(value, alpha, axis, kernel)
     if not isinstance(log_gain, torch.Tensor) or log_gain.ndim != 0 or log_gain.dtype != torch.float32:
         raise TypeError("log_gain must be a scalar float32 tensor")
-    return _FractionalGlLogGainFunction.apply(kernel, value, alpha, log_gain, axis)
+    window = _history_lag_window(lag_window, kernel)
+    return _FractionalGlLogGainFunction.apply(kernel, value, alpha, log_gain, axis, window)
 
 
 if torch is None:
@@ -439,10 +455,32 @@ else:
         _state_schema = "spiraltorch.fractional_gain_history_adapter.v1"
 
         def __init__(self, features: int, *, initial_alpha: float = 0.5,
-                     initial_gain: float = 1.0, strength: float = 0.1, **kernel_options: Any) -> None:
+                     initial_gain: float = 1.0, strength: float = 0.1,
+                     lag_window: tuple[int, int] | None = None, **kernel_options: Any) -> None:
             initial_gain = _history_gain(initial_gain)
             super().__init__(features, initial_alpha=initial_alpha, strength=strength, **kernel_options)
+            self._lag_window = _history_lag_window(lag_window, self._kernel)
             self.log_gain = torch.nn.Parameter(torch.tensor(math.log(initial_gain), dtype=torch.float32))
+
+        @property
+        def lag_window(self) -> tuple[int, int] | None:
+            return self._lag_window
+
+        def get_extra_state(self) -> dict[str, Any]:
+            state = super().get_extra_state()
+            if self.lag_window is not None:
+                state["lag_window"] = list(self.lag_window)
+            return state
+
+        def set_extra_state(self, state: dict[str, Any]) -> None:
+            if self.lag_window is None:
+                return super().set_extra_state(state)
+            if not isinstance(state, dict) or state.get("lag_window") != list(self.lag_window):
+                raise ValueError("incompatible fractional history lag_window state")
+            # The saved kernel may differ from the constructor's recipe.
+            kernel = _kernel(**state["kernel"])
+            _history_lag_window(state["lag_window"], kernel)
+            super().set_extra_state({key: value for key, value in state.items() if key != "lag_window"})
 
         @property
         def gain(self) -> float:
@@ -461,7 +499,7 @@ else:
 
         def _history(self, value: Any, alpha: Any) -> Any:
             return fractional_gl_history_log_gain_autograd(value, alpha, self.log_gain,
-                                                          axis=1, kernel=self._kernel)
+                                                          axis=1, kernel=self._kernel, lag_window=self.lag_window)
 
 
     class FractionalAngleGainHistoryAdapter(FractionalGainHistoryAdapter):
@@ -476,14 +514,15 @@ else:
         _state_schema = "spiraltorch.fractional_angle_gain_history_adapter.v1"
 
         def __init__(self, features: int, *, initial_angle: float = 0.0,
-                     initial_gain: float = 1.0, strength: float = 0.1, **kernel_options: Any) -> None:
+                     initial_gain: float = 1.0, strength: float = 0.1,
+                     lag_window: tuple[int, int] | None = None, **kernel_options: Any) -> None:
             from . import FractionalGlAngleChart
 
             if isinstance(initial_angle, bool) or not isinstance(initial_angle, (int, float)):
                 raise TypeError("initial_angle must be a number")
             chart = FractionalGlAngleChart(initial_angle)
             super().__init__(features, initial_alpha=chart.alpha, initial_gain=initial_gain,
-                             strength=strength, **kernel_options)
+                             strength=strength, lag_window=lag_window, **kernel_options)
             gain = self.log_gain
             del self.log_alpha
             del self.log_gain
