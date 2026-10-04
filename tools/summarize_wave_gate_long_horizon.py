@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Summarize a completed, hash-sealed study without importing Torch or scoring again."""
+"""Summarize sealed receipts; optional checkpoint verification imports Torch, never scores."""
 
 import argparse
 import gzip
 import hashlib
+import io
 import json
 import math
 import statistics
@@ -283,6 +284,110 @@ def fractional_lag_report(config, runs, measured, sets):
     return contrast_report(config, measured, sets, contrasts), trajectories, parity
 
 
+def two_lag_state_parity(plan, runs, checkpoint_dir):
+    """Read hash-bound final states, not scalar norms or validation-update states."""
+    if checkpoint_dir is None:
+        return {str(seed): {"status": "unverified", "saved_gates_equal": None,
+                            "saved_named_adam_equal": None}
+                for seed in plan["config"]["seeds"]}
+    import torch
+
+    config, directory = plan["config"], Path(checkpoint_dir)
+    gates = ("gate", "local_gate")
+
+    def tensor_receipt(value, shape):
+        require(isinstance(value, torch.Tensor) and value.device.type == "cpu"
+                and value.layout == torch.strided and value.dtype == torch.float32
+                and tuple(value.shape) == shape and bool(torch.isfinite(value).all()),
+                "invalid checkpoint tensor")
+        raw = bytes(value.detach().contiguous().reshape(-1).view(torch.uint8).tolist())
+        return {"dtype": "float32", "shape": list(shape),
+                "sha256": hashlib.sha256(raw).hexdigest()}
+
+    def read_state(seed, arm):
+        key = f"{seed}:{arm}"
+        row, names = runs[key], ["gate", "local_gate"]
+        if arm == "history_fixed_two":
+            names = ["gate", "log_alpha", "local_gate"]
+        receipt = row["checkpoint"]
+        name = receipt["filename"]
+        require(isinstance(name, str) and Path(name).name == name
+                and "/" not in name and "\\" not in name
+                and name.startswith("checkpoint-") and name.endswith(".pt"),
+                "invalid checkpoint path")
+        path = directory / name
+        require(not path.is_symlink(), "checkpoint must not be a symlink")
+        raw = path.read_bytes()
+        require(hashlib.sha256(raw).hexdigest() == receipt["sha256"],
+                "checkpoint hash mismatch")
+        # Deserialize the exact bytes just hashed, with no arbitrary pickle objects.
+        saved = torch.load(io.BytesIO(raw), weights_only=True, map_location="cpu")
+        require(saved["study_id"] == plan["study_id"] and saved["run_key"] == key
+                and saved["cursor"] == config["steps"]
+                and saved.get("frozen_base_verified") is True
+                and saved["initial_parameter_sha256"] == row["initial_parameter_sha256"]
+                and saved["records"] == row["records"]
+                and saved["development"] == row["development"],
+                "checkpoint identity or endpoint receipts differ")
+        adapter, optimizer = saved["adapter"], saved["optimizer"]
+        # These study schemas serialize parameters in registration order. Adam's
+        # numeric IDs differ across arms because the frozen order occupies a slot.
+        require(list(adapter) == [*names, "_extra_state"], "checkpoint parameter names differ")
+        extra = adapter["_extra_state"]
+        require(extra.get("features") == config["features"]
+                and extra.get("strength") == config["strength"]
+                and all(extra.get("kernel", {}).get(k) == v for k, v in config["kernel"].items()),
+                "checkpoint recipe differs")
+        if arm == "lag2":
+            require(extra.get("schema") == "spiraltorch.ordinary_two_lag_control.v1"
+                    and extra.get("history_coefficients") == [-2.0, 1.0]
+                    and extra.get("accumulation_dtype") == "float64", "checkpoint recipe differs")
+        else:
+            require(extra.get("study_schema") == "spiraltorch.fractional_two_lag_control.v1"
+                    and extra.get("arm") == arm and extra.get("initial_alpha") == 2.0
+                    and extra.get("learnable_alpha") is False, "checkpoint recipe differs")
+            tensor_receipt(adapter["log_alpha"], ())
+            require(float(adapter["log_alpha"]) == row["final_log_alpha"]
+                    and float(adapter["log_alpha"].exp()) == row["final_alpha"] == 2.0,
+                    "checkpoint fixed order differs")
+        group_list = optimizer["param_groups"]
+        require(len(group_list) == 1, "checkpoint Adam groups differ")
+        group = group_list[0]
+        ids = group["params"]
+        require(len(ids) == len(names) and all(type(i) is int for i in ids)
+                and len(set(ids)) == len(ids), "checkpoint Adam parameter IDs differ")
+        by_name = dict(zip(names, ids))
+        require(set(optimizer["state"]) == {by_name[n] for n in gates},
+                "checkpoint Adam states missing or frozen order has state")
+        require(group.get("lr") == config["learning_rate"] and group.get("amsgrad") is False,
+                "checkpoint Adam configuration differs")
+        parameters, adam = {}, {}
+        for field in gates:
+            parameters[field] = tensor_receipt(adapter[field], (config["features"],))
+            state = optimizer["state"][by_name[field]]
+            require(set(state) == {"step", "exp_avg", "exp_avg_sq"}, "checkpoint Adam fields differ")
+            adam[field] = {name: tensor_receipt(value, () if name == "step" else (config["features"],))
+                           for name, value in state.items()}
+            require(float(state["step"]) == config["steps"], "checkpoint Adam cursor differs")
+        metadata = {k: v for k, v in group.items() if k != "params"}
+        metadata_raw = json.dumps(metadata, sort_keys=True, allow_nan=False).encode()
+        return {"checkpoint_sha256": receipt["sha256"], "gates": parameters, "named_adam": adam,
+                "adam_group_sha256": hashlib.sha256(metadata_raw).hexdigest()}
+
+    report = {}
+    for seed in config["seeds"]:
+        left, right = (read_state(seed, arm) for arm in ("lag2", "history_fixed_two"))
+        gates_equal = left["gates"] == right["gates"]
+        adam_equal = (left["named_adam"] == right["named_adam"]
+                      and left["adam_group_sha256"] == right["adam_group_sha256"])
+        report[str(seed)] = {
+            "status": "passed" if gates_equal and adam_equal else "failed",
+            "saved_gates_equal": gates_equal, "saved_named_adam_equal": adam_equal,
+            "states": {"lag2": left, "history_fixed_two": right},
+        }
+    return report
+
+
 def ema_trajectories(config, runs):
     initial = config.get("initial_decay")
     require(type(initial) in (int, float) and math.isfinite(initial) and 0 < initial < 1,
@@ -409,7 +514,7 @@ def gated_trajectories(config, runs, arms=("gated_tangent", "gated_elliptic")):
     return report
 
 
-def summarize(plan, result, journal, result_sha256):
+def summarize(plan, result, journal, result_sha256, *, checkpoint_dir=None):
     require(
         result["status"] == journal["status"] == "completed",
         "study is not completed",
@@ -420,6 +525,8 @@ def summarize(plan, result, journal, result_sha256):
     )
     require(journal["results_sha256"] == result_sha256, "result hash differs")
     config = plan["config"]
+    require(checkpoint_dir is None or config.get("schema") == "spiraltorch.fractional_two_lag_protocol.v1",
+            "checkpoint parity is supported only for the two-lag protocol")
     seeds, arms = config["seeds"], config["arms"]
     reference = config.get("reference_arm", "tangent")
     require(
@@ -540,7 +647,9 @@ def summarize(plan, result, journal, result_sha256):
             else "No seed interpretation supplied.",
             "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
             *comparison_notes[1:],
-            "This summary checks published receipts, not checkpoint contents or process termination.",
+            ("This summary also checks hash-bound final same-math checkpoint states, not process termination."
+             if checkpoint_dir is not None else
+             "This summary checks published receipts, not checkpoint contents or process termination."),
             "No speed or pristine-corpus generalization claim.",
         ],
     }
@@ -571,6 +680,15 @@ def summarize(plan, result, journal, result_sha256):
         summary["reference_arm"] = reference
         (summary["paired_fractional_contrasts"], summary["order_trajectories"],
          summary["same_math_receipt_parity"]) = fractional_lag_report(config, runs, measured, sets)
+        if config["schema"] == "spiraltorch.fractional_two_lag_protocol.v1":
+            states = two_lag_state_parity(plan, runs, checkpoint_dir)
+            summary["same_math_state_parity"] = states
+            receipts_equal = all(row["update_receipts_equal"] and row["development_equal"]
+                                 and all(row["endpoint_block_losses_equal"].values())
+                                 for row in summary["same_math_receipt_parity"].values())
+            summary["same_math_parity_status"] = (
+                "failed" if not receipts_equal or any(row["status"] == "failed" for row in states.values())
+                else "unverified" if checkpoint_dir is None else "passed")
     if config.get("schema") == "spiraltorch.elliptic_chart_step_protocol.v1":
         summary["reference_arm"] = reference
         summary["paired_factorial_contrasts"], summary["chart_step_trajectories"] = chart_step_report(config, runs, measured, sets)
@@ -582,6 +700,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("plan", "results", "journal", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
+    parser.add_argument("--checkpoint-dir", type=Path,
+                        help="Read final two-lag checkpoints for gate/named-Adam parity (requires Torch)")
     args = parser.parse_args()
     raw = {}
     for name in ("plan", "results", "journal"):
@@ -591,7 +711,8 @@ def main():
     hashes = {name: hashlib.sha256(value).hexdigest() for name, value in raw.items()}
     parsed = {name: json.loads(value) for name, value in raw.items()}
     summary = summarize(
-        parsed["plan"], parsed["results"], parsed["journal"], hashes["results"]
+        parsed["plan"], parsed["results"], parsed["journal"], hashes["results"],
+        checkpoint_dir=args.checkpoint_dir,
     )
     summary["input_sha256"] = hashes
     # Never replace an input or a previous derived record by accident.

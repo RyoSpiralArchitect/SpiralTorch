@@ -1,7 +1,9 @@
+import builtins
 import copy
 import importlib.util
 import json
 import math
+import sys
 from pathlib import Path
 
 import pytest
@@ -177,7 +179,7 @@ def test_two_lag_domain_budget_and_transitive_source_binding(client, monkeypatch
         assert config[key] == previous[key]
 
 
-def test_four_hf_arms_resume_and_same_math_training_matches(client, summary_module, tmp_path):
+def test_four_hf_arms_resume_and_same_math_training_matches(client, summary_module, tmp_path, monkeypatch):
     driver, config = client.study, recipe(client)
     tokens = torch.arange(48).reshape(8, 6) % 32
 
@@ -247,12 +249,66 @@ def test_four_hf_arms_resume_and_same_math_training_matches(client, summary_modu
                                   result_schema="spiraltorch.fractional_two_lag_study.v1")
     assert driver.completed_result(directory, journal, plan) == result
     plan["data"] = {"evaluation_block_hashes": {"tail": driver.block_hashes(tokens[:2])}}
-    report = summary_module.summarize(plan, result, journal, journal["results_sha256"])
+    original_import = builtins.__import__
+
+    def no_torch_import(name, *args, **kwargs):
+        assert name != "torch", "receipt-only summary must not import Torch"
+        return original_import(name, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, "__import__", no_torch_import)
+        report = summary_module.summarize(plan, result, journal, journal["results_sha256"])
+    assert report["same_math_parity_status"] == "unverified"
+    assert report["same_math_state_parity"]["41"] == {
+        "status": "unverified", "saved_gates_equal": None, "saved_named_adam_equal": None}
     assert report["order_trajectories"]["41:history_fixed_two"]["final_alpha"] == 2.
     assert report["order_trajectories"]["41:history_learned_two"]["nonzero_order_gradient_steps"] > 0
     assert report["same_math_receipt_parity"]["41"] == {
         "update_receipts_equal": True, "development_equal": True,
         "endpoint_block_losses_equal": {"tail": True}}
+    verified = summary_module.summarize(plan, result, journal, journal["results_sha256"],
+                                        checkpoint_dir=directory)
+    assert verified["same_math_parity_status"] == "passed"
+    states = verified["same_math_state_parity"]["41"]
+    assert states["saved_gates_equal"] and states["saved_named_adam_equal"]
+    assert set(states["states"]["history_fixed_two"]["named_adam"]) == {"gate", "local_gate"}
+    driver.atomic_json(directory / "plan.json", plan)
+    output = directory / "summary.json"
+    argv = [summary_module.__file__]
+    for name in ("plan", "results", "journal"):
+        argv.extend([f"--{name}", str(directory / f"{name}.json")])
+    argv.extend(["--output", str(output), "--checkpoint-dir", str(directory)])
+    monkeypatch.setattr(sys, "argv", argv)
+    summary_module.main()
+    cli_report = json.loads(output.read_text())
+    assert cli_report["same_math_state_parity"] == verified["same_math_state_parity"]
+    assert cli_report["same_math_parity_status"] == "passed"
+    assert cli_report["input_sha256"]["results"] == journal["results_sha256"]
+    # Equal scalar receipts and vector norms must not hide changed vector content.
+    for path in (("adapter", "gate"), ("adapter", "local_gate"),
+                 ("optimizer", "state", 0, "exp_avg"),
+                 ("optimizer", "state", 2, "exp_avg_sq")):
+        altered = copy.deepcopy(fixed)
+        tensor = altered
+        for part in path:
+            tensor = tensor[part]
+        before = tensor.clone()
+        tensor[0].neg_()
+        assert not torch.equal(before, tensor) and torch.equal(before.norm(), tensor.norm())
+        receipt = driver.save_checkpoint(directory, altered)
+        changed_result, changed_journal = copy.deepcopy(result), copy.deepcopy(journal)
+        key = "41:history_fixed_two"
+        next(row for row in changed_result["runs"] if row["run_key"] == key)["checkpoint"] = receipt
+        changed_journal["runs"][key]["checkpoint"] = receipt
+        changed_hash = driver.pilot.digest(json.dumps(changed_result, sort_keys=True).encode())
+        changed_journal["results_sha256"] = changed_hash
+        failed = summary_module.summarize(plan, changed_result, changed_journal, changed_hash,
+                                          checkpoint_dir=directory)
+        assert failed["same_math_receipt_parity"] == report["same_math_receipt_parity"]
+        assert failed["same_math_parity_status"] == "failed"
+        parity = failed["same_math_state_parity"]["41"]
+        assert parity["saved_gates_equal"] is (path[0] != "adapter")
+        assert parity["saved_named_adam_equal"] is (path[0] != "optimizer")
 
 
 def receipts(client):
@@ -326,3 +382,104 @@ def test_summary_keeps_two_lag_parity_failures_and_initialization_separate(clien
     _, _, parity = summary_module.fractional_lag_report(config, runs, measured, {"tail": []})
     assert not parity["41"]["update_receipts_equal"]
     assert not parity["41"]["endpoint_block_losses_equal"]["tail"]
+
+
+@pytest.fixture
+def saved_controls(client, tmp_path):
+    config, runs = receipts(client)
+    config["steps"] = 2
+    plan = {"study_id": "state-parity-fixture", "config": config}
+    saved = {}
+    for arm in ("lag2", "history_fixed_two"):
+        adapter = client.adapter_for(arm, config, 41)
+        optimizer = torch.optim.Adam(adapter.parameters(), lr=config["learning_rate"])
+        for _ in range(config["steps"]):
+            for parameter in adapter.parameters():
+                if parameter.requires_grad:
+                    parameter.grad = torch.ones_like(parameter)
+            optimizer.step()
+        key = f"41:{arm}"
+        if arm == "history_fixed_two":
+            log_alpha = float(adapter.log_alpha.detach())
+            runs[key]["final_log_alpha"] = log_alpha
+        saved[key] = {"study_id": plan["study_id"], "run_key": key, "cursor": config["steps"],
+                      "adapter": adapter.state_dict(), "optimizer": optimizer.state_dict(),
+                      "frozen_base_verified": True, "initial_parameter_sha256": "a" * 64,
+                      "records": runs[key]["records"], "development": runs[key]["development"]}
+        runs[key]["checkpoint"] = client.study.save_checkpoint(tmp_path, saved[key])
+    return plan, runs, saved, tmp_path
+
+
+@pytest.mark.parametrize("corruption", ["hash", "escape", "symlink", "identity", "cursor", "records",
+                                         "initial", "base", "recipe", "names", "dtype", "shape", "nan",
+                                         "frozen_adam", "missing_adam", "adam_step", "adam_ids", "adam_lr"])
+def test_state_parity_rejects_unbound_or_incomplete_checkpoints(client, summary_module, saved_controls, corruption):
+    plan, runs, saved, directory = saved_controls
+    key = "41:history_fixed_two"
+    value, row = saved[key], runs[key]
+    if corruption == "hash":
+        row["checkpoint"]["sha256"] = "0" * 64
+    elif corruption == "escape":
+        row["checkpoint"]["filename"] = "../" + row["checkpoint"]["filename"]
+    elif corruption == "symlink":
+        link = directory / "checkpoint-link.pt"
+        link.symlink_to(directory / row["checkpoint"]["filename"])
+        row["checkpoint"]["filename"] = link.name
+    else:
+        value = copy.deepcopy(value)
+        if corruption == "identity":
+            value["run_key"] = "43:history_fixed_two"
+        elif corruption == "cursor":
+            value["cursor"] -= 1
+        elif corruption == "records":
+            value["records"][0]["loss"] += .1
+        elif corruption == "initial":
+            value["initial_parameter_sha256"] = "b" * 64
+        elif corruption == "base":
+            value["frozen_base_verified"] = False
+        elif corruption == "recipe":
+            value["adapter"]["_extra_state"]["arm"] = "history_learned_two"
+        elif corruption == "names":
+            value["adapter"]["renamed_gate"] = value["adapter"].pop("gate")
+        elif corruption == "dtype":
+            value["adapter"]["gate"] = value["adapter"]["gate"].double()
+        elif corruption == "shape":
+            value["adapter"]["gate"] = value["adapter"]["gate"][None]
+        elif corruption == "nan":
+            value["optimizer"]["state"][0]["exp_avg"][0] = float("nan")
+        elif corruption == "frozen_adam":
+            value["optimizer"]["state"][1] = copy.deepcopy(value["optimizer"]["state"][0])
+        elif corruption == "missing_adam":
+            value["optimizer"]["state"].pop(2)
+        elif corruption == "adam_step":
+            value["optimizer"]["state"][2]["step"] -= 1
+        elif corruption == "adam_ids":
+            value["optimizer"]["param_groups"][0]["params"] = [0, 0, 2]
+        else:
+            value["optimizer"]["param_groups"][0]["lr"] *= 2
+        row["checkpoint"] = client.study.save_checkpoint(directory, value)
+    with pytest.raises(ValueError):
+        summary_module.two_lag_state_parity(plan, runs, directory)
+
+
+def test_state_parity_uses_named_adam_not_raw_ids_and_checks_group_settings(client, summary_module, saved_controls):
+    plan, runs, saved, directory = saved_controls
+    key = "41:history_fixed_two"
+    optimizer = saved[key]["optimizer"]
+    optimizer["param_groups"][0]["params"] = [30, 31, 32]
+    optimizer["state"] = {30+i: value for i, value in optimizer["state"].items()}
+    runs[key]["checkpoint"] = client.study.save_checkpoint(directory, saved[key])
+    assert summary_module.two_lag_state_parity(plan, runs, directory)["41"]["status"] == "passed"
+    optimizer["param_groups"][0]["eps"] *= 2
+    runs[key]["checkpoint"] = client.study.save_checkpoint(directory, saved[key])
+    result = summary_module.two_lag_state_parity(plan, runs, directory)["41"]
+    assert result["status"] == "failed" and not result["saved_named_adam_equal"]
+    assert result["saved_gates_equal"]
+
+
+def test_checkpoint_option_does_not_silently_ignore_other_protocols(summary_module):
+    plan = {"study_id": "s", "config": {"schema": "spiraltorch.fractional_lag_protocol.v1"}}
+    result = {"status": "completed", "study_id": "s"}
+    journal = {**result, "results_sha256": "a" * 64}
+    with pytest.raises(ValueError, match="only for the two-lag protocol"):
+        summary_module.summarize(plan, result, journal, "a" * 64, checkpoint_dir=".")

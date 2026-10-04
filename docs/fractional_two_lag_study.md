@@ -80,7 +80,19 @@ Freeze the client/helpers and runtime package throughout the run; use the
 same inputs and `--resume` to continue. Completed resume checks sealed
 results instead of rescoring. Summarize read-only with
 `tools/summarize_wave_gate_long_horizon.py` and its `--plan`, `--results`,
-`--journal` and new `--output` paths.
+`--journal`, `--checkpoint-dir` (the study directory), and new `--output` paths.
+Checkpoint verification imports Torch but never loads or scores the base model.
+It binds the exact loaded bytes to each recorded checkpoint hash and compares
+both final gate vectors and Adam states by parameter name, including group
+settings. Reports retain per-tensor hashes rather than publishing the weights.
+Without checkpoints, receipt-only summaries remain Torch-free and explicitly
+mark full same-math parity `unverified`; matching losses or norms cannot pass
+that criterion. A valid state mismatch is reported as `failed`, while corrupt
+hashes, identities or incomplete states are rejected.
+
+For an already frozen run, keep its client and training package unchanged.
+Bind a corrected postprocessor separately as offline analysis; never replace
+its original sources or claim that analysis is a fresh training replicate.
 
 Publish all numeric outcomes, verification receipts, hashes and reproduction
 instructions. Keep weights, corpus text, checkpoints, runtime packages and raw
