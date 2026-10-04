@@ -207,10 +207,11 @@ def update(model, adapter, optimizer, batch):
     optimizer.step()
     if hasattr(optimizer, "last_step_diagnostics"):
         record["optimizer_step"] = optimizer.last_step_diagnostics
+    angle_after_update = angle_snapshot(adapter)
     if not all(torch.isfinite(p).all() for p in adapter.parameters()):
         raise ValueError("nonfinite adapter update")
     record.update({f"{key}_after_update": value for key, value in gain_snapshot(adapter).items()})
-    record.update({f"{key}_after_update": value for key, value in angle_snapshot(adapter).items()})
+    record.update({f"{key}_after_update": value for key, value in angle_after_update.items()})
     if hasattr(adapter, "raw_mix"):
         record["raw_mix_after_update"] = float(adapter.raw_mix.detach())
     if hasattr(adapter, "log_alpha"):

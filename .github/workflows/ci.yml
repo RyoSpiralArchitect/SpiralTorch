@@ -720,6 +720,7 @@ jobs:
             bindings/st-py/tests/test_fractional_gain_results.py \
             bindings/st-py/tests/test_fractional_angle_chart.py \
             bindings/st-py/tests/test_fractional_angle_results.py \
+            bindings/st-py/tests/test_fractional_angle_study.py \
             bindings/st-py/tests/test_fractional_selective_vjp.py \
             bindings/st-py/tests/test_fractional_buffers.py \
             bindings/st-py/tests/test_fractional_memory_study.py \

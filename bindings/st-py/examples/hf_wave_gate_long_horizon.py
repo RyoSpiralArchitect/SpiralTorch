@@ -33,6 +33,15 @@ def identity(payload):
     return pilot.digest(json.dumps(payload, sort_keys=True, allow_nan=False).encode())
 
 
+class TerminalStudyError(ValueError):
+    """A declared protocol failure, not an interruption eligible for replay."""
+
+    def __init__(self, message, *, details):
+        super().__init__(message)
+        identity(details)
+        self.details = copy.deepcopy(details)
+
+
 def atomic_json(path, value):
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".journal-", suffix=".tmp")
     try:
@@ -133,6 +142,8 @@ def per_block_loss(model, blocks, batch_size):
 
 
 def endpoint_gate(journal, plan, directory):
+    require(journal.get("status") != "terminal_failure" and "terminal_failure" not in journal,
+            "terminal protocol failure locks endpoint evaluation")
     expected = [
         f"{seed}:{arm}"
         for seed in plan["config"]["seeds"]
@@ -194,6 +205,8 @@ def run_training(
     adapter_factory=None,
     optimizer_factory=None,
 ):
+    require(journal.get("status") != "terminal_failure" and "terminal_failure" not in journal,
+            "terminal protocol failure cannot resume")
     config, study_id = plan["config"], plan["study_id"]
     base_hash = pilot.model_digest(model)
     require(base_hash == plan["base_parameter_sha256"], "base model differs from plan")
@@ -258,6 +271,7 @@ def run_training(
                     "checkpoint batch history mismatch",
                 )
             parent.add_module(child, torch.nn.Sequential(original, adapter))
+            phase, attempted_step = "initial_identity", 0
             try:
                 if cursor == 0:
                     with torch.no_grad():
@@ -271,12 +285,14 @@ def run_training(
                         "adapter is not identity initialized",
                     )
                 for index in range(cursor, config["steps"]):
+                    phase, attempted_step = "primary_update", index + 1
                     row = pilot.update(model, adapter, optimizer, train[batches[index]])
                     row.update(step=index + 1, batch_indices=batches[index])
                     records.append(row)
                     if (index + 1) % config[
                         "evaluate_every"
                     ] == 0 or index + 1 == config["steps"]:
+                        phase = "development"
                         development.append(
                             {
                                 "step": index + 1,
@@ -337,12 +353,14 @@ def run_training(
                     endpoint["cursor"] == config["steps"], "missing final checkpoint"
                 )
                 # These two updates verify continuation, never replace the frozen endpoint.
+                phase, attempted_step = "continuation_reference", config["steps"] + 1
                 pilot.update(model, adapter, optimizer, train[batches[-1]])
                 restored = make_adapter(arm, config, seed, adapter_factory)
                 restored.load_state_dict(endpoint["adapter"])
                 resumed = make_optimizer(restored, arm, config, optimizer_factory)
                 resumed.load_state_dict(copy.deepcopy(endpoint["optimizer"]))
                 parent.add_module(child, torch.nn.Sequential(original, restored))
+                phase = "continuation_replay"
                 pilot.update(model, restored, resumed, train[batches[-1]])
                 require(
                     pilot.equal_state(adapter.state_dict(), restored.state_dict()),
@@ -352,6 +370,20 @@ def run_training(
                     pilot.equal_state(optimizer.state_dict(), resumed.state_dict()),
                     "next optimizer state differs",
                 )
+            except TerminalStudyError as error:
+                journal["status"] = "terminal_failure"
+                journal["terminal_failure"] = {
+                    "schema": "spiraltorch.terminal_study_failure.v1",
+                    "study_id": study_id, "run_key": key, "phase": phase,
+                    "attempted_step": attempted_step,
+                    "completed_primary_updates_in_run": len(records),
+                    "failed_update_resumable": False,
+                    "optimizer_step_may_have_executed": phase in {
+                        "primary_update", "continuation_reference", "continuation_replay"},
+                    "details": error.details,
+                }
+                atomic_json(directory / "journal.json", journal)
+                raise
             finally:
                 parent.add_module(child, original)
             require(pilot.model_digest(model) == base_hash, "frozen base changed")
