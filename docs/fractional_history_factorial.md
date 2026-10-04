@@ -94,6 +94,24 @@ Torch-free and does not load model weights. The optional `--checkpoint-dir`
 is specific to the earlier two-lag parity study; do not use it here or imply
 that scalar receipts establish full saved-state verification.
 
+After completion, `tools/verify_fractional_history_factorial.py` can check
+the private saved states without retraining or loading the base weights.
+Use the frozen runtime and five-file client on `PYTHONPATH`, with Python
+`-P -B` so the live tools directory does not shadow the frozen summarizer.
+Pass `--study`, `--prior-study` (the completed two-lag study),
+`--client-manifest`, `--runtime-manifest`, `--summary` and a new `--output`.
+It checks the exact runtime inventory, recipe, dtype/shape, named Adam
+moments, cursor and reconstructed summary **bytes**. Source-code and output
+hashes are distinct. Historical raw-full replay is a separate outcome:
+`mismatch` is retained, not converted into extra independent seeds or a win.
+The saved-state check validates sealed continuation receipts; it does not
+itself execute a new model update or re-establish quality on fresh data.
+Its post-hoc unit-impulse probe sends an impulse through the saved recipe's
+Rust kernel to describe coefficient norm and energy at lags >= 3. It never
+reconstructs GL coefficients in Python. This auxiliary description was not
+a primary selection criterion and does not measure hidden-state variance or
+prove a long-memory quality benefit.
+
 Publish complete numerical outcomes, verification records, hashes and
 reproduction instructions. Keep weights, corpus text, runtime packages and
 raw logs local. Passing preflight or a running job is not a completed study.
