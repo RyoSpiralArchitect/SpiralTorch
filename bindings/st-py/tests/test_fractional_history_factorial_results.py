@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,11 @@ def read(name):
     return json.loads(gzip.decompress(raw) if name.endswith(".gz") else raw)
 
 
+def publication_entries(root):
+    return {p.name for p in root.iterdir() if p.name != "SHA256SUMS"
+            and not (p.name == "__pycache__" and p.is_dir() and not p.is_symlink())}
+
+
 @pytest.mark.parametrize("source", [ROOT / "tools/summarize_wave_gate_long_horizon.py",
                                     RESULT / "summarize_wave_gate_long_horizon.py"])
 def test_public_summary_rebuilds_without_torch(source, monkeypatch):
@@ -32,6 +38,7 @@ def test_public_summary_rebuilds_without_torch(source, monkeypatch):
         return original(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", no_model_import)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
     spec = importlib.util.spec_from_file_location("published_history_factorial_summary", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -52,7 +59,7 @@ def test_complete_publication_has_consistent_hashes_and_separate_replay_criterio
         assert Path(name).name == name and name not in manifest
         assert not (RESULT / name).is_symlink() and sha(RESULT / name) == expected
         manifest[name] = expected
-    assert set(manifest) == {p.name for p in RESULT.iterdir() if p.name != "SHA256SUMS"}
+    assert set(manifest) == publication_entries(RESULT)
     assert not any(p.suffix in {".pt", ".so", ".safetensors", ".log"} for p in RESULT.iterdir())
     validation, summary = read("validation.json"), read("summary.json")
     verification, plan, journal = read("checkpoint-verification.json"), read("plan.json.gz"), read("journal.json")
@@ -87,3 +94,13 @@ def test_complete_publication_has_consistent_hashes_and_separate_replay_criterio
             assert description["coefficient_l2"] == pytest.approx(5**.5, rel=2e-7)
         if key.endswith("_short"):
             assert description["lag_3_plus_energy_fraction"] == 0
+
+
+def test_inventory_ignores_only_a_regular_bytecode_cache_directory(tmp_path):
+    (tmp_path / "record.json").write_text("{}")
+    (tmp_path / "__pycache__").write_text("not a directory")
+    assert publication_entries(tmp_path) == {"record.json", "__pycache__"}
+    (tmp_path / "__pycache__").unlink()
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "unexpected").mkdir()
+    assert publication_entries(tmp_path) == {"record.json", "unexpected"}
