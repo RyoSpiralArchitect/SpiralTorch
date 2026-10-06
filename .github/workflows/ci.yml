@@ -712,6 +712,7 @@ jobs:
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
             bindings/st-py/tests/test_topos_capture.py \
+            bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \
             bindings/st-py/tests/test_geometry_optional_dependency.py \

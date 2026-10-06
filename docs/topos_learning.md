@@ -47,3 +47,6 @@ bulk with recurrence recomputation, public captured bulk, and an independent
 Torch finite unroll. Native routes must match bitwise; Torch comparisons allow
 the documented f32 tolerance. `tools/probe_topos_capture_wasm.mjs` checks scalar
 WASM parity, learning and saved-gate continuation in Node, not WebGPU speed.
+
+The [matched measurements and single-update migration replay](../benchmarks/results/2026-10-07-topos-captured-vjp/README.md)
+publish all conditions, hashes and numerical receipts, not model weights or text.
