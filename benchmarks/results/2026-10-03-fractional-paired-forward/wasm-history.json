@@ -1,0 +1,1 @@
+{"schema":"spiraltorch.fractional_history_wasm.v1","updates":500,"initial_loss":0.09122299140446592,"final_loss":0.0002418502445146712,"learned_alpha":0.8955443224831294,"nonzero_order_steps":499,"scope":"Synthetic joint gate/order learning, not pretrained quality, unique parameter recovery or speed"}

@@ -97,6 +97,12 @@ actual wasm32 synthetic fit learns its target order. This is finite-history,
 host-f32 learning connectivity, not pretrained quality or resident performance.
 Matched pointwise/fixed-order/learned-order controls precede any combination
 with the geometric adapters above.
+The [paired Rust forward](../benchmarks/results/2026-10-03-fractional-paired-forward/README.md)
+shares output/order-differential input reads and tiles trailing features without
+changing that map. Native-binary GPT-2 update parity and actual wasm32 regressions
+pass. Its matched Python-inclusive CPU operator time improves, while remaining
+slower than the ordinary Torch reference; list-based host transport remains a
+separate optimization target. This is not a model-quality or resident-GPU claim.
 The [fractional LM protocol](fractional_memory_study.md) now makes these three
 active controls executable with paired schedules, a shared frozen baseline,
 fixed/learned-order receipts and exact interruption/resume tests. The

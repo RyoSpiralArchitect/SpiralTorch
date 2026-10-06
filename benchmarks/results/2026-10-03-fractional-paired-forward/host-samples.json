@@ -1,0 +1,515 @@
+{
+  "schema": "spiraltorch.numeric_host_samples.v1",
+  "samples": [
+    {
+      "process": "baseline-full-1x256x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "b3c55d81b65527c4be28e1b72db996267a29fa377cb59cac3f35eb7357adc19d",
+      "samples": [
+        {
+          "user_percent": 36.96,
+          "system_percent": 17.56,
+          "idle_percent": 45.46
+        },
+        {
+          "user_percent": 36.7,
+          "system_percent": 10.77,
+          "idle_percent": 53.15
+        }
+      ]
+    },
+    {
+      "process": "baseline-full-1x256x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "a7b0995d876bb86477c381bde0c5b0523870481a83381b7dec6ae8814474dc12",
+      "samples": [
+        {
+          "user_percent": 25.28,
+          "system_percent": 21.1,
+          "idle_percent": 53.69
+        },
+        {
+          "user_percent": 21.38,
+          "system_percent": 13.17,
+          "idle_percent": 65.43
+        }
+      ]
+    },
+    {
+      "process": "baseline-full-1x256x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "3dd2cdfa8b0f21a79ff209fdf2ce4cc28aca9b28cb5dcf7dcc0be9d28296e146",
+      "samples": [
+        {
+          "user_percent": 37.31,
+          "system_percent": 23.86,
+          "idle_percent": 38.82
+        },
+        {
+          "user_percent": 28.84,
+          "system_percent": 17.96,
+          "idle_percent": 53.18
+        }
+      ]
+    },
+    {
+      "process": "baseline-full-2x128x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "d70e4da0bf9f2abc8e8266456f7ea5cc02405b3afa5c4edf7aa0b42cb1249e32",
+      "samples": [
+        {
+          "user_percent": 34.5,
+          "system_percent": 25.25,
+          "idle_percent": 40.69
+        },
+        {
+          "user_percent": 45.99,
+          "system_percent": 18.5,
+          "idle_percent": 35.49
+        }
+      ]
+    },
+    {
+      "process": "baseline-full-2x128x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "713f44339742ba034eb1b639fa80fbab2954f83470d289acd9f9eec001f2f2b4",
+      "samples": [
+        {
+          "user_percent": 20.16,
+          "system_percent": 20.33,
+          "idle_percent": 59.5
+        },
+        {
+          "user_percent": 21.7,
+          "system_percent": 8.3,
+          "idle_percent": 70.62
+        }
+      ]
+    },
+    {
+      "process": "baseline-full-2x128x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "0758ad62788f1e02fee140c062ee057890faf8a5c6621894182a0d1968123aa5",
+      "samples": [
+        {
+          "user_percent": 22.26,
+          "system_percent": 21.74,
+          "idle_percent": 55.99
+        },
+        {
+          "user_percent": 21.65,
+          "system_percent": 13.44,
+          "idle_percent": 64.89
+        }
+      ]
+    },
+    {
+      "process": "baseline-history-1x256x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "4e0159037ab81a1f930b0e9e19f8623931f87d25f17afc1271bfc84f65c78d32",
+      "samples": [
+        {
+          "user_percent": 17.26,
+          "system_percent": 17.6,
+          "idle_percent": 65.12
+        },
+        {
+          "user_percent": 29.45,
+          "system_percent": 11.81,
+          "idle_percent": 58.72
+        }
+      ]
+    },
+    {
+      "process": "baseline-history-1x256x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "9efb2f715d53d239d6fa28c26c0f20f622c965ca02ec0ed141260bb4345dd057",
+      "samples": [
+        {
+          "user_percent": 20.41,
+          "system_percent": 20.6,
+          "idle_percent": 59.51
+        },
+        {
+          "user_percent": 30.36,
+          "system_percent": 18.23,
+          "idle_percent": 51.39
+        }
+      ]
+    },
+    {
+      "process": "baseline-history-1x256x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "5c4f306b2cc79f8c554bfd84bfa3165116c4a04617e8e8dad08415d512ea5c89",
+      "samples": [
+        {
+          "user_percent": 17.36,
+          "system_percent": 14.93,
+          "idle_percent": 67.7
+        },
+        {
+          "user_percent": 26.3,
+          "system_percent": 15,
+          "idle_percent": 58.95
+        }
+      ]
+    },
+    {
+      "process": "baseline-history-2x128x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "1d865d74a84e828dcfd453d30f8bd8d8afe45c6a8ea04993513c5be262206ec2",
+      "samples": [
+        {
+          "user_percent": 42.71,
+          "system_percent": 23.95,
+          "idle_percent": 33.33
+        },
+        {
+          "user_percent": 26.19,
+          "system_percent": 19.32,
+          "idle_percent": 54.48
+        }
+      ]
+    },
+    {
+      "process": "baseline-history-2x128x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "251492c8a95b17bb1a4b5f747cc7b1b378d3b964c90d01368c4a4c0e68b06282",
+      "samples": [
+        {
+          "user_percent": 19.96,
+          "system_percent": 20.63,
+          "idle_percent": 59.4
+        },
+        {
+          "user_percent": 22.95,
+          "system_percent": 13.9,
+          "idle_percent": 63.13
+        }
+      ]
+    },
+    {
+      "process": "baseline-history-2x128x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "7fcb823db7c3b38b7afaeab9821bd631deea7b080427fdff714b317dbd0e7904",
+      "samples": [
+        {
+          "user_percent": 30.3,
+          "system_percent": 24.77,
+          "idle_percent": 45.19
+        },
+        {
+          "user_percent": 22.87,
+          "system_percent": 14.71,
+          "idle_percent": 62.41
+        }
+      ]
+    },
+    {
+      "process": "paired-full-1x256x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "95a435ed52d17bb4ec32821ecf141399020d1a00d8dcef0aca8ce3b28d1b46d5",
+      "samples": [
+        {
+          "user_percent": 24.75,
+          "system_percent": 22.5,
+          "idle_percent": 52.73
+        },
+        {
+          "user_percent": 20.24,
+          "system_percent": 9.9,
+          "idle_percent": 69.84
+        }
+      ]
+    },
+    {
+      "process": "paired-full-1x256x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "312d09cf7bd315586bd28bd460925164dbcd3d8bbbecd212a53533d2d780ecbf",
+      "samples": [
+        {
+          "user_percent": 22.1,
+          "system_percent": 20.4,
+          "idle_percent": 57.48
+        },
+        {
+          "user_percent": 27.86,
+          "system_percent": 16.5,
+          "idle_percent": 55.63
+        }
+      ]
+    },
+    {
+      "process": "paired-full-1x256x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "3301862dc1e0a9faf77fc0732fabe2832a28d03e23a08da6f5a22e6c92d652a4",
+      "samples": [
+        {
+          "user_percent": 18.78,
+          "system_percent": 20.86,
+          "idle_percent": 60.34
+        },
+        {
+          "user_percent": 21.39,
+          "system_percent": 10.48,
+          "idle_percent": 68.12
+        }
+      ]
+    },
+    {
+      "process": "paired-full-2x128x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "61143e7c5dcc42099db8d206ddc470df4d22c4c20e3716f6fe6eb9d5a82e6f1d",
+      "samples": [
+        {
+          "user_percent": 25.3,
+          "system_percent": 22.37,
+          "idle_percent": 52.58
+        },
+        {
+          "user_percent": 31.5,
+          "system_percent": 16.78,
+          "idle_percent": 52.15
+        }
+      ]
+    },
+    {
+      "process": "paired-full-2x128x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "b3e568072284d44a7a65145c4333bc6930a5546cf4e733d24f0aadcfee9d2ad7",
+      "samples": [
+        {
+          "user_percent": 26.51,
+          "system_percent": 24.92,
+          "idle_percent": 48.56
+        },
+        {
+          "user_percent": 20.8,
+          "system_percent": 12.88,
+          "idle_percent": 67.2
+        }
+      ]
+    },
+    {
+      "process": "paired-full-2x128x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "2bda818298d9bfd67502aedc1f72f3e1bca8747f85ce61886bec9e1f9f22501d",
+      "samples": [
+        {
+          "user_percent": 15.2,
+          "system_percent": 15.73,
+          "idle_percent": 69.5
+        },
+        {
+          "user_percent": 30.5,
+          "system_percent": 17.74,
+          "idle_percent": 51.74
+        }
+      ]
+    },
+    {
+      "process": "paired-history-1x256x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "7d56578bcf656e908a8afaccfabb6a48e1712a0762ee7086daa3710d5796485e",
+      "samples": [
+        {
+          "user_percent": 20.54,
+          "system_percent": 20.71,
+          "idle_percent": 58.73
+        },
+        {
+          "user_percent": 27.71,
+          "system_percent": 16.59,
+          "idle_percent": 55.69
+        }
+      ]
+    },
+    {
+      "process": "paired-history-1x256x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "761f3a2b8472604e663ef058dcd6c32af6bab1baff36074438084514dda71bee",
+      "samples": [
+        {
+          "user_percent": 18.41,
+          "system_percent": 15.2,
+          "idle_percent": 66.38
+        },
+        {
+          "user_percent": 24.17,
+          "system_percent": 14.5,
+          "idle_percent": 61.31
+        }
+      ]
+    },
+    {
+      "process": "paired-history-1x256x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "4401c846e2e7e6127f167199b5a447f38046295f3e5633da43e87c4e9acfe1d4",
+      "samples": [
+        {
+          "user_percent": 26.84,
+          "system_percent": 21.47,
+          "idle_percent": 51.68
+        },
+        {
+          "user_percent": 23.63,
+          "system_percent": 14.19,
+          "idle_percent": 62.16
+        }
+      ]
+    },
+    {
+      "process": "paired-history-2x128x768-repeat1",
+      "kind": "timings",
+      "log_sha256": "efb5d81fc5a041a1021c0b7cf42cc95496acffc7d3c5ed8c7516625313768f3d",
+      "samples": [
+        {
+          "user_percent": 23.58,
+          "system_percent": 23.42,
+          "idle_percent": 52.99
+        },
+        {
+          "user_percent": 22.24,
+          "system_percent": 10.2,
+          "idle_percent": 67.54
+        }
+      ]
+    },
+    {
+      "process": "paired-history-2x128x768-repeat2",
+      "kind": "timings",
+      "log_sha256": "ab8e6a16bdf3df29271ba35836e59ac8baccdec7b56de3377dbfb843bddc5827",
+      "samples": [
+        {
+          "user_percent": 19.69,
+          "system_percent": 17.48,
+          "idle_percent": 62.81
+        },
+        {
+          "user_percent": 23.81,
+          "system_percent": 13.63,
+          "idle_percent": 62.54
+        }
+      ]
+    },
+    {
+      "process": "paired-history-2x128x768-repeat3",
+      "kind": "timings",
+      "log_sha256": "f57fa22bd297741e8895afc9f9bcb00d929506be7559ba227f27293c89ff6fdc",
+      "samples": [
+        {
+          "user_percent": 37.1,
+          "system_percent": 22.9,
+          "idle_percent": 40.7
+        },
+        {
+          "user_percent": 23.53,
+          "system_percent": 11.5,
+          "idle_percent": 64.95
+        }
+      ]
+    },
+    {
+      "process": "baseline-repeat1",
+      "kind": "rust",
+      "log_sha256": "0252edb4f35c6010536de4fb2fea81aee8170f19ca7bae726e12a03d4a9303f4",
+      "samples": [
+        {
+          "user_percent": 27.22,
+          "system_percent": 27.22,
+          "idle_percent": 45.54
+        },
+        {
+          "user_percent": 23.5,
+          "system_percent": 13.2,
+          "idle_percent": 63.29
+        }
+      ]
+    },
+    {
+      "process": "baseline-repeat2",
+      "kind": "rust",
+      "log_sha256": "10b686a6185ea47e2d9838ca6516c6fe3678fbe055580acbf067bcf184ecf7de",
+      "samples": [
+        {
+          "user_percent": 18.13,
+          "system_percent": 15.49,
+          "idle_percent": 66.37
+        },
+        {
+          "user_percent": 21.78,
+          "system_percent": 13.56,
+          "idle_percent": 64.65
+        }
+      ]
+    },
+    {
+      "process": "baseline-repeat3",
+      "kind": "rust",
+      "log_sha256": "069127d757403898372c3c063a4ad9e953c535b21a1a128722ac8ac9d7e4c032",
+      "samples": [
+        {
+          "user_percent": 24.54,
+          "system_percent": 20.7,
+          "idle_percent": 54.75
+        },
+        {
+          "user_percent": 22.2,
+          "system_percent": 11.72,
+          "idle_percent": 66.7
+        }
+      ]
+    },
+    {
+      "process": "paired-repeat1",
+      "kind": "rust",
+      "log_sha256": "f54ed55543bb5d23647035dc8eead40630a8c2f9f0221512cf9e736f4053f415",
+      "samples": [
+        {
+          "user_percent": 15.2,
+          "system_percent": 19.4,
+          "idle_percent": 65.38
+        },
+        {
+          "user_percent": 22.87,
+          "system_percent": 12.54,
+          "idle_percent": 64.57
+        }
+      ]
+    },
+    {
+      "process": "paired-repeat2",
+      "kind": "rust",
+      "log_sha256": "6fc35f8f9c8766b44705b8b4be74d16b121d66fcae6b7fdc80ba8705b1433d73",
+      "samples": [
+        {
+          "user_percent": 19.93,
+          "system_percent": 20.78,
+          "idle_percent": 59.28
+        },
+        {
+          "user_percent": 21.25,
+          "system_percent": 14.26,
+          "idle_percent": 64.48
+        }
+      ]
+    },
+    {
+      "process": "paired-repeat3",
+      "kind": "rust",
+      "log_sha256": "72aebcbaead7793229655f961eeb69f14a7ef31ebd849bbb5ba3cbb68e98132f",
+      "samples": [
+        {
+          "user_percent": 15.82,
+          "system_percent": 19.82,
+          "idle_percent": 64.34
+        },
+        {
+          "user_percent": 21.67,
+          "system_percent": 9.35,
+          "idle_percent": 68.96
+        }
+      ]
+    }
+  ]
+}

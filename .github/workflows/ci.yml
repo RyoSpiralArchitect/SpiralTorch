@@ -166,6 +166,7 @@ jobs:
       - name: build + test core
         run: |
           cargo test --locked -p st-frac --release --test fft_numerics --test learning --test history_learning --test selective_learning
+          cargo test --locked -p st-frac --release --lib learning::tests
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
       - name: test upper stack
@@ -197,6 +198,7 @@ jobs:
       - name: build + test core
         run: |
           cargo test --locked -p st-frac --release --test fft_numerics --test learning --test history_learning --test selective_learning
+          cargo test --locked -p st-frac --release --lib learning::tests
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
   wgpu-macos:
@@ -353,6 +355,7 @@ jobs:
           node bindings/st-wasm/tests/fractional_learning.mjs "$module"
           node bindings/st-wasm/tests/fractional_history.mjs "$module"
           node bindings/st-wasm/tests/fractional_selective_vjp.mjs "$module"
+          node bindings/st-wasm/tests/fractional_tiled_forward.mjs "$module"
           node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
       - name: Portable NN plans without WebGPU

@@ -1,0 +1,12 @@
+{
+  "schema": "spiraltorch.fractional_rust_forward_timing_plan.v1",
+  "repetitions": 3,
+  "iterations": 12,
+  "warmup": 2,
+  "order": "baseline,paired for odd repetitions; paired,baseline for even repetitions",
+  "planned_at": "2026-10-03T12:43:14.376Z",
+  "baseline_binary_sha256": "fc6d87babc44e19bf6d6bd5d78d1227d953cf2928151c3635036ae9c19ea24dc",
+  "paired_binary_sha256": "347017de9a4ef62af7eb19aed0a62c3ad2237daf619cae5e7d013ee6d801b75b",
+  "source_sha256": "77ea2e7f8ec304e3362e299e6c1e3ee45b53ba1a3192a6da77d2d2d6e80863e6",
+  "scope": "Pure Rust snapshot forward plus alpha VJP; excludes bindings/model/output inspection/drop; sequential fixed case order in each process; ambient load, no own build/test overlap."
+}
