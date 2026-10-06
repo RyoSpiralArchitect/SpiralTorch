@@ -297,6 +297,11 @@ node bindings/st-wasm/tests/fractional_history_l2.mjs <node-bindgen-module>
 Its synthetic gate/order fit is an execution test,
 not evidence of pretrained quality, unique order recovery or a speed win.
 
+The [history-length x coefficient-energy protocol](fractional_history_factorial.md)
+crosses K=3/K=32 with raw/L2-normalized learning from the same alpha=2 filter.
+It tests whether the preceding effect survives a fixed coefficient norm,
+without calling that constraint fixed hidden-state variance or a speed win.
+
 These fixtures test the learning connection, not pretrained quality, unique
 parameter recovery or throughput. Independent gates are a structural
 hypothesis, not evidence that fractional history improves language modeling.

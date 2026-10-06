@@ -284,6 +284,59 @@ def fractional_lag_report(config, runs, measured, sets):
     return contrast_report(config, measured, sets, contrasts), trajectories, parity
 
 
+def history_factorial_report(config, runs, measured, sets):
+    arms = {"history_raw_short", "history_raw_full", "history_l2_short", "history_l2_full"}
+    require(set(config["arms"]) == arms and config.get("reference_arm") == "history_raw_full",
+            "incomplete history factorial design")
+    require(type(config.get("features")) is int and config["features"] > 0,
+            "invalid history feature count")
+    require(type(config.get("initial_alpha")) in (int, float) and config["initial_alpha"] == 2,
+            "history initial order differs")
+    require(type(config.get("history_l2_gain")) in (int, float)
+            and config["history_l2_gain"] == math.sqrt(5), "history initial filter energy differs")
+    kernel = config.get("kernel", {})
+    require(type(config.get("short_kernel_len")) is int and config["short_kernel_len"] == 3
+            and type(kernel.get("kernel_len")) is int and kernel["kernel_len"] > 3
+            and type(kernel.get("step")) in (int, float) and kernel["step"] == 1,
+            "history factorial kernels differ")
+    trajectories, initial_parity = {}, {}
+    fields = ("loss", "gate_gradient_l2", "local_gate_gradient_l2",
+              "gate_before_update_l2", "local_gate_before_update_l2")
+    for seed in config["seeds"]:
+        hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256") for arm in arms}
+        require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
+                "history initial parameters are not paired")
+        for arm in config["arms"]:
+            row = runs[f"{seed}:{arm}"]
+            require(type(row.get("parameter_count")) is int
+                    and type(row.get("trainable_parameter_count")) is int
+                    and row["parameter_count"] == row["trainable_parameter_count"] == 2*config["features"]+1,
+                    "history parameter counts differ")
+            require(bool(row["records"]) and all(
+                type(r.get(k)) in (int, float) and math.isfinite(r[k]) and r[k] >= 0
+                for r in row["records"] for k in fields), "invalid history update receipt")
+            require(row["records"][0]["gate_before_update_l2"] == 0
+                    and row["records"][0]["local_gate_before_update_l2"] == 0,
+                    "history gates are not identity initialized")
+            trajectories[f"{seed}:{arm}"] = order_trajectory(row, 2., True)
+        first = runs[f"{seed}:history_raw_full"]["records"][0]
+        equal = all(runs[f"{seed}:{arm}"]["records"][0][field] == first[field]
+                    for arm in arms for field in fields)
+        # Keep an observed mismatch visible instead of turning it into a quality win.
+        initial_parity[str(seed)] = {"first_update_receipts_equal": equal,
+                                     "status": "passed" if equal else "failed"}
+    contrasts = {
+        "raw_full_minus_raw_short": {"history_raw_full": 1, "history_raw_short": -1},
+        "l2_full_minus_l2_short": {"history_l2_full": 1, "history_l2_short": -1},
+        "l2_short_minus_raw_short": {"history_l2_short": 1, "history_raw_short": -1},
+        "l2_full_minus_raw_full": {"history_l2_full": 1, "history_raw_full": -1},
+        "length_by_normalization_interaction": {
+            "history_l2_full": 1, "history_l2_short": -1,
+            "history_raw_full": -1, "history_raw_short": 1},
+    }
+    return contrast_report(config, measured, sets, contrasts), trajectories, initial_parity
+
+
 def two_lag_state_parity(plan, runs, checkpoint_dir):
     """Read hash-bound final states, not scalar norms or validation-update states."""
     if checkpoint_dir is None:
@@ -707,6 +760,13 @@ def summarize(plan, result, journal, result_sha256, *, checkpoint_dir=None):
             summary["same_math_parity_status"] = (
                 "failed" if not receipts_equal or any(row["status"] == "failed" for row in states.values())
                 else "unverified" if checkpoint_dir is None else "passed")
+    if config.get("schema") == "spiraltorch.fractional_history_factorial_protocol.v1":
+        summary["reference_arm"] = reference
+        (summary["paired_factorial_contrasts"], summary["order_trajectories"],
+         summary["initial_filter_receipt_parity"]) = history_factorial_report(config, runs, measured, sets)
+        summary["initial_filter_receipt_status"] = (
+            "passed" if all(row["status"] == "passed" for row in summary["initial_filter_receipt_parity"].values())
+            else "failed")
     if config.get("schema") == "spiraltorch.elliptic_chart_step_protocol.v1":
         summary["reference_arm"] = reference
         summary["paired_factorial_contrasts"], summary["chart_step_trajectories"] = chart_step_report(config, runs, measured, sets)
