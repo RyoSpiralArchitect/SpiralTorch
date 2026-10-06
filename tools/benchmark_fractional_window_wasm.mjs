@@ -26,11 +26,14 @@ function capture(kernel, input, shape, axis, alpha, window, upstream, all) {
             const gradient = batch.vjp(upstream);
             try {
                 result.input = gradient.input;
-                assert.deepEqual(result.parameters, new Float32Array([gradient.alpha, gradient.log_gain]));
-                assert.deepEqual(batch.vjp_input(upstream), result.input);
+                // Baseline joint/selective scalar reductions can differ in zero sign.
+                // Preserve and compare EACH route's bits across builds, not across APIs.
+                result.joint_parameters = new Float32Array([gradient.alpha, gradient.log_gain]);
+                result.selective_input = batch.vjp_input(upstream);
                 result.jvp = batch.jvp(upstream, .2, -.3);
             } finally { gradient.free(); }
         }
+        for (const values of Object.values(result)) assert.ok(values.every(Number.isFinite));
         return result;
     } finally { batch.free(); }
 }
