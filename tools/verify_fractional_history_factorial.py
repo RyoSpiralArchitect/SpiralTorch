@@ -41,8 +41,16 @@ def equal(left, right):
 
 def verify_files(root, manifest):
     require(isinstance(manifest, dict) and bool(manifest), "empty file manifest")
-    actual = {str(p.relative_to(root)) for p in root.rglob("*")
-              if p.is_file() and "__pycache__" not in p.parts}
+    actual = set()
+    for path in root.rglob("*"):
+        require(not path.is_symlink(), "invalid frozen file path")
+        if path.is_file():
+            relative = path.relative_to(root)
+            # Ignore descendants of real cache directories, not cache-named files.
+            cached = any(parent.name == "__pycache__" and (root / parent).is_dir()
+                         for parent in relative.parents)
+            if not cached:
+                actual.add(str(relative))
     require(actual == set(manifest), "frozen file inventory differs")
     for name, expected in manifest.items():
         path = root / name
