@@ -805,16 +805,20 @@ mod tests {
                     let dy: Vec<_> = (0..input.len())
                         .map(|i| (i % 11) as f32 / 7.0 - 0.5)
                         .collect();
-                    let operator = ToposResonatorOperator::new(
-                        ToposResonatorConfig::new(coupling, iterations).unwrap(),
-                        topos(1.0, porosity),
-                    )
-                    .unwrap();
-                    let forward = operator.forward(&input, &gate, rows, features).unwrap();
-                    let expected = operator
-                        .backward(&input, &gate, &dy, rows, features)
+                    let (forward, expected, snapshot) = {
+                        let operator = ToposResonatorOperator::new(
+                            ToposResonatorConfig::new(coupling, iterations).unwrap(),
+                            topos(1.0, porosity),
+                        )
                         .unwrap();
-                    let snapshot = operator.capture(&input, &gate, rows, features).unwrap();
+                        (
+                            operator.forward(&input, &gate, rows, features).unwrap(),
+                            operator
+                                .backward(&input, &gate, &dy, rows, features)
+                                .unwrap(),
+                            operator.capture(&input, &gate, rows, features).unwrap(),
+                        )
+                    };
                     assert_eq!(bits(snapshot.output()), bits(&forward.output));
                     assert_eq!(
                         serde_json::to_string(snapshot.step()).unwrap(),
@@ -822,7 +826,6 @@ mod tests {
                     );
                     input.fill(f32::NAN);
                     gate.fill(f32::NAN);
-                    drop(operator);
                     for _ in 0..2 {
                         let actual = snapshot.vjp(&dy).unwrap();
                         assert_eq!(bits(&actual.grad_input), bits(&expected.grad_input));

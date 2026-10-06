@@ -4,17 +4,20 @@ import {createHash} from "node:crypto";
 import {resolve, join} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
 
-const [directory, destination] = process.argv.slice(2);
-if (!directory || !destination || process.argv.length !== 4) throw Error("module directory and new report required");
+const [directory, destination, option] = process.argv.slice(2);
+if (!directory || !destination || process.argv.length > 5 || (option && option !== "--require-capture"))
+  throw Error("module directory, new report and optional --require-capture required");
 const assert = (ok, label) => {if (!ok) throw Error(label);};
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const bytes = values => Buffer.from(values.buffer, values.byteOffset, values.byteLength);
 const same = (a, b) => bytes(a).equals(bytes(b));
 const wasm = await readFile(join(directory, "spiraltorch_wasm_bg.wasm"));
 const modulePath = resolve(directory, "spiraltorch_wasm.js");
-const {initSync, ToposResonatorKernel} = await import(pathToFileURL(modulePath).href);
-initSync({module: wasm});
+const loaded = await import(pathToFileURL(modulePath).href);
+const {initSync, ToposResonatorKernel} = loaded.initSync ? loaded : loaded.default;
+if (initSync) initSync({module: wasm});
 const captured = typeof ToposResonatorKernel.prototype.capture === "function";
+assert(option !== "--require-capture" || captured, "captured learning API required");
 const cases = [];
 let guardChecks = 0;
 function rejected(call) {
@@ -107,6 +110,7 @@ try {
   }
 } finally {kernel.free();}
 const report = {schema: "spiraltorch.topos_capture_wasm_probe.v1", status: "passed", captured, cases, learning,
+  module_format: initSync ? "web" : "nodejs", capture_required: option === "--require-capture",
   guard_checks: guardChecks, wasm_sha256: hash(wasm), wrapper_sha256: hash(await readFile(modulePath)),
   probe_sha256: hash(await readFile(fileURLToPath(import.meta.url))), node: process.version,
   scope: "Node-hosted scalar WASM. Not browser/WebGPU or timing evidence."};

@@ -362,6 +362,8 @@ jobs:
           node bindings/st-wasm/tests/fractional_tiled_forward.mjs "$module"
           node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
+          node tools/probe_topos_capture_wasm.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            "$RUNNER_TEMP/topos-captured-vjp.json" --require-capture
       - name: Portable NN plans without WebGPU
         run: |
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features nn
