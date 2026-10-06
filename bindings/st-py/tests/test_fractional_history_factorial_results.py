@@ -104,3 +104,57 @@ def test_inventory_ignores_only_a_regular_bytecode_cache_directory(tmp_path):
     (tmp_path / "__pycache__").mkdir()
     (tmp_path / "unexpected").mkdir()
     assert publication_entries(tmp_path) == {"record.json", "unexpected"}
+
+
+@pytest.fixture
+def live_verifier(monkeypatch):
+    pytest.importorskip("torch")
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    spec = importlib.util.spec_from_file_location(
+        "live_history_factorial_verifier", ROOT / "tools/verify_fractional_history_factorial.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("kind", ["file", "file_symlink", "directory_symlink", "dangling_symlink",
+                                  "nested_file", "cached_symlink"])
+def test_frozen_inventory_rejects_unlisted_cache_named_entries(live_verifier, tmp_path, kind):
+    root = tmp_path / "package"
+    root.mkdir()
+    record = root / "record.py"
+    record.write_text("value = 1\n")
+    manifest = {record.name: sha(record)}
+    cache = root / "__pycache__"
+    if kind == "file":
+        cache.write_text("not a cache directory")
+    elif kind == "file_symlink":
+        cache.symlink_to(record)
+    elif kind == "directory_symlink":
+        cache.symlink_to(tmp_path, target_is_directory=True)
+    elif kind == "dangling_symlink":
+        cache.symlink_to(tmp_path / "missing")
+    elif kind == "nested_file":
+        nested = root / "nested"
+        nested.mkdir()
+        (nested / "__pycache__").write_text("not a cache directory")
+    else:
+        cache.mkdir()
+        (cache / "record.pyc").symlink_to(record)
+    with pytest.raises(ValueError, match="frozen file (inventory|path)"):
+        live_verifier.verify_files(root, manifest)
+
+
+def test_frozen_inventory_allows_only_real_descendant_cache_directories(live_verifier, tmp_path):
+    root = tmp_path / "__pycache__" / "package"
+    root.mkdir(parents=True)
+    record = root / "record.py"
+    record.write_text("value = 1\n")
+    manifest = {record.name: sha(record)}
+    cache = root / "__pycache__"
+    cache.mkdir()
+    (cache / "record.pyc").write_bytes(b"bytecode")
+    assert live_verifier.verify_files(root, manifest) == 1
+    record.write_text("value = 2\n")
+    with pytest.raises(ValueError, match="frozen file differs"):
+        live_verifier.verify_files(root, manifest)
