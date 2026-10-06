@@ -86,6 +86,14 @@ saved-state continuation match independent manual insertion bitwise. Negative
 tests cover wrong paths/types, stale autograd, aliases, cache calls and failed
 hook installation. These are connection tests, not language-quality evidence.
 
+The [recorded pretrained GPT-2 check](../benchmarks/results/2026-10-07-geometry-adapter-stack/README.md)
+executes seven auxiliary updates with 12,294 trainable parameters at four MLPs.
+All losses, parameter gradients, final adapter/Adam state and RNG match the
+direct-insertion reference, including an in-process serialized-checkpoint
+continuation. All twelve parameter tensors have nonzero gradients at update
+three; the base remains unchanged. This is connectivity, not evidence that the
+combination improves language quality or that tiny scalar gradients are useful.
+
 The bounded local-model example uses the same public import, keeps placement
 configuration outside model code and never downloads a model or corpus:
 
