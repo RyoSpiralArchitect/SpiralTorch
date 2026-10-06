@@ -78,3 +78,13 @@ Publish every condition, numeric block loss, relevant checkpoint/runtime/source
 hash and process outcome, including failures. Weights, corpus text, native
 packages and raw logs stay local. Equal updates are not equal arithmetic;
 this different-support quality comparison is not a Torch speed benchmark.
+
+## Completed Run
+
+The [published six-run result](../benchmarks/results/2026-10-07-fractional-window-study/README.md)
+completed all 3072 primary and 12 continuation-only updates. Full history
+beats retained-short mean CE for every paired seed on both reused books,
+with paired mean deltas -0.03165 (Pride) and -0.01836 (Alice). The full arm
+exactly replays the prior full arm's numeric trajectory/endpoints and verified
+parameter/Adam hashes; it is not additional independent full-arm evidence.
+All limitations above still apply.

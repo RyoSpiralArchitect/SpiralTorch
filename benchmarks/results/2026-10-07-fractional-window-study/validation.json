@@ -1,0 +1,76 @@
+{
+  "schema": "spiraltorch.fractional_window_study_validation.v1",
+  "status": "completed_saved_states_verified",
+  "study_id": "0138640e620371d7dfa0cb760f6d59b96ac20b5ff21a5ca14fc6369e3962fcef",
+  "training_source_revision": "cbf68cea3cf82678fc63171765394f6b3472820c",
+  "runtime_build_source_revision": "16379238c73f6890a4f754dccd4ad381436e047b",
+  "native_sha256": "18f4c1c2bb4b76fa0e8beeca59f7fbfa0dffbc85efd72b96c45c119a63befa58",
+  "training_process_exit_code": 0,
+  "completed_resume_exit_code": 0,
+  "checkpoint_verification_exit_code": 0,
+  "completed_resume_rescored_endpoints": false,
+  "sealed_files_unchanged_after_completed_resume": true,
+  "primary_updates": 3072,
+  "continuation_only_updates": 12,
+  "planned_runs": 6,
+  "checkpoint_verification_sha256": "d61367f5655a6d20653c31f9f212f1b3142aa9da86d74bb033f832ffbda5a2ba",
+  "summary_sha256": "2dff45befa1bef038201ecbfbc798682f3dc14d6e1874914d891f45c242c6468",
+  "historical_full_status": "exact_replay",
+  "old_short_parameter_parity_status": "failed",
+  "regressions": {
+    "exit_code": 0,
+    "passed": 845,
+    "skipped": 0,
+    "warnings": 18
+  },
+  "preservation": {
+    "prior": {
+      "study": 76,
+      "client": 8,
+      "original_runtime": 71,
+      "candidate_runtime": 71,
+      "diagnostic": 2
+    },
+    "current": {
+      "study": 52,
+      "client": 9,
+      "verifier": 2
+    }
+  },
+  "private_logs": {
+    "primary-training.log": {
+      "sha256": "c6652c608c4216fa1abbf14dcfb39541ab412a3e20144ca098cfa9ea6669d4fd",
+      "bytes": 1690
+    },
+    "completed-resume.log": {
+      "sha256": "acb8f6860081926f1f1d50ce994344850bac00624ccbc75687186c8f7343337a",
+      "bytes": 351
+    },
+    "checkpoint-verification.log": {
+      "sha256": "ae02b75ac1068594949cb5ffca5a6ff5c60166228f4d1b9d867e4afe5f127136",
+      "bytes": 312
+    },
+    "summary.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "regressions.log": {
+      "sha256": "7edb522da9b76c5904ae69c06b80ed5c96e890ff4cdb03f388223dff4abc0a35",
+      "bytes": 1429
+    },
+    "publication-tests.log": {
+      "sha256": "2132f781fd09c4d032290bbe2ac096ba7335a9eb5ac19ffde8bd10a3ae2045f5",
+      "bytes": 98
+    },
+    "publication-regressions.log": {
+      "sha256": "85ccdc419324feefff384df4c933cb1bcf83147389608a4e32e7b57ffb8e5dda",
+      "bytes": 1429
+    }
+  },
+  "scope": "Matched fixed-normalization learning in the declared frozen GPT-2 setup. Reused endpoints and seeds; no significance, new independent full-arm evidence, speed, general LLM quality or safety beyond the measured horizon.",
+  "public_artifact_checks": {
+    "exit_code": 0,
+    "passed": 4,
+    "model_execution": false
+  }
+}
