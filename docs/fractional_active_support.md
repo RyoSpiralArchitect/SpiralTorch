@@ -12,6 +12,14 @@ VJP/JVP may use coefficient support alone. Interior zeros stay in their original
 order; accumulation remains f64 with the same checked f32 boundaries. Full
 input/control validation runs before any zero-support shortcut.
 
+History input VJPs use the validated C-order layout directly rather than
+gathering and scattering one feature lane at a time. A 64-feature tile gathers
+future output gradients in increasing lag order, exactly the contribution order
+of the original dense scatter for each input. This keeps the f64 multiply/add
+order, removes per-lane scratch copies, and applies to ordinary, normalized and
+windowed history snapshots. Non-history and general padded ND APIs remain on
+their established paths.
+
 Dense pre-optimization test oracles compare output and all requested first-order
 maps bitwise, including the [2,128,768] LM shape, arbitrary axes, tile boundaries,
 signed zeros, subnormals and integer-order tails. General line-operator tests

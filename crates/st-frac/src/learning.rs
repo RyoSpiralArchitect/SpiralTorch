@@ -5,9 +5,9 @@ mod window;
 pub use angle::FractionalGlAngleChart;
 
 use crate::{
-    checked_f32, fracdiff_gl_nd_config, fracdiff_gl_nd_vjp_config, fracdiff_gl_nd_vjp_with_coeffs,
-    fracdiff_gl_nd_with_coeffs, gl_coeffs_and_scaled_alpha_derivative, nonzero_lags,
-    validate_alpha, validate_slice, zeroed_vec, FracErr, FracdiffGlConfig, Pad,
+    checked_f32, fracdiff_gl_nd_config, fracdiff_gl_nd_vjp_config, fracdiff_gl_nd_with_coeffs,
+    gl_coeffs_and_scaled_alpha_derivative, nonzero_lags, validate_alpha, validate_slice,
+    zeroed_vec, FracErr, FracdiffGlConfig, Pad,
 };
 use ndarray::{ArrayD, IxDyn};
 
@@ -380,6 +380,49 @@ fn paired_zero_forward(
     Ok((shaped(output)?, shaped(differential)?))
 }
 
+// A C-order history adjoint gathers future output gradients in increasing lag
+// order, matching the dense scatter's contribution order for each input value.
+fn history_input_pullback(
+    upstream: &[f32],
+    shape: &[usize],
+    axis: usize,
+    coefficients: &[f32],
+    scale: f32,
+) -> Result<Vec<f32>> {
+    let inner: usize = shape[axis + 1..].iter().product();
+    let axis_len = shape[axis];
+    let lane_block = inner * axis_len;
+    let lags = nonzero_lags(coefficients);
+    let mut output = zeroed_vec("fractional history input gradient", upstream.len())?;
+    let scale = f64::from(scale);
+    const TILE: usize = 64;
+    for base in (0..upstream.len()).step_by(lane_block) {
+        for time in 0..axis_len {
+            let taps = lags.end.min(axis_len - time);
+            let destination = base + time * inner;
+            for first in (0..inner).step_by(TILE) {
+                let width = TILE.min(inner - first);
+                let mut accumulators = [0.0f64; TILE];
+                for lag in lags.start..taps {
+                    let coefficient = scale * f64::from(coefficients[lag]);
+                    let source = destination + lag * inner + first;
+                    for (value, &gradient) in accumulators[..width]
+                        .iter_mut()
+                        .zip(&upstream[source..source + width])
+                    {
+                        *value += coefficient * f64::from(gradient);
+                    }
+                }
+                for (index, &value) in accumulators[..width].iter().enumerate() {
+                    output[destination + first + index] =
+                        checked_f32("fractional input gradient", value)?;
+                }
+            }
+        }
+    }
+    Ok(output)
+}
+
 impl FractionalGlLearningBatch {
     pub fn output(&self) -> &ArrayD<f32> {
         &self.output
@@ -407,17 +450,22 @@ impl FractionalGlLearningBatch {
     }
 
     fn input_pullback(&self, upstream: &ArrayD<f32>) -> Result<Vec<f32>> {
-        let input = match &self.history_coefficients {
-            Some(coefficients) if coefficients.is_empty() => ArrayD::zeros(self.output.raw_dim()),
-            Some(coefficients) => fracdiff_gl_nd_vjp_with_coeffs(
-                upstream,
+        if let Some(coefficients) = &self.history_coefficients {
+            if coefficients.is_empty() {
+                return Ok(zeroed_vec(
+                    "fractional history input gradient",
+                    upstream.len(),
+                )?);
+            }
+            return history_input_pullback(
+                upstream.as_slice().ok_or(FractionalLearningError::Shape)?,
+                upstream.shape(),
                 self.config.axis,
                 coefficients,
-                self.config.pad,
-                Some(self.input_multiplier()?),
-            )?,
-            None => fracdiff_gl_nd_vjp_config(upstream, self.config)?,
-        };
+                self.input_multiplier()?,
+            );
+        }
+        let input = fracdiff_gl_nd_vjp_config(upstream, self.config)?;
         Ok(input.iter().copied().collect())
     }
 
@@ -643,6 +691,18 @@ mod tests {
         );
         let a = actual.vjp(&direction).unwrap();
         let r = reference.vjp(&direction).unwrap();
+        if history {
+            let shaped = ArrayD::from_shape_vec(IxDyn(shape), direction.clone()).unwrap();
+            let dense = crate::fracdiff_gl_nd_vjp_with_coeffs(
+                &shaped,
+                axis,
+                reference.history_coefficients.as_ref().unwrap(),
+                Pad::Zero,
+                Some(reference.config.scale_multiplier().unwrap()),
+            )
+            .unwrap();
+            assert_eq!(bits(a.input.iter().copied()), bits(dense.iter().copied()));
+        }
         assert_eq!(bits(a.input), bits(r.input));
         assert_eq!(a.alpha.to_bits(), r.alpha.to_bits());
         assert_eq!(

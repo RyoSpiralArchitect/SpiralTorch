@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn sparse_windows_preserve_dense_bits_at_lm_training_shape() {
-        for (alpha, lags) in [(0.09, 1..3), (0.55, 3..32), (2., 3..32)] {
+        for (alpha, lags) in [(0.09, 1..3), (0.09, 1..32), (0.55, 3..32), (2., 3..32)] {
             compare_dense(&[2, 128, 768], 1, alpha, lags);
         }
     }
