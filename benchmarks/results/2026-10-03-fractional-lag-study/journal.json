@@ -1,0 +1,139 @@
+{
+  "study_id": "b5264d2ea676d408f407f702b302b002f1bb6ea72b64a9660848c6d7e982d0a4",
+  "status": "completed",
+  "runs": {
+    "41:lag1": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-o381khtm.pt",
+        "sha256": "0c9c8222322f67bc66771fbd281431185dbfd2458ba828b8c0ca9c0c7c363dfb"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:history_fixed_one": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-yz6g08yy.pt",
+        "sha256": "f63312537f18cb6c985f40af14e9121fd0f900303949ac8c8483d9f95872729e"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:history_learned_one": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-exq86npd.pt",
+        "sha256": "f9dd0be2dccf94837b32a763d7fd49ec8a2faebbf919e96eb9b0d65484b74d93"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:history_learned_half": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-linx9o3y.pt",
+        "sha256": "57cee553b714ee581064fa10b222a1e487b4cdd0649f0dd94e08e8d0799a4d37"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:lag1": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-hv3iwm8n.pt",
+        "sha256": "25300e58ed62e4f9ef299d1cfdc7cb19136548fae4637716a9bbfd2aa41412bf"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:history_fixed_one": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-152fem86.pt",
+        "sha256": "e1d12c310bf13ccb2b01dfbad4554156e3b9fe2bce2bd7f239c3aa6c166435e8"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:history_learned_one": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-cqje6fia.pt",
+        "sha256": "a0c76f728fc5049c078e68e67293479fafe6ee236fa061320e6c36a5b09f2548"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:history_learned_half": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-omnn7n8k.pt",
+        "sha256": "e861776871c3331cc47c689ab3f9e6fba0e2f2ce6a1a0ba02df71b1e31db5e67"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:lag1": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-p77bt371.pt",
+        "sha256": "31a3365e5812d4c53aa1167cf4ebc487265815e98f4972141661fdfc5bbed50f"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:history_fixed_one": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-7r0g43h4.pt",
+        "sha256": "5658dc9fa918cfd6b103b3a1fa111a09bf077d6ecf3b1d6183002f7e9bea9d00"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:history_learned_one": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-4_mnvmr7.pt",
+        "sha256": "351452bef592c3557332e2509e9eaf42aa0ec77d70541d4aaee2f9f24e668e3e"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:history_learned_half": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-aa6oj6zt.pt",
+        "sha256": "44693513a8cc493f4fa1a220aab126ad874502434f963659d429110876f72742"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    }
+  },
+  "results_sha256": "2c6aa8cd689d1a1013fcc13eb70eeb7a049b989709caf8012fa30a81dff43bb7"
+}
