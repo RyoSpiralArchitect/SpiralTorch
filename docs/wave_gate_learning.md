@@ -89,6 +89,9 @@ input/gate/bias/radius gradients. Omit `--log-radius` to test the legacy map.
 The report retains per-round timings, errors and tensor/native/source hashes;
 cross-build comparisons require matching output and gradient bytes first.
 CPU host-transport timings are not model-throughput or quality evidence.
+The [matched transport receipts](../benchmarks/results/2026-10-07-wave-gate-buffer-transport/README.md)
+include old/new bitwise parity, a saved mixed-adapter HF update and scalar WASM
+continuation. The large CPU cases remain slower than the matched Torch reference.
 
 For a cached HF model, the local-only
 `bindings/st-py/examples/hf_elliptic_learning.py --geometry wave_gate` probe
