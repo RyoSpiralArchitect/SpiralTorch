@@ -434,10 +434,11 @@ fn conv1d_gl_line(
         return Err(FracErr::Kernel);
     }
     let lags = nonzero_lags(coeff);
+    let active = &coeff[lags.clone()];
     for (i, out) in y.iter_mut().enumerate() {
         let mut acc = 0.0f64;
-        for k in lags.clone() {
-            let c = coeff[k];
+        for (offset, &c) in active.iter().enumerate() {
+            let k = lags.start + offset;
             let idx = i as isize - k as isize;
             acc += f64::from(c) * f64::from(sample_with_pad(x, idx, pad));
         }
@@ -463,9 +464,10 @@ fn vjp1d_gl_line(
 
     let mut accumulators = zeroed_vec("fractional VJP accumulator", gx.len())?;
     let lags = nonzero_lags(coeff);
+    let active = &coeff[lags.clone()];
     for (output_index, &gradient) in gy.iter().enumerate() {
-        for lag in lags.clone() {
-            let coefficient = coeff[lag];
+        for (offset, &coefficient) in active.iter().enumerate() {
+            let lag = lags.start + offset;
             let source_index = output_index as isize - lag as isize;
             if let Some(source_index) = source_index_with_pad(source_index, gx.len(), pad) {
                 accumulators[source_index] += scale * f64::from(coefficient) * f64::from(gradient);
