@@ -113,3 +113,8 @@ not at a demonstrated optimum. At exactly two, strictly-past GL becomes the
 ordinary two-tap map `-2*x[t-1] + x[t-2]`. Fixed-two controls and truncated-history
 comparisons are the next separation to test before attributing the result to
 long fractional memory. No such follow-up or speed claim is included here.
+
+The [two-lag follow-up protocol](fractional_two_lag_study.md) tests whether the
+learned-from-one movement toward alpha=2 can be explained by an ordinary
+two-tap filter. It reruns the learned-one arm with matched inputs instead of
+reusing historical endpoints as independent evidence.
