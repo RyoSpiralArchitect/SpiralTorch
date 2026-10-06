@@ -390,11 +390,17 @@ def angle_trajectory(row, initial):
             "nonzero_angle_gradient_steps": sum(v != 0 for v in gradients)}
 
 
-def gain_study_report(config, runs, measured, sets, *, angular=False):
-    arms = (["ordinary_angle_short", "history_angle_short", "history_angle_full"] if angular
+def gain_study_report(config, runs, measured, sets, *, angular=False, windowed=False):
+    arms = (["history_window_short", "history_window_full"] if windowed else
+            ["ordinary_angle_short", "history_angle_short", "history_angle_full"] if angular
             else ["ordinary_gain_short", "history_gain_short", "history_gain_full"])
     require(config["arms"] == arms and config.get("reference_arm") == arms[0],
             "incomplete gain design")
+    if windowed:
+        require(angular and config.get("normalization_policy") == "full_declared_kernel_before_window"
+                and config.get("lag_windows") == {arms[0]: [1, 3], arms[1]: None}
+                and all(type(x) is int for x in config["lag_windows"][arms[0]]),
+                "window support or normalization differs")
     if angular:
         require(config.get("angle_domain_policy") == "terminal_all_arms_no_projection_no_endpoints",
                 "angular domain policy differs")
@@ -441,9 +447,10 @@ def gain_study_report(config, runs, measured, sets, *, angular=False):
                               "gate_gradient_norms_close": close_gates,
                               "gate_gradient_rtol": 2e-6, "gate_gradient_atol": 2e-7,
                               "receipts": first, "status": "passed" if equal_loss and close_gates else "failed"}
-    contrasts = {"gl_short_minus_ordinary_short": {arms[1]: 1, arms[0]: -1},
+    contrasts = ({"full_minus_retained_short": {arms[1]: 1, arms[0]: -1}} if windowed else
+                {"gl_short_minus_ordinary_short": {arms[1]: 1, arms[0]: -1},
                  "gl_full_minus_ordinary_short": {arms[2]: 1, arms[0]: -1},
-                 "gl_full_minus_gl_short": {arms[2]: 1, arms[1]: -1}}
+                 "gl_full_minus_gl_short": {arms[2]: 1, arms[1]: -1}})
     return contrast_report(config, measured, sets, contrasts), orders, angles, gains, initial
 
 
@@ -884,13 +891,19 @@ def summarize(plan, result, journal, result_sha256, *, checkpoint_dir=None):
             "passed" if all(row["status"] == "passed" for row in summary["initial_filter_receipt_parity"].values())
             else "failed")
     if config.get("schema") in {"spiraltorch.fractional_gain_protocol.v1",
-                                "spiraltorch.fractional_angle_protocol.v1"}:
-        angular = config["schema"] == "spiraltorch.fractional_angle_protocol.v1"
+                                "spiraltorch.fractional_angle_protocol.v1",
+                                "spiraltorch.fractional_window_protocol.v1"}:
+        windowed = config["schema"] == "spiraltorch.fractional_window_protocol.v1"
+        angular = windowed or config["schema"] == "spiraltorch.fractional_angle_protocol.v1"
         summary["reference_arm"] = reference
-        (summary["paired_gain_contrasts"], summary["order_trajectories"],
+        contrast_key = "paired_window_contrasts" if windowed else "paired_gain_contrasts"
+        (summary[contrast_key], summary["order_trajectories"],
          summary["angle_trajectories"], summary["gain_trajectories"],
          summary["initial_filter_receipt_parity"]) = gain_study_report(
-             config, runs, measured, sets, angular=angular)
+             config, runs, measured, sets, angular=angular, windowed=windowed)
+        if windowed:
+            summary["lag_windows"] = config["lag_windows"]
+            summary["normalization_policy"] = config["normalization_policy"]
         if angular:
             summary["angular_order_trajectories"] = {
                 key: angular_order_trajectory(row) for key, row in runs.items()}

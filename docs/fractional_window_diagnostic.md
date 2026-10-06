@@ -80,3 +80,6 @@ publishes all four modes after exact reproduction of the 456 original full
 block losses. Removing either short or long taps hurt all three saved models
 on both reused endpoints; this remains post-training dependence, not a result
 of the proposed matched-training comparison.
+
+The [matched-learning recipe](fractional_window_study.md) now fixes both arms
+to the same K=32 normalization and pairs their training schedules.
