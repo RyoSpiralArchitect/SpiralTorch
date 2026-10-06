@@ -6,8 +6,8 @@ pub use angle::FractionalGlAngleChart;
 
 use crate::{
     checked_f32, fracdiff_gl_nd_config, fracdiff_gl_nd_vjp_config, fracdiff_gl_nd_vjp_with_coeffs,
-    fracdiff_gl_nd_with_coeffs, gl_coeffs_and_scaled_alpha_derivative, validate_alpha,
-    validate_slice, zeroed_vec, FracErr, FracdiffGlConfig, Pad,
+    fracdiff_gl_nd_with_coeffs, gl_coeffs_and_scaled_alpha_derivative, nonzero_lags,
+    validate_alpha, validate_slice, zeroed_vec, FracErr, FracdiffGlConfig, Pad,
 };
 use ndarray::{ArrayD, IxDyn};
 
@@ -320,14 +320,24 @@ fn paired_zero_forward(
     let mut output = zeroed_vec("fractional learning output", input.len())?;
     let mut differential = zeroed_vec("fractional learning differential", input.len())?;
     let scale = f64::from(scale);
+    let values = nonzero_lags(coefficients);
+    let differentials = nonzero_lags(derivatives);
+    // Integer-order tails can have zero values but NONZERO order derivatives.
+    let lags = if values.is_empty() {
+        differentials
+    } else if differentials.is_empty() {
+        values
+    } else {
+        values.start.min(differentials.start)..values.end.max(differentials.end)
+    };
     for base in (0..input.len()).step_by(lane_block) {
         for time in 0..axis_len {
-            let taps = coefficients.len().min(time + 1);
+            let taps = lags.end.min(time + 1);
             let destination = base + time * inner;
             if inner == 1 {
                 let mut value = 0.0f64;
                 let mut derivative = 0.0f64;
-                for lag in 0..taps {
+                for lag in lags.start..taps {
                     let sample = f64::from(input[destination - lag]);
                     value += f64::from(coefficients[lag]) * sample;
                     derivative += f64::from(derivatives[lag]) * sample;
@@ -341,7 +351,7 @@ fn paired_zero_forward(
                 let width = TILE.min(inner - first);
                 let mut values = [0.0f64; TILE];
                 let mut differentials = [0.0f64; TILE];
-                for lag in 0..taps {
+                for lag in lags.start..taps {
                     let source = destination - lag * inner + first;
                     let coefficient = f64::from(coefficients[lag]);
                     let derivative = f64::from(derivatives[lag]);
