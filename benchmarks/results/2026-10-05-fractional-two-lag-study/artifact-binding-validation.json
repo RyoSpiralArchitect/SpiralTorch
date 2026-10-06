@@ -1,0 +1,28 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_artifact_binding_validation.v1",
+  "supersedes_publication_revision": "3f08cb4a545f906b7b111cba857c3ff0a32df4e2",
+  "tests": {
+    "geometry_and_publication": {
+      "passed": 456,
+      "skipped": 0,
+      "warnings": 18,
+      "log_sha256": "53bfe3378a119502388498ede245a03abeb4ef882b9e8cd055fcdf57a5ea6ffe"
+    },
+    "benchmark": {
+      "passed": 34,
+      "skipped": 0,
+      "log_sha256": "71e1a9aa9128db405a1456a307ddb48c8e3714bf840b502ceeda3e4feb8e9349"
+    }
+  },
+  "summary_source_sha256": "dd1dea6d2f7b5deaeb2a41eb49a51875a952d1c08eeafe51a9715429034d6477",
+  "summary_artifact_sha256": "5ea2d9c09183c9a1df85fab890fa48c509c99a4c297dd220bb115a6f05adce72",
+  "receipt_summary_artifact_sha256": "69e516b7e3a1aab9221845e2b82a573fc2fe671ea989774bdf80541b4d757dcc",
+  "published_verifier_sha256": "fc7f911dd41142888ed91d26e3217de84566a3e6e402367b6126ce0a34f43b9a",
+  "published_verifier_output_byte_identical": true,
+  "published_verifier_run_log_sha256": "7758883c3bcaf3985953d78a21e91150baa8c21efb906ad6e89ede95a009580e",
+  "rejects_self_consistent_tampered_summary": true,
+  "rejects_optimized_python": true,
+  "optimized_guard_log_sha256": "7cb3181750388e72856adb887d0e44acd5db6a44f43e26aacc705b5f78fd1539",
+  "publication_test_source_sha256": "05370e95f7168285048ffe63cb903e48216d7ae651fee4f3af0ee5ddeab8821a",
+  "scope": "Read-only correction to derived evidence; all 100 sealed training files and both summary outputs are unchanged. Prior derived records remain in the superseded commit and local frozen analysis."
+}

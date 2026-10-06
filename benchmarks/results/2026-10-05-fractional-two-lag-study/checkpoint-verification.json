@@ -1,0 +1,424 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_checkpoint_verification.v2",
+  "status": "passed",
+  "study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
+  "planned_runs_verified": 12,
+  "primary_updates": 6144,
+  "extra_continuation_updates": 24,
+  "artifacts": {
+    "plan.json": "bf418233415131764cc8148920d2c5172fcfc8e4700f4656c5d0738baf51da43",
+    "journal.json": "fe8f28f894be56836919e610f7ff3cd37633f0d6416fa91380ac1ffc30ee67f7",
+    "results.json": "5aa9df87bf7678043967bfbed06b0f6a3ea430da121432dc0750613738c89b72"
+  },
+  "frozen_client_files_verified": 6,
+  "frozen_package_files_verified": 70,
+  "analysis_source_revision": "a25aa224c472be1851f17e4a956e8c846039e3ef",
+  "summary_source_sha256": "dd1dea6d2f7b5deaeb2a41eb49a51875a952d1c08eeafe51a9715429034d6477",
+  "summary_artifact_sha256": "5ea2d9c09183c9a1df85fab890fa48c509c99a4c297dd220bb115a6f05adce72",
+  "receipt_summary_artifact_sha256": "69e516b7e3a1aab9221845e2b82a573fc2fe671ea989774bdf80541b4d757dcc",
+  "published_summary_rebuilt_from_saved_states_byte_identical": true,
+  "published_receipt_summary_rebuilt_byte_identical": true,
+  "verifier_sha256": "fc7f911dd41142888ed91d26e3217de84566a3e6e402367b6126ce0a34f43b9a",
+  "analysis_manifest_sha256": "2ab9d0d4bdd20454ff45e62ca2cc1aac1a8ad77594f2ae470ff04f8adb7f8cdf",
+  "supersedes": {
+    "publication_revision": "3f08cb4a545f906b7b111cba857c3ff0a32df4e2",
+    "analysis_manifest_sha256": "3c940b6e8cb72015803179a13ddd71c1188ba118e39b1ce50f75fc8d0fb9a74b",
+    "checkpoint_verification_sha256": "28f87136cb84fe301411232a5497771a49f0bcc3d3db7f6bfc6807ce7af38bba",
+    "validation_sha256": "1a6181379b76ba2e1770408076fd7947163aba6b9b23254c3130c7d8134ba5e8"
+  },
+  "same_math_parity": {
+    "41": {
+      "update_receipts_equal": true,
+      "development_equal": true,
+      "endpoint_block_losses_equal": {
+        "pride_unused_tail": true,
+        "alice_transfer": true
+      },
+      "saved_gates_equal": true,
+      "saved_named_adam_equal": true
+    },
+    "43": {
+      "update_receipts_equal": true,
+      "development_equal": true,
+      "endpoint_block_losses_equal": {
+        "pride_unused_tail": true,
+        "alice_transfer": true
+      },
+      "saved_gates_equal": true,
+      "saved_named_adam_equal": true
+    },
+    "47": {
+      "update_receipts_equal": true,
+      "development_equal": true,
+      "endpoint_block_losses_equal": {
+        "pride_unused_tail": true,
+        "alice_transfer": true
+      },
+      "saved_gates_equal": true,
+      "saved_named_adam_equal": true
+    }
+  },
+  "runs": {
+    "41:lag2": {
+      "checkpoint": {
+        "filename": "checkpoint-f2q6ny21.pt",
+        "sha256": "99902a798662602badaceeaea29cd7a2930d6b56c5f8e81404802af9e08da2db"
+      },
+      "cursor": 512,
+      "parameter_count": 1536,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "f8fffbd9c06d8601b1bd1718d8b736a404df0ab058da28562972ccc6fc4f4b4d",
+      "gates": {
+        "gate": {
+          "l2": 3.0434131622314453,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.027622222900391,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "41:history_fixed_two": {
+      "checkpoint": {
+        "filename": "checkpoint-0297tque.pt",
+        "sha256": "dcc16090f247b4a0c75a9a4327175198fb0f1a511f24cd12acc88a16f93aaf5f"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "a74020d5bc52daef396aaf69090994b1143ab1d00bf34bfde7c80ca26c511d07",
+      "gates": {
+        "gate": {
+          "l2": 3.0434131622314453,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.027622222900391,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 2.0,
+      "scalar_changed": false,
+      "nonzero_order_gradient_steps": 0,
+      "frozen_scalar_has_no_adam_state": true
+    },
+    "41:history_learned_two": {
+      "checkpoint": {
+        "filename": "checkpoint-k2t4anxe.pt",
+        "sha256": "d38be04961144b0ca92cde1d1bac7ce1ce5bc3bd16543addd5d43e2146f6655f"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "5f443556ab45fc4a0719cd17dc7721c8160d520f39212e2f2a4ae2ed52ab4165",
+      "gates": {
+        "gate": {
+          "l2": 3.221034526824951,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.021304130554199,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 4.055050373077393,
+      "scalar_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "41:history_learned_one": {
+      "checkpoint": {
+        "filename": "checkpoint-74j9ledy.pt",
+        "sha256": "b2e9c51ee4fc39c611e5905dd02afeee8001ed4639d7756d0ef54c7ae4c89ca8"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "fd847b08e27d3adaf5455867eddb8e3ee53e6c4979aa7e20a2f16750f1109343",
+      "gates": {
+        "gate": {
+          "l2": 3.840686559677124,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.027153015136719,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 2.0976626873016357,
+      "scalar_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "43:lag2": {
+      "checkpoint": {
+        "filename": "checkpoint-7_yebya7.pt",
+        "sha256": "f2aae0af48a91b7859e7816c389f2f34e4c4747b61ac58e00842c09e9315877f"
+      },
+      "cursor": 512,
+      "parameter_count": 1536,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "9c9a3bf77e8d3e1b36da26bb71bb099a038f4b5b38cd0afbce87cfe6d84227f1",
+      "gates": {
+        "gate": {
+          "l2": 3.067809581756592,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.046977996826172,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "43:history_fixed_two": {
+      "checkpoint": {
+        "filename": "checkpoint-e6k2i7jk.pt",
+        "sha256": "4e42c508b24b5bd15c8036ee71cd02117af2f76ad5014d35a4fdd510e49e1281"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "410b80cafc8d883cde05b325e7a6d5d9ce1e9a1541467ba38da79fecdf2ff194",
+      "gates": {
+        "gate": {
+          "l2": 3.067809581756592,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.046977996826172,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 2.0,
+      "scalar_changed": false,
+      "nonzero_order_gradient_steps": 0,
+      "frozen_scalar_has_no_adam_state": true
+    },
+    "43:history_learned_two": {
+      "checkpoint": {
+        "filename": "checkpoint-7_xjt11o.pt",
+        "sha256": "5014e501b71d9797298c5f4ab6a27e2e004857fb684e5711f21026f127101216"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "2a46ab1a7f56407913a280d9c6d6be014e5235928585bf0fc677fe3d419887bc",
+      "gates": {
+        "gate": {
+          "l2": 3.226405143737793,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.046185493469238,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 3.7574100494384766,
+      "scalar_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "43:history_learned_one": {
+      "checkpoint": {
+        "filename": "checkpoint-iqjb9ho1.pt",
+        "sha256": "c744ef9fd414a54ff63bbe0b16e9674d3b6d520750c3248ba4d0b7d26904056d"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "e82acefaff4d28b1572bc43a9540242b07e79d6ebb80a3da9b10c27acf1109dd",
+      "gates": {
+        "gate": {
+          "l2": 3.831190586090088,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.048694610595703,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 1.9491060972213745,
+      "scalar_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "47:lag2": {
+      "checkpoint": {
+        "filename": "checkpoint-gjoua_qb.pt",
+        "sha256": "5fbed80ec924caac515840c1fad05eb5c04fc120a04973ff4dad90ebe73b54bb"
+      },
+      "cursor": 512,
+      "parameter_count": 1536,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "2a56965fb02f050342739bf46428a49c0640240f26d70b33fc66551c3aac0106",
+      "gates": {
+        "gate": {
+          "l2": 3.0586788654327393,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.094801902770996,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "47:history_fixed_two": {
+      "checkpoint": {
+        "filename": "checkpoint-77cda548.pt",
+        "sha256": "0b0f6cf74c1e5f7dff99e487dfac24e237fec3b905988f8fa96f7d35489e45e6"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "b8ba4acb2b46d89bf7ee52a54452882603c1aa6b2630e7dd7e116ecd94f3b0fc",
+      "gates": {
+        "gate": {
+          "l2": 3.0586788654327393,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.094801902770996,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 2.0,
+      "scalar_changed": false,
+      "nonzero_order_gradient_steps": 0,
+      "frozen_scalar_has_no_adam_state": true
+    },
+    "47:history_learned_two": {
+      "checkpoint": {
+        "filename": "checkpoint-0e33g3m7.pt",
+        "sha256": "0cb33b9d8952e0bf4058ece2c8746145e0baddb96b8bf17159a582c7c71e2837"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "365b538de273908a3ea3f6178085eab3637c0242e5a46720a116ec76bafaee91",
+      "gates": {
+        "gate": {
+          "l2": 3.235243082046509,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.088716506958008,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 3.9513843059539795,
+      "scalar_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "47:history_learned_one": {
+      "checkpoint": {
+        "filename": "checkpoint-u8g5r19c.pt",
+        "sha256": "6c7d5e90b6cbf0422bc348c51d293a344f8b2c0de57e5af7a9ca023997654ee8"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "restored_adam_equal": true,
+      "checkpoint_records_and_endpoint_receipts_match": true,
+      "final_parameter_sha256": "aba9b81292a0184d011bff65a030a2a155ee04be1107e1f7307ecb4899b3a4fd",
+      "gates": {
+        "gate": {
+          "l2": 3.8410048484802246,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.0946269035339355,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 2.002378225326538,
+      "scalar_changed": true,
+      "nonzero_order_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    }
+  },
+  "scope": "Saved contents and sealed receipts only; no training or model scoring. Not speed, significance or general-LLM evidence."
+}

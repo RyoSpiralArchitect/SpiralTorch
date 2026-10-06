@@ -1,0 +1,24 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_publication_validation.v1",
+  "base_revision": "a25aa224c472be1851f17e4a956e8c846039e3ef",
+  "tests": {
+    "geometry_and_publication": {
+      "passed": 453,
+      "skipped": 0,
+      "warnings": 18,
+      "log_sha256": "fc51e9c155c814bd8298a446394ef89a5cf955f7b541ee0d5933643bdebc31f6"
+    },
+    "benchmark": {
+      "passed": 34,
+      "skipped": 0,
+      "log_sha256": "a424444ce9f672113d18fd6190437eff10c00b7bf815dd45b4c30a3f2e4b4629"
+    }
+  },
+  "isolated_public_receipt_rebuild": "byte-identical",
+  "public_receipt_summary_sha256": "69e516b7e3a1aab9221845e2b82a573fc2fe671ea989774bdf80541b4d757dcc",
+  "source_sha256": {
+    "bindings/st-py/tests/test_fractional_two_lag_results.py": "1e1e900ee833306c1ed6316090066c998c21adc3b63f121f6327319451b86acf",
+    ".github/workflows/ci.yml": "3a0dcf5ad33c5b8822fc8541a2433ffd786eb06caa4586f7a8d1c8ec9ccce757"
+  },
+  "scope": "Local regression and public numeric reconstruction. No timed assertions or retraining; not private-checkpoint verification by CI."
+}

@@ -98,3 +98,7 @@ Publish all numeric outcomes, verification receipts, hashes and reproduction
 instructions. Keep weights, corpus text, checkpoints, runtime packages and raw
 logs local. A protocol, passing preflight or running process is not a completed
 pretrained learning result.
+
+The [completed exploratory run](../benchmarks/results/2026-10-05-fractional-two-lag-study/README.md)
+publishes all twelve endpoints, moving-order trajectories, exact same-math
+checkpoint parity and the separately bound review-corrected analysis.
