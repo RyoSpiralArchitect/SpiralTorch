@@ -1,0 +1,55 @@
+{
+  "schema": "spiraltorch.fractional_lag_study_validation.v1",
+  "status": "completed_and_verified",
+  "study_id": "b5264d2ea676d408f407f702b302b002f1bb6ea72b64a9660848c6d7e982d0a4",
+  "training_process_exit_code": 0,
+  "training_source_revision": "37d7b7211d227f227f9ae1f71a168ca2ae1daa4c",
+  "frozen_native_source_revision": "a5b779dec33a73f0e281345dbaee91f598ac7586",
+  "frozen_native_sha256": "841680660aae22f5244c05c50a43d59cdca896037be2d38f484644ec6a13a1a5",
+  "runs": 12,
+  "primary_updates": 6144,
+  "continuation_only_updates": 24,
+  "completed_resume_exit_code": 0,
+  "completed_resume_rescored_endpoints": false,
+  "sealed_files_unchanged_after_completed_resume": true,
+  "sealed_files_verified": 100,
+  "sealed_input_sha256": {
+    "plan.json": "2dd8ba664014c9ba8a8f2afde80603782747b6522e0c6c42a9a380e64cccf179",
+    "journal.json": "930df83d9b920a3a2f39721b918e75182552cf6ccf246a7fe39adc959c58e24f",
+    "results.json": "2c6aa8cd689d1a1013fcc13eb70eeb7a049b989709caf8012fa30a81dff43bb7"
+  },
+  "checkpoints_verified": 12,
+  "frozen_client_files_verified": 5,
+  "frozen_package_files_verified": 67,
+  "actual_parameter_and_adam_contents_checked": true,
+  "same_math_lag1_fixed_one_exact": true,
+  "half_order_replay_exact_all_three_seeds": true,
+  "repeated_half_order_runs_are_not_additional_independent_seeds": true,
+  "deterministic_summary_sha256": "030bc7efd4d5227c8eba74e4bc45b61ebcbdf0df9632e7aee3d7b15715fe1f66",
+  "summary_hash_seeds": [
+    1,
+    42
+  ],
+  "checkpoint_verifier_sha256": "ee71f4267ec3b31ad83f49ca609ddb92d18b6b6c791f752acf5f56cbda40972e",
+  "half_replay_verifier_sha256": "608c2533c9c9c7b891e0abe2db050825fc3eaa0b7e181da3e168939b49730cba",
+  "original_launch_preflight_sha256": "ccc804dc70f6ae6103f58a108747df469f7e1fc41a253df7faacbb55d77b3662",
+  "publication_regression": {
+    "base_revision": "0d654009c95071a11247c44e448dfdd35acff565",
+    "python_tests_passed": 326,
+    "python_tests_skipped": 0,
+    "python_warnings": 18,
+    "golden_summary_rebuild": "byte-identical",
+    "source_sha256": {
+      "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "7672c17e1577aca34c8ddb9f2b017ae5fcf4dc8aa1516e157a804babaeb65ae5",
+      "tools/summarize_wave_gate_long_horizon.py": "48c63e18722961b30ca4c21b1938bc6bb64af5000c8cddee9e8e958a307f9d27"
+    }
+  },
+  "local_log_sha256": {
+    "training.log": "b21e55af615e495f776e8b7d418c34fc1d3e95c54f7735ba8967982cb51534c6",
+    "checkpoint-verification.log": "3d9e78847e452e51a659fa5c91b63b955eefd6907b934fd40bbcac94d7e79016",
+    "half-replay-verification.log": "1ca0f4552a29540cd350bd55afb3840a1e933e43be3bcc8e595cba025ab6f7a9",
+    "completed-resume.log": "acb8f6860081926f1f1d50ce994344850bac00624ccbc75687186c8f7343337a",
+    "publication-tests.log": "81c7c1e99048ae44ae5fa769cac635ce440046a0c6e30e488c6a1933aa858b28"
+  },
+  "scope": "Completed exploratory reused-book experiment and saved-content checks. Not significance, convergence at integer order, a unique long-memory explanation, speed or general LLM improvement. Raw logs, native packages, weights, corpora and checkpoints remain local."
+}

@@ -477,6 +477,60 @@ def test_state_parity_uses_named_adam_not_raw_ids_and_checks_group_settings(clie
     assert result["saved_gates_equal"]
 
 
+@pytest.mark.parametrize("arm", ["lag2", "history_fixed_two"])
+@pytest.mark.parametrize("corruption", ["missing_schema", "wrong_schema", "extra_field",
+                                         "missing_kernel_budget", "extra_kernel_field"])
+def test_state_parity_requires_the_complete_adapter_recipe(client, summary_module, saved_controls, arm, corruption):
+    plan, runs, saved, directory = saved_controls
+    key = f"41:{arm}"
+    extra = saved[key]["adapter"]["_extra_state"]
+    if corruption == "missing_schema":
+        extra.pop("schema")
+    elif corruption == "wrong_schema":
+        extra["schema"] = "spiraltorch.fractional_memory_adapter.v1"
+    elif corruption == "extra_field":
+        extra["unsupported"] = True
+    elif corruption == "missing_kernel_budget":
+        extra["kernel"].pop("max_values")
+    else:
+        extra["kernel"]["unsupported"] = True
+    with pytest.raises(ValueError, match="recipe"):
+        client.adapter_for(arm, plan["config"], 41).load_state_dict(saved[key]["adapter"])
+    runs[key]["checkpoint"] = client.study.save_checkpoint(directory, saved[key])
+    with pytest.raises(ValueError, match="recipe"):
+        summary_module.two_lag_state_parity(plan, runs, directory)
+
+
+@pytest.mark.parametrize("field", ["lr", "betas", "eps", "weight_decay", "amsgrad", "maximize",
+                                   "foreach", "capturable", "differentiable", "fused"])
+def test_state_parity_rejects_matching_incomplete_adam_groups(client, summary_module, saved_controls, field):
+    plan, runs, saved, directory = saved_controls
+    for key, value in saved.items():
+        value["optimizer"]["param_groups"][0].pop(field)
+        runs[key]["checkpoint"] = client.study.save_checkpoint(directory, value)
+    with pytest.raises(ValueError, match="Adam configuration"):
+        summary_module.two_lag_state_parity(plan, runs, directory)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("lr", True), ("lr", float("nan")), ("betas", []), ("betas", [.9]),
+    ("betas", [.9, 1.]), ("betas", [-.1, .999]), ("betas", [True, .999]),
+    ("betas", [.9, float("nan")]), ("betas", [.9, "0.999"]),
+    ("eps", -1.), ("eps", float("nan")), ("eps", True),
+    ("weight_decay", -1.), ("weight_decay", float("inf")),
+    ("amsgrad", 0), ("maximize", "false"), ("capturable", 0),
+    ("differentiable", None), ("foreach", "auto"), ("fused", 0),
+    ("decoupled_weight_decay", "false"),
+])
+def test_state_parity_rejects_matching_invalid_adam_groups(client, summary_module, saved_controls, field, value):
+    plan, runs, saved, directory = saved_controls
+    for key, state in saved.items():
+        state["optimizer"]["param_groups"][0][field] = value
+        runs[key]["checkpoint"] = client.study.save_checkpoint(directory, state)
+    with pytest.raises(ValueError, match="Adam configuration"):
+        summary_module.two_lag_state_parity(plan, runs, directory)
+
+
 def test_checkpoint_option_does_not_silently_ignore_other_protocols(summary_module):
     plan = {"study_id": "s", "config": {"schema": "spiraltorch.fractional_lag_protocol.v1"}}
     result = {"status": "completed", "study_id": "s"}

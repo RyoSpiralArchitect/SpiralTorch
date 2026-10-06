@@ -134,9 +134,11 @@ not matching their filter prior or compute. All twelve runs and exact Adam
 continuations completed: learned GL slightly improves over learned EMA in
 every seed on both reused evaluation sets, while EMA beats fixed-order GL.
 Learned alpha moves near 1, where strict GL becomes a single previous-step
-map. The [ordinary single-lag protocol](fractional_lag_study.md) tests Torch
-shift versus fixed Rust alpha=1 parity, then learned orders starting at one
-and one-half under the same budget. This is not proof that long
+map. The [completed ordinary single-lag study](fractional_lag_study.md) confirms
+exact Torch-shift/fixed-Rust parity through saved Adam states and endpoints.
+Learning from one improves both reused sets in all three seeds, but its order
+moves near two, where GL history is a short two-tap map. Fixed-two controls and
+bounded-history ablations remain necessary; this is not proof that long
 fractional memory, rather than short causal mixing, explains the difference.
 
 ## Restarted execution slice: vision across Rust, Python, and browser
