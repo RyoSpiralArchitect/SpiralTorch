@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,16 +29,26 @@ def sha(path):
 
 
 @pytest.mark.parametrize("archived", [False, True])
-def test_current_and_archived_summary_rebuild_identically_without_model_imports(monkeypatch, archived):
+@pytest.mark.parametrize("bytecode_enabled", [False, True])
+def test_current_and_archived_summary_rebuild_identically_without_model_imports(
+    monkeypatch, archived, bytecode_enabled
+):
     original_import = builtins.__import__
     def no_models(name, *args, **kwargs):
         assert name.split(".")[0] not in {"torch", "transformers", "spiraltorch"}
         return original_import(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", no_models)
+    monkeypatch.setattr(sys, "dont_write_bytecode", not bytecode_enabled)
     path = (DIRECTORY if archived else ROOT / "tools") / "summarize_wave_gate_long_horizon.py"
+    inventory_before = {p.name for p in path.parent.iterdir()}
     spec = importlib.util.spec_from_file_location("public_window_summary", path)
     summary = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(summary)
+    # Importing a publication must not add artifacts, even without Python -B.
+    with monkeypatch.context() as imports:
+        imports.setattr(sys, "dont_write_bytecode", True)
+        spec.loader.exec_module(summary)
+    assert sys.dont_write_bytecode == (not bytecode_enabled)
+    assert {p.name for p in path.parent.iterdir()} == inventory_before
     sources = {key: raw(f"{key}.json" + ("" if key == "journal" else ".gz"))
                for key in ("plan", "results", "journal")}
     hashes = {key: hashlib.sha256(value).hexdigest() for key, value in sources.items()}
