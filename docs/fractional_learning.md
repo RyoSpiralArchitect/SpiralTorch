@@ -87,6 +87,52 @@ causal-convolution reference. Use `--validate-only` before timing, a verified
 release native build, and an idle host. It includes the native host transport;
 it is not an end-to-end adapter/model or resident GPU benchmark.
 
+### Bulk Float32 Transport
+
+The optional AD bridge uses bulk buffers when its first-use Torch/NumPy interop
+probe succeeds; otherwise it retains the sequence route. Only that capability
+probe may fall back: errors during an actual operation are not silently retried.
+Noncontiguous Torch inputs are materialized in C order, lazy negative views are
+resolved, and device tensors still make explicit CPU host transfers. This does
+not add another mathematical backend or change adapter/checkpoint schemas.
+
+Native buffer methods also work without Torch or NumPy:
+
+```python
+from array import array
+import spiraltorch as st
+
+kernel = st.FractionalGlKernel(kernel_len=8, step=0.7)
+saved = kernel.forward_history_buffer(array("f", [1, 2, 3, 4, 5, 6]), [2, 3], 1, 0.5)
+output = memoryview(saved.output_buffer()).cast("f")
+dx_bytes, d_alpha = saved.vjp_buffer(array("f", [1] * 6))
+```
+
+`forward_buffer`/`forward_history_buffer`, `vjp_buffer`,
+`vjp_input_buffer`, `vjp_alpha_buffer` and `jvp_buffer` accept C-contiguous,
+native-endian float32 exporters. Read-only and unaligned exporters are safe;
+non-native byte order, wrong element types, noncontiguous/negative strides and
+invalid sizes are rejected rather than reinterpreted. The existing sequence
+methods and `output` list property remain available.
+
+Inputs are copied to Rust-owned values before releasing the GIL. Output and
+vector-derivative methods return fresh writable `bytearray` owners containing
+native float32 bytes, not aliases of the saved snapshot and not a portable disk
+format. The AD client retains a `memoryview` export around
+[`torch.frombuffer`](https://docs.pytorch.org/docs/2.12/generated/torch.frombuffer.html),
+so its CPU storage stays alive and its backing bytearray cannot resize. Mutating
+an output never changes the snapshot used for derivatives. There is no end-to-end
+zero-copy or resident-GPU claim.
+
+Use `tools/benchmark_fractional_learning.py --compare-transport` for explicit
+list versus buffer versus Torch comparisons of the same forward/order VJP.
+Both Rust routes use the same native binary and kernel; the list baseline is
+explicit, not an assumption about the current default transport.
+
+The [complete transport comparison](../benchmarks/results/2026-10-04-fractional-buffer-transport/README.md)
+records all 12 CPU processes and bitwise pretrained-update regression checks.
+Its operator timings do not establish model throughput or learning quality.
+
 `FractionalMemoryAdapter(F)` is an identity-initialized residual:
 
 ```text

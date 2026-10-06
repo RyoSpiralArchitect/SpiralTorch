@@ -10,7 +10,11 @@ import spiraltorch.fractional_autograd as bridge
 @pytest.mark.parametrize("history", [False, True])
 @pytest.mark.parametrize("axis", [0, 1, 2])
 @pytest.mark.parametrize("need_input,need_alpha", [(True, True), (True, False), (False, True)])
-def test_autograd_requests_only_needed_native_components(history, axis, need_input, need_alpha):
+@pytest.mark.parametrize("buffers", [False, True])
+def test_autograd_requests_only_needed_native_components(history, axis, need_input, need_alpha, buffers, monkeypatch):
+    if buffers and not bridge._buffer_transport_available():
+        pytest.skip("Torch/NumPy buffer interop is not installed")
+    monkeypatch.setattr(bridge, "_buffer_transport_available", lambda: buffers)
     kernel = st.FractionalGlKernel(kernel_len=5, step=.7)
     x = torch.linspace(-.8, .9, 24).reshape(2, 3, 4).transpose(0, 2).requires_grad_(need_input)
     alpha = torch.tensor(.6, requires_grad=need_alpha)
@@ -20,6 +24,7 @@ def test_autograd_requests_only_needed_native_components(history, axis, need_inp
     upstream = x.detach().cos()
     expected = snapshot.vjp(upstream.reshape(-1).tolist())
     method = "vjp" if need_input and need_alpha else ("vjp_input" if need_input else "vjp_alpha")
+    method += "_buffer" if buffers else ""
     calls = []
 
     class ObservedSnapshot:

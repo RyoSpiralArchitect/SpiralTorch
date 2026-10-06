@@ -1,0 +1,164 @@
+{
+  "schema": "spiraltorch.fractional_learning_benchmark.v1",
+  "comparison": "list_vs_buffer",
+  "status": "measured",
+  "shape": [
+    2,
+    128,
+    768
+  ],
+  "kernel_len": 32,
+  "alpha": 0.9,
+  "step": 1.0,
+  "map": "history",
+  "seed": 239,
+  "input_requires_grad": false,
+  "alpha_requires_grad": true,
+  "dtype": "float32",
+  "device": "cpu",
+  "threads": 2,
+  "native_profile_declared": "release",
+  "native_sha256": "5caece088b275f15f83a1bfb8e7216613c9470faf3f01f46ddf4b0f95f05f8f4",
+  "bridge_sha256": "40353142cf73192c3c704645bb75e3fe1eb591b8fe871e05b29693b8c4dc8531",
+  "benchmark_sha256": "f83a1a4f340bb95a78af85084195d4c52616f11b03df7f0877c324b54d63d315",
+  "input_sha256": "5734e5cf9522cfc656a3ad1e46fba3ef3258be2165e551532f869838f21dee9f",
+  "upstream_sha256": "3dab55a6cc65fa11ddeeee742c0a018ad12fc0c76f77cb3b758c92f3e2dd2c4b",
+  "torch": "2.12.1",
+  "machine": "arm64",
+  "correctness": {
+    "rust_list": {
+      "max_abs_output_error": 0.0,
+      "abs_alpha_gradient_error": 0.0,
+      "alpha_gradient": -29.853527069091797,
+      "output_sha256": "0843df7ae97875bb219a2afc5ff6e52cf05c6b6adc35351de64b795c85db0a67",
+      "alpha_gradient_sha256": "e967e9f7113703d7935c45e558869a5f9388ecfe5b7f0c60807cf761c7dc2a39"
+    },
+    "rust_buffer": {
+      "max_abs_output_error": 0.0,
+      "abs_alpha_gradient_error": 0.0,
+      "alpha_gradient": -29.853527069091797,
+      "output_sha256": "0843df7ae97875bb219a2afc5ff6e52cf05c6b6adc35351de64b795c85db0a67",
+      "alpha_gradient_sha256": "e967e9f7113703d7935c45e558869a5f9388ecfe5b7f0c60807cf761c7dc2a39"
+    },
+    "torch_conv1d": {
+      "max_abs_output_error": 4.76837158203125e-07,
+      "abs_alpha_gradient_error": 0.000324249267578125,
+      "alpha_gradient": -29.85320281982422,
+      "output_sha256": "fb9158cc93c9b1cb28dfe91256b72a194be915d3433efc6b97eb9f9e030d7e79",
+      "alpha_gradient_sha256": "60715af9c8f67281a95dfe40507c42ff3dbd381a946216fd9e386222f506676b"
+    }
+  },
+  "round_order": [
+    [
+      "rust_list",
+      "rust_buffer",
+      "torch_conv1d"
+    ],
+    [
+      "rust_list",
+      "torch_conv1d",
+      "rust_buffer"
+    ],
+    [
+      "rust_buffer",
+      "rust_list",
+      "torch_conv1d"
+    ],
+    [
+      "rust_buffer",
+      "torch_conv1d",
+      "rust_list"
+    ],
+    [
+      "torch_conv1d",
+      "rust_list",
+      "rust_buffer"
+    ],
+    [
+      "torch_conv1d",
+      "rust_buffer",
+      "rust_list"
+    ],
+    [
+      "rust_list",
+      "rust_buffer",
+      "torch_conv1d"
+    ],
+    [
+      "rust_list",
+      "torch_conv1d",
+      "rust_buffer"
+    ],
+    [
+      "rust_buffer",
+      "rust_list",
+      "torch_conv1d"
+    ],
+    [
+      "rust_buffer",
+      "torch_conv1d",
+      "rust_list"
+    ],
+    [
+      "torch_conv1d",
+      "rust_list",
+      "rust_buffer"
+    ],
+    [
+      "torch_conv1d",
+      "rust_buffer",
+      "rust_list"
+    ]
+  ],
+  "warmup_per_route": 2,
+  "measurements_ms": {
+    "rust_list": [
+      16.1515,
+      17.620541,
+      17.138667,
+      17.257042,
+      16.820125,
+      16.684541,
+      16.538292,
+      16.03425,
+      15.928542,
+      15.440959,
+      15.690042,
+      16.531125
+    ],
+    "rust_buffer": [
+      2.255792,
+      2.540625,
+      2.427666,
+      2.587792,
+      2.563584,
+      2.554,
+      2.615,
+      2.667,
+      2.568,
+      2.336041,
+      2.309208,
+      2.358
+    ],
+    "torch_conv1d": [
+      3.095834,
+      3.206875,
+      3.565541,
+      3.470916,
+      3.553167,
+      3.399417,
+      3.245834,
+      3.438834,
+      3.619375,
+      3.293542,
+      3.413708,
+      3.280167
+    ]
+  },
+  "median_ms": {
+    "rust_list": 16.5347085,
+    "rust_buffer": 2.5473125,
+    "torch_conv1d": 3.4065625
+  },
+  "scope": "Same finite GL map and requested order VJP; forward, AD and native host transport included. CPU float32 interfaces; backend accumulation differs within declared tolerance. Not a quality, GPU, adapter/model throughput or general-library speed claim. Native profile is declared, not inferred from the binary."
+}
