@@ -1,6 +1,15 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyByteArray;
 use st_nn::{WaveGateKernel, WaveGateLearningBatch};
+
+use crate::f32_buffer::{read_f32, write_f32};
+
+type BufferVjp<'py> = (
+    Bound<'py, PyByteArray>,
+    Bound<'py, PyByteArray>,
+    Bound<'py, PyByteArray>,
+);
 
 fn value_error(error: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(error.to_string())
@@ -78,6 +87,39 @@ impl PyWaveGateKernel {
         .map(|inner| PyWaveGateLearningBatch { inner })
         .map_err(value_error)
     }
+
+    /// Owned native-f32 copy; no foreign writable storage survives this call.
+    fn forward_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        gate: &Bound<'_, PyAny>,
+        bias: &Bound<'_, PyAny>,
+        rows: usize,
+        features: usize,
+    ) -> PyResult<PyWaveGateLearningBatch> {
+        let input = read_f32(input, self.max_values(), None)?;
+        let gate = read_f32(gate, self.max_values(), Some(features))?;
+        let bias = read_f32(bias, self.max_values(), Some(features))?;
+        self.forward(py, input, gate, bias, rows, features)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Same controls as the sequence transport.
+    fn forward_with_log_radius_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        gate: &Bound<'_, PyAny>,
+        bias: &Bound<'_, PyAny>,
+        rows: usize,
+        features: usize,
+        log_radius: f32,
+    ) -> PyResult<PyWaveGateLearningBatch> {
+        let input = read_f32(input, self.max_values(), None)?;
+        let gate = read_f32(gate, self.max_values(), Some(features))?;
+        let bias = read_f32(bias, self.max_values(), Some(features))?;
+        self.forward_with_log_radius(py, input, gate, bias, rows, features, log_radius)
+    }
 }
 
 #[pymethods]
@@ -85,6 +127,10 @@ impl PyWaveGateLearningBatch {
     #[getter]
     fn output(&self) -> Vec<f32> {
         self.inner.output().data().to_vec()
+    }
+
+    fn output_buffer<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyByteArray>> {
+        write_f32(py, self.inner.output().data().iter().copied())
     }
 
     fn conditioning_json(&self, py: Python<'_>) -> PyResult<String> {
@@ -119,6 +165,47 @@ impl PyWaveGateLearningBatch {
                 )
             })
             .map_err(value_error)
+    }
+
+    fn vjp_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<BufferVjp<'py>> {
+        let count = self.inner.output().data().len();
+        let upstream = read_f32(upstream, count, Some(count))?;
+        let vjp = py
+            .detach(|| self.inner.vjp(&upstream))
+            .map_err(value_error)?;
+        Ok((
+            write_f32(py, vjp.grad_input.data().iter().copied())?,
+            write_f32(py, vjp.grad_gate.data().iter().copied())?,
+            write_f32(py, vjp.grad_bias.data().iter().copied())?,
+        ))
+    }
+
+    #[allow(clippy::type_complexity)] // Flat tuple matches the existing scalar-radius VJP.
+    fn vjp_with_log_radius_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<(
+        Bound<'py, PyByteArray>,
+        Bound<'py, PyByteArray>,
+        Bound<'py, PyByteArray>,
+        f32,
+    )> {
+        let count = self.inner.output().data().len();
+        let upstream = read_f32(upstream, count, Some(count))?;
+        let (vjp, radius) = py
+            .detach(|| self.inner.vjp_with_log_radius(&upstream))
+            .map_err(value_error)?;
+        Ok((
+            write_f32(py, vjp.grad_input.data().iter().copied())?,
+            write_f32(py, vjp.grad_gate.data().iter().copied())?,
+            write_f32(py, vjp.grad_bias.data().iter().copied())?,
+            radius,
+        ))
     }
 }
 

@@ -61,6 +61,10 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                     raise AssertionError(name + ' did not reject missing PyTorch')
             # Native snapshots remain usable without the optional AD client.
             from array import array
+            wave = st.WaveGateKernel().forward_buffer(
+                array('f', [1.]), array('f', [0.]), array('f', [0.]), 1, 1)
+            assert wave.output_buffer() == array('f', [0.]).tobytes()
+            assert wave.vjp_buffer(array('f', [1.]))[1] == array('f', [1.]).tobytes()
             chart = st.FractionalGlAngleChart(0.)
             assert chart.alpha == 1. and chart.alpha_derivative == 2.
             assert chart.vjp(.5) == chart.jvp(.5) == 1.

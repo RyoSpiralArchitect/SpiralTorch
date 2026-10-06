@@ -154,10 +154,10 @@ impl ProjectionRadius {
         let scale = f64::from((-topos.curvature()).sqrt());
         let gate: Vec<_> = gate.data().iter().map(|&v| topos.saturate(v)).collect();
         let mut data = Vec::with_capacity(input.data().len());
+        let mut z = Vec::with_capacity(cols);
         for row in input.data().chunks_exact(cols) {
-            let z: Vec<_> = (0..cols)
-                .map(|c| topos.saturate(row[c] * gate[c] + bias.data()[c]))
-                .collect();
+            z.clear();
+            z.extend((0..cols).map(|c| topos.saturate(row[c] * gate[c] + bias.data()[c])));
             let (_, tangent, _, _) = self.row(&z, scale);
             data.extend(z.iter().map(|&v| (f64::from(v) * tangent / scale) as f32));
         }
@@ -185,15 +185,20 @@ impl ProjectionRadius {
         let mut dg = vec![0.0f64; cols];
         let mut db = vec![0.0f64; cols];
         let mut dr = 0.0f64;
+        // Reuse row-local storage without changing reduction order or precision.
+        let mut affine = Vec::with_capacity(cols);
+        let mut z = Vec::with_capacity(cols);
         for (x, dy) in input
             .data()
             .chunks_exact(cols)
             .zip(upstream.data().chunks_exact(cols))
         {
-            let affine: Vec<_> = (0..cols)
-                .map(|c| topos.saturate_with_slope(x[c] * gates[c].0 + bias.data()[c]))
-                .collect();
-            let z: Vec<_> = affine.iter().map(|&(v, _)| v).collect();
+            affine.clear();
+            affine.extend(
+                (0..cols).map(|c| topos.saturate_with_slope(x[c] * gates[c].0 + bias.data()[c])),
+            );
+            z.clear();
+            z.extend(affine.iter().map(|&(v, _)| v));
             let (norm, tangent, radial, log_gain) = self.row(&z, scale);
             let dot = if norm == 0.0 {
                 0.0
