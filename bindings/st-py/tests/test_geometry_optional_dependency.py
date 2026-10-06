@@ -59,6 +59,10 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
             history = st.FractionalGlKernel().forward_history([1.0], [1], 0, 0.5)
             assert history.output == [0.0]
             assert history.vjp_input([2.0]) == [0.0] and history.vjp_alpha([2.0]) == 0.0
+            normalized = st.FractionalGlKernel(kernel_len=2).forward_history_l2_buffer(
+                array('f', [1., 2.]), [2], 0, .5, 1.5)
+            assert normalized.output == [0., -1.5]
+            assert normalized.vjp_alpha([1., 1.]) == 0.
         """)
         completed = subprocess.run(
             [

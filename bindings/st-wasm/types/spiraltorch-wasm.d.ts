@@ -14,6 +14,7 @@ declare module "spiraltorch-wasm" {
         constructor(kernel_len: number, step: number, max_values: number, max_products: number);
         forward(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
         forward_history(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
+        forward_history_l2(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, gain: number): FractionalGlLearningBatch;
         free(): void;
     }
     export class FractionalGlLearningBatch {

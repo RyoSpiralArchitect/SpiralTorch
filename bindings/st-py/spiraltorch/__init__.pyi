@@ -12,6 +12,8 @@ from .fractional_autograd import (
     fractional_gl_autograd as fractional_gl_autograd,
     FractionalHistoryAdapter as FractionalHistoryAdapter,
     fractional_gl_history_autograd as fractional_gl_history_autograd,
+    FractionalL2HistoryAdapter as FractionalL2HistoryAdapter,
+    fractional_gl_history_l2_autograd as fractional_gl_history_l2_autograd,
 )
 
 class FractionalGlKernel:
@@ -24,10 +26,14 @@ class FractionalGlKernel:
                 alpha: float) -> FractionalGlLearningBatch: ...
     def forward_history(self, input: Sequence[float], shape: Sequence[int], axis: int,
                         alpha: float) -> FractionalGlLearningBatch: ...
+    def forward_history_l2(self, input: Sequence[float], shape: Sequence[int], axis: int,
+                           alpha: float, gain: float = ...) -> FractionalGlLearningBatch: ...
     def forward_buffer(self, input: Any, shape: Sequence[int], axis: int,
                        alpha: float) -> FractionalGlLearningBatch: ...
     def forward_history_buffer(self, input: Any, shape: Sequence[int], axis: int,
                                alpha: float) -> FractionalGlLearningBatch: ...
+    def forward_history_l2_buffer(self, input: Any, shape: Sequence[int], axis: int,
+                                  alpha: float, gain: float = ...) -> FractionalGlLearningBatch: ...
 
 class FractionalGlLearningBatch:
     @property

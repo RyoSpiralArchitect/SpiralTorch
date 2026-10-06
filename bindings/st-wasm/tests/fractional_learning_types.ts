@@ -9,6 +9,8 @@ const inputOnly: Float32Array = batch.vjp_input(dx);
 const alphaOnly: number = batch.vjp_alpha(dx);
 const dy: Float32Array = batch.jvp(dx, alpha);
 const history: FractionalGlLearningBatch = kernel.forward_history(dx, new Uint32Array([2,4,3]), 1, .5);
+const normalized: FractionalGlLearningBatch = kernel.forward_history_l2(dx, new Uint32Array([2,4,3]), 1, .5, 1);
+normalized.free();
 history.free();
 void dy;
 void inputOnly; void alphaOnly;

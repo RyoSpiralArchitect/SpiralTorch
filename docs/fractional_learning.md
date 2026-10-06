@@ -233,6 +233,70 @@ The compiled-WASM fixture's 500 updates reduced MSE from `0.0912229914` to
 gate. Final alpha was `0.8955443`, **not** the target's `0.65`: fitting the
 output with independently learned gates does not establish order recovery.
 
+## Fixed-Energy History
+
+`FractionalL2HistoryAdapter` keeps the same independent gates and `2*F+1`
+trainable parameters, but fixes the **strictly-past coefficient L2 norm**:
+
+```text
+c = (0, c_1(alpha), ..., c_(K-1)(alpha))
+q = gain * c / ||c||_2
+H_l2(x)[t] = sum(q[k] * x[t-k], k=1..min(t, K-1))
+output = x + strength*tanh(local_gate)*x + strength*tanh(gate)*H_l2(x)
+```
+
+The norm includes the entire declared kernel, even at early prefix positions.
+It is not recomputed per prefix or sample. This holds filter energy fixed,
+**not output variance on correlated hidden states**, and is not gradient
+normalization. `gain` is a positive, finite, constant float32, not a parameter.
+The default is 1; matching a raw alpha=2 history filter at h=1 uses
+`gain=sqrt(5)` with K>=3. Equality is mathematical up to float32 rounding,
+not a promise of bitwise optimizer trajectories. For a K=3 versus K=32
+comparison, keep gain, gates, initialization, data and update budget matched.
+
+Rust owns the normalized taps, the normalization's alpha derivative, input
+VJP and joint JVP. Both positive common factors `h^-alpha` and `alpha` cancel
+analytically before normalization. This avoids an unnecessary step-scale
+overflow and catastrophic cancellation near alpha=0. Internally, for k>=1,
+`c_k=-alpha*p_k`, `p_1=1`, `p_k=(k-1-alpha)*p_(k-1)/k`. The factored polynomial
+and its derivative must stay within the float32 range; recurrences and the
+norm accumulate in float64 before checked float32 conversion. Unrepresentable
+outputs/differentials raise errors rather than clipping alpha or gradients.
+
+```python
+adapter = st.FractionalL2HistoryAdapter(
+    model.config.n_embd, initial_alpha=2.0, strength=0.1,
+    kernel_len=32, gain=5.0**0.5,
+).to(next(model.parameters()).device)
+```
+
+The extra-state schema `spiraltorch.fractional_l2_history_adapter.v1` includes
+the canonical float32 gain and rejects raw-history/full-GL cross-loading.
+Save Adam state too. Identity initialization and all full-prefix, float32,
+padding, cache and first-order-only restrictions still apply. This is an
+explicit alternative operator, **not a change to existing GL checkpoints**.
+
+Lower-level entry points share the same immutable snapshot contract:
+Rust `kernel.forward_history_l2(input, shape, axis, alpha, gain)`, Python
+`kernel.forward_history_l2(...)` / `forward_history_l2_buffer(...)` and
+`st.fractional_gl_history_l2_autograd(x, alpha, axis=1, kernel=kernel, gain=1.0)`,
+WASM `kernel.forward_history_l2(float32Input, uint32Shape, axis, alpha, gain)`.
+All remain CPU/host paths, not resident GPU kernels. K=1 or an axis of length
+one has zero history and zero differentials. K=2 has one past tap `-gain`,
+so its alpha gradient is exactly zero; learning order needs more past taps.
+
+Tests compare to an independent Torch polynomial, cover finite differences,
+integer/subnormal orders, buffer ownership, causal boundaries, and exact Adam
+continuation in a tiny HF model with frozen base weights. Run the compiled
+WASM counterpart:
+
+```sh
+node bindings/st-wasm/tests/fractional_history_l2.mjs <node-bindgen-module>
+```
+
+Its synthetic gate/order fit is an execution test,
+not evidence of pretrained quality, unique order recovery or a speed win.
+
 These fixtures test the learning connection, not pretrained quality, unique
 parameter recovery or throughput. Independent gates are a structural
 hypothesis, not evidence that fractional history improves language modeling.

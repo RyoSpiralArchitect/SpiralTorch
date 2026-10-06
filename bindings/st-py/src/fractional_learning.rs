@@ -68,6 +68,25 @@ impl PyFractionalGlKernel {
             .map_err(value_error)
     }
 
+    #[pyo3(signature = (input, shape, axis, alpha, gain=1.0))]
+    #[allow(clippy::too_many_arguments)] // Keep the direct Rust/Python/WASM contract aligned.
+    fn forward_history_l2(
+        &self,
+        py: Python<'_>,
+        input: Vec<f32>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+        gain: f32,
+    ) -> PyResult<PyFractionalGlLearningBatch> {
+        py.detach(|| {
+            self.inner
+                .forward_history_l2(&input, &shape, axis, alpha, gain)
+        })
+        .map(|inner| PyFractionalGlLearningBatch { inner })
+        .map_err(value_error)
+    }
+
     /// C-contiguous native-f32 buffer, copied before Rust releases the GIL.
     fn forward_buffer(
         &self,
@@ -91,6 +110,21 @@ impl PyFractionalGlKernel {
     ) -> PyResult<PyFractionalGlLearningBatch> {
         let input = read_f32(input, self.inner.max_values(), None)?;
         self.forward_history(py, input, shape, axis, alpha)
+    }
+
+    #[pyo3(signature = (input, shape, axis, alpha, gain=1.0))]
+    #[allow(clippy::too_many_arguments)] // Same controls as the sequence transport.
+    fn forward_history_l2_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+        gain: f32,
+    ) -> PyResult<PyFractionalGlLearningBatch> {
+        let input = read_f32(input, self.inner.max_values(), None)?;
+        self.forward_history_l2(py, input, shape, axis, alpha, gain)
     }
 }
 

@@ -354,6 +354,7 @@ jobs:
           node bindings/st-wasm/tests/rank_adaptation.cjs "$module"
           node bindings/st-wasm/tests/fractional_learning.mjs "$module"
           node bindings/st-wasm/tests/fractional_history.mjs "$module"
+          node bindings/st-wasm/tests/fractional_history_l2.mjs "$module"
           node bindings/st-wasm/tests/fractional_selective_vjp.mjs "$module"
           node bindings/st-wasm/tests/fractional_tiled_forward.mjs "$module"
           node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
@@ -710,6 +711,7 @@ jobs:
             bindings/st-py/tests/test_geometry_optional_dependency.py \
             bindings/st-py/tests/test_fractional_learning.py \
             bindings/st-py/tests/test_fractional_history.py \
+            bindings/st-py/tests/test_fractional_history_l2.py \
             bindings/st-py/tests/test_fractional_selective_vjp.py \
             bindings/st-py/tests/test_fractional_buffers.py \
             bindings/st-py/tests/test_fractional_memory_study.py \
