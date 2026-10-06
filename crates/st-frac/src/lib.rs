@@ -437,9 +437,9 @@ fn conv1d_gl_line(
     let active = &coeff[lags.clone()];
     for (i, out) in y.iter_mut().enumerate() {
         let mut acc = 0.0f64;
+        let first_source = i as isize - lags.start as isize;
         for (offset, &c) in active.iter().enumerate() {
-            let k = lags.start + offset;
-            let idx = i as isize - k as isize;
+            let idx = first_source - offset as isize;
             acc += f64::from(c) * f64::from(sample_with_pad(x, idx, pad));
         }
         *out = checked_f32("fractional output", scale * acc)?;
@@ -466,9 +466,9 @@ fn vjp1d_gl_line(
     let lags = nonzero_lags(coeff);
     let active = &coeff[lags.clone()];
     for (output_index, &gradient) in gy.iter().enumerate() {
+        let first_source = output_index as isize - lags.start as isize;
         for (offset, &coefficient) in active.iter().enumerate() {
-            let lag = lags.start + offset;
-            let source_index = output_index as isize - lag as isize;
+            let source_index = first_source - offset as isize;
             if let Some(source_index) = source_index_with_pad(source_index, gx.len(), pad) {
                 accumulators[source_index] += scale * f64::from(coefficient) * f64::from(gradient);
             }
