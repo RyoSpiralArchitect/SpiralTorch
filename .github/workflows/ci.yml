@@ -723,6 +723,7 @@ jobs:
             bindings/st-py/tests/test_fractional_window_study_results.py \
             bindings/st-py/tests/test_fractional_active_support_results.py \
             bindings/st-py/tests/test_fractional_multi_adapter_replay.py \
+            bindings/st-py/tests/test_fractional_multi_adapter_results.py \
             bindings/st-py/tests/test_fractional_gain_study.py \
             bindings/st-py/tests/test_fractional_gain_verification.py \
             bindings/st-py/tests/test_fractional_gain_results.py \

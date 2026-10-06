@@ -94,6 +94,34 @@ def test_zeroed_native_input_vjp_is_rejected_and_modules_restored(probe, monkeyp
     assert all(p.grad is None for p in model.parameters())
 
 
+def test_later_native_input_vjp_changes_earlier_trainable_gradients(probe, monkeypatch):
+    def backward():
+        model, tokens = setup()
+        adapters = probe.make_adapters(recipe(), "full", [])
+        with torch.no_grad():
+            for adapter in adapters.values():
+                adapter.gate.fill_(.2)
+                adapter.local_gate.fill_(.1)
+        with probe.attached(model, adapters, recipe()["blocks"]):
+            loss = model(tokens[:2], labels=tokens[:2]).loss
+            loss.backward()
+        return loss.detach(), {n: p.grad.clone() for n, p in adapters.named_parameters()}
+
+    reference_loss, reference = backward()
+    delegate = probe.ObservedSnapshot.__getattr__
+    def corrupt(self, name):
+        operation = delegate(self, name)
+        def invoke(direction):
+            result = operation(direction)
+            return (bytearray(len(result[0])), *result[1:]) if name == "vjp_buffer" else result
+        return invoke
+    monkeypatch.setattr(probe.ObservedSnapshot, "__getattr__", corrupt)
+    broken_loss, broken = backward()
+    assert probe.equal(reference_loss, broken_loss)
+    assert all(probe.equal(value, broken[name]) for name, value in reference.items() if name.startswith("site1."))
+    assert any(not probe.equal(value, broken[name]) for name, value in reference.items() if name.startswith("site0."))
+
+
 @pytest.mark.parametrize("corruption", ["binding", "cursor", "names", "order", "recipe", "moment", "runtime", "nan", "step"])
 def test_incompatible_saved_states_cannot_resume(probe, corruption):
     saved = run(probe)["midpoint"]
