@@ -1,0 +1,62 @@
+{
+  "schema": "spiraltorch.fractional_active_support_validation.v1",
+  "status": "passed",
+  "final_source_revision": "381a8a10bc7cb6744696fa7e561b69066e9bd584",
+  "native_benchmark_processes": 96,
+  "final_exit_codes": {
+    "rust_tests": 0,
+    "clippy": 0,
+    "native_build": 0,
+    "wasm_build": 0,
+    "geometry_python": 0,
+    "benchmark_python": 0,
+    "wasm_parity_and_timing": 0,
+    "wasm_learning": 0,
+    "native_matrix": 0
+  },
+  "rust_tests": 151,
+  "geometry_python_tests": 848,
+  "benchmark_python_tests": 84,
+  "python_warnings": 18,
+  "old_runtime_files_verified": 71,
+  "old_studies_executed_or_written": false,
+  "final_runtime_files": 71,
+  "changed_package_files": [
+    "spiraltorch/spiraltorch.abi3.so"
+  ],
+  "failed_attempts_preserved": [
+    {
+      "log": "wasm-comparison.log",
+      "reason": "Initial harness compared two different old APIs and rejected their preexisting signed-zero difference. Fixed to compare each route across builds; same-route bitwise gate was not relaxed."
+    },
+    {
+      "log": "regressions.log",
+      "reason": "Existing diagnostic import left a cache on the prior no-B run, so the next inventory check failed. Isolated and fixed in PR #2218; generated cache moved aside, no public artifact rewritten."
+    },
+    {
+      "log": "clippy-v4.log",
+      "reason": "Needless-range-loop lint fixed with bounded iterators; final Clippy exits zero."
+    }
+  ],
+  "preliminary_performance_regressions_retained": true,
+  "hoisted_native_identical_to_sliced": true,
+  "private_logs_sha256": {
+    "native-build-final.log": "5dabdc19f66e29c9b5761dab64789d832df1d0b61d97df38865393c3836aa2ec",
+    "wasm-build-final.log": "7224e6938bdd39b72b4a130adf213789de5a8afcd66085c7dd2237cacfe8f56e",
+    "rust-tests-final.log": "d6d4dfbf3bae3895e95ce713ec2235652441106419538e23117de3a9d5c3128d",
+    "clippy-final.log": "8f0871f5584ac6e5afb7b16c628c3d348f246c712cc67e9758221907c9182d1d",
+    "regressions-final.log": "4b03864c79de1851b2585778d825971354d3d7cbdbed15ccf429caa969e1ac8f",
+    "benchmark-tests-final.log": "28c41c5247d72a644625df57c866923ee0972ab979df4e7a35f08b32963f2c30",
+    "wasm-tiled.log": "aec0679d6df2cd4727383032b2787e04917af4b1a283e47ab60d477ef0a8a6ac",
+    "wasm-window-learning-final.log": "9d0721745abbc83a6230d3717d274b552c673400a97329190b8b296939903af1",
+    "wasm-comparison.log": "ec8d756508627eb38b8a98b45ad10a169c1407e9e7596d0b9af88508e9b4331d",
+    "regressions.log": "57d68ba238e1e9e7834985173decdabab77b6c2f5e4fbb36cd1bbaac77248f18",
+    "clippy-v4.log": "67e471423139caac8a5c52fa83697d819c03e58717842434613a72c246ef845f"
+  },
+  "scope": "Operator correctness and local performance only; no pretrained reexecution, endpoint selection, model-quality evidence or universal speed claim.",
+  "public_artifact_tests": {
+    "passed": 3,
+    "exit_code": 0,
+    "model_execution": false
+  }
+}
