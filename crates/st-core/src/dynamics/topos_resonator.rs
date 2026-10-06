@@ -299,6 +299,50 @@ pub struct ToposResonatorOperator {
     topos: OpenCartesianTopos,
 }
 
+/// Owned finite-unroll tape. The caller retains optimizer and broadcast policy.
+/// Four f32 vectors are retained; VJPs do not rerun the resonance or read live inputs.
+#[derive(Clone, Debug)]
+pub struct ToposResonatorLearningBatch {
+    input: Vec<f32>,
+    gate: Vec<f32>,
+    drive_sensitivity: Vec<f32>,
+    step: ToposResonatorStep,
+}
+
+impl ToposResonatorLearningBatch {
+    pub fn step(&self) -> &ToposResonatorStep {
+        &self.step
+    }
+
+    pub fn output(&self) -> &[f32] {
+        &self.step.output
+    }
+
+    pub fn vjp(&self, grad_output: &[f32]) -> Result<ToposResonatorBackward, ToposResonatorError> {
+        validate_length("grad_output", grad_output, self.input.len())?;
+        let mut grad_input = Vec::with_capacity(self.input.len());
+        let mut grad_gate = Vec::with_capacity(self.input.len());
+        for (index, &upstream) in grad_output.iter().enumerate() {
+            // Keep (upstream * sensitivity) * parameter in the legacy order.
+            // Caching sensitivity * parameter would change f32 rounding.
+            let grad_drive =
+                require_derived_finite("grad_drive", upstream * self.drive_sensitivity[index])?;
+            grad_input.push(require_derived_finite(
+                "grad_input",
+                grad_drive * self.gate[index],
+            )?);
+            grad_gate.push(require_derived_finite(
+                "grad_gate",
+                grad_drive * self.input[index],
+            )?);
+        }
+        Ok(ToposResonatorBackward {
+            grad_input,
+            grad_gate,
+        })
+    }
+}
+
 impl ToposResonatorOperator {
     pub fn new(
         config: ToposResonatorConfig,
@@ -342,6 +386,27 @@ impl ToposResonatorOperator {
         features: usize,
     ) -> Result<ToposResonatorStep, ToposResonatorError> {
         apply_topos_resonator(self.request(input, gate, rows, features))
+    }
+
+    /// Capture the same audited forward and exact finite-unroll sensitivity.
+    /// Inputs and gate are per-element; no reduction or averaging is introduced.
+    pub fn capture(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        rows: usize,
+        features: usize,
+    ) -> Result<ToposResonatorLearningBatch, ToposResonatorError> {
+        let request = self.request(input, gate, rows, features);
+        let mut evolved = evolve_resonance::<true>(request)?;
+        let drive_sensitivity = std::mem::take(&mut evolved.drive_sensitivity);
+        let step = finish_resonance(request, evolved)?;
+        Ok(ToposResonatorLearningBatch {
+            input: input.to_vec(),
+            gate: gate.to_vec(),
+            drive_sensitivity,
+            step,
+        })
     }
 
     pub fn backward(
@@ -412,13 +477,14 @@ fn root_mean_square(values: &[f32]) -> f64 {
 struct EvolvedResonance {
     drive: Vec<f32>,
     output: Vec<f32>,
+    drive_sensitivity: Vec<f32>,
     last_update_linf: f32,
     fixed_point_residual_linf: f32,
     closure_adjustment_linf: f32,
     rewritten_values: usize,
 }
 
-fn evolve_resonance(
+fn evolve_resonance<const CAPTURE_SENSITIVITY: bool>(
     request: ToposResonatorRequest<'_>,
 ) -> Result<EvolvedResonance, ToposResonatorError> {
     let volume = validate_request(request)?;
@@ -429,6 +495,11 @@ fn evolve_resonance(
     let coupling = request.config.coupling();
     let mut state = vec![0.0f32; volume];
     let mut next = vec![0.0f32; volume];
+    let mut sensitivity = if CAPTURE_SENSITIVITY {
+        vec![0.0f32; volume]
+    } else {
+        Vec::new()
+    };
     let mut last_update_linf = 0.0f32;
     let mut closure_adjustment_linf = 0.0f32;
     let mut rewritten_values = 0usize;
@@ -437,8 +508,14 @@ fn evolve_resonance(
         for index in 0..volume {
             let raw =
                 require_derived_finite("resonance_drive", drive[index] + coupling * state[index])?;
-            let (rewritten, _) = request.topos.saturate_with_slope(raw);
+            let (rewritten, slope) = request.topos.saturate_with_slope(raw);
             require_derived_finite("resonance_rewrite", rewritten)?;
+            if CAPTURE_SENSITIVITY {
+                sensitivity[index] = require_derived_finite(
+                    "drive_sensitivity",
+                    slope * (1.0 + coupling * sensitivity[index]),
+                )?;
+            }
             let adjustment = (rewritten - raw).abs();
             closure_adjustment_linf = closure_adjustment_linf.max(adjustment);
             if rewritten != raw {
@@ -459,6 +536,7 @@ fn evolve_resonance(
     Ok(EvolvedResonance {
         drive,
         output: state,
+        drive_sensitivity: sensitivity,
         last_update_linf,
         fixed_point_residual_linf,
         closure_adjustment_linf,
@@ -588,7 +666,13 @@ pub fn validate_topos_resonator_state(
 pub fn apply_topos_resonator(
     request: ToposResonatorRequest<'_>,
 ) -> Result<ToposResonatorStep, ToposResonatorError> {
-    let evolved = evolve_resonance(request)?;
+    finish_resonance(request, evolve_resonance::<false>(request)?)
+}
+
+fn finish_resonance(
+    request: ToposResonatorRequest<'_>,
+    evolved: EvolvedResonance,
+) -> Result<ToposResonatorStep, ToposResonatorError> {
     let audit = audit_from_evolved(request, &evolved, 0.0, 0.0)?;
     Ok(ToposResonatorStep {
         kind: TOPOS_RESONATOR_KIND,
@@ -611,7 +695,7 @@ pub fn audit_topos_resonator(
 ) -> Result<ToposResonatorAudit, ToposResonatorError> {
     let volume = validate_request(request.request)?;
     validate_length("output", request.output, volume)?;
-    let evolved = evolve_resonance(request.request)?;
+    let evolved = evolve_resonance::<false>(request.request)?;
     let (max_error, max_ratio) = compare_field("output", &evolved.output, request.output, false)?;
     audit_from_evolved(request.request, &evolved, max_error, max_ratio)
 }
@@ -704,6 +788,75 @@ pub fn audit_topos_resonator_backward(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_pullbacks_preserve_audit_bits_ownership_and_invalid_upstream_guards() {
+        let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        for rows in [0, 1, 7] {
+            for (coupling, iterations) in [(0.0, 1), (0.25, 4), (0.9, 16)] {
+                for porosity in [0.0, 0.2] {
+                    let features = 17;
+                    let mut input: Vec<_> = (0..rows * features)
+                        .map(|i| (i % 13) as f32 / 3.0 - 2.0)
+                        .collect();
+                    let mut gate: Vec<_> = (0..input.len())
+                        .map(|i| (i % 7) as f32 / 2.0 - 1.0)
+                        .collect();
+                    let dy: Vec<_> = (0..input.len())
+                        .map(|i| (i % 11) as f32 / 7.0 - 0.5)
+                        .collect();
+                    let operator = ToposResonatorOperator::new(
+                        ToposResonatorConfig::new(coupling, iterations).unwrap(),
+                        topos(1.0, porosity),
+                    )
+                    .unwrap();
+                    let forward = operator.forward(&input, &gate, rows, features).unwrap();
+                    let expected = operator
+                        .backward(&input, &gate, &dy, rows, features)
+                        .unwrap();
+                    let snapshot = operator.capture(&input, &gate, rows, features).unwrap();
+                    assert_eq!(bits(snapshot.output()), bits(&forward.output));
+                    assert_eq!(
+                        serde_json::to_string(snapshot.step()).unwrap(),
+                        serde_json::to_string(&forward).unwrap()
+                    );
+                    input.fill(f32::NAN);
+                    gate.fill(f32::NAN);
+                    drop(operator);
+                    for _ in 0..2 {
+                        let actual = snapshot.vjp(&dy).unwrap();
+                        assert_eq!(bits(&actual.grad_input), bits(&expected.grad_input));
+                        assert_eq!(bits(&actual.grad_gate), bits(&expected.grad_gate));
+                    }
+                    assert!(snapshot.vjp(&vec![0.0; dy.len() + 1]).is_err());
+                    if !dy.is_empty() {
+                        assert!(snapshot.vjp(&vec![f32::NAN; dy.len()]).is_err());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn capture_retains_shape_budget_finite_and_gradient_overflow_guards() {
+        let operator =
+            ToposResonatorOperator::new(ToposResonatorConfig::default(), topos(1.0, 0.2)).unwrap();
+        assert!(operator.capture(&[], &[], 0, 0).is_err());
+        assert!(operator.capture(&[], &[], usize::MAX, 2).is_err());
+        assert!(operator.capture(&[1.0], &[1.0], 1, 2).is_err());
+        assert!(operator.capture(&[1.0; 129], &[1.0; 129], 1, 129).is_err());
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(operator.capture(&[invalid], &[1.0], 1, 1).is_err());
+            assert!(operator.capture(&[1.0], &[invalid], 1, 1).is_err());
+        }
+        assert!(operator.capture(&[f32::MAX], &[2.0], 1, 1).is_err());
+        let batch = operator.capture(&[1.0], &[0.0], 1, 1).unwrap();
+        assert!(operator
+            .backward(&[1.0], &[0.0], &[f32::MAX], 1, 1)
+            .is_err());
+        assert!(batch.vjp(&[f32::MAX]).is_err());
+        assert!(batch.vjp(&[1.0]).is_ok());
+    }
 
     fn topos(saturation: f32, porosity: f32) -> OpenCartesianTopos {
         OpenCartesianTopos::new(-1.0, 1e-6, saturation, 32, 128)

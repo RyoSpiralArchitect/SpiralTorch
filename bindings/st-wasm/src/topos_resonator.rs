@@ -1,7 +1,10 @@
 //! Browser transport for the same finite-unroll operator used by Rust and Python.
 
 #[cfg(target_arch = "wasm32")]
-use st_core::dynamics::topos_resonator::{ToposResonatorConfig, ToposResonatorOperator};
+use st_core::dynamics::topos_resonator::{
+    ToposResonatorBackward, ToposResonatorConfig, ToposResonatorLearningBatch as CoreLearningBatch,
+    ToposResonatorOperator,
+};
 #[cfg(target_arch = "wasm32")]
 use st_tensor::topos::OpenCartesianTopos;
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +28,18 @@ fn scalar(value: &Number, label: &str) -> Result<f32, JsValue> {
 #[wasm_bindgen]
 pub struct ToposResonatorKernel {
     operator: ToposResonatorOperator,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct ToposResonatorLearningBatch {
+    inner: CoreLearningBatch,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub struct ToposResonatorPullback {
+    inner: ToposResonatorBackward,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -89,5 +104,54 @@ impl ToposResonatorKernel {
             .backward(input, gate, grad_output, rows, features)
             .map_err(js_error)?;
         serde_wasm_bindgen::to_value(&gradients).map_err(js_error)
+    }
+
+    pub fn capture(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        rows: Number,
+        features: Number,
+    ) -> Result<ToposResonatorLearningBatch, JsValue> {
+        let rows = js_u32(rows.as_ref(), "rows")? as usize;
+        let features = js_u32(features.as_ref(), "features")? as usize;
+        self.operator
+            .capture(input, gate, rows, features)
+            .map(|inner| ToposResonatorLearningBatch { inner })
+            .map_err(js_error)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl ToposResonatorLearningBatch {
+    #[wasm_bindgen(getter)]
+    pub fn output(&self) -> Vec<f32> {
+        self.inner.output().to_vec()
+    }
+
+    pub fn audit_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.inner.step().audit).map_err(js_error)
+    }
+
+    pub fn vjp(&self, upstream: &[f32]) -> Result<ToposResonatorPullback, JsValue> {
+        self.inner
+            .vjp(upstream)
+            .map(|inner| ToposResonatorPullback { inner })
+            .map_err(js_error)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl ToposResonatorPullback {
+    #[wasm_bindgen(getter)]
+    pub fn grad_input(&self) -> Vec<f32> {
+        self.inner.grad_input.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn grad_gate(&self) -> Vec<f32> {
+        self.inner.grad_gate.clone()
     }
 }

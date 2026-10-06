@@ -32,3 +32,14 @@ def test_missing_or_changed_evidence_is_rejected(field):
                      "final": {"adapter": [2.]}, "base_sha256": "changed"}[field]
     with pytest.raises(ValueError):
         replay.compare_update(proof, actual, expected, report)
+
+
+@pytest.mark.parametrize("captured", [False, True])
+def test_transport_budget_is_explicit_and_rejects_extra_reuploads(captured):
+    report = {"shape": [2, 128, 768], "config": {"features": 768}}
+    shape = report["shape"]
+    calls = [shape, [768], [768]] + ([shape] * 3 if captured else []) + [shape]
+    replay.check_transport(calls, report, captured)
+    for bad in (calls[:-1], calls + [shape], calls + [shape, shape]):
+        with pytest.raises(ValueError, match="sequence"):
+            replay.check_transport(bad, report, captured)

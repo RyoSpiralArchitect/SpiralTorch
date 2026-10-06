@@ -186,7 +186,10 @@ if torch is not None:
             ctx.save_for_backward(value, gate, bias, log_radius)
             if conditioning is not None:
                 conditioning.update(json.loads(ctx.snapshot.conditioning_json()))
-            output = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
+            output = (
+                ctx.snapshot.output_buffer()
+                if ctx.buffer_transport else ctx.snapshot.output
+            )
             return _transport_output(output, value, ctx.buffer_transport)
 
         @staticmethod
@@ -195,7 +198,10 @@ if torch is not None:
             value, gate, bias, log_radius = ctx.saved_tensors
             name = "vjp_with_log_radius" if ctx.has_radius else "vjp"
             operation = getattr(ctx.snapshot, name + ("_buffer" if ctx.buffer_transport else ""))
-            direction = _buffer_values(grad_output) if ctx.buffer_transport else _values(grad_output)
+            direction = (
+                _buffer_values(grad_output)
+                if ctx.buffer_transport else _values(grad_output)
+            )
             gradients = operation(direction)
             parameters = (
                 (value, gate, bias, log_radius)
@@ -213,33 +219,24 @@ if torch is not None:
         def forward(ctx: Any, value: Any, gate: Any, kernel: Any) -> Any:
             features = value.shape[-1]
             rows = value.numel() // features
-            output = kernel.forward(_values(value), _values(gate), rows, features)
+            ctx.buffer_transport = _buffer_transport_available()
+            transport = _buffer_values if ctx.buffer_transport else _values
+            capture = kernel.capture_buffer if ctx.buffer_transport else kernel.capture
+            ctx.snapshot = capture(transport(value), transport(gate), rows, features)
             ctx.save_for_backward(value, gate)
-            ctx.kernel = kernel
-            ctx.rows = rows
-            ctx.features = features
-            return torch.tensor(output, device=value.device, dtype=value.dtype).reshape(
-                value.shape
-            )
+            output = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
+            return _transport_output(output, value, ctx.buffer_transport)
 
         @staticmethod
         @torch.autograd.function.once_differentiable
         def backward(ctx: Any, grad_output: Any) -> tuple[Any, Any, None]:
             value, gate = ctx.saved_tensors
-            dx, dg = ctx.kernel.backward(
-                _values(value),
-                _values(gate),
-                _values(grad_output),
-                ctx.rows,
-                ctx.features,
-            )
+            operation = ctx.snapshot.vjp_buffer if ctx.buffer_transport else ctx.snapshot.vjp
+            direction = _buffer_values(grad_output) if ctx.buffer_transport else _values(grad_output)
+            dx, dg = operation(direction)
             return (
-                torch.tensor(dx, device=value.device, dtype=value.dtype).reshape(
-                    value.shape
-                ),
-                torch.tensor(dg, device=gate.device, dtype=gate.dtype).reshape(
-                    gate.shape
-                ),
+                _transport_output(dx, value, ctx.buffer_transport),
+                _transport_output(dg, gate, ctx.buffer_transport),
                 None,
             )
 
@@ -397,6 +394,15 @@ def topos_resonator_autograd(value: Any, gate: Any, *, kernel: Any = None) -> An
         raise TypeError("kernel must be an immutable Rust ToposResonatorKernel")
     if value.numel() > kernel.max_values:
         raise ValueError("input exceeds the geometric kernel's value budget")
+    if not torch.is_grad_enabled() or not (value.requires_grad or gate.requires_grad):
+        buffers = _buffer_transport_available()
+        transport = _buffer_values if buffers else _values
+        forward = kernel.forward_buffer if buffers else kernel.forward
+        features = value.shape[-1]
+        output = forward(
+            transport(value), transport(expanded_gate), value.numel() // features, features
+        )
+        return _transport_output(output, value, buffers)
     return _ToposResonatorFunction.apply(value, expanded_gate, kernel)
 
 
