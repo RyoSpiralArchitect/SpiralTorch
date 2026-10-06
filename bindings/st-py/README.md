@@ -3295,6 +3295,16 @@ different positional route.
 
 ## Open-topos learning and inference hints
 
+For shared placement across geometric families, import `GeometryAdapterStack`.
+It owns adapters separately from the base model and installs explicit, scoped
+output hooks at named modules. `with geometry.attach(model):` supports ordinary
+loss/backward/optimizer steps without renaming model weights; checkpoint state
+binds the adapter types and placement order. See the
+[multi-site learning guide](../../docs/geometry_adapter_stack.md) and offline
+`examples/hf_geometry_adapter_stack.py` for mixed WaveGate/Topos/elliptic/fractional
+learning. This is orchestration over existing Rust operators, not a GPU-resident
+backend, automatic model patcher or language-quality claim.
+
 For a differentiable hidden-state intervention rather than a control hint,
 `from spiraltorch import ToposResonatorAdapter, topos_resonator_autograd` now
 connects the Rust finite-unroll recurrence and VJP to Torch/HF training.

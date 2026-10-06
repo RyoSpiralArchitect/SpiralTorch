@@ -1,0 +1,20 @@
+{
+  "schema": "spiraltorch.geometry_adapter_stack_example.v1",
+  "model_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "corpus_sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+  "corpus_end_marker": "*** END OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***",
+  "features": 768,
+  "steps": 3,
+  "checkpoint_after": 2,
+  "batch_size": 2,
+  "block_size": 128,
+  "seed": 41,
+  "threads": 2,
+  "learning_rate": 0.001,
+  "placements": [
+    {"path": "transformer.h.0.mlp", "adapter": "WaveGateAdapter", "options": {"strength": 0.1, "log_radius": 0.0, "learnable_radius": true}},
+    {"path": "transformer.h.1.mlp", "adapter": "ToposResonatorAdapter", "options": {"strength": 0.1}},
+    {"path": "transformer.h.2.mlp", "adapter": "EllipticAnchoredResidualAdapter", "options": {"strength": 0.1}},
+    {"path": "transformer.h.3.mlp", "adapter": "FractionalAngleGainHistoryAdapter", "options": {"strength": 0.1, "initial_angle": 0.2, "initial_gain": 1.0, "kernel_len": 32, "max_values": 262144, "max_products": 8388608}}
+  ]
+}
