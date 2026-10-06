@@ -261,6 +261,15 @@ def write_json(path, value):
         handle.write(json.dumps(value, indent=2, allow_nan=False) + "\n")
 
 
+def verify_runtime(root, manifest):
+    require(isinstance(manifest, dict) and set(manifest) == {"source_revision", "files"}
+            and isinstance(manifest["source_revision"], str)
+            and len(manifest["source_revision"]) == 40
+            and all(c in "0123456789abcdef" for c in manifest["source_revision"]),
+            "invalid frozen runtime manifest")
+    return common.verify_files(root, manifest["files"])
+
+
 def save_state(path, value):
     with path.open("xb") as handle:
         torch.save(value, handle)
@@ -333,9 +342,10 @@ def main():
     validate_config(config)
     require(Path(st.__file__).resolve().parent == (args.package_root / "spiraltorch").resolve(), "wrong package")
     manifest = json.loads(args.runtime_manifest.read_bytes())
-    common.verify_files(args.package_root, manifest)
+    verify_runtime(args.package_root, manifest)
     runtime = {"native_sha256": common.digest(Path(native.__file__)),
                "bridge_sha256": common.digest(Path(bridge.__file__)),
+               "build_source_revision": manifest["source_revision"],
                "manifest_sha256": common.digest(args.runtime_manifest)}
     require(args.model_dir.name == config["model_snapshot"], "model snapshot differs")
     require(common.digest(args.corpus) == config["corpus_sha256"], "corpus differs")
@@ -366,7 +376,7 @@ def main():
         result = learning_run(model, train, config, args.window, runtime, context,
             saved=saved, allowed_native=args.allow_source_native_sha256,
             on_checkpoint=lambda state: save_state(args.output / "midpoint.pt", state))
-        common.verify_files(args.package_root, manifest)
+        verify_runtime(args.package_root, manifest)
         receipt = save_state(args.output / "state.pt", result)
         report = {"schema": SCHEMA, "status": "completed", "window": args.window,
                   "runtime": runtime, "binding": result["final"]["binding"],

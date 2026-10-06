@@ -140,3 +140,18 @@ def test_bad_insertion_paths_do_not_leave_a_partial_patch(probe, paths):
 def test_signed_zero_is_not_a_bitwise_match(probe):
     assert not probe.equal(torch.tensor(0.), torch.tensor(-0.))
     assert probe.tensor_receipt(torch.tensor(0.))["sha256"] != probe.tensor_receipt(torch.tensor(-0.))["sha256"]
+
+
+def test_runtime_manifest_envelope_and_inventory_are_checked(probe, tmp_path):
+    path = tmp_path / "fixture"
+    path.write_bytes(b"frozen")
+    manifest = {"source_revision": "a" * 40, "files": {"fixture": probe.common.digest(path)}}
+    assert probe.verify_runtime(tmp_path, manifest) == 1
+    for invalid in (manifest["files"], {**manifest, "source_revision": "invalid"},
+                    {**manifest, "unexpected": True}):
+        with pytest.raises(ValueError): probe.verify_runtime(tmp_path, invalid)
+    path.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="file differs"): probe.verify_runtime(tmp_path, manifest)
+    path.write_bytes(b"frozen")
+    (tmp_path / "extra").write_bytes(b"extra")
+    with pytest.raises(ValueError, match="inventory differs"): probe.verify_runtime(tmp_path, manifest)
