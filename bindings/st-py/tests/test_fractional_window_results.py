@@ -5,7 +5,10 @@ import hashlib
 import importlib.util
 import json
 import math
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 DIRECTORY = ROOT / "benchmarks/results/2026-10-07-fractional-window-diagnostic"
@@ -104,16 +107,23 @@ def test_all_block_deltas_and_seed_averages_rebuild_without_model_imports():
                                "mean_delta": math.fsum(contrasts) / len(contrasts), "per_seed": contrasts}
 
 
-def test_archived_and_current_summary_rebuild_identically_without_model_imports(monkeypatch):
+@pytest.mark.parametrize("bytecode_enabled", [False, True])
+def test_archived_and_current_summary_rebuild_identically_without_model_imports(monkeypatch, bytecode_enabled):
     import builtins
     original_import = builtins.__import__
     def no_models(name, *args, **kwargs):
         assert name.split(".")[0] not in {"torch", "transformers", "spiraltorch"}
         return original_import(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", no_models)
+    monkeypatch.setattr(sys, "dont_write_bytecode", not bytecode_enabled)
     for directory in (ROOT / "tools", DIRECTORY):
+        inventory_before = {path.name for path in directory.iterdir()}
         spec = importlib.util.spec_from_file_location("numeric_window_summary", directory / "summarize_fractional_window_diagnostic.py")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        with monkeypatch.context() as imports:
+            imports.setattr(sys, "dont_write_bytecode", True)
+            spec.loader.exec_module(module)
+        assert sys.dont_write_bytecode == (not bytecode_enabled)
+        assert {path.name for path in directory.iterdir()} == inventory_before
         rebuilt = module.summarize((DIRECTORY / "results.json").read_bytes())
         assert (json.dumps(rebuilt, indent=2, allow_nan=False) + "\n").encode() == (DIRECTORY / "summary.json").read_bytes()
