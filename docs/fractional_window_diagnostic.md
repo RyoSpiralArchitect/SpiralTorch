@@ -74,3 +74,9 @@ new independent seeds, general LLM quality or speed. The preceding study's
 failed ordinary/GL-short final-parameter parity remains failed and unchanged.
 The next causal comparison would train full versus retained-short windows
 from the same initialization/budget, not train an initially dormant tail alone.
+
+The [completed three-seed diagnostic](../benchmarks/results/2026-10-07-fractional-window-diagnostic/README.md)
+publishes all four modes after exact reproduction of the 456 original full
+block losses. Removing either short or long taps hurt all three saved models
+on both reused endpoints; this remains post-training dependence, not a result
+of the proposed matched-training comparison.

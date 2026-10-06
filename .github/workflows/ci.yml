@@ -718,6 +718,7 @@ jobs:
             bindings/st-py/tests/test_fractional_history_log_gain.py \
             bindings/st-py/tests/test_fractional_history_window.py \
             bindings/st-py/tests/test_fractional_window_diagnostic.py \
+            bindings/st-py/tests/test_fractional_window_results.py \
             bindings/st-py/tests/test_fractional_gain_study.py \
             bindings/st-py/tests/test_fractional_gain_verification.py \
             bindings/st-py/tests/test_fractional_gain_results.py \

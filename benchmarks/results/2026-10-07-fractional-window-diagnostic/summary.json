@@ -1,0 +1,94 @@
+{
+  "schema": "spiraltorch.fractional_history_window_numeric_summary.v1",
+  "aggregation": "binary64_math_fsum_divide_by_seed_count",
+  "diagnostic_id": "c139863645fe48e3e7d26c92ac825e80dab81e8ec63278f19783947121e67975",
+  "results_sha256": "ba2c0985fdb46ded4b9528971b0be829a0e3e25b933a2ceee667d9c3361d747e",
+  "runs": 3,
+  "blocks_per_seed": {
+    "pride_unused_tail": 120,
+    "alice_transfer": 32
+  },
+  "modes": {
+    "full": {
+      "pride_unused_tail": {
+        "mean_ce": 3.992910082472695,
+        "mean_delta": 0.0,
+        "per_seed": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "alice_transfer": {
+        "mean_ce": 3.9641989593704543,
+        "mean_delta": 0.0,
+        "per_seed": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "retained_short": {
+      "pride_unused_tail": {
+        "mean_ce": 4.02233458492491,
+        "mean_delta": 0.029424502452214618,
+        "per_seed": [
+          0.03110260963439959,
+          0.02770205736160314,
+          0.029468840360641124
+        ]
+      },
+      "alice_transfer": {
+        "mean_ce": 3.9815028235316277,
+        "mean_delta": 0.017303864161173504,
+        "per_seed": [
+          0.01827988028526306,
+          0.016187280416488647,
+          0.0174444317817688
+        ]
+      }
+    },
+    "retained_tail": {
+      "pride_unused_tail": {
+        "mean_ce": 4.0278538008530935,
+        "mean_delta": 0.0349437183803983,
+        "per_seed": [
+          0.03555986285209656,
+          0.034329132239023785,
+          0.034942160050074555
+        ]
+      },
+      "alice_transfer": {
+        "mean_ce": 3.985358369847139,
+        "mean_delta": 0.02115941047668457,
+        "per_seed": [
+          0.021656565368175507,
+          0.0205603688955307,
+          0.021261297166347504
+        ]
+      }
+    },
+    "local_only": {
+      "pride_unused_tail": {
+        "mean_ce": 4.063613761795891,
+        "mean_delta": 0.07070367932319647,
+        "per_seed": [
+          0.0732442915439604,
+          0.06795639594395997,
+          0.07091035048166905
+        ]
+      },
+      "alice_transfer": {
+        "mean_ce": 4.005748060842355,
+        "mean_delta": 0.04154910147190094,
+        "per_seed": [
+          0.04312876611948013,
+          0.03965830057859421,
+          0.04186023771762848
+        ]
+      }
+    }
+  },
+  "scope": "Post-training dependence at fixed learned parameters, not matched-training causation, independent heldout evidence, unique long-memory benefit, speed or general LLM quality."
+}

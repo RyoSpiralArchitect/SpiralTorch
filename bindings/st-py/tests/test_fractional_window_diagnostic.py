@@ -117,6 +117,22 @@ def test_different_evaluation_order_is_rejected_before_scoring(fixture, monkeypa
         tool.evaluate(model, {"probe": evaluation["probe"].flip(0)}, current, directory, client, {}, lambda r: None)
 
 
+def test_scoring_exception_restores_original_module(fixture, monkeypatch):
+    tool, client, model, evaluation, current, directory = fixture
+    plan, journal, _, _ = current
+    key = f"41:{tool.ARM}"
+    saved = client.study.load_checkpoint(directory, journal["runs"][key]["checkpoint"], "fixture", key)
+    adapter, _ = tool.intervention(client, plan["config"], saved, "retained_short")
+    original = model.transformer.h[0].mlp
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected scoring failure")
+    monkeypatch.setattr(client.study, "per_block_loss", fail)
+    with pytest.raises(RuntimeError, match="injected"):
+        tool.score(model, plan["config"], evaluation, adapter, client.study)
+    assert model.transformer.h[0].mlp is original
+    assert client.study.pilot.model_digest(model) == plan["base_parameter_sha256"]
+
+
 @pytest.mark.parametrize("field", ["recipe", "dtype", "nan"])
 def test_invalid_saved_state_is_not_coerced_into_a_diagnostic(fixture, field):
     tool, client, _, _, current, directory = fixture
