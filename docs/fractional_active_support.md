@@ -35,6 +35,8 @@ the original lag offset, rather than doing needless full-K zero-tap work.
 Both scalar pullbacks and optional input gradients are checked before timing;
 each route must repeat bitwise during timing. Cross-backend tolerances are fixed
 at rtol=atol=3e-5. Parameters-only and input-gradient requests are separate cases.
+The thread setting controls Torch intra-op work; the Rust GL host kernel is
+serial. This is an explicit implementation comparison, not a scaling claim.
 
 ```sh
 python -P -B tools/benchmark_fractional_window.py --window 1 3 --alpha .55 \

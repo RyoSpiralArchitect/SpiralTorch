@@ -403,8 +403,10 @@ fn history_input_pullback(
             for first in (0..inner).step_by(TILE) {
                 let width = TILE.min(inner - first);
                 let mut accumulators = [0.0f64; TILE];
-                for lag in lags.start..taps {
-                    let coefficient = scale * f64::from(coefficients[lag]);
+                for (lag, &coefficient) in
+                    coefficients.iter().enumerate().take(taps).skip(lags.start)
+                {
+                    let coefficient = scale * f64::from(coefficient);
                     let source = destination + lag * inner + first;
                     for (value, &gradient) in accumulators[..width]
                         .iter_mut()

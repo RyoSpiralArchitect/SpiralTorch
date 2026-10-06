@@ -137,6 +137,7 @@ def main():
         "alpha": args.alpha, "log_gain": args.log_gain, "seed": args.seed,
         "input_requires_grad": args.input_gradient, "alpha_requires_grad": True, "log_gain_requires_grad": True,
         "dtype": "float32", "device": "cpu", "threads": args.threads,
+        "thread_policy": {"torch_intraop": args.threads, "rust_gl_host": 1},
         "native_profile_declared": args.native_profile,
         "native_sha256": digest(Path(native.__file__).read_bytes()),
         "bridge_sha256": digest(Path(bridge.__file__).read_bytes()),
