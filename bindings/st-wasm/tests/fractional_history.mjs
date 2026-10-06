@@ -64,8 +64,7 @@ for (let step = 0; step <= 500; step++) {
         gateGradient[f] += g*h[i]*(1-Math.tanh(gate[f])**2);
         return g*Math.tanh(gate[f]);
     }));
-    const pullback = batch.vjp(historyUpstream);
-    const orderGradient = pullback.alpha * alpha;
+    const orderGradient = batch.vjp_alpha(historyUpstream) * alpha;
     if (step === 0) {
         assert.equal(orderGradient, 0);
         assert.ok(localGradient.some(v => v !== 0) && gateGradient.some(v => v !== 0));
@@ -77,7 +76,7 @@ for (let step = 0; step <= 500; step++) {
     }
     logAlpha -= .2*orderGradient;
     assert.ok([...local, ...gate, logAlpha, Math.exp(logAlpha)].every(Number.isFinite));
-    pullback.free(); batch.free();
+    batch.free();
 }
 kernel.free();
 assert.ok(losses.every(Number.isFinite) && losses.at(-1) < losses[0] * .01);

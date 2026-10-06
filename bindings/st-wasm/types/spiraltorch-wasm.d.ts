@@ -20,6 +20,8 @@ declare module "spiraltorch-wasm" {
         private constructor();
         readonly output: Float32Array;
         vjp(upstream: Float32Array): FractionalGlGradients;
+        vjp_input(upstream: Float32Array): Float32Array;
+        vjp_alpha(upstream: Float32Array): number;
         jvp(input_tangent: Float32Array, alpha_tangent: number): Float32Array;
         free(): void;
     }

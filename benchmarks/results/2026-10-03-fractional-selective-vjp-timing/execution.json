@@ -1,0 +1,360 @@
+{
+  "schema": "spiraltorch.fractional_learning_timing_execution.v1",
+  "status": "completed_under_ambient_load",
+  "implementation_revision": "a63282316ef65ccc4dbf780e16f4aa88d392ecaf",
+  "native_build_profile": "release",
+  "rust_toolchain": "1.98.0",
+  "hardware": {
+    "cpu": "Apple M4",
+    "physical_cores": 10,
+    "logical_cores": 10,
+    "memory_bytes": 25769803776
+  },
+  "primary_training_exit_code_before_measurement": 0,
+  "task_builds_and_tests_running_during_measurement": false,
+  "host_was_isolated": false,
+  "host_was_idle": false,
+  "processes": [
+    {
+      "name": "full-2x128x768-repeat1",
+      "repeat": 1,
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "full",
+      "exit_code": 0
+    },
+    {
+      "name": "history-2x128x768-repeat1",
+      "repeat": 1,
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "history",
+      "exit_code": 0
+    },
+    {
+      "name": "full-1x256x768-repeat1",
+      "repeat": 1,
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "full",
+      "exit_code": 0
+    },
+    {
+      "name": "history-1x256x768-repeat1",
+      "repeat": 1,
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "history",
+      "exit_code": 0
+    },
+    {
+      "name": "full-2x128x768-repeat2",
+      "repeat": 2,
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "full",
+      "exit_code": 0
+    },
+    {
+      "name": "history-2x128x768-repeat2",
+      "repeat": 2,
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "history",
+      "exit_code": 0
+    },
+    {
+      "name": "full-1x256x768-repeat2",
+      "repeat": 2,
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "full",
+      "exit_code": 0
+    },
+    {
+      "name": "history-1x256x768-repeat2",
+      "repeat": 2,
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "history",
+      "exit_code": 0
+    },
+    {
+      "name": "full-2x128x768-repeat3",
+      "repeat": 3,
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "full",
+      "exit_code": 0
+    },
+    {
+      "name": "history-2x128x768-repeat3",
+      "repeat": 3,
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "map": "history",
+      "exit_code": 0
+    },
+    {
+      "name": "full-1x256x768-repeat3",
+      "repeat": 3,
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "full",
+      "exit_code": 0
+    },
+    {
+      "name": "history-1x256x768-repeat3",
+      "repeat": 3,
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "map": "history",
+      "exit_code": 0
+    }
+  ],
+  "before_process_cpu_samples": [
+    {
+      "file": "full-1x256x768-repeat1-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 16.19,
+          "system_percent": 19.96,
+          "idle_percent": 63.84
+        },
+        {
+          "user_percent": 24.56,
+          "system_percent": 15.54,
+          "idle_percent": 59.88
+        }
+      ]
+    },
+    {
+      "file": "full-1x256x768-repeat2-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 14.4,
+          "system_percent": 19.16,
+          "idle_percent": 66.79
+        },
+        {
+          "user_percent": 23.64,
+          "system_percent": 14.89,
+          "idle_percent": 61.46
+        }
+      ]
+    },
+    {
+      "file": "full-1x256x768-repeat3-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 20.81,
+          "system_percent": 20.81,
+          "idle_percent": 58.36
+        },
+        {
+          "user_percent": 21.45,
+          "system_percent": 14.63,
+          "idle_percent": 63.9
+        }
+      ]
+    },
+    {
+      "file": "full-2x128x768-repeat1-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 18.11,
+          "system_percent": 18.3,
+          "idle_percent": 63.58
+        },
+        {
+          "user_percent": 21.64,
+          "system_percent": 14.51,
+          "idle_percent": 63.84
+        }
+      ]
+    },
+    {
+      "file": "full-2x128x768-repeat2-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 23.14,
+          "system_percent": 19.92,
+          "idle_percent": 56.92
+        },
+        {
+          "user_percent": 18,
+          "system_percent": 10.17,
+          "idle_percent": 71.82
+        }
+      ]
+    },
+    {
+      "file": "full-2x128x768-repeat3-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 17.5,
+          "system_percent": 21.12,
+          "idle_percent": 61.82
+        },
+        {
+          "user_percent": 17.2,
+          "system_percent": 6.36,
+          "idle_percent": 76.43
+        }
+      ]
+    },
+    {
+      "file": "history-1x256x768-repeat1-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 18.23,
+          "system_percent": 18.82,
+          "idle_percent": 62.94
+        },
+        {
+          "user_percent": 21.19,
+          "system_percent": 9.79,
+          "idle_percent": 69.1
+        }
+      ]
+    },
+    {
+      "file": "history-1x256x768-repeat2-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 15.53,
+          "system_percent": 18.83,
+          "idle_percent": 65.63
+        },
+        {
+          "user_percent": 24.6,
+          "system_percent": 13.46,
+          "idle_percent": 62.46
+        }
+      ]
+    },
+    {
+      "file": "history-1x256x768-repeat3-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 16.5,
+          "system_percent": 18.4,
+          "idle_percent": 65.45
+        },
+        {
+          "user_percent": 20.8,
+          "system_percent": 13.34,
+          "idle_percent": 65.84
+        }
+      ]
+    },
+    {
+      "file": "history-2x128x768-repeat1-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 17.52,
+          "system_percent": 16.76,
+          "idle_percent": 65.71
+        },
+        {
+          "user_percent": 19.63,
+          "system_percent": 13.84,
+          "idle_percent": 66.52
+        }
+      ]
+    },
+    {
+      "file": "history-2x128x768-repeat2-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 16.37,
+          "system_percent": 18.88,
+          "idle_percent": 64.73
+        },
+        {
+          "user_percent": 19.3,
+          "system_percent": 11.49,
+          "idle_percent": 69.47
+        }
+      ]
+    },
+    {
+      "file": "history-2x128x768-repeat3-host-before.log",
+      "cpu_samples": [
+        {
+          "user_percent": 14.25,
+          "system_percent": 16.57,
+          "idle_percent": 69.17
+        },
+        {
+          "user_percent": 19.14,
+          "system_percent": 12.11,
+          "idle_percent": 68.74
+        }
+      ]
+    }
+  ],
+  "local_log_sha256": {
+    "full-1x256x768-repeat1-host-before.log": "5bd1e391c076f331dc59a096e9223e782e173aa62605da0b863e4474026ee027",
+    "full-1x256x768-repeat1.log": "6dc87a3c573caa1c6d53dbfb30f42043c011fcab33738e2880b5d5e7999a45a2",
+    "full-1x256x768-repeat2-host-before.log": "ed94e795735735fba5cc48592e30af2a44445629c773160e8dc1418e4c06608e",
+    "full-1x256x768-repeat2.log": "20ab5288346476c9ba3e292219f3bc5849ddf59f3d274f2c87107e7a95e02f9d",
+    "full-1x256x768-repeat3-host-before.log": "3b68b5f8d1e92dbfce048282502c882630de8b72010dde212758a6c3ddbfd544",
+    "full-1x256x768-repeat3.log": "b1fd86d0971f616d1a84316e06e3d57b2cceeeea650176f7cb03787c668946a8",
+    "full-2x128x768-repeat1-host-before.log": "e48b1898de1e19800a4c1a63f9e4847968ba0c363972e40b50d1c73973935841",
+    "full-2x128x768-repeat1.log": "3347232e43bc84130c7c987ce12e949f7ef7e3866375216ff4a533c3900330ca",
+    "full-2x128x768-repeat2-host-before.log": "710a8c9105ec90ab1e3913cfb7ba1c040ea6fc3b3db94b4a9dab9456fd399654",
+    "full-2x128x768-repeat2.log": "83cff8ee421b2d47f91d4e14926840eb384f820f8dae55c689d45ff40dcab7a3",
+    "full-2x128x768-repeat3-host-before.log": "2ffba7fff38bec84f035c51e3550bfbd1ed2030dac20ac2756e757acb9bcf8bd",
+    "full-2x128x768-repeat3.log": "c973195de070c66a40f8359e98d25b53c00a0fab4b2f65fd19d44ffd230ff356",
+    "history-1x256x768-repeat1-host-before.log": "1ed56aca9637a4bd3865448fc4212e3a065d7bb723e7d60c24fcb02e9a3b67db",
+    "history-1x256x768-repeat1.log": "218fc0504016cd6f52bb259442bdca28f35462e86dcef5df8da4933290e3c126",
+    "history-1x256x768-repeat2-host-before.log": "1d8527cbd9bfb830c43ccb201af39f91fe1bcca0cfb0c46f64c70c0bf7fb369c",
+    "history-1x256x768-repeat2.log": "889b85664775d4ad2bb97df9723ebfaf4c49e1bac6cd6d4a712527ac37a3698d",
+    "history-1x256x768-repeat3-host-before.log": "d081358f04a733d7e31ba3d533f00b9b7b7d5905659c3c3f693a79cd3d524a2b",
+    "history-1x256x768-repeat3.log": "65537d487b33b9c557c122db158a0a060512772ad6874e9d355b5d3ba117ad41",
+    "history-2x128x768-repeat1-host-before.log": "1bf8b9ffe275222f967cf63926824b82f3ed4a45ce45ccc75b673bfacd7964bc",
+    "history-2x128x768-repeat1.log": "68e12eeb646726a019ade3551a561f1c60b056aa8d1aad14c8a9552ac76ff2bc",
+    "history-2x128x768-repeat2-host-before.log": "8d64f956168ca77efc74396c472cfb8cd34025efc665a0808549508ea8f8b594",
+    "history-2x128x768-repeat2.log": "d29f05d88a6c33f904df8be65e181a9cc53772db3316f6e3bb16f32dab8d0c11",
+    "history-2x128x768-repeat3-host-before.log": "fcb21877622c9509be0b434fee2dd121584c286441cfcbf5d91ad1280fc77f5a",
+    "history-2x128x768-repeat3.log": "eed0b2029f3ba7aec3ba7550dfa08dcc7cd945ef33775f7750db05ff44bef65a"
+  },
+  "scope": "All twelve fixed conditions retained. CPU samples describe ambient load only, not per-interval interference; no process names, raw host logs, weights or local paths are published."
+}
