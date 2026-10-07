@@ -1,0 +1,179 @@
+{
+  "schema": "spiraltorch.topos_native_traversal_process_sensitivity.v1",
+  "classification": "post_hoc_derived_from_existing_process_medians_not_new_measurements",
+  "formal_screen_unchanged": true,
+  "interpretation": "All process medians are retained. Bounds enumerate cross-arm process-median ratios; they are not confidence intervals, hypothesis tests, alternate screening criteria or a selected replacement baseline.",
+  "rows": [
+    {
+      "id": "8x3-k1",
+      "baseline_process_medians_ms": [
+        0.00075,
+        0.0006875000000000001
+      ],
+      "candidate_process_medians_ms": [
+        0.000709,
+        0.0016454999999999998
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        0.9453333333333334,
+        2.1939999999999995,
+        1.0312727272727271,
+        2.393454545454545
+      ],
+      "minimum_ratio": 0.9453333333333334,
+      "maximum_ratio": 2.393454545454545
+    },
+    {
+      "id": "8x3-k5",
+      "baseline_process_medians_ms": [
+        0.0008335,
+        0.000875
+      ],
+      "candidate_process_medians_ms": [
+        0.000833,
+        0.0008335
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        0.9994001199760048,
+        1,
+        0.952,
+        0.9525714285714286
+      ],
+      "minimum_ratio": 0.952,
+      "maximum_ratio": 1
+    },
+    {
+      "id": "8x3-k16",
+      "baseline_process_medians_ms": [
+        0.001083,
+        0.0010625
+      ],
+      "candidate_process_medians_ms": [
+        0.0029579999999999997,
+        0.0011875
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        2.7313019390581714,
+        1.0964912280701755,
+        2.7839999999999994,
+        1.1176470588235292
+      ],
+      "minimum_ratio": 1.0964912280701755,
+      "maximum_ratio": 2.7839999999999994
+    },
+    {
+      "id": "64x128-k1",
+      "baseline_process_medians_ms": [
+        0.0648335,
+        0.0626465
+      ],
+      "candidate_process_medians_ms": [
+        0.1085835,
+        0.056916
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        1.6748054632250302,
+        0.8778794913123616,
+        1.7332732076013826,
+        0.9085264140853839
+      ],
+      "minimum_ratio": 0.8778794913123616,
+      "maximum_ratio": 1.7332732076013826
+    },
+    {
+      "id": "64x128-k5",
+      "baseline_process_medians_ms": [
+        0.160937,
+        0.1060835
+      ],
+      "candidate_process_medians_ms": [
+        0.103521,
+        0.103854
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        0.643239279966695,
+        0.6453084126086606,
+        0.9758444998515321,
+        0.9789835365537525
+      ],
+      "minimum_ratio": 0.643239279966695,
+      "maximum_ratio": 0.9789835365537525
+    },
+    {
+      "id": "64x128-k16",
+      "baseline_process_medians_ms": [
+        0.271708,
+        0.22618749999999999
+      ],
+      "candidate_process_medians_ms": [
+        0.221896,
+        0.21810449999999998
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        0.8166708378111797,
+        0.80271651920444,
+        0.9810268029842499,
+        0.9642641613705443
+      ],
+      "minimum_ratio": 0.80271651920444,
+      "maximum_ratio": 0.9810268029842499
+    },
+    {
+      "id": "256x768-k1",
+      "baseline_process_medians_ms": [
+        2.328791,
+        1.4321875
+      ],
+      "candidate_process_medians_ms": [
+        1.403667,
+        1.4186874999999999
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        0.6027449436209604,
+        0.6091948569021436,
+        0.9800860571677941,
+        0.9905738599170848
+      ],
+      "minimum_ratio": 0.6027449436209604,
+      "maximum_ratio": 0.9905738599170848
+    },
+    {
+      "id": "256x768-k5",
+      "baseline_process_medians_ms": [
+        2.42075,
+        2.4293959999999997
+      ],
+      "candidate_process_medians_ms": [
+        2.3980414999999997,
+        2.3565205000000002
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        0.9906192295776102,
+        0.9734671073014562,
+        0.9870937055959589,
+        0.9700026261671628
+      ],
+      "minimum_ratio": 0.9700026261671628,
+      "maximum_ratio": 0.9906192295776102
+    },
+    {
+      "id": "256x768-k16",
+      "baseline_process_medians_ms": [
+        5.127000000000001,
+        5.2003755
+      ],
+      "candidate_process_medians_ms": [
+        4.878270499999999,
+        4.865146
+      ],
+      "all_candidate_over_baseline_process_pairs": [
+        0.9514863467914957,
+        0.9489264677199141,
+        0.9380612034650189,
+        0.9355374434019237
+      ],
+      "minimum_ratio": 0.9355374434019237,
+      "maximum_ratio": 0.9514863467914957
+    }
+  ]
+}

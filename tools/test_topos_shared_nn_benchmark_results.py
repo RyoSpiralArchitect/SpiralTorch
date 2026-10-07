@@ -50,13 +50,14 @@ def load():
     return data, verification
 
 
-def verify(data, verification, *, revisions=REVISIONS, source_changes=None):
+def verify(data, verification, *, revisions=REVISIONS, source_changes=None,
+           plan_schema="spiraltorch.topos_nn_shared_benchmark_plan.v1"):
     assert data["schema"] == "spiraltorch.topos_nn_shared_benchmark.v1"
     assert verification["schema"] == "spiraltorch.topos_nn_shared_benchmark_verification.v1"
     plan = data["plan"]
     assert json.loads(data["plan_raw_json"]) == plan
     assert digest(data["plan_raw_json"].encode()) == verification["private_files"]["plan.json"]["sha256"]
-    assert plan["schema"] == "spiraltorch.topos_nn_shared_benchmark_plan.v1"
+    assert plan["schema"] == plan_schema
     assert [plan[a + "_revision"] for a in ("baseline", "candidate")] == list(revisions)
     assert plan["cases"] == CASES and plan["phase_order"] == PHASES
     assert plan["case_order"] == ["forward", "reverse", "forward", "reverse"]
