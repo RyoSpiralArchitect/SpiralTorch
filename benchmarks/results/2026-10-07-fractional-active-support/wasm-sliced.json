@@ -1,0 +1,1668 @@
+{
+  "schema": "spiraltorch.fractional_active_support_wasm.v1",
+  "status": "passed",
+  "node": "v24.14.0",
+  "machine": "arm64",
+  "wasm_sha256": [
+    "752d4daf65ddfc5814707af2bc9a1bdf338f1d555ebe9c7d429b7439b0b05aec",
+    "c2189f5af54b502c1d1bc8409d6e187d8bcc9a76a8508e9a48c3ab8058282fc4"
+  ],
+  "script_sha256": "5449e570efef4dd8dd7fa891eb5773b7fc80413e001684bdd8f1c0f37cbdb312",
+  "correctness": [
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "ea68afd132534661c9b9591516fc087b8797172f5fba50228577b2ffd6a1b104",
+        "parameters": "9acdfa968fa3063344fcfd8d788b656462f5d0aab284bc257648bd7640e21d4a",
+        "input": "ca14aec56465e716262af97c728fc8c77b70ba12f25cd438f083d8085d209072",
+        "joint_parameters": "9acdfa968fa3063344fcfd8d788b656462f5d0aab284bc257648bd7640e21d4a",
+        "selective_input": "ca14aec56465e716262af97c728fc8c77b70ba12f25cd438f083d8085d209072",
+        "jvp": "8fb16415eb2a915e3c3d7b0f0178ba36ec302ac39e68a29009256899b65b78d1"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "30e77b6a0c648b7db4734c71a5e7d8153b18b4b5a72da9a4d8605b9afb1d0211",
+        "parameters": "ad4dbe1dcb4ecb33e485281224490276f27b848030225f61453badb791c1ff19",
+        "input": "abf744c6c4fa490e26361d99ef3fb455c7def486ddca7cba8ef319d08dbb87d0",
+        "joint_parameters": "ad4dbe1dcb4ecb33e485281224490276f27b848030225f61453badb791c1ff19",
+        "selective_input": "abf744c6c4fa490e26361d99ef3fb455c7def486ddca7cba8ef319d08dbb87d0",
+        "jvp": "2fb67ce3871f243c0079117a1e8c980d88b8adc36924df9a24ef6302488f07f4"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "6f22ab46e23f7a37303fd475ca3b9cbc52d655570bc72e49969eab3382ee69ea",
+        "parameters": "d9877d65e0573bda392947331be07e03bc8d0bfcda70e399f0a3b737f6332a0f",
+        "input": "98e7e8713be92391e564720ea453cb2ff9223b02796b79343c5796c3cce9067b",
+        "joint_parameters": "d9877d65e0573bda392947331be07e03bc8d0bfcda70e399f0a3b737f6332a0f",
+        "selective_input": "98e7e8713be92391e564720ea453cb2ff9223b02796b79343c5796c3cce9067b",
+        "jvp": "0602ae4553106e29dcea35563be756897652b22c7ed1066dd012334a601a0c38"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "joint_parameters": "830c36064389b2cccf203320175135214c8af5e33fc4eda15207aef76bc1c0f9",
+        "selective_input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "jvp": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "36d61ea84ea07d06ffeeec814c6e71464ea40f32b0f50777ad0167cab22a21bf",
+        "parameters": "7ee3f7aedd7accde5e87ae236da89f7969447e683ed5908dde30962ff43f6265",
+        "input": "18f50144690ab61c5402d6bb8170d0ef46971c5f11d513c1331381213a05004f",
+        "joint_parameters": "7ee3f7aedd7accde5e87ae236da89f7969447e683ed5908dde30962ff43f6265",
+        "selective_input": "18f50144690ab61c5402d6bb8170d0ef46971c5f11d513c1331381213a05004f",
+        "jvp": "ea9a5a9ee7e8c1cb11de4a4657b6e15d59bf550e5b2bee613a0dc5a13da0589e"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "9e6f83c66b7f4f3fecff39680cee6e3fd85fb4a5f4a87fab207be0d23ae3db35",
+        "parameters": "af2ca350895d655b66bb242afa8478ab56c3b1f6934a6f1f2565bc8c23ff75d5",
+        "input": "d9517adfe72e4f12550bd510c782787b757089bf133b6b769fe53e4f9fdfe35a",
+        "joint_parameters": "af2ca350895d655b66bb242afa8478ab56c3b1f6934a6f1f2565bc8c23ff75d5",
+        "selective_input": "d9517adfe72e4f12550bd510c782787b757089bf133b6b769fe53e4f9fdfe35a",
+        "jvp": "c8f874b8ae5403dc09b127067c5e4a1fd05e49657594c745e35cb609756f15e2"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "ec5bba1eefa8310376e45e00be62fc7b5ad9a22f8654c39d049ad23ffd5c21dd",
+        "parameters": "8fa37cd0d1ca2140ea58d4fbc6c2104735e219a8f153e1bb337bb8477be53e41",
+        "input": "7ddfe6fe5284bf3f41f6751bc71e0044767112c51dec31fe9f9671e2a7c3af80",
+        "joint_parameters": "8fa37cd0d1ca2140ea58d4fbc6c2104735e219a8f153e1bb337bb8477be53e41",
+        "selective_input": "7ddfe6fe5284bf3f41f6751bc71e0044767112c51dec31fe9f9671e2a7c3af80",
+        "jvp": "3b9217050418b59ce81703c0255ec07d83807f0cbc40791b09c6e84b511b6f29"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "joint_parameters": "830c36064389b2cccf203320175135214c8af5e33fc4eda15207aef76bc1c0f9",
+        "selective_input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "jvp": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "c947cc6d90e112d0249337fffebe32ec99dca5c9490aaffcbb6749f97b80c59c",
+        "parameters": "10aac9c1b3a3214792724f6bbc0d9c97e5dec31beecb9af2ea32eac40f232f65",
+        "input": "201503fc34d39010ea0378b004d37d65c86b078666ce47757fc6b3691d048b84",
+        "joint_parameters": "10aac9c1b3a3214792724f6bbc0d9c97e5dec31beecb9af2ea32eac40f232f65",
+        "selective_input": "201503fc34d39010ea0378b004d37d65c86b078666ce47757fc6b3691d048b84",
+        "jvp": "9443146ef6af203f96b191bbd664703a2ef581985ed36e9e805137ad0be3fafa"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "parameters": "d1f92d429617bb48b40227dd21420fd015f0ae80aae88e24120daa2028909659",
+        "input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "joint_parameters": "3f094a973b7469385e1b8a67e410c41a9f30d4287be7e30853a63705d25ee11d",
+        "selective_input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "jvp": "f0ac98278cb4ead47b4d7de34cea95adfcf0431a5401f0c4eed73c8113b270ea"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "c947cc6d90e112d0249337fffebe32ec99dca5c9490aaffcbb6749f97b80c59c",
+        "parameters": "4e8dbe8827f52112768eaaebdc2066118ba364b172eb7e3f92fec383fb1a4fa9",
+        "input": "201503fc34d39010ea0378b004d37d65c86b078666ce47757fc6b3691d048b84",
+        "joint_parameters": "4e8dbe8827f52112768eaaebdc2066118ba364b172eb7e3f92fec383fb1a4fa9",
+        "selective_input": "201503fc34d39010ea0378b004d37d65c86b078666ce47757fc6b3691d048b84",
+        "jvp": "07367c789ea083539303ad6af46121e51eafa4a12d4ca6a6b860884aab0fa6e0"
+      }
+    },
+    {
+      "shape": [
+        9
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "joint_parameters": "830c36064389b2cccf203320175135214c8af5e33fc4eda15207aef76bc1c0f9",
+        "selective_input": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e",
+        "jvp": "6db65fd59fd356f6729140571b5bcd6bb3b83492a16e1bf0a3884442fc3c8a0e"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "75c2447b47c6cd801ed2cc648dad20a17877d8296221ce9b29c0c81620f62f7d",
+        "parameters": "5c8a910d445ec0199ce99eea10d1938db76be19e574158092b68fe99ec12fbeb",
+        "input": "3fb495db137e417f3625fb2c85d0f687dd2515fc414ef2c85c1b9872916a0101",
+        "joint_parameters": "5c8a910d445ec0199ce99eea10d1938db76be19e574158092b68fe99ec12fbeb",
+        "selective_input": "3fb495db137e417f3625fb2c85d0f687dd2515fc414ef2c85c1b9872916a0101",
+        "jvp": "bc17b7f0bc7843af69b5156a943702a10caed102973e9f27dc4ec14201311196"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "75c2447b47c6cd801ed2cc648dad20a17877d8296221ce9b29c0c81620f62f7d",
+        "parameters": "5c8a910d445ec0199ce99eea10d1938db76be19e574158092b68fe99ec12fbeb",
+        "input": "3fb495db137e417f3625fb2c85d0f687dd2515fc414ef2c85c1b9872916a0101",
+        "joint_parameters": "5c8a910d445ec0199ce99eea10d1938db76be19e574158092b68fe99ec12fbeb",
+        "selective_input": "3fb495db137e417f3625fb2c85d0f687dd2515fc414ef2c85c1b9872916a0101",
+        "jvp": "bc17b7f0bc7843af69b5156a943702a10caed102973e9f27dc4ec14201311196"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.09,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "c11198a4b4318427b0676e65d2e90662459f41d648d3de4879adc31d8dcbc7e9",
+        "parameters": "7b5e7a6e2ffa023021cb60782af812b795e27ea1a351d622df18643b1bfe66c5",
+        "input": "d2bd3fb06994ade84f49cc74990585115e0da9b69705aebae1bc5617376c35d4",
+        "joint_parameters": "7b5e7a6e2ffa023021cb60782af812b795e27ea1a351d622df18643b1bfe66c5",
+        "selective_input": "d2bd3fb06994ade84f49cc74990585115e0da9b69705aebae1bc5617376c35d4",
+        "jvp": "6219724059a54f612d92023fc57b3cc759b7ad5a8b9e2f2daa887ffa16975198"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "c11198a4b4318427b0676e65d2e90662459f41d648d3de4879adc31d8dcbc7e9",
+        "parameters": "7b5e7a6e2ffa023021cb60782af812b795e27ea1a351d622df18643b1bfe66c5",
+        "input": "d2bd3fb06994ade84f49cc74990585115e0da9b69705aebae1bc5617376c35d4",
+        "joint_parameters": "7b5e7a6e2ffa023021cb60782af812b795e27ea1a351d622df18643b1bfe66c5",
+        "selective_input": "d2bd3fb06994ade84f49cc74990585115e0da9b69705aebae1bc5617376c35d4",
+        "jvp": "6219724059a54f612d92023fc57b3cc759b7ad5a8b9e2f2daa887ffa16975198"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 0.55,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "0d3a28b68c68c0c599b15ea9ba5a30ece21475e7f8f54c22419a090bb17f7e85",
+        "parameters": "15830fb1611d44e2cace6d63e5a1982a5aae9598c9d5013dd054d745f216e85c",
+        "input": "50ba495966f01adef1b5f637933728a79c93aa2e94e7617b2af09393a57c4ce7",
+        "joint_parameters": "15830fb1611d44e2cace6d63e5a1982a5aae9598c9d5013dd054d745f216e85c",
+        "selective_input": "50ba495966f01adef1b5f637933728a79c93aa2e94e7617b2af09393a57c4ce7",
+        "jvp": "75c69f06f5d52f312367d5854b158a698fc15e0ff536e14750866e725abc686c"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "0d3a28b68c68c0c599b15ea9ba5a30ece21475e7f8f54c22419a090bb17f7e85",
+        "parameters": "15830fb1611d44e2cace6d63e5a1982a5aae9598c9d5013dd054d745f216e85c",
+        "input": "50ba495966f01adef1b5f637933728a79c93aa2e94e7617b2af09393a57c4ce7",
+        "joint_parameters": "15830fb1611d44e2cace6d63e5a1982a5aae9598c9d5013dd054d745f216e85c",
+        "selective_input": "50ba495966f01adef1b5f637933728a79c93aa2e94e7617b2af09393a57c4ce7",
+        "jvp": "75c69f06f5d52f312367d5854b158a698fc15e0ff536e14750866e725abc686c"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 0,
+      "alpha": 2,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "e1dae1d18f529ab55fcdd64051c6b405f18bcb7afeb1e8e7e7bcf8386abb1b21",
+        "parameters": "459610925301db521a4dc624a97f35eceb0789ef35d44194063042e304574948",
+        "input": "e96bf86dfcae873c793db50b9e18d3aeb78a36e360a4633d5d797e41f0d9eb2d",
+        "joint_parameters": "459610925301db521a4dc624a97f35eceb0789ef35d44194063042e304574948",
+        "selective_input": "e96bf86dfcae873c793db50b9e18d3aeb78a36e360a4633d5d797e41f0d9eb2d",
+        "jvp": "205a01b8f571da06d536595e21debe5ae04f736f2a39e7bff93f46867641893f"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "52d97407e0cfc9ce6db9f42dfb9c5548b16cdedc2e7de3c263144c83575ed92e",
+        "parameters": "97c80b553ba852ac017e56398b1a3ebc3b2ed87735bfb566ddfe0cda0dc89a82",
+        "input": "f6fdf9913677770d83bd9707397af3d36dcf9e884bc9aea9bfb9a1fcd47f305c",
+        "joint_parameters": "97c80b553ba852ac017e56398b1a3ebc3b2ed87735bfb566ddfe0cda0dc89a82",
+        "selective_input": "f6fdf9913677770d83bd9707397af3d36dcf9e884bc9aea9bfb9a1fcd47f305c",
+        "jvp": "7e81d6321d0d4d3f531b31c64ccbeaa01c35c104c91bc5d00e7340403d1cbf7f"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "acabafdee1feafff24ff8b1ae4adc85ffb52ca1e0d2efa466994fce57a1cebe4",
+        "parameters": "6478489a8f252b923703a87049b5d33e62bd3c8999af0ce1516cd2646b0549fd",
+        "input": "fe047da8075792b145ac917a4ac3c7fc9e428e65cd25cf45f7f973d2a0a5ae8f",
+        "joint_parameters": "6478489a8f252b923703a87049b5d33e62bd3c8999af0ce1516cd2646b0549fd",
+        "selective_input": "fe047da8075792b145ac917a4ac3c7fc9e428e65cd25cf45f7f973d2a0a5ae8f",
+        "jvp": "95df2b48b0fab9a2f098b88f559fb20d89d98666dce019e76e2671a78239b1ba"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "f34a55c5e86fe36737c082501f3da5af43da688d1feddb053b29dff39f3c2551",
+        "parameters": "756f14805137631b479a1b200759cac4b082bf335364c3e42940a3d4f5523380",
+        "input": "6ec51ed16a1efe046f7ac5672cf9c220131f52fd5f0250846e009aba31292cfd",
+        "joint_parameters": "756f14805137631b479a1b200759cac4b082bf335364c3e42940a3d4f5523380",
+        "selective_input": "6ec51ed16a1efe046f7ac5672cf9c220131f52fd5f0250846e009aba31292cfd",
+        "jvp": "55567ffead9671d8070d676d5680fae03a62207971912cd4c9d274cce5bbc43e"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "435403a4a9d91cd52728551e9a7d66f8d18b9018c6f5e70e7ca4a2babae0b2e4",
+        "parameters": "ebbc64b5e1e1ddfc5ea0857c7c0ee873e3406b16c19fced48e15f1a319fc6c33",
+        "input": "688b3f9228e963a96cc5381dd512f40590db5cd7accfdbdb6a4f992d0ccf81aa",
+        "joint_parameters": "ebbc64b5e1e1ddfc5ea0857c7c0ee873e3406b16c19fced48e15f1a319fc6c33",
+        "selective_input": "688b3f9228e963a96cc5381dd512f40590db5cd7accfdbdb6a4f992d0ccf81aa",
+        "jvp": "164cc4f1532eaf4e9ae86a09c5bd52a204c0b99b4de2b4b0d9bbedd4b05b6d9c"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "bc409b5c521f3df7e2ce305b310aaf9752474f299dc59bd271f06932a7e94db6",
+        "parameters": "ae0a35bad39547699b2af54520b077531f29355c8631605a5a4048bca4d92e79",
+        "input": "68d395922b67b517d9df1c444178cb41ecc10f40597c4b2e93fb85667f254b88",
+        "joint_parameters": "ae0a35bad39547699b2af54520b077531f29355c8631605a5a4048bca4d92e79",
+        "selective_input": "68d395922b67b517d9df1c444178cb41ecc10f40597c4b2e93fb85667f254b88",
+        "jvp": "3b3b7173fe946ca264c73bf2f97ac0d2c2d79f55c1339904c9e7b59b4ee77a65"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "059ff29a801e4462d985d29c306cce1648f8aa9c5fa379f108e4c1a312293df5",
+        "parameters": "bf76ab1879595883080839b245bdfebc9dfecfec1555aad2c95672cddb9faf3e",
+        "input": "4d369e8ca3fe48874aad5043ad6f90035bdc2270c1d776ecd0ecdd88f627baa0",
+        "joint_parameters": "bf76ab1879595883080839b245bdfebc9dfecfec1555aad2c95672cddb9faf3e",
+        "selective_input": "4d369e8ca3fe48874aad5043ad6f90035bdc2270c1d776ecd0ecdd88f627baa0",
+        "jvp": "983e0631da89a7e4c5388da3bb090e8ff40d06c08b243a61b68fb42603ac04ea"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "be3b9503032225cd7c6123952fa5d1e6ae8f353b5f4b2f89ff24ad4a6ddfde7b",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "be3b9503032225cd7c6123952fa5d1e6ae8f353b5f4b2f89ff24ad4a6ddfde7b",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "cb76285127e0afe52db717e03fb4a485809ff3e274fafa7f45e6ad4720bf6437"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "059ff29a801e4462d985d29c306cce1648f8aa9c5fa379f108e4c1a312293df5",
+        "parameters": "d97fd72f7b8e8b30f821b35084e94ecb0912dd808c2f8ac538c3a2396d9b0264",
+        "input": "4d369e8ca3fe48874aad5043ad6f90035bdc2270c1d776ecd0ecdd88f627baa0",
+        "joint_parameters": "d97fd72f7b8e8b30f821b35084e94ecb0912dd808c2f8ac538c3a2396d9b0264",
+        "selective_input": "4d369e8ca3fe48874aad5043ad6f90035bdc2270c1d776ecd0ecdd88f627baa0",
+        "jvp": "83306f6939559bed3c3afe6f1e629df7d1f13ce977a7806bccd68243b461e696"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.09,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "64e4b2c1c99d586a6b71d1e1179828134551d0114f165c9e8ccb69c1e2eda7b6",
+        "parameters": "c1f383783306d23440c21b57e0f8518a8aa0adc977ab947b81731f41e0414dd8",
+        "input": "c75e0567b6ab770a96a41808930251677d6257c59f0db5c9c7d2892a5d498431",
+        "joint_parameters": "c1f383783306d23440c21b57e0f8518a8aa0adc977ab947b81731f41e0414dd8",
+        "selective_input": "c75e0567b6ab770a96a41808930251677d6257c59f0db5c9c7d2892a5d498431",
+        "jvp": "3d4b97f653a3dcd025e543859bf504999739ae603e8fd2b2fe224e27f133f64b"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.09,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "4ea3b4b609a45d96e521a5d810663bf1293ee899a0a96e3fc32651d81bf3608a",
+        "parameters": "86d83fc2d82baffd1175c4bf4ae643e64aad81f626e76e16360a482350fb512c",
+        "input": "2804a6b8626b8411a2cea18a2047dcfee813967d82101a32fc0183b8773c9709",
+        "joint_parameters": "86d83fc2d82baffd1175c4bf4ae643e64aad81f626e76e16360a482350fb512c",
+        "selective_input": "2804a6b8626b8411a2cea18a2047dcfee813967d82101a32fc0183b8773c9709",
+        "jvp": "ecc162319752f2d7d9a64f19fc83424c24fc6d6238c7b4df0f6da8d0587100c8"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.09,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "0bfc6df02512cb7ec1cb41db9b1cdad978ce648cc938c95a813ff14a967bbeb7",
+        "parameters": "6a47c3ec0dcb859d994e6b8107312ab06053cba72545c582849b8481e9286706",
+        "input": "6775ef0e9ea547522a5703f21d58e123bb6d3a5cb313f6f2daf9a9dd21447588",
+        "joint_parameters": "6a47c3ec0dcb859d994e6b8107312ab06053cba72545c582849b8481e9286706",
+        "selective_input": "6775ef0e9ea547522a5703f21d58e123bb6d3a5cb313f6f2daf9a9dd21447588",
+        "jvp": "a1051f8a8cb6530e1c4fd0af156a6235bf6ad07a937f35764b4d79c690fd8035"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.09,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.55,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "e42bfd593d398498550f840944ae5b3808e427c48021382b887e23539dcb46a9",
+        "parameters": "6aeb9bbfaaa74fc073b802b25776a2db6e4c6fb14b18403a680b0392d29d0a8b",
+        "input": "8dc408d5ddda7e92b0ee8dfee7d04e7a5b359179171c33b5b59d17e2b7ec4429",
+        "joint_parameters": "6aeb9bbfaaa74fc073b802b25776a2db6e4c6fb14b18403a680b0392d29d0a8b",
+        "selective_input": "8dc408d5ddda7e92b0ee8dfee7d04e7a5b359179171c33b5b59d17e2b7ec4429",
+        "jvp": "f01a24a09eb4c633066c32acfcdac61cfddd422c4b9a63b502b48576b64d0168"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.55,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "bc413fa611b5e3a0d82e921e023f53167acb29afdfc096eeea37134c29a994d1",
+        "parameters": "7f7bb5a2874e660a6891c23b72bd3a95314626fb58abccaff42c2f2605f3acb8",
+        "input": "06ab9df268b45685fb3d1c46dadec7631d888c7ca179ab9295568d3f97aa060d",
+        "joint_parameters": "7f7bb5a2874e660a6891c23b72bd3a95314626fb58abccaff42c2f2605f3acb8",
+        "selective_input": "06ab9df268b45685fb3d1c46dadec7631d888c7ca179ab9295568d3f97aa060d",
+        "jvp": "b3b0c9758156cbe29410b3bfc7c3d28dc58baa45c8ef9b73ddebbe28a6cafc0f"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.55,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "d97b6caa08c0d518c1c93fb8364bd20482350cb9732cdf939b248a1c58eebabb",
+        "parameters": "78830da56e1249bc1b242c733dcde05e315669a27777ca5f12298c966af82b49",
+        "input": "fabce687d16ddfdb4a28857772f68aa5270488fecdf1dbf228dc583ffcb106d8",
+        "joint_parameters": "78830da56e1249bc1b242c733dcde05e315669a27777ca5f12298c966af82b49",
+        "selective_input": "fabce687d16ddfdb4a28857772f68aa5270488fecdf1dbf228dc583ffcb106d8",
+        "jvp": "8d4931b9b52adae25499c8e8d58af610e2c59a1f1289e21f6ba8552894dfd1ea"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 0.55,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 2,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "6a9d4776c9350a99e698938942f291ff6320b16be800dc0c6b1bbb0373775936",
+        "parameters": "3ba98f44590314a2513247305c984ab2ae866aecc5e93b53081601e6f74e3b10",
+        "input": "6e61b025beff6165e03eff47286cfc4560d3c7a9f9140ab0c358d55898dd4fa9",
+        "joint_parameters": "3ba98f44590314a2513247305c984ab2ae866aecc5e93b53081601e6f74e3b10",
+        "selective_input": "6e61b025beff6165e03eff47286cfc4560d3c7a9f9140ab0c358d55898dd4fa9",
+        "jvp": "f71fbf3a56aa5fb6fab254944ba6ec709e0328789ca4666b2373e638293ad89f"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 2,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "21dba917cfd3bedd2db9ab4b3425d49793a0f0e13d70faddd72614e41fe61853",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "21dba917cfd3bedd2db9ab4b3425d49793a0f0e13d70faddd72614e41fe61853",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "a942fa273fe404388d1b3c644241dfb845f8d00d60b3dd5b98ad7dcf05332f35"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 2,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "6a9d4776c9350a99e698938942f291ff6320b16be800dc0c6b1bbb0373775936",
+        "parameters": "be30f98e4a6904d62106b0b8c6406a7a7f12f27169177f3301e428ce42088e31",
+        "input": "6e61b025beff6165e03eff47286cfc4560d3c7a9f9140ab0c358d55898dd4fa9",
+        "joint_parameters": "be30f98e4a6904d62106b0b8c6406a7a7f12f27169177f3301e428ce42088e31",
+        "selective_input": "6e61b025beff6165e03eff47286cfc4560d3c7a9f9140ab0c358d55898dd4fa9",
+        "jvp": "452701ba2b6dd973cee56e23771d378d33fb76cf68edb46599335598ad593459"
+      }
+    },
+    {
+      "shape": [
+        2,
+        7,
+        65
+      ],
+      "axis": 2,
+      "alpha": 2,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082",
+        "jvp": "f25aa50390750f51d705195701ba474d3eb27d313cead39016b7b1e656e18082"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "3bc4eba3ad759b07198786dab10bc1ff931d6bf0faf07b3fac565e9568ce68fb",
+        "parameters": "89e12a7e0b8ac2e2520d52c0151a51c90ad31ca855c937e8faf4f0ecf70509f9",
+        "input": "083d40468011eda03713fa79baa4db04afd3294b8576f6220396007c9a0ad3cc",
+        "joint_parameters": "89e12a7e0b8ac2e2520d52c0151a51c90ad31ca855c937e8faf4f0ecf70509f9",
+        "selective_input": "083d40468011eda03713fa79baa4db04afd3294b8576f6220396007c9a0ad3cc",
+        "jvp": "6dd515e2667babf54341e20118b193b20b061668d942ee3f8040269384ca7a68"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "2098099eabd43290a5ed6426e8aa8a244b663f2c8bad170ed86d74878f91b46f",
+        "parameters": "8639a2a439bd6f034402756a6fa0c93047b68eba104a8f42eeba9fa6e3b58da4",
+        "input": "e861dce03ff222090406973308a30da921127e9fa33592a7025115b3df4ddf75",
+        "joint_parameters": "8639a2a439bd6f034402756a6fa0c93047b68eba104a8f42eeba9fa6e3b58da4",
+        "selective_input": "e861dce03ff222090406973308a30da921127e9fa33592a7025115b3df4ddf75",
+        "jvp": "ac75c0093ab2bf0903b1244a7176dd6c10fa13fbccd8729b9ad5cd86e5c11be4"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "2f986f38a2f39ef3ee46bb02cbf1d011e47c282776a1bd9133713404d9be42a3",
+        "parameters": "38e356dfc46c442f7afead68930910ce008ca8c6d12d4e9a9b3f74b337536eb1",
+        "input": "e30b2df8bc583acd25dfba94635173c1c862278a16f751ec3718c4008a3d32f3",
+        "joint_parameters": "38e356dfc46c442f7afead68930910ce008ca8c6d12d4e9a9b3f74b337536eb1",
+        "selective_input": "e30b2df8bc583acd25dfba94635173c1c862278a16f751ec3718c4008a3d32f3",
+        "jvp": "bf3004960e9d6222783a091a01b63569c909e9e6a677573a208808c0a9d9b999"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "jvp": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "e5e9c6c7b05f84446613a313fde1dde73870554f172147f48465c50ad5d28561",
+        "parameters": "055186e0fc868ea86df727cc538bab09de4484c8abff5bf592d79b902cd76434",
+        "input": "c1da64048080edd09d570cc62c3a73078a21dd31a73769e2a0dc7bf224f9f854",
+        "joint_parameters": "055186e0fc868ea86df727cc538bab09de4484c8abff5bf592d79b902cd76434",
+        "selective_input": "c1da64048080edd09d570cc62c3a73078a21dd31a73769e2a0dc7bf224f9f854",
+        "jvp": "ee9b6e2a8d9f6531120b64d4aee37320b48a361292fa2c4e4a3fef6eb1882a83"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "5deda2ea0c01b539f71258f36106301769744497e896fcaa1d4c8624ed8bf155",
+        "parameters": "67b284a4042ebd8b36d304795067d85506c5dc5a0b8953ac6183a70772df47f7",
+        "input": "6e85af6d0b2d5c8b77c21d5ff68f4537f12a543214ead14bd8fb143826c88748",
+        "joint_parameters": "67b284a4042ebd8b36d304795067d85506c5dc5a0b8953ac6183a70772df47f7",
+        "selective_input": "6e85af6d0b2d5c8b77c21d5ff68f4537f12a543214ead14bd8fb143826c88748",
+        "jvp": "880522c7eb6bafc88e916d7e0cef365fa4a48e002ac2f1b764bb5bae1a28a372"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "93ef74804643479ef93795b3e65a1be53b936ed67403756b47be2c09a520ae09",
+        "parameters": "7c4369311798e30982a4aa2794f331c3781860409559d2f6a4b6fb5f0e583a6e",
+        "input": "654948337c34c516a229e945f4a425ce4244f6a7cfb8c40c162d3420cc8ca1e1",
+        "joint_parameters": "7c4369311798e30982a4aa2794f331c3781860409559d2f6a4b6fb5f0e583a6e",
+        "selective_input": "654948337c34c516a229e945f4a425ce4244f6a7cfb8c40c162d3420cc8ca1e1",
+        "jvp": "fb518ddb598a26682c45f410e0c606affc9cf886df2be207ac16c4f4eafba985"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "jvp": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        1,
+        3
+      ],
+      "sha256": {
+        "output": "4c2d1cb57543b8d3ee899b261c793c57cbde2350e7b5f32e479d92abe6d8e575",
+        "parameters": "54060428498a6b8dcf49035d32822a011cd8bcd7f50dfa750dc478ab2bad1624",
+        "input": "e76d95edff9ff6aa92340aaa351f081669a8555a4ccfaff45790180eb876a281",
+        "joint_parameters": "54060428498a6b8dcf49035d32822a011cd8bcd7f50dfa750dc478ab2bad1624",
+        "selective_input": "e76d95edff9ff6aa92340aaa351f081669a8555a4ccfaff45790180eb876a281",
+        "jvp": "d8acbb5c597b44e1fa57701ec11ffc5f12169380de70e91d8fd0eafc893b109e"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        3,
+        32
+      ],
+      "sha256": {
+        "output": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "parameters": "217346fdbeb76ae4269f0afe24f524d3d373d0a1b41e91cabcd4c5a22328993b",
+        "input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "joint_parameters": "217346fdbeb76ae4269f0afe24f524d3d373d0a1b41e91cabcd4c5a22328993b",
+        "selective_input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "jvp": "a63525ae31b7229f112d908d4d21c5e6ad41c06afb7509e58a7df3cbec1a9bd6"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        1,
+        32
+      ],
+      "sha256": {
+        "output": "4c2d1cb57543b8d3ee899b261c793c57cbde2350e7b5f32e479d92abe6d8e575",
+        "parameters": "ba8fea9594761f5c25bf8d3adf831fd95b5bd950d3c75978087de7582f5c3fb0",
+        "input": "e76d95edff9ff6aa92340aaa351f081669a8555a4ccfaff45790180eb876a281",
+        "joint_parameters": "ba8fea9594761f5c25bf8d3adf831fd95b5bd950d3c75978087de7582f5c3fb0",
+        "selective_input": "e76d95edff9ff6aa92340aaa351f081669a8555a4ccfaff45790180eb876a281",
+        "jvp": "0868b592a750654e2f7fe2e0b911203c97c56e734197c4f42975c292d97bedc1"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "window": [
+        32,
+        32
+      ],
+      "sha256": {
+        "output": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "joint_parameters": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "selective_input": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "jvp": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.55,
+      "log_gain": 1.6094379124341003,
+      "window": [
+        1,
+        3
+      ],
+      "kernel_len": 32,
+      "warmup_per_route": 2,
+      "round_order": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "measurements_ms": [
+        [
+          5.913542000000007,
+          5.950874999999996,
+          5.9529999999999745,
+          6.000167000000033,
+          5.952666000000022,
+          5.993749999999977,
+          5.952957999999967,
+          6.0626250000000255,
+          6.024375000000077,
+          6.06291699999997,
+          6.02841699999999,
+          6.090834000000086
+        ],
+        [
+          3.6692919999999276,
+          3.707875000000058,
+          3.6955829999999423,
+          3.646667000000093,
+          3.6994999999999436,
+          3.652249999999981,
+          3.671000000000049,
+          3.669208000000026,
+          3.7314999999999827,
+          3.685416000000032,
+          3.852957999999944,
+          3.7229160000000547
+        ]
+      ],
+      "median_ms": [
+        5.996958500000005,
+        3.690499499999987
+      ],
+      "sha256": {
+        "output": "e5e9c6c7b05f84446613a313fde1dde73870554f172147f48465c50ad5d28561",
+        "parameters": "055186e0fc868ea86df727cc538bab09de4484c8abff5bf592d79b902cd76434"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 0.09,
+      "log_gain": 1.6094379124341003,
+      "window": [
+        1,
+        32
+      ],
+      "kernel_len": 32,
+      "warmup_per_route": 2,
+      "round_order": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "measurements_ms": [
+        [
+          5.985709000000043,
+          6.035250000000019,
+          6.013709000000063,
+          6.023416999999995,
+          6.027625000000057,
+          6.021415999999931,
+          6.000208999999927,
+          6.013124999999945,
+          5.99412499999994,
+          5.988125000000082,
+          5.914207999999917,
+          6.105457999999999
+        ],
+        [
+          5.825166999999965,
+          5.859667000000059,
+          5.820249999999987,
+          5.832625000000007,
+          6.2635420000000295,
+          5.811958000000004,
+          5.801415999999904,
+          5.756665999999996,
+          5.759416999999985,
+          5.729249999999979,
+          5.760499999999979,
+          5.772707999999966
+        ]
+      ],
+      "median_ms": [
+        6.013417000000004,
+        5.806686999999954
+      ],
+      "sha256": {
+        "output": "2f986f38a2f39ef3ee46bb02cbf1d011e47c282776a1bd9133713404d9be42a3",
+        "parameters": "38e356dfc46c442f7afead68930910ce008ca8c6d12d4e9a9b3f74b337536eb1"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "log_gain": 1.6094379124341003,
+      "window": [
+        1,
+        3
+      ],
+      "kernel_len": 32,
+      "warmup_per_route": 2,
+      "round_order": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "measurements_ms": [
+        [
+          5.986250000000041,
+          6.014332999999965,
+          5.916084000000069,
+          6.263417000000118,
+          5.94316700000013,
+          5.978166999999985,
+          6.078125,
+          5.985374999999976,
+          5.982332999999926,
+          5.9688750000000255,
+          5.996209000000135,
+          6.05399999999986
+        ],
+        [
+          3.77312500000005,
+          3.6954580000000306,
+          3.6771249999999327,
+          3.639124999999922,
+          3.5787920000000213,
+          3.5673750000000837,
+          3.676666999999952,
+          3.6230829999999514,
+          3.684082999999873,
+          3.6312500000001364,
+          3.633833999999979,
+          3.6644169999999576
+        ]
+      ],
+      "median_ms": [
+        5.985812500000009,
+        3.6517709999999397
+      ],
+      "sha256": {
+        "output": "4c2d1cb57543b8d3ee899b261c793c57cbde2350e7b5f32e479d92abe6d8e575",
+        "parameters": "54060428498a6b8dcf49035d32822a011cd8bcd7f50dfa750dc478ab2bad1624"
+      }
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "axis": 1,
+      "alpha": 2,
+      "log_gain": 1.6094379124341003,
+      "window": [
+        3,
+        32
+      ],
+      "kernel_len": 32,
+      "warmup_per_route": 2,
+      "round_order": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "measurements_ms": [
+        [
+          6.0295840000001135,
+          5.811832999999979,
+          5.828375000000051,
+          5.7690000000000055,
+          5.752707999999984,
+          5.706916999999976,
+          5.766791999999896,
+          5.753165999999965,
+          5.747666999999865,
+          5.731416999999965,
+          5.742749999999887,
+          5.793582999999899
+        ],
+        [
+          5.664041999999881,
+          5.51304099999993,
+          5.393416000000116,
+          5.425500000000056,
+          5.38087500000006,
+          5.430458000000044,
+          5.375915999999961,
+          5.381542000000081,
+          5.376749999999902,
+          5.385042000000112,
+          5.347999999999956,
+          5.372041999999965
+        ]
+      ],
+      "median_ms": [
+        5.75997899999993,
+        5.383292000000097
+      ],
+      "sha256": {
+        "output": "599c1bb5ffd4b87229a81958f33f1060821cd01cd7aa7ccafa0d862f4522f3f6",
+        "parameters": "217346fdbeb76ae4269f0afe24f524d3d373d0a1b41e91cabcd4c5a22328993b"
+      }
+    }
+  ],
+  "scope": "Compiled release WASM in Node, before/after exact same windows. Bitwise forward, parameter/input VJP and JVP parity. Timing includes forward, parameter VJP, output copy and snapshot free; hashing excluded. Not native-Python/Torch timing, browser/WebGPU, model throughput or quality evidence."
+}

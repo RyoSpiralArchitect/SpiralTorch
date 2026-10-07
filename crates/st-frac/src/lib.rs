@@ -17,7 +17,11 @@ pub mod zspace;
 pub use fractal_field::{FractalFieldError, FractalFieldGenerator, FractalFieldResult};
 
 use ndarray::{ArrayD, Axis};
+use std::ops::Range;
 use thiserror::Error;
+
+#[cfg(test)]
+mod support_tests;
 
 /// Enumeration of fractional regularisation backends.
 #[derive(Clone, Debug, PartialEq)]
@@ -402,6 +406,20 @@ fn source_index_with_pad(idx: isize, len: usize, pad: Pad) -> Option<usize> {
     }
 }
 
+// Only exact zero endpoints are omitted, after all finite/domain validation.
+// This is not tolerance-based kernel truncation or coefficient renormalization.
+fn nonzero_lags(coefficients: &[f32]) -> Range<usize> {
+    let Some(start) = coefficients.iter().position(|&value| value != 0.0) else {
+        return 0..0;
+    };
+    let end = coefficients
+        .iter()
+        .rposition(|&value| value != 0.0)
+        .unwrap()
+        + 1;
+    start..end
+}
+
 fn conv1d_gl_line(
     x: &[f32],
     y: &mut [f32],
@@ -415,10 +433,13 @@ fn conv1d_gl_line(
     if coeff.is_empty() {
         return Err(FracErr::Kernel);
     }
+    let lags = nonzero_lags(coeff);
+    let active = &coeff[lags.clone()];
     for (i, out) in y.iter_mut().enumerate() {
         let mut acc = 0.0f64;
-        for (k, &c) in coeff.iter().enumerate() {
-            let idx = i as isize - k as isize;
+        let first_source = i as isize - lags.start as isize;
+        for (offset, &c) in active.iter().enumerate() {
+            let idx = first_source - offset as isize;
             acc += f64::from(c) * f64::from(sample_with_pad(x, idx, pad));
         }
         *out = checked_f32("fractional output", scale * acc)?;
@@ -442,9 +463,12 @@ fn vjp1d_gl_line(
     debug_assert_eq!(gy.len(), gx.len());
 
     let mut accumulators = zeroed_vec("fractional VJP accumulator", gx.len())?;
+    let lags = nonzero_lags(coeff);
+    let active = &coeff[lags.clone()];
     for (output_index, &gradient) in gy.iter().enumerate() {
-        for (lag, &coefficient) in coeff.iter().enumerate() {
-            let source_index = output_index as isize - lag as isize;
+        let first_source = output_index as isize - lags.start as isize;
+        for (offset, &coefficient) in active.iter().enumerate() {
+            let source_index = first_source - offset as isize;
             if let Some(source_index) = source_index_with_pad(source_index, gx.len(), pad) {
                 accumulators[source_index] += scale * f64::from(coefficient) * f64::from(gradient);
             }

@@ -721,6 +721,7 @@ jobs:
             bindings/st-py/tests/test_fractional_window_results.py \
             bindings/st-py/tests/test_fractional_window_study.py \
             bindings/st-py/tests/test_fractional_window_study_results.py \
+            bindings/st-py/tests/test_fractional_active_support_results.py \
             bindings/st-py/tests/test_fractional_gain_study.py \
             bindings/st-py/tests/test_fractional_gain_verification.py \
             bindings/st-py/tests/test_fractional_gain_results.py \
@@ -754,4 +755,4 @@ jobs:
             bindings/st-py/tests/test_wave_gate_long_horizon_summary.py \
             bindings/st-py/tests/test_elliptic_nonlinear_study.py \
             bindings/st-py/tests/test_elliptic_causal_study.py
-          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py

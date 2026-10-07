@@ -1,0 +1,396 @@
+{
+  "schema": "spiraltorch.fractional_active_support_summary.v1",
+  "native": {
+    "initial": [
+      {
+        "key": "0.09/1:32/joint",
+        "before_ms": 7.3338965,
+        "after_ms": 7.958521,
+        "speedup": 0.921515002599101,
+        "torch_before_ms": 3.5570209999999998,
+        "torch_after_ms": 3.4438959999999996,
+        "files": [
+          "full-009-joint-0-before.json",
+          "full-009-joint-1-after.json",
+          "full-009-joint-2-after.json",
+          "full-009-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.09/1:32/parameters",
+        "before_ms": 2.672917,
+        "after_ms": 2.6545215,
+        "speedup": 1.0069298741788304,
+        "torch_before_ms": 2.6221875,
+        "torch_after_ms": 2.6402915,
+        "files": [
+          "full-009-parameters-0-before.json",
+          "full-009-parameters-1-after.json",
+          "full-009-parameters-2-after.json",
+          "full-009-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.55/1:3/joint",
+        "before_ms": 7.3353335,
+        "after_ms": 3.3596665,
+        "speedup": 2.1833516808885642,
+        "torch_before_ms": 12.601333499999999,
+        "torch_after_ms": 12.576083,
+        "files": [
+          "short-055-joint-0-before.json",
+          "short-055-joint-1-after.json",
+          "short-055-joint-2-after.json",
+          "short-055-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.55/1:3/parameters",
+        "before_ms": 2.6393329999999997,
+        "after_ms": 1.738813,
+        "speedup": 1.5178935285162922,
+        "torch_before_ms": 11.2554795,
+        "torch_after_ms": 11.233478999999999,
+        "files": [
+          "short-055-parameters-0-before.json",
+          "short-055-parameters-1-after.json",
+          "short-055-parameters-2-after.json",
+          "short-055-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/1:3/joint",
+        "before_ms": 7.429542,
+        "after_ms": 3.409958,
+        "speedup": 2.1787781550388594,
+        "torch_before_ms": 12.8921665,
+        "torch_after_ms": 12.8110415,
+        "files": [
+          "short-integer-joint-0-before.json",
+          "short-integer-joint-1-after.json",
+          "short-integer-joint-2-after.json",
+          "short-integer-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/1:3/parameters",
+        "before_ms": 2.7255000000000003,
+        "after_ms": 1.7840205,
+        "speedup": 1.5277290815884685,
+        "torch_before_ms": 11.340062,
+        "torch_after_ms": 11.1053125,
+        "files": [
+          "short-integer-parameters-0-before.json",
+          "short-integer-parameters-1-after.json",
+          "short-integer-parameters-2-after.json",
+          "short-integer-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/3:32/joint",
+        "before_ms": 7.296854,
+        "after_ms": 4.0174164999999995,
+        "speedup": 1.8163050806407552,
+        "torch_before_ms": 3.343375,
+        "torch_after_ms": 3.387791,
+        "files": [
+          "tail-integer-joint-0-before.json",
+          "tail-integer-joint-1-after.json",
+          "tail-integer-joint-2-after.json",
+          "tail-integer-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/3:32/parameters",
+        "before_ms": 2.6497085,
+        "after_ms": 2.605875,
+        "speedup": 1.0168210294047104,
+        "torch_before_ms": 2.6012085000000003,
+        "torch_after_ms": 2.574875,
+        "files": [
+          "tail-integer-parameters-0-before.json",
+          "tail-integer-parameters-1-after.json",
+          "tail-integer-parameters-2-after.json",
+          "tail-integer-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      }
+    ],
+    "sliced": [
+      {
+        "key": "0.09/1:32/joint",
+        "before_ms": 7.7882295,
+        "after_ms": 8.128708,
+        "speedup": 0.9581140692961293,
+        "torch_before_ms": 3.667625,
+        "torch_after_ms": 3.67525,
+        "files": [
+          "v2-full-009-joint-0-before.json",
+          "v2-full-009-joint-1-after.json",
+          "v2-full-009-joint-2-after.json",
+          "v2-full-009-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.09/1:32/parameters",
+        "before_ms": 2.8385,
+        "after_ms": 2.7657705000000004,
+        "speedup": 1.0262962888641698,
+        "torch_before_ms": 2.754896,
+        "torch_after_ms": 2.7466875,
+        "files": [
+          "v2-full-009-parameters-0-before.json",
+          "v2-full-009-parameters-1-after.json",
+          "v2-full-009-parameters-2-after.json",
+          "v2-full-009-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.55/1:3/joint",
+        "before_ms": 7.6495619999999995,
+        "after_ms": 3.491854,
+        "speedup": 2.1906878122624827,
+        "torch_before_ms": 12.4856245,
+        "torch_after_ms": 12.3865835,
+        "files": [
+          "v2-short-055-joint-0-before.json",
+          "v2-short-055-joint-1-after.json",
+          "v2-short-055-joint-2-after.json",
+          "v2-short-055-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.55/1:3/parameters",
+        "before_ms": 2.837021,
+        "after_ms": 1.8406455,
+        "speedup": 1.5413185211383724,
+        "torch_before_ms": 10.909979,
+        "torch_after_ms": 10.8913745,
+        "files": [
+          "v2-short-055-parameters-0-before.json",
+          "v2-short-055-parameters-1-after.json",
+          "v2-short-055-parameters-2-after.json",
+          "v2-short-055-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/1:3/joint",
+        "before_ms": 7.7632080000000006,
+        "after_ms": 3.603771,
+        "speedup": 2.154190152481942,
+        "torch_before_ms": 12.7804585,
+        "torch_after_ms": 12.6973755,
+        "files": [
+          "v2-short-integer-joint-0-before.json",
+          "v2-short-integer-joint-1-after.json",
+          "v2-short-integer-joint-2-after.json",
+          "v2-short-integer-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/1:3/parameters",
+        "before_ms": 2.832687,
+        "after_ms": 1.849834,
+        "speedup": 1.5313195670530437,
+        "torch_before_ms": 10.8972505,
+        "torch_after_ms": 10.785895499999999,
+        "files": [
+          "v2-short-integer-parameters-0-before.json",
+          "v2-short-integer-parameters-1-after.json",
+          "v2-short-integer-parameters-2-after.json",
+          "v2-short-integer-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/3:32/joint",
+        "before_ms": 7.8024995,
+        "after_ms": 4.2478755,
+        "speedup": 1.8368004194096554,
+        "torch_before_ms": 3.5157914999999997,
+        "torch_after_ms": 3.4872915,
+        "files": [
+          "v2-tail-integer-joint-0-before.json",
+          "v2-tail-integer-joint-1-after.json",
+          "v2-tail-integer-joint-2-after.json",
+          "v2-tail-integer-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/3:32/parameters",
+        "before_ms": 2.8558755,
+        "after_ms": 2.7608755,
+        "speedup": 1.0344093748522887,
+        "torch_before_ms": 2.7099789999999997,
+        "torch_after_ms": 2.690521,
+        "files": [
+          "v2-tail-integer-parameters-0-before.json",
+          "v2-tail-integer-parameters-1-after.json",
+          "v2-tail-integer-parameters-2-after.json",
+          "v2-tail-integer-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      }
+    ],
+    "tiled": [
+      {
+        "key": "0.09/1:32/joint",
+        "before_ms": 7.658104,
+        "after_ms": 3.988333,
+        "speedup": 1.9201265290536171,
+        "torch_before_ms": 3.5955,
+        "torch_after_ms": 3.622875,
+        "files": [
+          "v4-full-009-joint-0-before.json",
+          "v4-full-009-joint-1-after.json",
+          "v4-full-009-joint-2-after.json",
+          "v4-full-009-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.09/1:32/parameters",
+        "before_ms": 2.826125,
+        "after_ms": 2.80575,
+        "speedup": 1.0072618729394993,
+        "torch_before_ms": 2.7335835,
+        "torch_after_ms": 2.7600215,
+        "files": [
+          "v4-full-009-parameters-0-before.json",
+          "v4-full-009-parameters-1-after.json",
+          "v4-full-009-parameters-2-after.json",
+          "v4-full-009-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.55/1:3/joint",
+        "before_ms": 7.6917290000000005,
+        "after_ms": 2.396167,
+        "speedup": 3.210013742781701,
+        "torch_before_ms": 12.468708,
+        "torch_after_ms": 12.474062499999999,
+        "files": [
+          "v4-short-055-joint-0-before.json",
+          "v4-short-055-joint-1-after.json",
+          "v4-short-055-joint-2-after.json",
+          "v4-short-055-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "0.55/1:3/parameters",
+        "before_ms": 2.697063,
+        "after_ms": 1.849021,
+        "speedup": 1.4586437904166583,
+        "torch_before_ms": 10.8678335,
+        "torch_after_ms": 10.780999999999999,
+        "files": [
+          "v4-short-055-parameters-0-before.json",
+          "v4-short-055-parameters-1-after.json",
+          "v4-short-055-parameters-2-after.json",
+          "v4-short-055-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/1:3/joint",
+        "before_ms": 7.767542000000001,
+        "after_ms": 2.5101044999999997,
+        "speedup": 3.094509411859148,
+        "torch_before_ms": 12.5145625,
+        "torch_after_ms": 12.7310835,
+        "files": [
+          "v4-short-integer-joint-0-before.json",
+          "v4-short-integer-joint-1-after.json",
+          "v4-short-integer-joint-2-after.json",
+          "v4-short-integer-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/1:3/parameters",
+        "before_ms": 2.8140005,
+        "after_ms": 1.810396,
+        "speedup": 1.5543563397179403,
+        "torch_before_ms": 10.864042000000001,
+        "torch_after_ms": 10.876666499999999,
+        "files": [
+          "v4-short-integer-parameters-0-before.json",
+          "v4-short-integer-parameters-1-after.json",
+          "v4-short-integer-parameters-2-after.json",
+          "v4-short-integer-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/3:32/joint",
+        "before_ms": 7.1603335,
+        "after_ms": 3.376042,
+        "speedup": 2.120925480192486,
+        "torch_before_ms": 3.2998125,
+        "torch_after_ms": 3.652792,
+        "files": [
+          "v4-tail-integer-joint-0-before.json",
+          "v4-tail-integer-joint-1-after.json",
+          "v4-tail-integer-joint-2-after.json",
+          "v4-tail-integer-joint-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      },
+      {
+        "key": "2/3:32/parameters",
+        "before_ms": 2.8292289999999998,
+        "after_ms": 2.683625,
+        "speedup": 1.0542564628068376,
+        "torch_before_ms": 2.6546665000000003,
+        "torch_after_ms": 2.6685415,
+        "files": [
+          "v4-tail-integer-parameters-0-before.json",
+          "v4-tail-integer-parameters-1-after.json",
+          "v4-tail-integer-parameters-2-after.json",
+          "v4-tail-integer-parameters-3-before.json"
+        ],
+        "bitwise_rust_parity": true,
+        "bitwise_torch_repeats": true
+      }
+    ]
+  },
+  "scope": "Pooled 24 timings per implementation/build/case from balanced before-after-after-before processes, each internally alternating Rust and Torch for 12 rounds. All earlier variants retained. Not independent model/quality evidence or universal speed claims."
+}

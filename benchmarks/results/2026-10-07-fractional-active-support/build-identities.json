@@ -1,0 +1,42 @@
+{
+  "before": {
+    "source_revision": "16379238c73f6890a4f754dccd4ad381436e047b",
+    "native_sha256": "18f4c1c2bb4b76fa0e8beeca59f7fbfa0dffbc85efd72b96c45c119a63befa58",
+    "bridge_sha256": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "native_profile": "release",
+    "cargo_features": "default",
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)"
+  },
+  "initial": {
+    "source_revision": "d07eff89d15af00591fc566c1bb9531d35887ad7",
+    "native_sha256": "a34f5f59907ae3d323997b182d8aaf288688120919bd51f21c182c46aa351868",
+    "bridge_sha256": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "native_profile": "release",
+    "cargo_features": "default",
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)"
+  },
+  "sliced": {
+    "source_revision": "04967074576779316bc7be0935d2b9cfa587dc87",
+    "native_sha256": "f80276e02a7680cc030c10e9df23e19227c8f458eb913d7141fad861d74f2b63",
+    "bridge_sha256": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "native_profile": "release",
+    "cargo_features": "default",
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)"
+  },
+  "hoisted": {
+    "source_revision": "68788239555da053bc74ca07bd01bc7a114e0500",
+    "native_sha256": "f80276e02a7680cc030c10e9df23e19227c8f458eb913d7141fad861d74f2b63",
+    "bridge_sha256": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "native_profile": "release",
+    "cargo_features": "default",
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)"
+  },
+  "tiled": {
+    "source_revision": "381a8a10bc7cb6744696fa7e561b69066e9bd584",
+    "native_sha256": "810384d0db64aa4e9154addfea0050d5258d9a6e2381f50a10de4270d24419b9",
+    "bridge_sha256": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "native_profile": "release",
+    "cargo_features": "default",
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)"
+  }
+}
