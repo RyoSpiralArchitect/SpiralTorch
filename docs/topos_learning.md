@@ -41,6 +41,29 @@ typed `grad_input` and `grad_gate` arrays. Copies outlive their Rust handles;
 call `.free()` on batches and pullbacks when finished. A batch can outlive its
 kernel. Direct Rust consumers use the same `ToposResonatorLearningBatch` core.
 
+## Rust NN Learning
+
+The CPU route of `st_nn::ToposResonator` now captures that same core tape during
+forward. Backward calls `batch.vjp_audited(upstream)`, which checks finite
+gradients and the sensitivity bound and computes the same backward audit from
+the saved transition. It does not run the finite recurrence twice again.
+This is an audit of Rust-owned results, not independent verification of an
+external executor; WGPU results still use the full formula-comparison audit.
+
+The NN cache shares its immutable tape across repeated band pullbacks, checks
+input and gate consistency bit-for-bit (including signed zero), and invalidates
+it on mutable parameter access or topos/config changes. CPU/WGPU routing can
+change between forward and backward;
+only an actual CPU captured pullback reports `capture_reused: true`.
+
+Capture trades extra forward work and retained storage for cheaper backward.
+The core tape owns four N-element vectors, while the returned NN output is a
+separate Tensor; the older NN cache shared the caller's Tensor storage. This
+is not an inference-speed or peak-memory improvement. Stateless
+`ToposResonatorOperator::forward` and Python's no-grad path remain available
+without capture. Tests compare saturated and unsaturated gradients/audits and
+100 synthetic SGD updates against recomputation, not language-model quality.
+
 Rust callers with owned `Vec<f32>` inputs can use
 `ToposResonatorOperator::capture_owned(input, gate, rows, features)` to transfer
 both allocations into the tape without cloning them. The vectors are consumed

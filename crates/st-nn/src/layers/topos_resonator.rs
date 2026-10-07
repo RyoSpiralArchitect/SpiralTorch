@@ -6,16 +6,18 @@
 use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
-use st_core::dynamics::topos_resonator::{
-    apply_topos_resonator, audit_topos_resonator_backward, backward_topos_resonator,
-    validate_topos_resonator_state, ToposResonatorBackwardAuditRequest,
-    ToposResonatorBackwardRequest, ToposResonatorRequest, TOPOS_RESONATOR_BACKWARD,
-    TOPOS_RESONATOR_CONTRACT_VERSION, TOPOS_RESONATOR_EQUATION, TOPOS_RESONATOR_REWRITE,
-    TOPOS_RESONATOR_SCHEME, TOPOS_RESONATOR_SEMANTIC_BACKEND, TOPOS_RESONATOR_SEMANTIC_OWNER,
-    TOPOS_RESONATOR_STABILITY, TOPOS_RESONATOR_STATE,
-};
 #[cfg(feature = "wgpu")]
-use st_core::dynamics::topos_resonator::{audit_topos_resonator, ToposResonatorAuditRequest};
+use st_core::dynamics::topos_resonator::{
+    audit_topos_resonator, audit_topos_resonator_backward, backward_topos_resonator,
+    ToposResonatorAuditRequest, ToposResonatorBackwardAuditRequest, ToposResonatorBackwardRequest,
+};
+use st_core::dynamics::topos_resonator::{
+    validate_topos_resonator_state, ToposResonatorLearningBatch, ToposResonatorOperator,
+    ToposResonatorRequest, TOPOS_RESONATOR_BACKWARD, TOPOS_RESONATOR_CONTRACT_VERSION,
+    TOPOS_RESONATOR_EQUATION, TOPOS_RESONATOR_REWRITE, TOPOS_RESONATOR_SCHEME,
+    TOPOS_RESONATOR_SEMANTIC_BACKEND, TOPOS_RESONATOR_SEMANTIC_OWNER, TOPOS_RESONATOR_STABILITY,
+    TOPOS_RESONATOR_STATE,
+};
 pub use st_core::dynamics::topos_resonator::{
     ToposResonatorAudit, ToposResonatorBackwardAudit, ToposResonatorConfig,
 };
@@ -24,6 +26,7 @@ use st_tensor::backend::wgpu_dense;
 use st_tensor::topos::OpenCartesianTopos;
 use st_tensor::{emit_tensor_op, emit_tensor_op_meta, LanguageWaveEncoder, TensorUtilBackend};
 use std::cell::RefCell;
+use std::sync::Arc;
 
 const DEFAULT_CURVATURE: f32 = -1.0;
 const DEFAULT_TOLERANCE: f32 = 1e-6;
@@ -32,6 +35,15 @@ const DEFAULT_MAX_DEPTH: usize = 64;
 
 fn topos_resonator_error(error: impl std::fmt::Display) -> TensorError {
     TensorError::Generic(format!("Topos resonator contract failed: {error}"))
+}
+
+fn same_operand_bits(left: &[f32], right: &[f32]) -> bool {
+    // A captured pullback must use the exact forward operands, including signed zero.
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
 }
 
 fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
@@ -67,6 +79,7 @@ fn emit_topos_resonator_meta(
     topos: &OpenCartesianTopos,
     encoder_attached: bool,
     backward: bool,
+    captured: bool,
     audit: ToposResonatorAudit,
     backward_audit: Option<ToposResonatorBackwardAudit>,
     fallback: Option<String>,
@@ -74,6 +87,13 @@ fn emit_topos_resonator_meta(
     emit_tensor_op(op_name, &[rows, cols, rows, cols], &[rows, cols]);
     emit_tensor_op_meta(op_name, || {
         let values = rows.saturating_mul(cols);
+        let estimated_ops_per_value = if backward && captured {
+            3
+        } else {
+            config
+                .iterations()
+                .saturating_mul(if backward || captured { 13 } else { 6 })
+        };
         let mut data = serde_json::json!({
             "backend": backend,
             "requested_backend": tensor_util_backend_label(requested_backend),
@@ -113,12 +133,14 @@ fn emit_topos_resonator_meta(
             "max_volume": topos.max_volume(),
             "audit": audit,
             "backward_audit": backward_audit,
-            "estimated_ops_per_value": config.iterations().saturating_mul(if backward { 13 } else { 6 }),
-            "estimated_total_ops": values
-                .saturating_mul(config.iterations())
-                .saturating_mul(if backward { 13 } else { 6 }),
+            "estimated_ops_per_value": estimated_ops_per_value,
+            "estimated_total_ops": values.saturating_mul(estimated_ops_per_value),
             "empty": values == 0,
         });
+        data["captured_sensitivity"] = serde_json::json!(captured);
+        data["capture_reused"] = serde_json::json!(backward && captured);
+        data["estimated_ops_scope"] =
+            serde_json::json!("pointwise_recurrence_or_vjp_excludes_audit_and_transport");
         data["finite_amplification_bound"] = serde_json::json!(config.finite_amplification_bound());
         if let Some(message) = fallback {
             data["fallback"] = serde_json::json!({"from": "wgpu", "message": message});
@@ -128,10 +150,45 @@ fn emit_topos_resonator_meta(
 }
 
 #[derive(Clone, Debug)]
+enum ToposResonatorSaved {
+    Captured(Arc<ToposResonatorLearningBatch>),
+    #[cfg(feature = "wgpu")]
+    Recomputed {
+        input: Tensor,
+        gate: Tensor,
+        output: Tensor,
+    },
+}
+
+impl ToposResonatorSaved {
+    fn input(&self) -> &[f32] {
+        match self {
+            Self::Captured(batch) => batch.input(),
+            #[cfg(feature = "wgpu")]
+            Self::Recomputed { input, .. } => input.data(),
+        }
+    }
+
+    fn gate(&self) -> &[f32] {
+        match self {
+            Self::Captured(batch) => batch.gate(),
+            #[cfg(feature = "wgpu")]
+            Self::Recomputed { gate, .. } => gate.data(),
+        }
+    }
+
+    fn output(&self) -> &[f32] {
+        match self {
+            Self::Captured(batch) => batch.output(),
+            #[cfg(feature = "wgpu")]
+            Self::Recomputed { output, .. } => output.data(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct ToposResonatorStepCache {
-    input: Tensor,
-    gate: Tensor,
-    output: Tensor,
+    saved: ToposResonatorSaved,
     audit: ToposResonatorAudit,
     backward_audit: Option<ToposResonatorBackwardAudit>,
 }
@@ -303,10 +360,14 @@ impl ToposResonator {
     }
 
     pub fn latest_output(&self) -> Option<Tensor> {
-        self.last_step
-            .borrow()
-            .as_ref()
-            .map(|step| step.output.clone())
+        self.last_step.borrow().as_ref().map(|step| {
+            Tensor::from_vec(
+                step.audit.rows,
+                step.audit.features,
+                step.saved.output().to_vec(),
+            )
+            .expect("cached Topos shape was validated at capture")
+        })
     }
 
     pub fn latest_audit(&self) -> Option<ToposResonatorAudit> {
@@ -370,6 +431,7 @@ impl ToposResonator {
         .with_porosity(self.topos.porosity())
     }
 
+    #[cfg(feature = "wgpu")]
     fn commit_step(
         &self,
         input: &Tensor,
@@ -382,9 +444,27 @@ impl ToposResonator {
         self.last_step
             .borrow_mut()
             .replace(ToposResonatorStepCache {
-                input: input.clone(),
-                gate: gate.clone(),
-                output: output.clone(),
+                saved: ToposResonatorSaved::Recomputed {
+                    input: input.clone(),
+                    gate: gate.clone(),
+                    output: output.clone(),
+                },
+                audit,
+                backward_audit: None,
+            });
+        Ok(ToposResonatorTensorStep { output, audit })
+    }
+
+    fn commit_capture(
+        &self,
+        batch: ToposResonatorLearningBatch,
+    ) -> PureResult<ToposResonatorTensorStep> {
+        let audit = batch.step().audit;
+        let output = Tensor::from_vec(audit.rows, audit.features, batch.output().to_vec())?;
+        self.last_step
+            .borrow_mut()
+            .replace(ToposResonatorStepCache {
+                saved: ToposResonatorSaved::Captured(Arc::new(batch)),
                 audit,
                 backward_audit: None,
             });
@@ -406,8 +486,8 @@ impl ToposResonator {
             });
         }
         self.validate_optimizer_topos_alignment()?;
-        let gate = self.gate.value().clone();
-        let request = self.core_request(input, &gate);
+        let gate = self.gate.value();
+        let request = self.core_request(input, gate);
         validate_topos_resonator_state(request).map_err(topos_resonator_error)?;
         let (rows, cols) = input.shape();
         let route_backend = current_tensor_util_backend_for_values(input.data().len());
@@ -437,7 +517,7 @@ impl ToposResonator {
                 });
                 match wgpu_step {
                     Ok((output, audit)) => {
-                        let step = self.commit_step(input, &gate, output, audit)?;
+                        let step = self.commit_step(input, gate, output, audit)?;
                         emit_topos_resonator_meta(
                             "topos_resonator_forward",
                             rows,
@@ -448,6 +528,7 @@ impl ToposResonator {
                             self.config,
                             &self.topos,
                             self.encoder.is_some(),
+                            false,
                             false,
                             audit,
                             None,
@@ -473,20 +554,25 @@ impl ToposResonator {
             }
         }
 
-        let core_step = apply_topos_resonator(request).map_err(topos_resonator_error)?;
-        let audit = core_step.audit;
-        let step = self.commit_step(input, &gate, core_step.output, audit)?;
+        let operator = ToposResonatorOperator::new(self.config, self.topos.clone())
+            .map_err(topos_resonator_error)?;
+        let batch = operator
+            .capture(input.data(), gate.data(), rows, cols)
+            .map_err(topos_resonator_error)?;
+        let step = self.commit_capture(batch)?;
+        let audit = step.audit;
         emit_topos_resonator_meta(
             "topos_resonator_forward",
             rows,
             cols,
             "cpu",
             route_backend,
-            "st_core.apply_topos_resonator",
+            "st_core.ToposResonatorOperator.capture",
             self.config,
             &self.topos,
             self.encoder.is_some(),
             false,
+            true,
             audit,
             None,
             {
@@ -517,32 +603,40 @@ impl ToposResonator {
             .ok_or(TensorError::InvalidValue {
                 label: "topos_resonator_forward_cache",
             })?;
-        if input.shape() != cache.input.shape() {
+        let cached_shape = (cache.audit.rows, cache.audit.features);
+        if input.shape() != cached_shape {
             return Err(TensorError::ShapeMismatch {
                 left: input.shape(),
-                right: cache.input.shape(),
+                right: cached_shape,
             });
         }
-        if grad_output.shape() != cache.output.shape() {
+        if grad_output.shape() != cached_shape {
             return Err(TensorError::ShapeMismatch {
                 left: grad_output.shape(),
-                right: cache.output.shape(),
+                right: cached_shape,
             });
         }
-        if input.data() != cache.input.data() {
+        if !same_operand_bits(input.data(), cache.saved.input()) {
             return Err(TensorError::InvalidValue {
                 label: "topos_resonator_forward_input_mismatch",
             });
         }
-        if self.gate.value().data() != cache.gate.data() {
+        if !same_operand_bits(self.gate.value().data(), cache.saved.gate()) {
             return Err(TensorError::InvalidValue {
                 label: "topos_resonator_forward_gate_mismatch",
             });
         }
         let (rows, cols) = input.shape();
-        let request = self.core_request(input, &cache.gate);
+        #[cfg(feature = "wgpu")]
         let backward_request = ToposResonatorBackwardRequest {
-            request,
+            request: ToposResonatorRequest {
+                input: input.data(),
+                gate: cache.saved.gate(),
+                rows,
+                features: cols,
+                config: self.config,
+                topos: &self.topos,
+            },
             grad_output: grad_output.data(),
         };
         let route_backend = current_tensor_util_backend_for_values(input.data().len());
@@ -554,7 +648,7 @@ impl ToposResonator {
             if wgpu_dense::is_available() {
                 let wgpu_backward = wgpu_dense::topos_resonator_backward(
                     input.data(),
-                    cache.gate.data(),
+                    cache.saved.gate(),
                     grad_output.data(),
                     rows,
                     cols,
@@ -589,6 +683,7 @@ impl ToposResonator {
                             &self.topos,
                             self.encoder.is_some(),
                             true,
+                            false,
                             cache.audit,
                             Some(backward_audit),
                             None,
@@ -616,13 +711,26 @@ impl ToposResonator {
             }
         }
 
-        let backward = backward_topos_resonator(backward_request).map_err(topos_resonator_error)?;
-        let backward_audit = audit_topos_resonator_backward(ToposResonatorBackwardAuditRequest {
-            request: backward_request,
-            grad_input: &backward.grad_input,
-            grad_gate: &backward.grad_gate,
-        })
-        .map_err(topos_resonator_error)?;
+        let (backward, backward_audit, captured) = match &cache.saved {
+            ToposResonatorSaved::Captured(batch) => {
+                let (backward, audit) = batch
+                    .vjp_audited(grad_output.data())
+                    .map_err(topos_resonator_error)?;
+                (backward, audit, true)
+            }
+            #[cfg(feature = "wgpu")]
+            ToposResonatorSaved::Recomputed { .. } => {
+                let backward =
+                    backward_topos_resonator(backward_request).map_err(topos_resonator_error)?;
+                let audit = audit_topos_resonator_backward(ToposResonatorBackwardAuditRequest {
+                    request: backward_request,
+                    grad_input: &backward.grad_input,
+                    grad_gate: &backward.grad_gate,
+                })
+                .map_err(topos_resonator_error)?;
+                (backward, audit, false)
+            }
+        };
         let grad_input = Tensor::from_vec(rows, cols, backward.grad_input)?;
         let grad_gate = Tensor::from_vec(rows, cols, backward.grad_gate)?;
         self.gate.accumulate_euclidean(&grad_gate)?;
@@ -633,11 +741,16 @@ impl ToposResonator {
             cols,
             "cpu",
             route_backend,
-            "st_core.backward_topos_resonator",
+            if captured {
+                "st_core.ToposResonatorLearningBatch.vjp_audited"
+            } else {
+                "st_core.backward_topos_resonator"
+            },
             self.config,
             &self.topos,
             self.encoder.is_some(),
             true,
+            captured,
             cache.audit,
             Some(backward_audit),
             {
@@ -734,10 +847,263 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use crate::execution::push_backend_policy;
     use st_core::backend::device_caps::DeviceCaps;
+    use st_core::dynamics::topos_resonator::{
+        apply_topos_resonator, audit_topos_resonator_backward, backward_topos_resonator,
+        ToposResonatorBackwardAuditRequest, ToposResonatorBackwardRequest,
+    };
     use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::test_global_state_lock()
+    }
+
+    #[test]
+    fn cpu_capture_replays_exact_gradients_and_audits_without_cloning_the_tape() {
+        #[cfg(feature = "wgpu")]
+        let _policy =
+            crate::execution::push_backend_policy(crate::test_backend_policy(DeviceCaps::cpu(), 1));
+        let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        let input = Tensor::from_vec(2, 3, vec![0.0, -0.0, 0.2, -0.4, 4.0, -3.0]).unwrap();
+        let gate = Tensor::from_vec(2, 3, vec![1.0, -1.0, 0.3, -0.2, 0.7, 0.5]).unwrap();
+        for (coupling, iterations) in [(0.0, 1), (0.35, 6), (0.9, 16)] {
+            for porosity in [0.0, 0.2, 1.0] {
+                let topos = OpenCartesianTopos::new(-1.0, 1e-6, 1.0, 32, 6)
+                    .unwrap()
+                    .with_porosity(porosity)
+                    .unwrap();
+                let config = ToposResonatorConfig::new(coupling, iterations).unwrap();
+                let mut layer =
+                    ToposResonator::with_config_and_topos("gate", 2, 3, config, topos.clone())
+                        .unwrap();
+                *layer.parameter_mut().value_mut() = gate.clone();
+                let request = ToposResonatorRequest {
+                    input: input.data(),
+                    gate: gate.data(),
+                    rows: 2,
+                    features: 3,
+                    config,
+                    topos: &topos,
+                };
+                let expected = apply_topos_resonator(request).unwrap();
+                let actual = layer.step_resonance(&input).unwrap();
+                assert_eq!(bits(actual.output.data()), bits(&expected.output));
+                assert_eq!(actual.audit, expected.audit);
+                assert_eq!(
+                    bits(layer.latest_output().unwrap().data()),
+                    bits(&expected.output)
+                );
+                let saved = layer.last_step.borrow().as_ref().unwrap().saved.clone();
+                #[allow(irrefutable_let_patterns)]
+                let ToposResonatorSaved::Captured(tape) = saved
+                else {
+                    panic!("CPU forward must retain its sensitivity");
+                };
+                assert_eq!(Arc::strong_count(&tape), 2);
+                let mut expected_gate = Vec::new();
+                for (pass, scale) in [0.3, -0.2, 0.0].into_iter().enumerate() {
+                    let dy = Tensor::from_vec(2, 3, vec![scale; 6]).unwrap();
+                    let backward_request = ToposResonatorBackwardRequest {
+                        request,
+                        grad_output: dy.data(),
+                    };
+                    let expected = backward_topos_resonator(backward_request).unwrap();
+                    let audit =
+                        audit_topos_resonator_backward(ToposResonatorBackwardAuditRequest {
+                            request: backward_request,
+                            grad_input: &expected.grad_input,
+                            grad_gate: &expected.grad_gate,
+                        })
+                        .unwrap();
+                    let actual = layer.backward_resonance(&input, &dy).unwrap();
+                    assert_eq!(bits(actual.grad_input.data()), bits(&expected.grad_input));
+                    assert_eq!(actual.audit, audit);
+                    assert_eq!(layer.latest_backward_audit(), Some(audit));
+                    if pass == 0 {
+                        expected_gate = expected.grad_gate.clone();
+                    } else {
+                        for (sum, value) in expected_gate.iter_mut().zip(&expected.grad_gate) {
+                            *sum += value;
+                        }
+                    }
+                    assert_eq!(
+                        bits(layer.parameter().gradient().unwrap().data()),
+                        bits(&expected_gate)
+                    );
+                    assert_eq!(Arc::strong_count(&tape), 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn captured_module_errors_leave_gradients_audit_and_prior_tape_intact() {
+        #[cfg(feature = "wgpu")]
+        let _policy =
+            crate::execution::push_backend_policy(crate::test_backend_policy(DeviceCaps::cpu(), 1));
+        let mut layer = ToposResonator::new("gate", 1, 2).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap();
+        let dy = Tensor::from_vec(1, 2, vec![0.2, 0.3]).unwrap();
+        layer.forward(&input).unwrap();
+        layer.backward(&input, &dy).unwrap();
+        let gradient = layer.parameter().gradient().unwrap().clone();
+        let audit = layer.latest_backward_audit();
+        let invalid = Tensor::from_vec(1, 2, vec![f32::MAX; 2]).unwrap();
+        assert!(layer.backward(&input, &invalid).is_err());
+        assert!(layer.backward(&dy, &dy).is_err());
+        assert_eq!(
+            layer.parameter().gradient().unwrap().data(),
+            gradient.data()
+        );
+        assert_eq!(layer.latest_backward_audit(), audit);
+        let bad_shape = Tensor::from_vec(2, 1, vec![0.1, 0.2]).unwrap();
+        assert!(layer.forward(&bad_shape).is_err());
+        assert_eq!(layer.latest_backward_audit(), audit);
+        layer.backward(&input, &dy).unwrap();
+        layer.parameter_mut().zero_gradient();
+        assert!(layer.latest_output().is_none());
+        assert!(layer.backward(&input, &dy).is_err());
+        layer.forward(&input).unwrap();
+        assert!(layer.latest_backward_audit().is_none());
+        layer.backward(&input, &dy).unwrap();
+    }
+
+    #[test]
+    fn captured_module_sgd_matches_recomputed_learning_for_one_hundred_updates() {
+        #[cfg(feature = "wgpu")]
+        let _policy =
+            crate::execution::push_backend_policy(crate::test_backend_policy(DeviceCaps::cpu(), 1));
+        let config = ToposResonatorConfig::new(0.35, 6).unwrap();
+        let topos = OpenCartesianTopos::new(-1.0, 1e-6, 1.0, 16, 4)
+            .unwrap()
+            .with_porosity(0.2)
+            .unwrap();
+        let mut layer =
+            ToposResonator::with_config_and_topos("gate", 2, 2, config, topos.clone()).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 0.4, -0.5]).unwrap();
+        let target = [0.05, -0.075, 0.1, -0.125];
+        let mut reference_gate = Parameter::new("reference", layer.parameter().value().clone());
+        let mut losses = Vec::new();
+        let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        for _ in 0..100 {
+            let request = ToposResonatorRequest {
+                input: input.data(),
+                gate: reference_gate.value().data(),
+                rows: 2,
+                features: 2,
+                config,
+                topos: &topos,
+            };
+            let expected = apply_topos_resonator(request).unwrap();
+            let actual = layer.forward(&input).unwrap();
+            assert_eq!(bits(actual.data()), bits(&expected.output));
+            let residual: Vec<_> = actual
+                .data()
+                .iter()
+                .zip(target)
+                .map(|(x, y)| x - y)
+                .collect();
+            losses.push(residual.iter().map(|x| x * x).sum::<f32>() / 4.0);
+            let dy = Tensor::from_vec(2, 2, residual.iter().map(|x| x * 0.5).collect()).unwrap();
+            let expected = backward_topos_resonator(ToposResonatorBackwardRequest {
+                request,
+                grad_output: dy.data(),
+            })
+            .unwrap();
+            let actual = layer.backward(&input, &dy).unwrap();
+            assert_eq!(bits(actual.data()), bits(&expected.grad_input));
+            assert_eq!(
+                bits(layer.parameter().gradient().unwrap().data()),
+                bits(&expected.grad_gate)
+            );
+            reference_gate
+                .accumulate_euclidean(&Tensor::from_vec(2, 2, expected.grad_gate).unwrap())
+                .unwrap();
+            reference_gate.apply_step(0.2).unwrap();
+            reference_gate.zero_gradient();
+            layer.parameter_mut().apply_step(0.2).unwrap();
+            layer.parameter_mut().zero_gradient();
+            assert_eq!(
+                bits(layer.parameter().value().data()),
+                bits(reference_gate.value().data())
+            );
+        }
+        assert!(losses[99] < losses[0] * 0.1);
+    }
+
+    #[test]
+    fn captured_input_signed_zero_change_is_rejected_without_mutating_state() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        for zero in [0.0_f32, -0.0_f32] {
+            let mut layer = ToposResonator::new("gate", 1, 2).unwrap();
+            let input = Tensor::from_vec(1, 2, vec![zero, 0.25]).unwrap();
+            let changed = Tensor::from_vec(1, 2, vec![-zero, 0.25]).unwrap();
+            let upstream = Tensor::from_vec(1, 2, vec![1.0, 0.5]).unwrap();
+            layer.forward(&input).unwrap();
+            assert!(matches!(
+                layer.backward(&changed, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_input_mismatch"
+                })
+            ));
+            assert!(layer.parameter().gradient().is_none());
+            assert!(layer.latest_backward_audit().is_none());
+            layer.backward(&input, &upstream).unwrap();
+            let gradient = layer
+                .parameter()
+                .gradient()
+                .unwrap()
+                .data()
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>();
+            assert_eq!(gradient[0], zero.to_bits());
+            let audit = layer.latest_backward_audit();
+            assert!(layer.backward(&changed, &upstream).is_err());
+            assert_eq!(
+                layer
+                    .parameter()
+                    .gradient()
+                    .unwrap()
+                    .data()
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                gradient
+            );
+            assert_eq!(layer.latest_backward_audit(), audit);
+        }
+    }
+
+    #[test]
+    fn cached_gate_signed_zero_change_is_rejected_before_any_accumulation() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        for zero in [0.0_f32, -0.0_f32] {
+            let mut layer = ToposResonator::new("gate", 1, 2).unwrap();
+            let gate = Tensor::from_vec(1, 2, vec![zero, 0.5]).unwrap();
+            *layer.parameter_mut().value_mut() = gate.clone();
+            let input = Tensor::from_vec(1, 2, vec![0.25, 0.5]).unwrap();
+            let upstream = Tensor::from_vec(1, 2, vec![1.0, 0.5]).unwrap();
+            layer.forward(&input).unwrap();
+            // Bypass the public invalidating accessor to exercise the defensive
+            // saved-gate check itself, not only cache invalidation.
+            *layer.gate.value_mut() = Tensor::from_vec(1, 2, vec![-zero, 0.5]).unwrap();
+            assert!(matches!(
+                layer.backward(&input, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_gate_mismatch"
+                })
+            ));
+            assert!(layer.parameter().gradient().is_none());
+            assert!(layer.latest_backward_audit().is_none());
+            *layer.gate.value_mut() = gate;
+            let dx = layer.backward(&input, &upstream).unwrap();
+            assert_eq!(dx.data()[0].to_bits(), zero.to_bits());
+            assert!(layer.parameter().gradient().is_some());
+        }
     }
 
     #[test]
@@ -904,6 +1270,12 @@ mod tests {
             assert_eq!(event.1["coupling"], 0.25);
             assert_eq!(event.1["iterations"], 4);
             assert_eq!(event.1["backward"], backward);
+            assert_eq!(event.1["captured_sensitivity"], true);
+            assert_eq!(event.1["capture_reused"], backward);
+            assert_eq!(
+                event.1["estimated_ops_per_value"],
+                if backward { 3 } else { 52 }
+            );
             assert!(event.1["audit"].is_object());
         }
     }
@@ -912,6 +1284,7 @@ mod tests {
     #[test]
     fn forced_wgpu_matches_cpu_contract_and_audits() {
         if !wgpu_dense::is_available() {
+            eprintln!("Topos mixed-route test skipped: WGPU is unavailable");
             return;
         }
         let _lock = observer_lock();
@@ -963,21 +1336,15 @@ mod tests {
             )
         };
 
-        st_tensor::set_thread_meta_observer(previous);
         for (cpu, wgpu) in cpu_output.data().iter().zip(wgpu_output.data()) {
             assert!((cpu - wgpu).abs() < 1e-5);
         }
         for (cpu, wgpu) in cpu_grad_input.data().iter().zip(wgpu_grad_input.data()) {
             assert!((cpu - wgpu).abs() < 1e-5);
         }
-        for (cpu, wgpu) in cpu_layer
-            .parameter()
-            .gradient()
-            .unwrap()
-            .data()
-            .iter()
-            .zip(wgpu_layer.parameter().gradient().unwrap().data())
-        {
+        let cpu_grad_gate = cpu_layer.parameter().gradient().unwrap().clone();
+        let wgpu_grad_gate = wgpu_layer.parameter().gradient().unwrap().clone();
+        for (cpu, wgpu) in cpu_grad_gate.data().iter().zip(wgpu_grad_gate.data()) {
             assert!((cpu - wgpu).abs() < 1e-5);
         }
         assert!(wgpu_layer.latest_audit().unwrap().max_output_error <= 1e-5);
@@ -988,6 +1355,44 @@ mod tests {
                 .max_grad_input_error
                 <= 1e-5
         );
+        assert!(
+            wgpu_layer
+                .latest_backward_audit()
+                .unwrap()
+                .max_grad_gate_error
+                <= 1e-5
+        );
+
+        // Compare each executor before replay can mix their gradients or
+        // overwrite its audit, then check cross-route accumulation separately.
+        {
+            let _guard = push_backend_policy(crate::test_backend_policy(DeviceCaps::cpu(), 1));
+            let replay = wgpu_layer.backward(&input, &grad_output).unwrap();
+            for (expected, actual) in cpu_grad_input.data().iter().zip(replay.data()) {
+                assert_eq!(expected.to_bits(), actual.to_bits());
+            }
+        }
+        {
+            let _guard = push_backend_policy(crate::test_backend_policy(
+                DeviceCaps::wgpu(32, true, 256),
+                1,
+            ));
+            let replay = cpu_layer.backward(&input, &grad_output).unwrap();
+            for (expected, actual) in wgpu_grad_input.data().iter().zip(replay.data()) {
+                assert!((expected - actual).abs() < 1e-5);
+            }
+        }
+        for layer in [&cpu_layer, &wgpu_layer] {
+            for ((cpu, wgpu), accumulated) in cpu_grad_gate
+                .data()
+                .iter()
+                .zip(wgpu_grad_gate.data())
+                .zip(layer.parameter().gradient().unwrap().data())
+            {
+                assert!((cpu + wgpu - accumulated).abs() < 1e-5);
+            }
+        }
+        st_tensor::set_thread_meta_observer(previous);
         let events = events.lock().unwrap();
         assert!(events.iter().any(|(name, data)| {
             *name == "topos_resonator_forward"
@@ -999,5 +1404,6 @@ mod tests {
                 && data["backend"] == "wgpu_dense"
                 && data["requested_backend"] == "wgpu"
         }));
+        eprintln!("Topos mixed-route test executed CPU/WGPU forward and both backward routes");
     }
 }
