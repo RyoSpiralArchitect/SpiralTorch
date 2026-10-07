@@ -54,7 +54,8 @@ def inspect_run(client, plan, row, entry, saved):
     require(driver.pilot.model_digest(adapter) == saved["initial_parameter_sha256"]
             == row["initial_parameter_sha256"], "saved initialization differs")
     parameters = dict(adapter.named_parameters())
-    angular = config.get("schema") == "spiraltorch.fractional_angle_protocol.v1"
+    angular = config.get("schema") in ("spiraltorch.fractional_angle_protocol.v1",
+                                       "spiraltorch.fractional_window_protocol.v1")
     shape_name = "history_angle" if angular or arm == client.ARMS[0] else "log_alpha"
     require(set(parameters) == {"gate", "local_gate", "log_gain", shape_name}
             and set(saved["adapter"]) == set(parameters) | {"_extra_state"},
@@ -111,7 +112,8 @@ def inspect_run(client, plan, row, entry, saved):
 def verify(study, summary_path, client, summary):
     plan, journal, result, rows = common.completed(study, client)
     client.validate_protocol(plan["config"])
-    family = ("angle" if plan["config"]["schema"] == "spiraltorch.fractional_angle_protocol.v1"
+    family = ("window" if plan["config"]["schema"] == "spiraltorch.fractional_window_protocol.v1" else
+              "angle" if plan["config"]["schema"] == "spiraltorch.fractional_angle_protocol.v1"
               else "gain")
     require(result["schema"] == f"spiraltorch.fractional_{family}_study.v1",
             "gain study result schema differs")
@@ -175,13 +177,19 @@ def verify_environment(plan, client, summary, client_manifest, runtime_manifest)
 
     client_root, package_root = Path(client.__file__).parent, Path(st.__file__).parent.parent
     angular = hasattr(client, "gain")
-    require((plan["config"].get("schema") == "spiraltorch.fractional_angle_protocol.v1") == angular,
+    windowed = hasattr(client, "angle")
+    require((plan["config"].get("schema") == "spiraltorch.fractional_window_protocol.v1") == windowed,
+            "client window schema differs")
+    require((plan["config"].get("schema") in ("spiraltorch.fractional_angle_protocol.v1",
+             "spiraltorch.fractional_window_protocol.v1")) == angular,
             "client coordinate schema differs")
     control = client.gain if angular else client
-    sources = ({"angle_study": client, "gain_control": control} if angular
+    sources = ({"window_study": client, "angle_control": client.angle, "gain_control": control} if windowed else
+               {"angle_study": client, "gain_control": control} if angular
                else {"gain_study": client})
     sources.update(lag_control=control.lag, fractional_bridge=control.fractional_bridge)
-    config_name = "hf_fractional_pride_angle.json" if angular else "hf_fractional_pride_gain.json"
+    config_name = ("hf_fractional_pride_window.json" if windowed else
+                   "hf_fractional_pride_angle.json" if angular else "hf_fractional_pride_gain.json")
     runtime = json.loads(runtime_manifest.read_bytes())
     require(set(runtime) == {"source_revision", "files"}
             and isinstance(runtime["source_revision"], str)
@@ -193,6 +201,8 @@ def verify_environment(plan, client, summary, client_manifest, runtime_manifest)
     require(all(Path(module.__file__).parent == client_root
                 for module in (control, control.lag, client.study, client.study.pilot, summary)),
             "helpers and summary must come from the frozen client")
+    require(not windowed or Path(client.angle.__file__).parent == client_root,
+            "angle control must come from the frozen client")
     require(all(Path(module.__file__).parent == package_root / "spiraltorch"
                 for module in (native, geometry, control.fractional_bridge)),
             "native and bridges must come from the frozen package")
@@ -217,10 +227,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("study", "client-manifest", "runtime-manifest", "summary", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
-    parser.add_argument("--coordinate", choices=("log-order", "angle"), default="log-order")
+    parser.add_argument("--coordinate", choices=("log-order", "angle", "window"), default="log-order")
     args = parser.parse_args()
     require(not args.output.exists(), "verification output already exists")
-    if args.coordinate == "angle":
+    if args.coordinate == "window":
+        import hf_fractional_window_study as client
+    elif args.coordinate == "angle":
         import hf_fractional_angle_study as client
     else:
         import hf_fractional_gain_study as client
