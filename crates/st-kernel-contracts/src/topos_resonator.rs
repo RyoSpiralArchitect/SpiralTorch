@@ -20,13 +20,24 @@ pub enum ToposKernelError {
 }
 
 /// Validated scalar execution parameters, not an admission or geometry policy.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct ToposResonatorKernel {
     coupling: f32,
     saturation: f32,
     porosity: f32,
     iterations: usize,
 }
+
+impl PartialEq for ToposResonatorKernel {
+    fn eq(&self, other: &Self) -> bool {
+        self.coupling.to_bits() == other.coupling.to_bits()
+            && self.saturation.to_bits() == other.saturation.to_bits()
+            && self.porosity.to_bits() == other.porosity.to_bits()
+            && self.iterations == other.iterations
+    }
+}
+
+impl Eq for ToposResonatorKernel {}
 
 impl ToposResonatorKernel {
     pub fn new(

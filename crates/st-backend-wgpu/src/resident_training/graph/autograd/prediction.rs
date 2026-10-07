@@ -76,7 +76,7 @@ impl PredictionOutputs {
                 Node::Pointwise {
                     plan, parameters, ..
                 },
-                GraphStage::Pointwise { .. },
+                GraphStage::Pointwise { .. } | GraphStage::ToposResonator { .. },
             ) => {
                 let inputs: Vec<_> = std::iter::once(&g.activations[stage])
                     .chain(parameters.iter().map(|&id| &g.parameters[id]))

@@ -339,7 +339,7 @@ impl WasmGraphTrainingState {
             self.inner.effective_gradients[self.parameter_id(&parameter)?].as_slice(),
         ))
     }
-    /// Versioned parameter plan (v2 or v3); runtime state and policy are not serialized.
+    /// Versioned parameter plan; runtime state and policy are not serialized.
     #[wasm_bindgen(js_name = toPlan)]
     pub fn to_plan(&self) -> Result<WasmInferencePlan, JsValue> {
         Ok(WasmInferencePlan {

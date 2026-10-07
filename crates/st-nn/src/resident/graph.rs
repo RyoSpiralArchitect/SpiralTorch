@@ -190,6 +190,28 @@ impl InferencePlan {
                         epsilon,
                     });
                 }
+                InferenceOp::ToposResonator {
+                    gate,
+                    kernel,
+                    max_volume,
+                } => {
+                    if gate.shape() != (1, width) {
+                        return Err(InferenceError::Shape(stages.len()));
+                    }
+                    let gate = gate.to_layout(Layout::RowMajor)?;
+                    let id = parameters.len();
+                    parameters.push(GraphParameter {
+                        role: ParameterRole::Gate,
+                        shape: vec![width],
+                        values: gate.data().to_vec(),
+                    });
+                    stages.push(GraphStage::ToposResonator {
+                        gate: id,
+                        kernel,
+                        // All resident shapes already obey the u32 address space.
+                        max_volume: max_volume.min(u32::MAX as usize),
+                    });
+                }
                 InferenceOp::Gelu | InferenceOp::Relu => {
                     let gelu = matches!(op, InferenceOp::Gelu);
                     if gelu {
@@ -274,7 +296,7 @@ impl InferencePlan {
                 GraphStage::Pointwise { chain, .. } => {
                     source_operations += chain.steps().len();
                 }
-                GraphStage::LayerNorm { .. } => {
+                GraphStage::LayerNorm { .. } | GraphStage::ToposResonator { .. } => {
                     source_operations += 1;
                 }
             }
@@ -389,6 +411,9 @@ impl InferencePlan {
         )
     }
 }
+
+#[cfg(test)]
+mod topos_tests;
 
 #[cfg(test)]
 mod tests {

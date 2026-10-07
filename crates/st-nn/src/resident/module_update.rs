@@ -97,7 +97,9 @@ impl InferencePlan {
             {
                 let shape = match before.role {
                     ParameterRole::Weight => (before.shape[0], before.shape[1]),
-                    ParameterRole::Bias | ParameterRole::Gain => (1, before.shape[0]),
+                    ParameterRole::Bias | ParameterRole::Gain | ParameterRole::Gate => {
+                        (1, before.shape[0])
+                    }
                 };
                 if role != before.role
                     || param.value().shape() != shape
@@ -126,27 +128,12 @@ impl InferencePlan {
         };
         let mut seen = HashSet::new();
         let mut valid = true;
+        let mut attached_optimizer = false;
         module.visit_parameters(&mut |param| {
             valid &= prepared
                 .get(param.name())
                 .is_some_and(|p| p.identity == std::ptr::from_ref(param))
                 && seen.insert(param.name().to_owned());
-            Ok(())
-        })?;
-        if !valid || seen.len() != prepared.len() {
-            return Err(InferenceError::ModuleUpdate(
-                "immutable visitor does not match bindings",
-            ));
-        }
-        seen.clear();
-        let mut attached_optimizer = false;
-        module.visit_parameters_mut(&mut |param| {
-            valid &= prepared.get(param.name()).is_some_and(|p| {
-                p.identity == std::ptr::from_ref(param)
-                    && p.value.shape() == param.value().shape()
-                    && p.value.layout() == param.value().layout()
-                    && p.before == bits(param.value().data())
-            }) && seen.insert(param.name().to_owned());
             attached_optimizer |= param.gradient().is_some()
                 || param.hypergrad().is_some()
                 || param.realgrad().is_some();
@@ -154,12 +141,29 @@ impl InferencePlan {
         })?;
         if !valid || seen.len() != prepared.len() {
             return Err(InferenceError::ModuleUpdate(
-                "mutable visitor does not match bindings",
+                "immutable visitor does not match bindings",
             ));
         }
+        // Mutable visitors may invalidate Module captures even before values
+        // change. Reject optimizer state while the visit is still immutable.
         if optimizer == ModuleOptimizerStatePolicy::Reject && attached_optimizer {
             return Err(InferenceError::ModuleUpdate(
                 "optimizer state is attached; explicit reset is required",
+            ));
+        }
+        seen.clear();
+        module.visit_parameters_mut(&mut |param| {
+            valid &= prepared.get(param.name()).is_some_and(|p| {
+                p.identity == std::ptr::from_ref(param)
+                    && p.value.shape() == param.value().shape()
+                    && p.value.layout() == param.value().layout()
+                    && p.before == bits(param.value().data())
+            }) && seen.insert(param.name().to_owned());
+            Ok(())
+        })?;
+        if !valid || seen.len() != prepared.len() {
+            return Err(InferenceError::ModuleUpdate(
+                "mutable visitor does not match bindings",
             ));
         }
         let count = prepared.len();

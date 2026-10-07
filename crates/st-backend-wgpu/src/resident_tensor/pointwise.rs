@@ -27,20 +27,21 @@ pub struct PointwisePlan {
 enum Program {
     Chain(PointwiseChain),
     Topos(ToposResonatorKernel),
+    ToposResidualGuard(ToposResonatorKernel),
 }
 
 impl Program {
     fn input_count(&self) -> usize {
         match self {
             Self::Chain(chain) => chain.input_count(),
-            Self::Topos(_) => 2,
+            Self::Topos(_) | Self::ToposResidualGuard(_) => 2,
         }
     }
 
     fn validate_layouts(&self, layouts: &[NdLayout]) -> Result<(), PointwiseError> {
         match self {
             Self::Chain(chain) => chain.validate_layouts(layouts),
-            Self::Topos(_) => {
+            Self::Topos(_) | Self::ToposResidualGuard(_) => {
                 if layouts.len() != 2 {
                     return Err(PointwiseError::Operands);
                 }
@@ -168,8 +169,13 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     for i in 0..count {
         writeln!(code, "    let value{i} = input{i}[address(i, {i}u)];").unwrap();
     }
-    if let Program::Topos(kernel) = program {
-        topos::write_body(&mut code, *kernel, vjp);
+    if let Program::Topos(kernel) | Program::ToposResidualGuard(kernel) = program {
+        topos::write_body(
+            &mut code,
+            *kernel,
+            vjp,
+            matches!(program, Program::ToposResidualGuard(_)),
+        );
         return substitute_ops(
             code.replace("CHECKED_FLAG_INDEX", "params[arrayLength(&params) - 1u]"),
         );
@@ -327,6 +333,22 @@ impl PointwisePlan {
         layouts: Vec<NdLayout>,
     ) -> Result<Self, TensorError> {
         Self::new_program(device, Program::Topos(kernel), layouts, 0)
+    }
+
+    /// Module graphs also check the next drive used by the host's fixed-point
+    /// residual audit. This is not a readback or the complete semantic audit.
+    pub(crate) fn topos_graph(
+        device: TensorDevice,
+        kernel: ToposResonatorKernel,
+        layouts: Vec<NdLayout>,
+        flag_slot: u32,
+    ) -> Result<Self, TensorError> {
+        Self::new_program(
+            device,
+            Program::ToposResidualGuard(kernel),
+            layouts,
+            flag_slot,
+        )
     }
 
     fn new_program(

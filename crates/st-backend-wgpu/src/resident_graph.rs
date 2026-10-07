@@ -147,7 +147,9 @@ impl ResidentGraph {
                         .map_err(DenseError::from)?;
                     Ok(Some(shape))
                 }
-                GraphStage::Pointwise { .. } | GraphStage::LayerNorm { .. } => Ok(None),
+                GraphStage::Pointwise { .. }
+                | GraphStage::LayerNorm { .. }
+                | GraphStage::ToposResonator { .. } => Ok(None),
             })
             .collect::<Result<Vec<_>, DenseError>>()?;
         let kernel = if shapes.iter().any(Option::is_some) {
@@ -217,10 +219,8 @@ impl ResidentGraph {
                         *gelu,
                     )?)
                 }
-                GraphStage::Pointwise {
-                    chain,
-                    parameters: ids,
-                } => {
+                GraphStage::Pointwise { .. } | GraphStage::ToposResonator { .. } => {
+                    let ids = stage.pointwise_parameters().unwrap();
                     let mut layouts = vec![definition.layouts()[i].clone()];
                     for &id in ids {
                         layouts.push(
@@ -228,12 +228,18 @@ impl ResidentGraph {
                                 .map_err(TensorError::from)?,
                         );
                     }
-                    let plan = Box::new(PointwisePlan::new_with_flag_slot(
-                        device.clone(),
-                        chain.clone(),
-                        layouts,
-                        i as u32,
-                    )?);
+                    let plan = Box::new(match stage {
+                        GraphStage::Pointwise { chain, .. } => PointwisePlan::new_with_flag_slot(
+                            device.clone(),
+                            chain.clone(),
+                            layouts,
+                            i as u32,
+                        )?,
+                        GraphStage::ToposResonator { kernel, .. } => {
+                            PointwisePlan::topos_graph(device.clone(), *kernel, layouts, i as u32)?
+                        }
+                        _ => unreachable!("pointwise stage"),
+                    });
                     let inputs: Vec<_> = std::iter::once(&activations[i])
                         .chain(ids.iter().map(|&id| &parameters[id]))
                         .collect();
@@ -446,7 +452,8 @@ impl ResidentGraph {
                     &self.validation,
                 ))
             }
-            (Node::Pointwise { plan, .. }, GraphStage::Pointwise { parameters, .. }) => {
+            (Node::Pointwise { plan, .. }, stage) => {
+                let parameters = stage.pointwise_parameters().expect("pointwise node");
                 let inputs: Vec<_> = std::iter::once(input)
                     .chain(parameters.iter().map(|&id| &self.parameters[id]))
                     .collect();

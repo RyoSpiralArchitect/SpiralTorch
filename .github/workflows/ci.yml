@@ -384,6 +384,7 @@ jobs:
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
+          node bindings/st-wasm/tests/topos_graph_contract.cjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js"
       - name: Share freshly built WASM for native input replay
         uses: actions/upload-artifact@v7
         with:
@@ -651,6 +652,7 @@ jobs:
           python -P bindings/st-py/tests/test_nn_resident.py
           python -P bindings/st-py/tests/test_nn_resident_training.py
           python -P bindings/st-py/tests/test_nn_resident_graph_training.py
+          python -P bindings/st-py/tests/test_nn_resident_topos.py
           python -P bindings/st-py/tests/test_nn_resident_graph_forward.py
           python -P bindings/st-py/tests/test_nn_resident_exports.py
           python -P bindings/st-py/tests/test_nn_resident_graph_autograd.py
@@ -771,4 +773,4 @@ jobs:
             bindings/st-py/tests/test_elliptic_causal_study.py
           python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_benchmark_topos_learning.py tools/test_replay_geometry_stack_update.py tools/test_topos_inlining_results.py tools/test_topos_evolution_results.py tools/test_topos_browser_learning_results.py
       - name: Verify frozen Topos NN measurements
-        run: python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_topos_nn_capture_results.py tools/test_topos_shared_gate_learning.py tools/test_topos_resident_kernel_results.py
+        run: python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_topos_nn_capture_results.py tools/test_topos_shared_gate_learning.py tools/test_topos_resident_kernel_results.py tools/test_topos_resident_graph_results.py
