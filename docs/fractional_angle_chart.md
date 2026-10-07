@@ -97,3 +97,6 @@ The [completed training-only preflight](../benchmarks/results/2026-10-05-fractio
 checks 48 real-GPT-2 updates and 12 exact continuation updates. Full gradient,
 parameter and Adam tensors agree within the declared tolerances across
 three seeds; this is not long-run or bitwise cross-arm equivalence.
+
+The [fixed angular comparison](fractional_angle_study.md) takes this coordinate
+into three full learning arms with a predeclared terminal domain-exit policy.

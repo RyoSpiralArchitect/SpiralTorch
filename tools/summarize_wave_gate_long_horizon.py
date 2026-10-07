@@ -386,10 +386,14 @@ def angle_trajectory(row, initial):
             "nonzero_angle_gradient_steps": sum(v != 0 for v in gradients)}
 
 
-def gain_study_report(config, runs, measured, sets):
-    arms = ["ordinary_gain_short", "history_gain_short", "history_gain_full"]
+def gain_study_report(config, runs, measured, sets, *, angular=False):
+    arms = (["ordinary_angle_short", "history_angle_short", "history_angle_full"] if angular
+            else ["ordinary_gain_short", "history_gain_short", "history_gain_full"])
     require(config["arms"] == arms and config.get("reference_arm") == arms[0],
             "incomplete gain design")
+    if angular:
+        require(config.get("angle_domain_policy") == "terminal_all_arms_no_projection_no_endpoints",
+                "angular domain policy differs")
     for name, expected in (("initial_alpha", 2.), ("initial_gain", math.sqrt(5)),
                            ("initial_history_angle", 0.4636476090008061)):
         require(type(config.get(name)) in (int, float) and config[name] == expected,
@@ -404,7 +408,8 @@ def gain_study_report(config, runs, measured, sets):
     fields = ("loss", "gate_gradient_l2", "local_gate_gradient_l2",
               "gate_before_update_l2", "local_gate_before_update_l2")
     for seed in config["seeds"]:
-        hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256") for arm in arms[1:]}
+        hashes = {runs[f"{seed}:{arm}"].get("initial_parameter_sha256")
+                  for arm in (arms if angular else arms[1:])}
         require(len(hashes) == 1 and all(isinstance(h, str) and len(h) == 64 for h in hashes),
                 "GL gain initial parameters are not paired")
         first = {}
@@ -421,7 +426,7 @@ def gain_study_report(config, runs, measured, sets):
             require(first[arm]["gate_before_update_l2"] == first[arm]["local_gate_before_update_l2"] == 0,
                     "gain study gates are not identity initialized")
             gains[key] = gain_trajectory(row, config["initial_gain"])
-            if arm == arms[0]:
+            if angular or arm == arms[0]:
                 angles[key] = angle_trajectory(row, config["initial_history_angle"])
             else:
                 orders[key] = order_trajectory(row, config["initial_alpha"], True)
@@ -436,6 +441,30 @@ def gain_study_report(config, runs, measured, sets):
                  "gl_full_minus_ordinary_short": {arms[2]: 1, arms[0]: -1},
                  "gl_full_minus_gl_short": {arms[2]: 1, arms[1]: -1}}
     return contrast_report(config, measured, sets, contrasts), orders, angles, gains, initial
+
+
+def angular_order_trajectory(row):
+    """Validate recorded chart observations offline, never execute training math."""
+    records = row["records"]
+    angles = [r.get(f"history_angle_{phase}_update")
+              for phase in ("before", "after") for r in records]
+    orders = [r.get(f"alpha_{phase}_update")
+              for phase in ("before", "after") for r in records]
+    require(bool(records) and all(type(v) in (int, float) and math.isfinite(v)
+            for v in angles + orders + [row.get("final_alpha")]), "invalid angular order receipt")
+    require(all(-math.atan(.5) < v < math.pi / 2 for v in angles), "recorded angle left domain")
+    require(all(0 < alpha <= float.fromhex("0x1.fffffep127")
+                and math.isclose(alpha, 1 + 2*math.tan(angle), rel_tol=2e-6, abs_tol=2**-149)
+                for angle, alpha in zip(angles, orders)), "angle and native order receipts differ")
+    require(records[0]["alpha_before_update"] == 2.
+            and row["final_alpha"] == records[-1]["alpha_after_update"]
+            and all(a["alpha_after_update"] == b["alpha_before_update"]
+                    for a, b in zip(records, records[1:])), "angular order continuity differs")
+    return {"initial_alpha": orders[0], "final_alpha": row["final_alpha"],
+            "min_alpha": min(orders), "max_alpha": max(orders),
+            "min_angle_distance_to_lower_boundary": min(angles) + math.atan(.5),
+            "min_angle_distance_to_upper_boundary": math.pi / 2 - max(angles),
+            "chart_domain_observations_valid": True}
 
 
 def two_lag_state_parity(plan, runs, checkpoint_dir):
@@ -868,11 +897,17 @@ def summarize(plan, result, journal, result_sha256, *, checkpoint_dir=None):
         summary["initial_filter_receipt_status"] = (
             "passed" if all(row["status"] == "passed" for row in summary["initial_filter_receipt_parity"].values())
             else "failed")
-    if config.get("schema") == "spiraltorch.fractional_gain_protocol.v1":
+    if config.get("schema") in {"spiraltorch.fractional_gain_protocol.v1",
+                                "spiraltorch.fractional_angle_protocol.v1"}:
+        angular = config["schema"] == "spiraltorch.fractional_angle_protocol.v1"
         summary["reference_arm"] = reference
         (summary["paired_gain_contrasts"], summary["order_trajectories"],
          summary["angle_trajectories"], summary["gain_trajectories"],
-         summary["initial_filter_receipt_parity"]) = gain_study_report(config, runs, measured, sets)
+         summary["initial_filter_receipt_parity"]) = gain_study_report(
+             config, runs, measured, sets, angular=angular)
+        if angular:
+            summary["angular_order_trajectories"] = {
+                key: angular_order_trajectory(row) for key, row in runs.items()}
         summary["initial_filter_receipt_status"] = (
             "passed" if all(row["status"] == "passed" for row in summary["initial_filter_receipt_parity"].values())
             else "failed")

@@ -1,4 +1,4 @@
-"""Offline training-only admission for the learned-gain comparison, not quality scoring."""
+"""Offline training-only admission for a fixed gain/angle study, not quality scoring."""
 
 import argparse
 import copy
@@ -24,11 +24,15 @@ def main():
     for name in ("client-root", "package-root", "config", "model-dir", "corpus",
                  "transfer-corpus", "previous-study", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
+    parser.add_argument("--coordinate", choices=("log-order", "angle"), default="log-order")
     args = parser.parse_args()
     assert not args.output.exists()
     assert Path(st.__file__).resolve().parent == (args.package_root / "spiraltorch").resolve()
     sys.path.insert(0, str(args.client_root))
-    import hf_fractional_gain_study as client
+    if args.coordinate == "angle":
+        import hf_fractional_angle_study as client
+    else:
+        import hf_fractional_gain_study as client
     driver, pilot = client.study, client.study.pilot
     config = json.loads(args.config.read_bytes())
     client.validate_protocol(config)
@@ -73,7 +77,8 @@ def main():
         with torch.no_grad():
             assert torch.equal(adapter(hidden), hidden)
             observed = (adapter.history(hidden) if arm == client.ARMS[0]
-                        else adapter._history(hidden, adapter.log_alpha.exp()))
+                        else adapter._history(hidden, adapter._alpha_tensor() if args.coordinate == "angle"
+                                              else adapter.log_alpha.exp()))
             assert torch.allclose(observed, target, rtol=2e-6, atol=2e-7)
         optimizer = driver.make_optimizer(adapter, arm, config, None)
         records = []
@@ -96,7 +101,7 @@ def main():
         finally:
             parent.add_module(child, original)
         assert records[0]["log_gain_gradient"] == 0 and records[1]["log_gain_gradient"] != 0
-        shape = "history_angle" if arm == client.ARMS[0] else "log_alpha"
+        shape = "history_angle" if args.coordinate == "angle" or arm == client.ARMS[0] else "log_alpha"
         assert records[0][f"{shape}_gradient"] == 0 and records[1][f"{shape}_gradient"] != 0
         report[arm] = {"records": records, "initial_parameter_sha256": initial_hash,
                        "initial_filter_close": True, "next_update_and_adam_equal": True,
@@ -104,13 +109,16 @@ def main():
         print(f"{arm}: two auxiliary training updates and exact continuation verified", flush=True)
     assert pilot.model_digest(model) == base_hash and all(p.grad is None for p in model.parameters())
     assert report[client.ARMS[1]]["initial_parameter_sha256"] == report[client.ARMS[2]]["initial_parameter_sha256"]
+    if args.coordinate == "angle":
+        assert len({r["initial_parameter_sha256"] for r in report.values()}) == 1
     first = report[client.ARMS[0]]["records"][0]
     for arm in client.ARMS:
         row = report[arm]["records"][0]
         assert row["loss"] == first["loss"]
         for field in ("gate_gradient_l2", "local_gate_gradient_l2"):
             assert abs(row[field]-first[field]) <= 2e-7 + 2e-6*abs(first[field])
-    payload = {"schema": "spiraltorch.fractional_gain_preflight.v1", "status": "passed",
+    payload = {"schema": ("spiraltorch.fractional_angle_study_preflight.v1" if args.coordinate == "angle"
+                          else "spiraltorch.fractional_gain_preflight.v1"), "status": "passed",
                "config_sha256": sha(args.config), "preflight_source_sha256": sha(Path(__file__)),
                "native_sha256": sha(Path(native.__file__)), "base_parameter_sha256": base_hash,
                "train_tokens_sha256": data["train_tokens_sha256"],
