@@ -62,9 +62,13 @@ def validate_sample_timestamps(sample):
         assert 0 <= result < 2**64
         return result
 
+    previous_end = None
     for timing in passes:
-        ticks = tick(timing["end_tick"]) - tick(timing["start_tick"])
+        start, end = tick(timing["start_tick"]), tick(timing["end_tick"])
+        assert previous_end is None or start >= previous_end
+        ticks = end - start
         assert ticks >= 0
+        previous_end = end
         # Match Rust: subtract u64 ticks before converting to f64. Absolute
         # device clocks may be too large to represent exactly as floats.
         elapsed = float(ticks) * period
@@ -97,6 +101,28 @@ def test_timestamp_contradictions_are_rejected():
         except AssertionError:
             continue
         raise AssertionError("inconsistent timestamp receipt accepted")
+
+
+def test_pass_order_and_overlap_are_rejected_without_rejecting_touching_intervals():
+    for offset in (0, 2**60):
+        for intervals, accepted in (
+            ([(100, 110), (110, 110), (110, 120), (123, 130)], True),
+            ([(100, 110), (0, 10), (120, 130)], False),
+            ([(100, 110), (105, 115), (120, 130)], False),
+            ([(100, 120), (110, 115), (116, 130)], False),
+        ):
+            sample = {
+                "timestamp_period_ns": .25,
+                "gpu_span_ns": .25 * (intervals[-1][1] - intervals[0][0]),
+                "passes": [{"start_tick": str(offset + start), "end_tick": str(offset + end),
+                            "elapsed_ns": .25 * (end - start)} for start, end in intervals],
+            }
+            try:
+                validate_sample_timestamps(sample)
+            except AssertionError:
+                assert not accepted
+            else:
+                assert accepted, "reordered or overlapping pass timestamps accepted"
 
 
 def test_all_profile_conditions_and_medians():
@@ -168,6 +194,7 @@ def test_browser_saved_learning_and_guards():
 if __name__ == "__main__":
     test_hashes_and_runtime_identity()
     test_timestamp_contradictions_are_rejected()
+    test_pass_order_and_overlap_are_rejected_without_rejecting_touching_intervals()
     test_all_profile_conditions_and_medians()
     test_browser_saved_learning_and_guards()
-    print("Four saved Topos capture record checks passed (no GPU execution)")
+    print("Five saved Topos capture record checks passed (no GPU execution)")
