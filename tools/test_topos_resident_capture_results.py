@@ -1,4 +1,5 @@
 """Frozen profile arithmetic and receipt consistency, not a runtime witness."""
+import copy
 import gzip
 import hashlib
 import json
@@ -49,6 +50,55 @@ def test_hashes_and_runtime_identity():
     assert len(verify["clippy"]["unique_unchanged_files"]) == 7
 
 
+def validate_sample_timestamps(sample):
+    period = sample["timestamp_period_ns"]
+    assert type(period) in (int, float) and math.isfinite(period) and period > 0
+    passes = sample["passes"]
+    assert passes
+
+    def tick(value):
+        assert isinstance(value, str) and re.fullmatch(r"0|[1-9][0-9]*", value)
+        result = int(value)
+        assert 0 <= result < 2**64
+        return result
+
+    for timing in passes:
+        ticks = tick(timing["end_tick"]) - tick(timing["start_tick"])
+        assert ticks >= 0
+        # Match Rust: subtract u64 ticks before converting to f64. Absolute
+        # device clocks may be too large to represent exactly as floats.
+        elapsed = float(ticks) * period
+        assert math.isfinite(elapsed) and timing["elapsed_ns"] == elapsed
+    span_ticks = tick(passes[-1]["end_tick"]) - tick(passes[0]["start_tick"])
+    assert span_ticks >= 0
+    span = float(span_ticks) * period
+    assert math.isfinite(span) and sample["gpu_span_ns"] == span
+
+
+def test_timestamp_contradictions_are_rejected():
+    valid = {
+        "timestamp_period_ns": .25,
+        "gpu_span_ns": 1.75,
+        "passes": [{"start_tick": str(2**60 + 3), "end_tick": str(2**60 + 10), "elapsed_ns": 1.75}],
+    }
+    validate_sample_timestamps(valid)
+    for mutate in (
+        lambda s: s.__setitem__("gpu_span_ns", 3.5),
+        lambda s: s["passes"][0].__setitem__("elapsed_ns", 3.5),
+        lambda s: s.__setitem__("timestamp_period_ns", .5),
+        lambda s: s.__setitem__("timestamp_period_ns", 0.),
+        lambda s: s["passes"][0].__setitem__("end_tick", str(2**60)),
+        lambda s: s["passes"][0].__setitem__("start_tick", str(2**64)),
+    ):
+        bad = copy.deepcopy(valid)
+        mutate(bad)
+        try:
+            validate_sample_timestamps(bad)
+        except AssertionError:
+            continue
+        raise AssertionError("inconsistent timestamp receipt accepted")
+
+
 def test_all_profile_conditions_and_medians():
     profile = load("profile.json.gz")
     expected = [(r, c, it) for r, c in ((2, 3), (32, 256), (128, 1025)) for it in (1, 5, 64)]
@@ -66,6 +116,7 @@ def test_all_profile_conditions_and_medians():
             assert len(case["samples"]) == 9
             assert re.fullmatch(r"[0-9a-f]{64}", case["state_bits_sha256"])
             for sample in case["samples"]:
+                validate_sample_timestamps(sample)
                 assert sample["accepted"] and sample["timing_complete"] and sample["instrumented"]
                 assert sample["gpu_span_ns"] > 0 and sample["zero_intervals"] == 0
                 for phase, total in sample["phase_totals_ns"].items():
@@ -116,6 +167,7 @@ def test_browser_saved_learning_and_guards():
 
 if __name__ == "__main__":
     test_hashes_and_runtime_identity()
+    test_timestamp_contradictions_are_rejected()
     test_all_profile_conditions_and_medians()
     test_browser_saved_learning_and_guards()
-    print("Three saved Topos capture record checks passed (no GPU execution)")
+    print("Four saved Topos capture record checks passed (no GPU execution)")
