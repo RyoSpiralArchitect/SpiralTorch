@@ -397,16 +397,46 @@ impl ToposResonatorOperator {
         rows: usize,
         features: usize,
     ) -> Result<ToposResonatorLearningBatch, ToposResonatorError> {
-        let request = self.request(input, gate, rows, features);
-        let mut evolved = evolve_resonance::<true>(request)?;
-        let drive_sensitivity = std::mem::take(&mut evolved.drive_sensitivity);
-        let step = finish_resonance(request, evolved)?;
+        let (step, drive_sensitivity) = self.capture_step(input, gate, rows, features)?;
         Ok(ToposResonatorLearningBatch {
             input: input.to_vec(),
             gate: gate.to_vec(),
             drive_sensitivity,
             step,
         })
+    }
+
+    /// Retains both Rust-owned input allocations without cloning them.
+    /// The audited transition is identical to `capture`; buffers are consumed
+    /// even on failure. Foreign clients must still establish Rust ownership.
+    pub fn capture_owned(
+        &self,
+        input: Vec<f32>,
+        gate: Vec<f32>,
+        rows: usize,
+        features: usize,
+    ) -> Result<ToposResonatorLearningBatch, ToposResonatorError> {
+        let (step, drive_sensitivity) = self.capture_step(&input, &gate, rows, features)?;
+        Ok(ToposResonatorLearningBatch {
+            input,
+            gate,
+            drive_sensitivity,
+            step,
+        })
+    }
+
+    fn capture_step(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        rows: usize,
+        features: usize,
+    ) -> Result<(ToposResonatorStep, Vec<f32>), ToposResonatorError> {
+        let request = self.request(input, gate, rows, features);
+        let mut evolved = evolve_resonance::<true>(request)?;
+        let drive_sensitivity = std::mem::take(&mut evolved.drive_sensitivity);
+        let step = finish_resonance(request, evolved)?;
+        Ok((step, drive_sensitivity))
     }
 
     pub fn backward(
@@ -788,6 +818,95 @@ pub fn audit_topos_resonator_backward(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_capture_retains_allocations_and_matches_borrowed_audits_and_pullbacks() {
+        let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        for rows in [0, 1, 3] {
+            for (coupling, iterations) in [(0.0, 1), (0.25, 4), (0.75, 16)] {
+                for porosity in [0.0, 0.2] {
+                    let features = 7;
+                    let volume = rows * features;
+                    let dy = vec![0.3; volume];
+                    let (borrowed, owned, expected) = {
+                        let operator = ToposResonatorOperator::new(
+                            ToposResonatorConfig::new(coupling, iterations).unwrap(),
+                            topos(1.0, porosity),
+                        )
+                        .unwrap();
+                        let mut input = Vec::with_capacity(volume + 13);
+                        let mut gate = Vec::with_capacity(volume + 17);
+                        let pattern = [0.0, -0.0, f32::from_bits(1), -0.3, 0.5, 1.3, -2.0];
+                        input.extend((0..volume).map(|i| pattern[i % pattern.len()]));
+                        gate.extend((0..volume).map(|i| (i % 3) as f32 - 1.0));
+                        let expected = operator
+                            .backward(&input, &gate, &dy, rows, features)
+                            .unwrap();
+                        let borrowed = operator.capture(&input, &gate, rows, features).unwrap();
+                        let allocations = (
+                            input.as_ptr(),
+                            input.capacity(),
+                            gate.as_ptr(),
+                            gate.capacity(),
+                        );
+                        let owned = operator.capture_owned(input, gate, rows, features).unwrap();
+                        assert_eq!(
+                            (
+                                owned.input.as_ptr(),
+                                owned.input.capacity(),
+                                owned.gate.as_ptr(),
+                                owned.gate.capacity()
+                            ),
+                            allocations
+                        );
+                        (borrowed, owned, expected)
+                    };
+                    assert_eq!(bits(owned.output()), bits(borrowed.output()));
+                    assert_eq!(
+                        serde_json::to_string(owned.step()).unwrap(),
+                        serde_json::to_string(borrowed.step()).unwrap()
+                    );
+                    for _ in 0..2 {
+                        let actual = owned.vjp(&dy).unwrap();
+                        assert_eq!(bits(&actual.grad_input), bits(&expected.grad_input));
+                        assert_eq!(bits(&actual.grad_gate), bits(&expected.grad_gate));
+                    }
+                    let cloned = owned.clone();
+                    drop(owned);
+                    assert_eq!(bits(cloned.output()), bits(borrowed.output()));
+                    assert_eq!(
+                        bits(&cloned.vjp(&dy).unwrap().grad_gate),
+                        bits(&expected.grad_gate)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn owned_capture_preserves_guard_errors_without_corrupting_the_operator() {
+        let operator =
+            ToposResonatorOperator::new(ToposResonatorConfig::default(), topos(1.0, 0.2)).unwrap();
+        let good = operator.capture_owned(vec![1.0], vec![0.2], 1, 1).unwrap();
+        for (input, gate, rows, features) in [
+            (vec![], vec![], 0, 0),
+            (vec![], vec![], usize::MAX, 2),
+            (vec![1.0], vec![], 1, 1),
+            (vec![1.0; 129], vec![1.0; 129], 1, 129),
+            (vec![f32::NAN], vec![1.0], 1, 1),
+            (vec![1.0], vec![f32::INFINITY], 1, 1),
+            (vec![f32::MAX], vec![2.0], 1, 1),
+        ] {
+            let expected = operator.capture(&input, &gate, rows, features).unwrap_err();
+            let actual = operator
+                .capture_owned(input, gate, rows, features)
+                .unwrap_err();
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+            let next = operator.capture_owned(vec![1.0], vec![0.2], 1, 1).unwrap();
+            assert_eq!(next.step(), good.step());
+            assert_eq!(next.vjp(&[0.3]).unwrap(), good.vjp(&[0.3]).unwrap());
+        }
+    }
 
     // Frozen iteration-major, double-buffered traversal from before the in-place change.
     fn legacy_evolution<const CAPTURE: bool>(

@@ -57,6 +57,28 @@ def test_owned_tape_survives_mutation_drop_and_concurrent_vjps():
     assert survivors == (output, gradients)
 
 
+@pytest.mark.parametrize("buffers", [False, True])
+def test_capture_of_aliased_sources_remains_independent_after_failure_and_drop(buffers):
+    kernel = st.ToposResonatorKernel(porosity=.2)
+    values = array("f", [0., -0., 1e-40, -.3, .5, 1.3])
+    if not buffers:
+        values = list(values)
+    capture = kernel.capture_buffer if buffers else kernel.capture
+    batch = capture(values, values, 2, 3)
+    upstream = array("f", [.3] * 6)
+    expected_output, expected_audit = batch.output_buffer(), batch.audit_json()
+    expected_gradients = batch.vjp_buffer(upstream)
+    values[:] = array("f", [float("nan")] * 6) if buffers else [float("nan")] * 6
+    values.append(4.)
+    with pytest.raises(ValueError):
+        capture(values, values, 1, 7)
+    del capture, kernel, values
+    gc.collect()
+    assert batch.output_buffer() == expected_output
+    assert batch.audit_json() == expected_audit
+    assert batch.vjp_buffer(upstream) == expected_gradients
+
+
 @pytest.mark.parametrize("bad", [b"1234", bytearray(4), array("d", [1.]), array("i", [1])])
 def test_buffers_reject_non_f32(bad):
     kernel, good = st.ToposResonatorKernel(), array("f", [1.])

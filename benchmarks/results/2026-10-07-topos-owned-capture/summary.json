@@ -1,0 +1,231 @@
+{
+  "schema": "spiraltorch.topos_owned_capture_results.v1",
+  "source_revision": "8e1071e1e1caf1bfcb4be6dd794e601ff3eadde0",
+  "baseline_source_revision": "e03719056adc6f34ccd7972d4819b849164adf93",
+  "run_count": 32,
+  "timing_sample_count": 1536,
+  "output_and_both_vjp_hashes_exact": true,
+  "rows": [
+    {
+      "iterations": 4,
+      "size": "small",
+      "shape": [
+        2,
+        16,
+        64
+      ],
+      "routes": {
+        "rust_list": {
+          "before_ms": 0.4459895,
+          "after_ms": 0.443625,
+          "ratio": 1.0053299520991827,
+          "paired_ratios": [
+            0.9870019779598759,
+            1.0340105274792075,
+            1.0009834223096374,
+            0.9802476369805141
+          ]
+        },
+        "rust_buffer_recomputed": {
+          "before_ms": 0.08819774999999999,
+          "after_ms": 0.08608299999999999,
+          "ratio": 1.0245664068399103,
+          "paired_ratios": [
+            0.9749112659012086,
+            1.0616635105608156,
+            1.0126144202115661,
+            0.9910590179946654
+          ]
+        },
+        "rust_public": {
+          "before_ms": 0.06733375,
+          "after_ms": 0.06839600000000001,
+          "ratio": 0.984469121001228,
+          "paired_ratios": [
+            0.9160035746201968,
+            1.0560919609001636,
+            0.9676040563500468,
+            1.0103628783089826
+          ]
+        },
+        "torch_reference": {
+          "before_ms": 0.213594,
+          "after_ms": 0.21709375,
+          "ratio": 0.9838790844969052,
+          "paired_ratios": [
+            0.9335975103639562,
+            1.0608989379225227,
+            1.0108282335103074,
+            0.9320539947027499
+          ]
+        }
+      }
+    },
+    {
+      "iterations": 4,
+      "size": "large",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "routes": {
+        "rust_list": {
+          "before_ms": 44.944843750000004,
+          "after_ms": 44.787707999999995,
+          "ratio": 1.0035084570525468,
+          "paired_ratios": [
+            0.9883776720224483,
+            0.992556482898371,
+            1.0125988505279098,
+            1.013365618858818
+          ]
+        },
+        "rust_buffer_recomputed": {
+          "before_ms": 6.8202815,
+          "after_ms": 6.6818335,
+          "ratio": 1.0207200613424445,
+          "paired_ratios": [
+            1.0046894910725293,
+            0.9992493146654938,
+            1.0324936288064226,
+            1.0306500126498064
+          ]
+        },
+        "rust_public": {
+          "before_ms": 5.1847395,
+          "after_ms": 5.1674065,
+          "ratio": 1.0033542938803053,
+          "paired_ratios": [
+            0.9942214375617906,
+            0.9920113598538177,
+            1.016010100357838,
+            1.0098148089879402
+          ]
+        },
+        "torch_reference": {
+          "before_ms": 4.2161040000000005,
+          "after_ms": 4.27354175,
+          "ratio": 0.9865596843648482,
+          "paired_ratios": [
+            0.9492244251060269,
+            0.966066828865836,
+            1.0116940039152547,
+            1.034503955788819
+          ]
+        }
+      }
+    },
+    {
+      "iterations": 16,
+      "size": "small",
+      "shape": [
+        2,
+        16,
+        64
+      ],
+      "routes": {
+        "rust_list": {
+          "before_ms": 0.6171665,
+          "after_ms": 0.6217085,
+          "ratio": 0.9926943253952615,
+          "paired_ratios": [
+            1.0003718286990055,
+            1.0117862234622061,
+            0.9895289634121943,
+            0.9670356266301858
+          ]
+        },
+        "rust_buffer_recomputed": {
+          "before_ms": 0.2533545,
+          "after_ms": 0.258594,
+          "ratio": 0.9797385090141302,
+          "paired_ratios": [
+            0.9787268606261262,
+            1.0032986200377325,
+            0.9878347239083535,
+            0.9618738870371215
+          ]
+        },
+        "rust_public": {
+          "before_ms": 0.122333,
+          "after_ms": 0.12116674999999999,
+          "ratio": 1.0096251653196937,
+          "paired_ratios": [
+            0.9231809056078579,
+            1.0086548988891437,
+            1.0921640916355888,
+            0.9620550604495677
+          ]
+        },
+        "torch_reference": {
+          "before_ms": 0.7928437500000001,
+          "after_ms": 0.8006040000000001,
+          "ratio": 0.9903070057106884,
+          "paired_ratios": [
+            1.0004795525199526,
+            1.0020702285213792,
+            0.9824665965510208,
+            0.9734540763560751
+          ]
+        }
+      }
+    },
+    {
+      "iterations": 16,
+      "size": "large",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "routes": {
+        "rust_list": {
+          "before_ms": 70.58992724999999,
+          "after_ms": 70.05146875,
+          "ratio": 1.0076866125665636,
+          "paired_ratios": [
+            0.9989833079159132,
+            1.0148211256917523,
+            1.0068594963038588,
+            1.0072079447807412
+          ]
+        },
+        "rust_buffer_recomputed": {
+          "before_ms": 31.66963525,
+          "after_ms": 31.61832275,
+          "ratio": 1.001622872294831,
+          "paired_ratios": [
+            0.9988627079320469,
+            0.9999828884609686,
+            1.001675664402413,
+            1.0078183161338934
+          ]
+        },
+        "rust_public": {
+          "before_ms": 19.702375,
+          "after_ms": 19.56842675,
+          "ratio": 1.006845121057062,
+          "paired_ratios": [
+            1.0046859229840472,
+            1.0083524238225212,
+            1.0039705342917837,
+            1.0148798529984113
+          ]
+        },
+        "torch_reference": {
+          "before_ms": 18.467469,
+          "after_ms": 18.574135750000003,
+          "ratio": 0.9942572428975597,
+          "paired_ratios": [
+            0.9606919621963389,
+            1.0271604169212774,
+            1.0093603073527908,
+            0.9784706209741668
+          ]
+        }
+      }
+    }
+  ],
+  "scope": "Paired CPU f32 forward and both VJPs including foreign transport and Torch broadcast reduction. Near-neutral timing, not a demonstrated general speedup. Owned Rust capture removes two N-element copies, not foreign copies or retained tape vectors. No model quality, full-model, browser, WebGPU or accelerator timing claim."
+}

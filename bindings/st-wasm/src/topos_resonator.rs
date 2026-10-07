@@ -108,15 +108,15 @@ impl ToposResonatorKernel {
 
     pub fn capture(
         &self,
-        input: &[f32],
-        gate: &[f32],
+        input: Vec<f32>,
+        gate: Vec<f32>,
         rows: Number,
         features: Number,
     ) -> Result<ToposResonatorLearningBatch, JsValue> {
         let rows = js_u32(rows.as_ref(), "rows")? as usize;
         let features = js_u32(features.as_ref(), "features")? as usize;
         self.operator
-            .capture(input, gate, rows, features)
+            .capture_owned(input, gate, rows, features)
             .map(|inner| ToposResonatorLearningBatch { inner })
             .map_err(js_error)
     }
