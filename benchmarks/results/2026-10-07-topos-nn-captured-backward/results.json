@@ -1,0 +1,110 @@
+{
+  "schema": "spiraltorch.topos_nn_capture_results.v1",
+  "status": "measured",
+  "baseline": {
+    "source_revision": "e8313540f6a955c965d4b08045b3496e6a72b591",
+    "client_sha256": {
+      "crates/st-nn/examples/topos_module_probe.rs": "d5e7819f83ee4a295ff91d79c5f174a2831e6aa089b304ebc5702a211fbfaa5d",
+      "tools/benchmark_topos_module_reference.py": "580427fc50ef4aa61be8bdbec3f1c2b6a8e54f225a9c41bfe0d7d234ce0881d9"
+    },
+    "binary_sha256": "2e63a710e5bcca1ae3bcc26f3f0defafb6e2c6f020ee4b26bc46ab77995066dc"
+  },
+  "candidate": {
+    "source_revision": "60eb80fbf0e8103ee348a50d65a4c744196c0f03",
+    "client_sha256": {
+      "crates/st-nn/examples/topos_module_probe.rs": "d5e7819f83ee4a295ff91d79c5f174a2831e6aa089b304ebc5702a211fbfaa5d",
+      "tools/benchmark_topos_module_reference.py": "580427fc50ef4aa61be8bdbec3f1c2b6a8e54f225a9c41bfe0d7d234ce0881d9"
+    },
+    "binary_sha256": "3e81b4369c2f53de8b95d0d0adc57473cea7eecb7e1367289e075f26de1a084f"
+  },
+  "native_reports": 32,
+  "torch_reports": 32,
+  "timing_samples": 1536,
+  "summary": [
+    {
+      "id": "small-4",
+      "rows": 32,
+      "features": 64,
+      "iterations": 4,
+      "baseline_forward_ms": 0.02196875,
+      "torch_baseline_forward_ms": 0.08710375,
+      "baseline_forward_backward_ms": 0.06766675,
+      "torch_baseline_forward_backward_ms": 0.20460425,
+      "candidate_forward_ms": 0.02301075,
+      "torch_candidate_forward_ms": 0.08835375,
+      "candidate_forward_backward_ms": 0.0309585,
+      "torch_candidate_forward_backward_ms": 0.217802,
+      "forward_ratio": 1.0474310099573259,
+      "learning_ratio": 0.4575142148839718,
+      "max_errors": {
+        "output": 5.960464477539063e-8,
+        "grad_input": 5.960464477539063e-8,
+        "grad_gate": 1.1920928955078125e-7
+      }
+    },
+    {
+      "id": "large-4",
+      "rows": 256,
+      "features": 768,
+      "iterations": 4,
+      "baseline_forward_ms": 2.1161042500000002,
+      "torch_baseline_forward_ms": 1.89005175,
+      "baseline_forward_backward_ms": 6.4551875,
+      "torch_baseline_forward_backward_ms": 4.30674975,
+      "candidate_forward_ms": 2.245104,
+      "torch_candidate_forward_ms": 1.92861475,
+      "candidate_forward_backward_ms": 3.02443725,
+      "torch_candidate_forward_backward_ms": 4.38641675,
+      "forward_ratio": 1.0609609616350422,
+      "learning_ratio": 0.4685281798553489,
+      "max_errors": {
+        "output": 5.960464477539063e-8,
+        "grad_input": 5.960464477539063e-8,
+        "grad_gate": 1.1920928955078125e-7
+      }
+    },
+    {
+      "id": "small-16",
+      "rows": 32,
+      "features": 64,
+      "iterations": 16,
+      "baseline_forward_ms": 0.06260425,
+      "torch_baseline_forward_ms": 0.33319774999999996,
+      "baseline_forward_backward_ms": 0.3280105,
+      "torch_baseline_forward_backward_ms": 0.781208,
+      "candidate_forward_ms": 0.06923950000000001,
+      "torch_candidate_forward_ms": 0.34353124999999995,
+      "candidate_forward_backward_ms": 0.07710399999999999,
+      "torch_candidate_forward_backward_ms": 0.7878227499999999,
+      "forward_ratio": 1.1059872133281687,
+      "learning_ratio": 0.23506564576438863,
+      "max_errors": {
+        "output": 5.960464477539063e-8,
+        "grad_input": 3.5762786865234375e-7,
+        "grad_gate": 4.76837158203125e-7
+      }
+    },
+    {
+      "id": "large-16",
+      "rows": 256,
+      "features": 768,
+      "iterations": 16,
+      "baseline_forward_ms": 5.89195825,
+      "torch_baseline_forward_ms": 7.91062525,
+      "baseline_forward_backward_ms": 31.20888525,
+      "torch_baseline_forward_backward_ms": 18.745979249999998,
+      "candidate_forward_ms": 6.670094,
+      "torch_candidate_forward_ms": 8.097823,
+      "candidate_forward_backward_ms": 7.44229175,
+      "torch_candidate_forward_backward_ms": 18.828719,
+      "forward_ratio": 1.1320674242727364,
+      "learning_ratio": 0.23846708046068385,
+      "max_errors": {
+        "output": 5.960464477539063e-8,
+        "grad_input": 3.5762786865234375e-7,
+        "grad_gate": 4.76837158203125e-7
+      }
+    }
+  ],
+  "scope": "Rust NN and independent Torch f32 CPU per-element gate; all numbers retained; not Python bridge, resident execution, pretrained training or quality"
+}

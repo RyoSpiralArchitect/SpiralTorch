@@ -1251,8 +1251,35 @@ mod tests {
             )
         };
 
-        // Backward routing can differ from forward routing without reusing an
-        // incompatible executor result or losing the original gate snapshot.
+        for (cpu, wgpu) in cpu_output.data().iter().zip(wgpu_output.data()) {
+            assert!((cpu - wgpu).abs() < 1e-5);
+        }
+        for (cpu, wgpu) in cpu_grad_input.data().iter().zip(wgpu_grad_input.data()) {
+            assert!((cpu - wgpu).abs() < 1e-5);
+        }
+        let cpu_grad_gate = cpu_layer.parameter().gradient().unwrap().clone();
+        let wgpu_grad_gate = wgpu_layer.parameter().gradient().unwrap().clone();
+        for (cpu, wgpu) in cpu_grad_gate.data().iter().zip(wgpu_grad_gate.data()) {
+            assert!((cpu - wgpu).abs() < 1e-5);
+        }
+        assert!(wgpu_layer.latest_audit().unwrap().max_output_error <= 1e-5);
+        assert!(
+            wgpu_layer
+                .latest_backward_audit()
+                .unwrap()
+                .max_grad_input_error
+                <= 1e-5
+        );
+        assert!(
+            wgpu_layer
+                .latest_backward_audit()
+                .unwrap()
+                .max_grad_gate_error
+                <= 1e-5
+        );
+
+        // Compare each executor before replay can mix their gradients or
+        // overwrite its audit, then check cross-route accumulation separately.
         {
             let _guard = push_backend_policy(crate::test_backend_policy(DeviceCaps::cpu(), 1));
             let replay = wgpu_layer.backward(&input, &grad_output).unwrap();
@@ -1270,32 +1297,17 @@ mod tests {
                 assert!((expected - actual).abs() < 1e-5);
             }
         }
-
+        for layer in [&cpu_layer, &wgpu_layer] {
+            for ((cpu, wgpu), accumulated) in cpu_grad_gate
+                .data()
+                .iter()
+                .zip(wgpu_grad_gate.data())
+                .zip(layer.parameter().gradient().unwrap().data())
+            {
+                assert!((cpu + wgpu - accumulated).abs() < 1e-5);
+            }
+        }
         st_tensor::set_thread_meta_observer(previous);
-        for (cpu, wgpu) in cpu_output.data().iter().zip(wgpu_output.data()) {
-            assert!((cpu - wgpu).abs() < 1e-5);
-        }
-        for (cpu, wgpu) in cpu_grad_input.data().iter().zip(wgpu_grad_input.data()) {
-            assert!((cpu - wgpu).abs() < 1e-5);
-        }
-        for (cpu, wgpu) in cpu_layer
-            .parameter()
-            .gradient()
-            .unwrap()
-            .data()
-            .iter()
-            .zip(wgpu_layer.parameter().gradient().unwrap().data())
-        {
-            assert!((cpu - wgpu).abs() < 1e-5);
-        }
-        assert!(wgpu_layer.latest_audit().unwrap().max_output_error <= 1e-5);
-        assert!(
-            wgpu_layer
-                .latest_backward_audit()
-                .unwrap()
-                .max_grad_input_error
-                <= 1e-5
-        );
         let events = events.lock().unwrap();
         assert!(events.iter().any(|(name, data)| {
             *name == "topos_resonator_forward"
