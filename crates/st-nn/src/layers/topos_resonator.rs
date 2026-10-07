@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::execution::current_tensor_util_backend_for_values;
+use crate::execution::{current_tensor_util_backend, current_tensor_util_backend_for_values};
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 #[cfg(feature = "wgpu")]
@@ -592,11 +592,19 @@ impl ToposResonator {
         self.validate_optimizer_topos_alignment()?;
         let input = input.to_layout(Layout::RowMajor)?;
         let parameter_gate = self.gate.value().to_layout(Layout::RowMajor)?;
-        validate_topos_resonator_state_with_layout(
-            self.core_request(&input, parameter_gate.data()),
-            self.gate_layout,
-        )
-        .map_err(topos_resonator_error)?;
+        // Direct CPU/legacy Auto capture performs these checks in core. Keep
+        // early admission for accelerator requests (even threshold fallbacks),
+        // before route metadata, availability probes or dispatch can occur.
+        if !matches!(
+            current_tensor_util_backend(),
+            TensorUtilBackend::Cpu | TensorUtilBackend::Auto
+        ) {
+            validate_topos_resonator_state_with_layout(
+                self.core_request(&input, parameter_gate.data()),
+                self.gate_layout,
+            )
+            .map_err(topos_resonator_error)?;
+        }
         let route_backend = current_tensor_util_backend_for_values(input.data().len());
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
