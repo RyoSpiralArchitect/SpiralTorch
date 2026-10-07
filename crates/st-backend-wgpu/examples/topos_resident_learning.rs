@@ -104,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let tensors: Vec<_> = retained.iter().flatten().collect();
         let snapshots = device.snapshot_many(&tensors)?.read()?;
-        for (record, values) in records.iter_mut().zip(snapshots.chunks_exact(5)) {
+        for (record, values) in records.iter_mut().zip(snapshots.as_chunks::<5>().0) {
             for (name, data) in ["output", "grad_input", "grad_gate", "gate_after"]
                 .into_iter()
                 .zip(values)
