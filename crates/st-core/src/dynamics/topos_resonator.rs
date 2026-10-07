@@ -760,9 +760,9 @@ fn evolve_resonance_with_layout<const CAPTURE_SENSITIVITY: bool>(
     let mut closure_adjustment_linf = 0.0f32;
     let mut rewritten_values = 0usize;
     for iteration in 0..request.config.iterations() {
-        for index in 0..volume {
-            let raw =
-                require_derived_finite("resonance_drive", drive[index] + coupling * state[index])?;
+        let last_iteration = iteration + 1 == request.config.iterations();
+        for (index, (&drive, state)) in drive.iter().zip(&mut state).enumerate() {
+            let raw = require_derived_finite("resonance_drive", drive + coupling * *state)?;
             let (rewritten, slope) = request.topos.saturate_with_slope(raw);
             require_derived_finite("resonance_rewrite", rewritten)?;
             if CAPTURE_SENSITIVITY {
@@ -776,19 +776,18 @@ fn evolve_resonance_with_layout<const CAPTURE_SENSITIVITY: bool>(
             if rewritten != raw {
                 rewritten_values = rewritten_values.saturating_add(1);
             }
-            if iteration + 1 == request.config.iterations() {
-                last_update_linf = last_update_linf.max((rewritten - state[index]).abs());
+            if last_iteration {
+                last_update_linf = last_update_linf.max((rewritten - *state).abs());
             }
             // Stalks are independent; retain iteration-major guard order without a second buffer.
-            state[index] = rewritten;
+            *state = rewritten;
         }
     }
     let mut fixed_point_residual_linf = 0.0f32;
-    for index in 0..volume {
-        let raw =
-            require_derived_finite("fixed_point_drive", drive[index] + coupling * state[index])?;
+    for (&drive, &state) in drive.iter().zip(&state) {
+        let raw = require_derived_finite("fixed_point_drive", drive + coupling * state)?;
         let target = request.topos.saturate(raw);
-        fixed_point_residual_linf = fixed_point_residual_linf.max((target - state[index]).abs());
+        fixed_point_residual_linf = fixed_point_residual_linf.max((target - state).abs());
     }
     Ok(EvolvedResonance {
         drive,
