@@ -1,7 +1,11 @@
 """Bounded receipt guards; these tests do not substitute for a Torch replay."""
 
 import copy
+import gzip
+import hashlib
 import importlib.util
+import json
+import math
 import sys
 from pathlib import Path
 
@@ -119,3 +123,54 @@ def test_review_torch_loss_overflow_cannot_be_certified(monkeypatch):
     CHECK.validate_receipt(payload)
     with pytest.raises(ValueError, match="nonfinite Torch loss"):
         CHECK.compare(payload)
+
+
+COMPACT_RESULTS = PATH.parent.parent / "benchmarks/results/2026-10-07-topos-nn-shared-capture"
+
+
+def test_saved_compact_native_learning_and_client_identities():
+    hashes = dict(line.split("  ")[::-1] for line in
+                  (COMPACT_RESULTS / "SHA256SUMS").read_text().splitlines())
+    assert set(hashes) == {"README.md", "learning.json.gz", "clients.json", "verification.json"}
+    for name, digest in hashes.items():
+        assert hashlib.sha256((COMPACT_RESULTS / name).read_bytes()).hexdigest() == digest
+    raw = gzip.decompress((COMPACT_RESULTS / "learning.json.gz").read_bytes())
+    CHECK.validate_receipt(json.loads(raw))
+    verification = json.loads((COMPACT_RESULTS / "verification.json").read_text())
+    assert verification["schema"] == "spiraltorch.topos_nn_shared_capture_validation.v1"
+    assert verification["status"] == "validated_with_lint_limitation"
+    assert verification["learning_json_sha256"] == hashlib.sha256(raw).hexdigest()
+    torch_result = verification["torch_learning"]
+    assert torch_result["status"] == "passed" and torch_result["updates"] == 200
+    assert torch_result["receipt_sha256"] == verification["learning_json_sha256"]
+    assert (torch_result["rtol"], torch_result["atol"]) == (5e-4, 3e-5)
+    assert set(torch_result["max_abs_error"]) == {"output", "grad_input", "grad_gate", "gate_after", "loss"}
+    for error in torch_result["max_abs_error"].values():
+        assert CHECK.finite_number(error) and 0 <= error <= 3e-5
+    sources, artifacts = verification["source_sha256"], verification["artifacts"]
+    assert torch_result["client_sha256"] == sources["tools/check_topos_shared_gate_learning.py"]
+    assert torch_result["torch_reference_sha256"] == sources["tools/benchmark_topos_module_reference.py"]
+    clients = json.loads((COMPACT_RESULTS / "clients.json").read_text())
+    for client_name in ("node", "legacy_node", "browser"):
+        client = clients[client_name]
+        assert client["status"] == "passed"
+        assert client["learning"]["updates"] == 240
+        assert client["learning"]["next_update_exact"] is True
+        assert math.isfinite(client["learning"]["final_loss"])
+        prefix = "web" if client_name == "browser" else "node"
+        assert client["wasm_sha256"] == artifacts[prefix + "_wasm"]["sha256"]
+        if client_name != "browser":
+            assert client["wrapper_sha256"] == artifacts["node_wrapper"]["sha256"]
+    browser = clients["browser"]
+    assert browser["page_errors"] == [] and browser["console_messages"] == []
+    assert browser["asset_sha256"]["/module/spiraltorch_wasm_bg.wasm"] == browser["wasm_sha256"]
+    assert browser["asset_sha256"]["/module/spiraltorch_wasm.js"] == artifacts["web_wrapper"]["sha256"]
+    assert browser["page_sha256"] == browser["asset_sha256"]["/"] == sources["bindings/st-wasm/tests/topos_shared_transport.html"]
+    assert browser["asset_sha256"]["/topos_shared_transport.mjs"] == clients["node"]["fixture_sha256"] == sources["bindings/st-wasm/tests/topos_shared_transport.mjs"]
+
+
+def test_saved_compact_native_learning_replays_against_independent_torch():
+    pytest.importorskip("torch")
+    payload = json.loads(gzip.decompress((COMPACT_RESULTS / "learning.json.gz").read_bytes()))
+    report = CHECK.compare(payload)
+    assert report["status"] == "passed" and report["updates"] == 200
