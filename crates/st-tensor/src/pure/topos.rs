@@ -166,6 +166,7 @@ fn permeable_clamp(value: f32, limit: f32, permeability: f32) -> f32 {
     sign * (limit + headroom * softened.min(1.0))
 }
 
+#[inline]
 pub(crate) fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     if !value.is_finite() {
         return 0.0;
@@ -188,6 +189,7 @@ pub(crate) fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     value.signum() * softened
 }
 
+#[inline]
 fn porous_mix_slope(value: f32, saturation: f32, porosity: f32) -> f32 {
     if !value.is_finite() || saturation <= 0.0 {
         return 0.0;
@@ -3503,6 +3505,7 @@ impl OpenCartesianTopos {
     }
 
     /// Saturates a scalar into the finite window enforced by the topos.
+    #[inline]
     pub fn saturate(&self, value: f32) -> f32 {
         porous_mix(value, self.saturation, self.porosity)
     }
@@ -3511,6 +3514,7 @@ impl OpenCartesianTopos {
     ///
     /// The slope is the canonical reverse-mode rule for every Rust adapter that
     /// differentiates through the open-topos saturation boundary.
+    #[inline]
     pub fn saturate_with_slope(&self, value: f32) -> (f32, f32) {
         (
             porous_mix(value, self.saturation, self.porosity),

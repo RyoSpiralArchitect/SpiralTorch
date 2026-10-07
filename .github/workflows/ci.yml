@@ -765,4 +765,4 @@ jobs:
             bindings/st-py/tests/test_wave_gate_long_horizon_summary.py \
             bindings/st-py/tests/test_elliptic_nonlinear_study.py \
             bindings/st-py/tests/test_elliptic_causal_study.py
-          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_benchmark_topos_learning.py tools/test_replay_geometry_stack_update.py
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_benchmark_topos_learning.py tools/test_replay_geometry_stack_update.py tools/test_topos_inlining_results.py
