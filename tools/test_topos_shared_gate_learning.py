@@ -106,13 +106,18 @@ def test_trajectory_guard_rejects_incomplete_or_mislabeled_run(change):
         CHECK.validate_receipt(payload)
 
 
-def test_review_torch_loss_overflow_cannot_be_certified(monkeypatch):
+@pytest.fixture
+def torch_reference(monkeypatch):
     pytest.importorskip("torch")
     spec = importlib.util.spec_from_file_location("benchmark_topos_module_reference",
                                                 PATH.with_name("benchmark_topos_module_reference.py"))
     reference = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reference)
     monkeypatch.setitem(sys.modules, "benchmark_topos_module_reference", reference)
+
+
+@pytest.mark.usefixtures("torch_reference")
+def test_review_torch_loss_overflow_cannot_be_certified():
     payload = receipt()
     for case in payload["cases"]:
         case["initial_gate"] = [0.0] * 5
@@ -169,8 +174,8 @@ def test_saved_compact_native_learning_and_client_identities():
     assert browser["asset_sha256"]["/topos_shared_transport.mjs"] == clients["node"]["fixture_sha256"] == sources["bindings/st-wasm/tests/topos_shared_transport.mjs"]
 
 
+@pytest.mark.usefixtures("torch_reference")
 def test_saved_compact_native_learning_replays_against_independent_torch():
-    pytest.importorskip("torch")
     payload = json.loads(gzip.decompress((COMPACT_RESULTS / "learning.json.gz").read_bytes()))
     report = CHECK.compare(payload)
     assert report["status"] == "passed" and report["updates"] == 200
