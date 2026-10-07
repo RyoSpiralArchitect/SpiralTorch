@@ -1,0 +1,52 @@
+{
+  "schema": "spiraltorch.topos_browser_native_fixture.v1",
+  "native_sha256": "5bc164c1d1caee48134d3e5afa7d618dfeee902edac8cae21dbef8629bcbb63d",
+  "scope": "Only native_fixture() executed; no HF model creation, training, scoring or downloads.",
+  "native_fixture": {
+    "config": {
+      "coupling": 0.3499999940395355,
+      "iterations": 6,
+      "max_values": 1048576,
+      "porosity": 0.20000000298023224,
+      "saturation": 1.0
+    },
+    "input": [
+      0.2,
+      -0.4,
+      4.0,
+      -3.0
+    ],
+    "gate": [
+      0.3,
+      -0.2,
+      0.7,
+      0.5
+    ],
+    "upstream": [
+      0.4,
+      -0.7,
+      -0.3,
+      0.8
+    ],
+    "rows": 2,
+    "features": 2,
+    "output": [
+      0.09213800728321075,
+      0.1228506863117218,
+      0.9741490483283997,
+      -0.9851518273353577
+    ],
+    "grad_input": [
+      0.1842760145664215,
+      0.21498866379261017,
+      0.0012221748474985361,
+      -0.00492131756618619
+    ],
+    "grad_gate": [
+      0.12285067141056061,
+      0.42997732758522034,
+      0.006983856670558453,
+      0.029527906328439713
+    ]
+  }
+}
