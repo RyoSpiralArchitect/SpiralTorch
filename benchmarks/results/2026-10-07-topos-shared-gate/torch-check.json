@@ -1,0 +1,20 @@
+{
+  "schema": "spiraltorch.topos_shared_gate_torch_check.v1",
+  "status": "passed",
+  "torch": "2.12.1",
+  "threads": 2,
+  "updates": 200,
+  "rtol": 0.0005,
+  "atol": 3e-05,
+  "max_abs_error": {
+    "output": 1.1920928955078125e-07,
+    "grad_input": 5.960464477539063e-08,
+    "grad_gate": 1.1920928955078125e-07,
+    "gate_after": 2.9802322387695312e-08,
+    "loss": 1.1920928955078125e-07
+  },
+  "scope": "CPU f32 closed-loop shared-gate trajectories, independent broadcast/autograd/reduction. No timing or model-quality claim.",
+  "receipt_sha256": "811725feac9272508789d03f147063964b87786080a0348fce89ac2af2640ea8",
+  "client_sha256": "fcb2ae0838e31a730527f41ca7ead5c2441d41708aa021459a5113059246033c",
+  "torch_reference_sha256": "580427fc50ef4aa61be8bdbec3f1c2b6a8e54f225a9c41bfe0d7d234ce0881d9"
+}
