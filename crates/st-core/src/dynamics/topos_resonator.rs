@@ -366,39 +366,52 @@ impl ToposResonatorLearningBatch {
         let mut grad_input = Vec::with_capacity(self.input.len());
         let mut grad_gate = Vec::with_capacity(self.gate.len());
         let mut gate_sum_squares = 0.0_f64;
-        let mut shared_sums = match self.gate_layout {
-            ToposResonatorGateLayout::Elementwise => Vec::new(),
-            ToposResonatorGateLayout::SharedRows => vec![0.0f64; self.gate.len()],
-        };
-        for (index, &upstream) in grad_output.iter().enumerate() {
-            let gate_index = match self.gate_layout {
-                ToposResonatorGateLayout::Elementwise => index,
-                ToposResonatorGateLayout::SharedRows => index % self.gate.len(),
-            };
+        let mut point = |upstream: f32, sensitivity: f32, input: f32, gate: f32| {
             // Keep (upstream * sensitivity) * parameter in the legacy order.
             // Caching sensitivity * parameter would change f32 rounding.
-            let grad_drive =
-                require_derived_finite("grad_drive", upstream * self.drive_sensitivity[index])?;
-            grad_input.push(require_derived_finite(
-                "grad_input",
-                grad_drive * self.gate[gate_index],
-            )?);
-            let contribution = require_derived_finite("grad_gate", grad_drive * self.input[index])?;
+            let grad_drive = require_derived_finite("grad_drive", upstream * sensitivity)?;
+            grad_input.push(require_derived_finite("grad_input", grad_drive * gate)?);
+            let contribution = require_derived_finite("grad_gate", grad_drive * input)?;
             if ELEMENTWISE_RMS {
                 let contribution = f64::from(contribution);
                 gate_sum_squares += contribution * contribution;
             }
-            match self.gate_layout {
-                ToposResonatorGateLayout::Elementwise => grad_gate.push(contribution),
-                // Match Tensor::try_sum_axis0: retain finite cancellation in f64,
-                // then round once. No expanded gate-gradient buffer is allocated.
-                ToposResonatorGateLayout::SharedRows => {
-                    shared_sums[gate_index] += f64::from(contribution);
+            Ok::<_, ToposResonatorError>(contribution)
+        };
+        match self.gate_layout {
+            ToposResonatorGateLayout::Elementwise => {
+                for (((&upstream, &sensitivity), &input), &gate) in grad_output
+                    .iter()
+                    .zip(&self.drive_sensitivity)
+                    .zip(&self.input)
+                    .zip(&self.gate)
+                {
+                    grad_gate.push(point(upstream, sensitivity, input, gate)?);
                 }
             }
-        }
-        for sum in shared_sums {
-            grad_gate.push(require_derived_finite("grad_gate_sum", sum as f32)?);
+            ToposResonatorGateLayout::SharedRows => {
+                let features = self.gate.len();
+                let mut sums = vec![0.0f64; features];
+                // Capture guarantees nonzero features and complete rows. This
+                // keeps legacy row-major guard/f64-sum order without division.
+                for ((upstream, sensitivity), input) in grad_output
+                    .chunks_exact(features)
+                    .zip(self.drive_sensitivity.chunks_exact(features))
+                    .zip(self.input.chunks_exact(features))
+                {
+                    for (((&upstream, &sensitivity), &input), (&gate, sum)) in upstream
+                        .iter()
+                        .zip(sensitivity)
+                        .zip(input)
+                        .zip(self.gate.iter().zip(&mut sums))
+                    {
+                        *sum += f64::from(point(upstream, sensitivity, input, gate)?);
+                    }
+                }
+                for sum in sums {
+                    grad_gate.push(require_derived_finite("grad_gate_sum", sum as f32)?);
+                }
+            }
         }
         Ok((
             ToposResonatorBackward {
