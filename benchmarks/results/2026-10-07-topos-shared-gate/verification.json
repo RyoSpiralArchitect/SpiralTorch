@@ -1,0 +1,131 @@
+{
+  "schema": "spiraltorch.topos_shared_gate_verification.v1",
+  "status": "passed",
+  "source_revision": "4809ba969bf56f173dc8fa43ac5247dc08cc0647",
+  "parent_revision": "9b734752e61ec517f44af0da709d2cf429044157",
+  "source_sha256": {
+    "crates/st-nn/src/layers/topos_resonator.rs": "0d52fc87cdc0b49ea2a8756a8d46bab4cf4de9b0104100327ed4657fb93ef361",
+    "crates/st-nn/src/layers/mod.rs": "bedb9bf1d67a07731eadcb3b781d741abcd450b16552e8b63c7c13a6857e1a69",
+    "crates/st-nn/src/lib.rs": "418fc28ca5d7c07bfa7e7228901da890e9345db44f54e4fc5ea28d0cbc14b5d8",
+    "crates/st-nn/examples/topos_shared_gate_probe.rs": "2573258cc6fd83bf20f932d4fb74cca194eef2fb448cbb1a2b499c4509d80be9",
+    "tools/check_topos_shared_gate_learning.py": "fcb2ae0838e31a730527f41ca7ead5c2441d41708aa021459a5113059246033c",
+    "tools/test_topos_shared_gate_learning.py": "06a27d2889a943740ecf25879ef6a8ed05c699ab4749a2dcbaf84a149d109ec3",
+    "docs/topos_learning.md": "8b962b5c7597ba4a0057a1d00c43eb5a97b7a443bccdf907b2602160f192ecff",
+    ".github/workflows/ci.yml": "45e37878969665b9246a3aab537fcfd3b43900812e72421d7291ce8e0bba9529"
+  },
+  "private_binary_sha256": "1908330a952523b8b8745c309aa6247369263887401b41cdd0faf9f085ddc8b5",
+  "rust_tests": {
+    "nn_default": 772,
+    "nn_wgpu_topos": 26
+  },
+  "hardware_execution": {
+    "executed": true,
+    "shared_gate_route_combinations": 12,
+    "row_counts": [
+      1,
+      3,
+      257
+    ],
+    "features": 5,
+    "backward_replays": 2,
+    "typed_row_reduction_receipts_checked": true,
+    "no_fallback": true
+  },
+  "wasm_nn_release": {
+    "status": "passed",
+    "scope": "Compilation only, not direct WASM NN execution or a new frontend API"
+  },
+  "tool_tests": 150,
+  "fmt": "passed",
+  "negative_checks": [
+    {
+      "name": "averaged-gradient",
+      "exit_code": 1,
+      "python_optimized": true,
+      "no_success_report": true,
+      "receipt_sha256": "edfafed63cd257c08109a319eab7f0ebc7dc25c8922cc497cd1011f3abcbd2a6",
+      "log_sha256": "d8ed4d5136ddc12bcf6e8e4a180584b0cc979a86f43e349a9d16a83f3f780485"
+    },
+    {
+      "name": "changed-weight",
+      "exit_code": 1,
+      "python_optimized": true,
+      "no_success_report": true,
+      "receipt_sha256": "e7289159956251c26b7f43c0a253e31aa48996dadc37700856c91b2a911761e5",
+      "log_sha256": "a1336dc02e3f9ea2d8e74061d402c93286408c1d5c7cde449ccd4d933c54fabb"
+    },
+    {
+      "name": "missing-step",
+      "exit_code": 1,
+      "python_optimized": true,
+      "no_success_report": true,
+      "receipt_sha256": "ed7b4bee7d42d191f0fb9157bd2a3f6cc44ed3b14c099122f837a0a3bf17011b",
+      "log_sha256": "a81ff920916c301f3309d5b6987b3f48a9094784b09dab5ecb4a73447838185e"
+    },
+    {
+      "name": "nonfinite-gradient",
+      "exit_code": 1,
+      "python_optimized": true,
+      "no_success_report": true,
+      "receipt_sha256": "6248bde7da187bd1c1d5d1d5fc333c0e4dbad61dee16366223600011602e5764",
+      "log_sha256": "a32fe22d9ea6ade04541e2b74eb0949fc8e705d9b96bbd3b5ea18a1c32177882"
+    },
+    {
+      "name": "wrong-gate-layout",
+      "exit_code": 1,
+      "python_optimized": true,
+      "no_success_report": true,
+      "receipt_sha256": "98a4db53a36978b49155b45da7953b21657fa27242ca5f5151e52204ba0b1771",
+      "log_sha256": "6b473f85a208938a07d7974f7edbe40a68b292a65878479a5f52cd7fef5caaa5"
+    }
+  ],
+  "retained_logs_sha256": {
+    "fmt-api-correction.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fmt-initial.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fmt-shared-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fmt-shared-probe.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fmt-shared-tests.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fmt-shared-wgpu.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fmt-signed-zero-merge.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "nn-shared-all.log": "ca1fd66bdd85c2b136ad061afbe2fc142f808a959f52e56b6469a744a21925c7",
+    "rejected-averaged-gradient.log": "d8ed4d5136ddc12bcf6e8e4a180584b0cc979a86f43e349a9d16a83f3f780485",
+    "rejected-changed-weight.log": "a1336dc02e3f9ea2d8e74061d402c93286408c1d5c7cde449ccd4d933c54fabb",
+    "rejected-missing-step.log": "a81ff920916c301f3309d5b6987b3f48a9094784b09dab5ecb4a73447838185e",
+    "rejected-nonfinite-gradient.log": "a32fe22d9ea6ade04541e2b74eb0949fc8e705d9b96bbd3b5ea18a1c32177882",
+    "rejected-wrong-gate-layout.log": "6b473f85a208938a07d7974f7edbe40a68b292a65878479a5f52cd7fef5caaa5",
+    "shared-checker-tests.log": "b411c023c70b8479e9c4dc98b4a317930ed647ad5f3b6f0ea8bcb3a01496dd08",
+    "shared-combined-tools.log": "bf3caaa80e702ac24d626fdad013a730312274a2a33874bccc6f308858486602",
+    "shared-native-learning.log": "a3caec9a7a60d893013933a12c9630099f4f1b0e7daf7b4f7b189b3f18511753",
+    "shared-probe-build.log": "01dd7b86f714fa4f9e1566bec60da3f883885a47ba7453f50b725008409296b8",
+    "shared-torch-learning.log": "307828131abc404a85734feda6e4e9027950ee7d88276ccbaf6568d34be5fa3a",
+    "shared-wasm-nn-build.log": "5d152021b6cafeb95f809ac63727b63dd7520daf10ade0bfb92f177dec81a01f",
+    "shared-wgpu-macro-fixed.log": "ca960279bffac2f62006b52d18a38c6bfcbf993e01fce6a997a0b65605f12ad0",
+    "shared-wgpu.log": "a59cfb69841953d24b204a6ca910c359413dbe5d29399954b6068c7600ba017b",
+    "topos-initial.log": "0644f6874fc50d5320498c3ec3c01e1f955586d3a471f76df3b7e7d77cd281ca",
+    "topos-shared-api-corrected.log": "6ff5111ae3ecc839ba26d94cf50d1e503722df8a6f35e64942b04754e10e00db",
+    "topos-shared-tests.log": "6b9f8a7f92ce4067ceb92d265cdf7ec1d183dcb14054f42aae7cfe6f80e47cf7",
+    "topos-signed-zero-merge.log": "6d5987ae897afceca8f793a3c82db0be4305cf7718e852af7790a9732ed054bd"
+  },
+  "rejected_attempts": [
+    {
+      "log": "topos-shared-tests.log",
+      "stage": "test_compile",
+      "reason": "12 test-only API-name errors; fixed Layout::ColMajor, Tensor::from_fn, layers::Identity; log retained"
+    },
+    {
+      "log": "shared-wgpu.log",
+      "stage": "compile",
+      "reason": "metadata JSON macro recursion budget; moved extra fields outside macro without raising crate recursion limits; log retained"
+    }
+  ],
+  "limits": [
+    "No timing or model-quality claim",
+    "No new Python native extension or shared-gate Python/WASM constructor",
+    "Host Tensor route, not GPU residency",
+    "Core backward audits cover expanded per-element VJPs, not their shared sum",
+    "Torch check is CPU-only; WGPU numerical/route evidence is the separate Rust test",
+    "One deterministic probe run; no input-seed population or general training claim",
+    "Prior frozen measurements and failed logs are unchanged",
+    "Hashes show byte consistency, not independent execution-history provenance"
+  ]
+}
