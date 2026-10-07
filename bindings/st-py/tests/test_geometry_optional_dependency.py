@@ -44,6 +44,8 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                         namespace[name](8)
                     elif name == 'fractional_gl_history_log_gain_autograd':
                         namespace[name](None, None, None, axis=1)
+                    elif name == 'fractional_gl_angle_autograd':
+                        namespace[name](None)
                     else:
                         namespace[name](None, None, axis=1)
                 except RuntimeError as error:
@@ -52,6 +54,9 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                     raise AssertionError(name + ' did not reject missing PyTorch')
             # Native snapshots remain usable without the optional AD client.
             from array import array
+            chart = st.FractionalGlAngleChart(0.)
+            assert chart.alpha == 1. and chart.alpha_derivative == 2.
+            assert chart.vjp(.5) == chart.jvp(.5) == 1.
             buffered = st.FractionalGlKernel().forward_buffer(array('f', [1.0]), [1], 0, 0.5)
             assert buffered.output_buffer() == array('f', [1.0]).tobytes()
             assert buffered.vjp_alpha_buffer(array('f', [2.0])) == 0.0

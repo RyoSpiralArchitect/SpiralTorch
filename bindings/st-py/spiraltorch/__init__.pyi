@@ -16,7 +16,20 @@ from .fractional_autograd import (
     fractional_gl_history_l2_autograd as fractional_gl_history_l2_autograd,
     FractionalGainHistoryAdapter as FractionalGainHistoryAdapter,
     fractional_gl_history_log_gain_autograd as fractional_gl_history_log_gain_autograd,
+    FractionalAngleGainHistoryAdapter as FractionalAngleGainHistoryAdapter,
+    fractional_gl_angle_autograd as fractional_gl_angle_autograd,
 )
+
+class FractionalGlAngleChart:
+    def __init__(self, angle: float) -> None: ...
+    @property
+    def angle(self) -> float: ...
+    @property
+    def alpha(self) -> float: ...
+    @property
+    def alpha_derivative(self) -> float: ...
+    def vjp(self, alpha_upstream: float) -> float: ...
+    def jvp(self, angle_tangent: float) -> float: ...
 
 class FractionalGlKernel:
     @staticmethod

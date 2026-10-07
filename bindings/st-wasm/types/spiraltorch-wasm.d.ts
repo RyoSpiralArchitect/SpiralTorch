@@ -10,6 +10,16 @@
  */
 declare module "spiraltorch-wasm" {
     /** Causal zero-padded GL, Rust f32 host execution; no WebGPU claim. */
+    export class FractionalGlAngleChart {
+        constructor(angle: number);
+        readonly angle: number;
+        readonly alpha: number;
+        readonly alpha_derivative: number;
+        vjp(alpha_upstream: number): number;
+        jvp(angle_tangent: number): number;
+        free(): void;
+    }
+
     export class FractionalGlKernel {
         static gain_from_log_gain(log_gain: number): number;
         constructor(kernel_len: number, step: number, max_values: number, max_products: number);

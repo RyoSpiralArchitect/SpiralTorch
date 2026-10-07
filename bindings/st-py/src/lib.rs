@@ -462,6 +462,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "gl_coeffs_adaptive",
         "fracdiff_gl_1d",
         "FractionalGlKernel",
+        "FractionalGlAngleChart",
         "FractionalGlLearningBatch",
         "FractionalGlGainLearningBatch",
         "fft_radix2",

@@ -19,7 +19,8 @@ from .geometry_autograd import _input, _require_torch, _strength, _values, torch
 __all__ = ["fractional_gl_autograd", "fractional_gl_history_autograd",
            "fractional_gl_history_l2_autograd", "FractionalMemoryAdapter",
            "FractionalHistoryAdapter", "FractionalL2HistoryAdapter",
-           "fractional_gl_history_log_gain_autograd", "FractionalGainHistoryAdapter"]
+           "fractional_gl_history_log_gain_autograd", "FractionalGainHistoryAdapter",
+           "fractional_gl_angle_autograd", "FractionalAngleGainHistoryAdapter"]
 
 
 def _kernel(**options: Any) -> Any:
@@ -75,6 +76,30 @@ def _history_gain(gain: float) -> float:
 
 
 if torch is not None:
+    class _FractionalGlAngleFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, angle: Any) -> Any:
+            from . import FractionalGlAngleChart
+
+            ctx.chart = FractionalGlAngleChart(angle.detach().item())
+            ctx.save_for_backward(angle)
+            ctx.save_for_forward(angle)
+            return torch.tensor(ctx.chart.alpha, dtype=angle.dtype, device=angle.device)
+
+        @staticmethod
+        @torch.autograd.function.once_differentiable
+        def backward(ctx: Any, upstream: Any) -> tuple[Any]:
+            angle, = ctx.saved_tensors
+            gradient = ctx.chart.vjp(upstream.detach().item())
+            return (torch.tensor(gradient, dtype=angle.dtype, device=angle.device),)
+
+        @staticmethod
+        def jvp(ctx: Any, tangent: Any) -> Any:
+            angle, = ctx.saved_tensors
+            value = ctx.chart.jvp(0.0 if tangent is None else tangent.detach().item())
+            return torch.tensor(value, dtype=angle.dtype, device=angle.device)
+
+
     class _FractionalGlFunction(torch.autograd.Function):
         @staticmethod
         def forward(ctx: Any, kernel: Any, value: Any, alpha: Any, axis: int,
@@ -171,6 +196,19 @@ if torch is not None:
             return _transport_output(result, value, ctx.buffer_transport)
 
 
+def fractional_gl_angle_autograd(angle: Any) -> Any:
+    """Rust alpha=1+2*tan(angle), with first-order scalar VJP/JVP.
+
+    Domain: -atan(1/2) < angle < pi/2 after float32 conversion. No clipping,
+    wrapping, higher-order AD or torch.func. Compose with the existing GL map;
+    this does not replace its convolution or promise cross-chart quality parity.
+    """
+    _require_torch()
+    if not isinstance(angle, torch.Tensor) or angle.ndim != 0 or angle.dtype != torch.float32:
+        raise TypeError("angle must be a scalar float32 tensor")
+    return _FractionalGlAngleFunction.apply(angle)
+
+
 def fractional_gl_autograd(value: Any, alpha: Any, *, axis: int, kernel: Any = None) -> Any:
     """Causal zero-padded GL on an ND axis, with true input and scalar-alpha VJPs.
 
@@ -250,6 +288,9 @@ if torch is None:
 
     class FractionalGainHistoryAdapter(FractionalHistoryAdapter):
         pass
+
+    class FractionalAngleGainHistoryAdapter(FractionalHistoryAdapter):
+        pass
 else:
     class FractionalMemoryAdapter(torch.nn.Module):
         """Identity-initialized [batch,time,feature] residual with learnable order.
@@ -279,13 +320,20 @@ else:
         def execution_backend(self) -> str:
             return self._kernel.execution_backend
 
+        def _order_parameter(self) -> Any:
+            return self.log_alpha
+
+        def _alpha_tensor(self) -> Any:
+            return self.log_alpha.exp()
+
         def _checked_input(self, value: Any) -> float:
             _input(value)
             if value.ndim != 3 or value.shape[-1] != self.features:
                 raise ValueError("fractional memory needs [batch, time, features]")
-            if self.gate.dtype != value.dtype or self.log_alpha.dtype != value.dtype:
+            order = self._order_parameter()
+            if self.gate.dtype != value.dtype or order.dtype != value.dtype:
                 raise TypeError("fractional memory parameters must remain float32")
-            if value.device != self.gate.device or value.device != self.log_alpha.device:
+            if value.device != self.gate.device or value.device != order.device:
                 raise ValueError("input and adapter parameters must share a device")
             return _strength(self.strength)
 
@@ -293,7 +341,7 @@ else:
             strength = self._checked_input(value)
             if strength == 0.0:
                 return value
-            difference = fractional_gl_autograd(value, self.log_alpha.exp(), axis=1, kernel=self._kernel)
+            difference = fractional_gl_autograd(value, self._alpha_tensor(), axis=1, kernel=self._kernel)
             return value + strength * self.gate.tanh() * difference
 
         def get_extra_state(self) -> dict[str, Any]:
@@ -339,7 +387,7 @@ else:
                 raise ValueError("input and adapter parameters must share a device")
             if strength == 0.0:
                 return value
-            history = self._history(value, self.log_alpha.exp())
+            history = self._history(value, self._alpha_tensor())
             local = value + strength * self.local_gate.tanh() * value
             return local + strength * self.gate.tanh() * history
 
@@ -414,3 +462,45 @@ else:
         def _history(self, value: Any, alpha: Any) -> Any:
             return fractional_gl_history_log_gain_autograd(value, alpha, self.log_gain,
                                                           axis=1, kernel=self._kernel)
+
+
+    class FractionalAngleGainHistoryAdapter(FractionalGainHistoryAdapter):
+        """2*F+2 parameters with Rust's bounded angular GL shape chart.
+
+        Same identity feature gates and log-gain as the log-order adapter,
+        but a distinct recipe and parameter name prevent silent checkpoint
+        substitution. Complete unpadded prefixes, float32 and no KV cache.
+        Leaving the chart fails; no parameter projection is performed.
+        """
+
+        _state_schema = "spiraltorch.fractional_angle_gain_history_adapter.v1"
+
+        def __init__(self, features: int, *, initial_angle: float = 0.0,
+                     initial_gain: float = 1.0, strength: float = 0.1, **kernel_options: Any) -> None:
+            from . import FractionalGlAngleChart
+
+            if isinstance(initial_angle, bool) or not isinstance(initial_angle, (int, float)):
+                raise TypeError("initial_angle must be a number")
+            chart = FractionalGlAngleChart(initial_angle)
+            super().__init__(features, initial_alpha=chart.alpha, initial_gain=initial_gain,
+                             strength=strength, **kernel_options)
+            gain = self.log_gain
+            del self.log_alpha
+            del self.log_gain
+            self.history_angle = torch.nn.Parameter(torch.tensor(chart.angle, dtype=torch.float32))
+            self.log_gain = gain
+
+        def _order_parameter(self) -> Any:
+            return self.history_angle
+
+        def _alpha_tensor(self) -> Any:
+            return fractional_gl_angle_autograd(self.history_angle)
+
+        @property
+        def alpha(self) -> float:
+            """Read the native chart, including its domain guard, without AD."""
+            from . import FractionalGlAngleChart
+
+            if self.history_angle.ndim != 0 or self.history_angle.dtype != torch.float32:
+                raise TypeError("history_angle must remain scalar float32")
+            return FractionalGlAngleChart(float(self.history_angle.detach())).alpha
