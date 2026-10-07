@@ -94,6 +94,12 @@ gradients and the sensitivity bound and computes the same backward audit from
 the saved transition. It does not run the finite recurrence twice again.
 This is an audit of Rust-owned results, not independent verification of an
 external executor; WGPU results still use the full formula-comparison audit.
+Direct CPU and legacy Auto routes rely on the core capture's complete input,
+gate and finite-drive checks instead of repeating the same scan in the NN
+wrapper. Accelerator requests retain early admission before route metadata,
+availability checks and dispatch, including requests that select CPU via a
+size threshold. Invalid forward calls do not replace an existing valid tape
+or gradient. This does not expose an unchecked core entry point.
 
 The NN cache shares its immutable tape across repeated band pullbacks, checks
 input and gate consistency bit-for-bit (including signed zero), and invalidates

@@ -138,6 +138,105 @@ fn empty_shared_input_checks_feature_gate_before_dispatch() {
     }
 }
 
+#[test]
+fn forward_admission_keeps_core_errors_and_rejects_before_route_events() {
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = events.clone();
+    let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+        captured.lock().unwrap().push(event.op_name);
+    })));
+    let policies = [
+        None,
+        Some(BackendPolicy::from_device_caps(DeviceCaps::cpu())),
+        Some(BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Allow, 1024),
+        )),
+        Some(BackendPolicy::from_device_caps_with_config(
+            DeviceCaps::wgpu(32, true, 256),
+            ExecutionConfig::new(AcceleratorFallback::Forbid, 0),
+        )),
+    ];
+    for policy in policies {
+        let _policy = policy.map(push_backend_policy);
+        for shared in [false, true] {
+            for layout in [Layout::RowMajor, Layout::ColMajor] {
+                for (input_value, gate_value) in [
+                    (f32::NAN, 1.0),
+                    (f32::INFINITY, 1.0),
+                    (1.0, f32::NAN),
+                    (1.0, f32::NEG_INFINITY),
+                    (f32::MAX, 2.0),
+                    (f32::NAN, f32::INFINITY),
+                ] {
+                    let config = ToposResonatorConfig::new(0.25, 1).unwrap();
+                    let topos = OpenCartesianTopos::new(-1.0, 1e-6, 1.0, 4, 6).unwrap();
+                    let mut layer = if shared {
+                        ToposResonator::with_shared_gate("shared", 3, config, topos).unwrap()
+                    } else {
+                        ToposResonator::with_config_and_topos("elementwise", 2, 3, config, topos)
+                            .unwrap()
+                    };
+                    let gate =
+                        Tensor::from_fn(if shared { 1 } else { 2 }, 3, |_, _| gate_value).unwrap();
+                    *layer.parameter_mut().value_mut() = gate.to_layout(layout).unwrap();
+                    let input = Tensor::from_fn(2, 3, |_, _| input_value).unwrap();
+                    let expected = validate_topos_resonator_state_with_layout(
+                        layer.core_request(&input, gate.data()),
+                        layer.gate_layout(),
+                    )
+                    .unwrap_err();
+                    events.lock().unwrap().clear();
+                    let error = layer
+                        .forward(&input.to_layout(layout).unwrap())
+                        .unwrap_err();
+                    assert_eq!(
+                        format!("{error:?}"),
+                        format!("{:?}", topos_resonator_error(expected))
+                    );
+                    assert!(layer.latest_audit().is_none());
+                    assert!(layer.parameter().gradient().is_none());
+                    assert!(!events.lock().unwrap().iter().any(|name| {
+                        matches!(*name, "tensor_util_route" | "topos_resonator_forward")
+                    }));
+                }
+            }
+        }
+    }
+    st_tensor::set_thread_meta_observer(previous);
+}
+
+#[test]
+fn failed_cpu_forward_preserves_valid_tape_and_prior_gradient() {
+    let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+    let mut layer = ToposResonator::from_shared_gate(
+        "shared",
+        Tensor::from_vec(1, 2, vec![2.0, 2.0]).unwrap(),
+        ToposResonatorConfig::new(0.25, 5).unwrap(),
+        OpenCartesianTopos::new(-1.0, 1e-6, 4.0, 8, 4).unwrap(),
+    )
+    .unwrap();
+    let valid = Tensor::from_vec(2, 2, vec![0.1, 0.2, -0.3, 0.4]).unwrap();
+    let upstream = Tensor::from_vec(2, 2, vec![0.5; 4]).unwrap();
+    layer.forward(&valid).unwrap();
+    let expected = layer.backward(&valid, &upstream).unwrap();
+    let saved = tape(&layer);
+    let audit = layer.latest_backward_audit();
+    let gradient = bits(layer.parameter().gradient().unwrap().data());
+    for invalid in [f32::NAN, f32::INFINITY, f32::MAX] {
+        assert!(layer
+            .forward(&Tensor::from_vec(2, 2, vec![invalid; 4]).unwrap())
+            .is_err());
+        assert!(Arc::ptr_eq(&saved, &tape(&layer)));
+        assert_eq!(layer.latest_backward_audit(), audit);
+        assert_eq!(bits(layer.parameter().gradient().unwrap().data()), gradient);
+    }
+    assert_eq!(
+        bits(layer.backward(&valid, &upstream).unwrap().data()),
+        bits(expected.data())
+    );
+}
+
 #[cfg(feature = "wgpu")]
 #[test]
 fn gpu_then_cpu_replays_keep_the_same_compact_tape() {
