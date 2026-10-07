@@ -364,6 +364,9 @@ jobs:
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
           node tools/probe_topos_capture_wasm.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             "$RUNNER_TEMP/topos-captured-vjp.json" --require-capture
+          node tools/probe_topos_browser_learning.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            bindings/st-wasm/tests/topos_resonator_learning_fixture.json \
+            "$RUNNER_TEMP/topos-browser-learning.json"
       - name: Portable NN plans without WebGPU
         run: |
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features nn
