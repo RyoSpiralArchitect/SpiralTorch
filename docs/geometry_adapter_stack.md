@@ -6,6 +6,10 @@ module surgery, not any geometric operator, derivative or optimizer rule.
 Different families can share this placement API without gaining a second
 Python implementation of their mathematics.
 
+The [captured Topos tape](topos_learning.md) avoids backward recomputation and
+reupload of saved inputs without changing placement, optimizer or derivative
+semantics.
+
 ```python
 import torch
 from spiraltorch import (

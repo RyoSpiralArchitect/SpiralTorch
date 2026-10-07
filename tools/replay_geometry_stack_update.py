@@ -37,10 +37,19 @@ def compare_update(proof, actual, expected, report):
     require(actual["base_sha256"] == report["base_sha256"], "base identity differs")
 
 
+def check_transport(calls, report, topos_capture):
+    shape, features = report["shape"], [report["config"]["features"]]
+    # Forward WaveGate (x/gate/bias), optional Topos (x/gate), then reverse VJPs.
+    expected = [shape, features, features] + ([shape] * 3 if topos_capture else []) + [shape]
+    require(calls == expected, "geometry bulk transport call sequence differs")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("previous", "client-root", "model-dir", "corpus", "package-root", "runtime-manifest", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--topos-capture", action="store_true",
+                        help="Require the new Topos captured bulk path as well as WaveGate")
     args = parser.parse_args()
     require(not args.output.exists(), "output exists")
     report = json.loads((args.previous / "report.json").read_bytes())
@@ -65,6 +74,8 @@ def main():
     require(str(torch.__version__) == report["torch"] and str(transformers.__version__) == report["transformers"],
             "Torch/Transformers version differs")
     require(bridge._buffer_transport_available(), "bulk transport unavailable")
+    if args.topos_capture:
+        require(hasattr(st.ToposResonatorKernel, "capture_buffer"), "Topos capture unavailable")
     torch.set_num_threads(config["threads"])
     torch.use_deterministic_algorithms(True)
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_dir, local_files_only=True)
@@ -98,11 +109,11 @@ def main():
         finally:
             bridge._buffer_values = original
         compare_update(proof, actual, expected, report)
-        require(calls == [report["shape"], [config["features"]], [config["features"]], report["shape"]],
-                "WaveGate did not use bulk transport in forward and backward")
+        check_transport(calls, report, args.topos_capture)
         proof.verify_runtime(args.package_root, manifest)
         state = proof.save_state(args.output / "state.pt", actual)
-        result = {"schema": "spiraltorch.geometry_stack_native_replay.v1", "status": "bitwise_exact",
+        result = {"schema": "spiraltorch.geometry_stack_native_replay.v2" if args.topos_capture
+                  else "spiraltorch.geometry_stack_native_replay.v1", "status": "bitwise_exact",
                   "source_report_sha256": digest(args.previous / "report.json"),
                   "source_midpoint_sha256": digest(args.previous / "midpoint.pt"),
                   "source_states_sha256": digest(args.previous / "states.pt"),
@@ -111,6 +122,7 @@ def main():
                   "records": actual["records"], "parameter_count": actual["parameter_count"],
                   "base_sha256": actual["base_sha256"], "base_unchanged": True,
                   "bulk_transport_shapes": calls, "auxiliary_updates": 1,
+                  "topos_capture_required": args.topos_capture,
                   "raw_gradients_adapter_adam_rng_exact": True, "heldout_scoring": False, "timing_evidence": False}
         proof.write_json(args.output / "report.json", result)
         print(json.dumps({"status": result["status"], "auxiliary_updates": 1, "parameter_count": actual["parameter_count"]}), flush=True)

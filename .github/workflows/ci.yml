@@ -362,6 +362,8 @@ jobs:
           node bindings/st-wasm/tests/fractional_tiled_forward.mjs "$module"
           node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
+          node tools/probe_topos_capture_wasm.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            "$RUNNER_TEMP/topos-captured-vjp.json" --require-capture
       - name: Portable NN plans without WebGPU
         run: |
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features nn
@@ -711,6 +713,8 @@ jobs:
           python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "EllipticCausalLearningBatch"); assert hasattr(st, "EllipticCausalResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
+            bindings/st-py/tests/test_topos_capture.py \
+            bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \
             bindings/st-py/tests/test_geometry_adapter_stack_results.py \
             bindings/st-py/tests/test_geometry_optional_dependency.py \
@@ -761,4 +765,4 @@ jobs:
             bindings/st-py/tests/test_wave_gate_long_horizon_summary.py \
             bindings/st-py/tests/test_elliptic_nonlinear_study.py \
             bindings/st-py/tests/test_elliptic_causal_study.py
-          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_replay_geometry_stack_update.py
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_benchmark_topos_learning.py tools/test_replay_geometry_stack_update.py

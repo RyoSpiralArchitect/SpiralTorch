@@ -61,6 +61,11 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
                     raise AssertionError(name + ' did not reject missing PyTorch')
             # Native snapshots remain usable without the optional AD client.
             from array import array
+            assert 'ToposResonatorLearningBatch' in namespace
+            topos = st.ToposResonatorKernel().capture_buffer(array('f', [1.]), array('f', [0.]), 1, 1)
+            assert isinstance(topos, namespace['ToposResonatorLearningBatch'])
+            assert topos.output_buffer() == array('f', [0.]).tobytes()
+            assert topos.vjp_buffer(array('f', [1.]))[1] == array('f', [1.328125]).tobytes()
             wave = st.WaveGateKernel().forward_buffer(
                 array('f', [1.]), array('f', [0.]), array('f', [0.]), 1, 1)
             assert wave.output_buffer() == array('f', [0.]).tobytes()
