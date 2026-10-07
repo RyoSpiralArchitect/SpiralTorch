@@ -364,6 +364,8 @@ jobs:
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
           node tools/probe_topos_capture_wasm.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             "$RUNNER_TEMP/topos-captured-vjp.json" --require-capture
+          node tools/probe_topos_shared_transport.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            "$RUNNER_TEMP/topos-shared-transport.json"
           node tools/probe_topos_browser_learning.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             bindings/st-wasm/tests/topos_resonator_learning_fixture.json \
             "$RUNNER_TEMP/topos-browser-learning.json"
@@ -720,6 +722,7 @@ jobs:
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
             bindings/st-py/tests/test_topos_capture.py \
+            bindings/st-py/tests/test_topos_shared_transport.py \
             bindings/st-py/tests/test_topos_matched_controls.py \
             bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \
@@ -775,3 +778,5 @@ jobs:
           python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_benchmark_topos_learning.py tools/test_replay_geometry_stack_update.py tools/test_topos_inlining_results.py tools/test_topos_evolution_results.py tools/test_topos_browser_learning_results.py
       - name: Verify frozen Topos NN measurements
         run: python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_topos_nn_capture_results.py tools/test_topos_shared_gate_learning.py tools/test_topos_resident_kernel_results.py tools/test_topos_resident_graph_results.py tools/test_topos_resident_capture_results.py
+      - name: Verify shared Topos transport measurements
+        run: python -I -S -B tools/test_topos_shared_transport_results.py

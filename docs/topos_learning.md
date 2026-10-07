@@ -25,9 +25,11 @@ this is not zero-copy. A tape retains four float32 vectors of element count N
 (input, per-element gate, sensitivity, output), about **16 N bytes** plus
 metadata, excluding temporary transport buffers and the client's saved tensors.
 
-`topos_resonator_autograd` and `ToposResonatorAdapter` use the same capture API.
-Torch still handles gate broadcasting and reduction; Rust returns both full
-per-element gradients. Only the upstream gradient is uploaded during backward.
+`topos_resonator_autograd` and `ToposResonatorAdapter` use the same core tape.
+Feature gates `[F]` (or `[1, ..., 1, F]`) now use shared-row capture: the client
+transports F gate values, not N, and Rust returns N input gradients and F gate
+gradients. Other broadcast shapes retain the elementwise route and Torch's
+reduction. Only the upstream gradient is uploaded during backward.
 Optional NumPy enables bulk transport; the sequence fallback has identical
 semantics. Saved Torch tensors still enforce in-place version checks. These
 are first derivatives only, and the execution backend remains **Rust f32 CPU**
@@ -40,6 +42,47 @@ WASM exposes `kernel.capture(Float32Array, Float32Array, rows, features)`,
 typed `grad_input` and `grad_gate` arrays. Copies outlive their Rust handles;
 call `.free()` on batches and pullbacks when finished. A batch can outlive its
 kernel. Direct Rust consumers use the same `ToposResonatorLearningBatch` core.
+
+### Unexpanded Shared-Row Transport
+
+Rust offers `forward_shared_rows`, `capture_shared_rows`, and
+`capture_shared_rows_owned`. Python exposes the first two, also with `_buffer`
+suffixes; WASM exposes `forwardSharedRows` and `captureSharedRows`. Forward
+does not allocate a tape. A shared tape stores input, output and sensitivity
+of length N plus a gate of length F: **12 N + 4 F bytes** of f32 storage,
+excluding allocation capacity, metadata, temporary and client buffers.
+`gate_layout` / `gateLayout` and `gate_values` / `gateValues` describe the tape
+and its gate-VJP shape. Existing elementwise methods are unchanged.
+
+The same finite recurrence, derivative multiplication order and forward audit
+are used. Row contributions to the shared gate VJP are individually checked in
+f32, accumulated in row order in f64, then rounded once to f32 and checked again.
+This is a **sum, not an average**, matching CPU `Tensor::try_sum_axis0`. It can
+retain cancellation when an intermediate f32 sum would overflow. It is not
+promised bit-identical to Torch's f32 reduction, and historical optimizer
+trajectories need not remain bit-identical after migration. Repeating a saved
+state with the same implementation still must reproduce the next update.
+
+Both N and F must fit the kernel's value budget, even when rows is zero; an
+empty input returns F zero gate gradients. Shared `vjp_audited` reports RMS of
+the reduced F gradients. The external per-element audit API is unchanged.
+This is CPU/scalar-WASM transport optimization, **not GPU-resident HF training**
+or evidence of better language-model quality. The native `st-nn` CPU shared
+layer below still uses its existing expanded tape and separate tensor reduction.
+
+Reproduce the scalar-WASM contract in Node or Chrome and compare equivalent
+finite-unroll CPU routes (including the old expanded captured control):
+
+```sh
+node tools/probe_topos_shared_transport.mjs /tmp/shared-node /tmp/shared-node-new.json
+node tools/test_resident_browser.cjs /tmp/shared-web "$CHROME_EXECUTABLE" /tmp/shared-browser-new.json "" "" "" "" topos-shared-transport
+python tools/benchmark_topos_learning.py --shape 2 128 768 --iterations 5 --include-expanded-capture --rounds 15 --native-profile release --output /tmp/shared-benchmark-new.json
+```
+
+The benchmark keeps bitwise checks for Rust output and input VJPs; shared gate
+VJPs are checked against an independent wide sum of the legacy elementwise
+VJPs. It also records numerical differences from the legacy Torch-f32 sum.
+Timings cover forward plus both VJPs and host transport, not optimizer updates.
 
 ## Rust NN Learning
 

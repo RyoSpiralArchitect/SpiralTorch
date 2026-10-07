@@ -153,10 +153,79 @@ impl PyToposResonatorKernel {
         let gate = read_f32(gate, self.max_values(), Some(input.len()))?;
         self.capture(py, input, gate, rows, features)
     }
+
+    fn forward_shared_rows(
+        &self,
+        py: Python<'_>,
+        input: Vec<f32>,
+        gate: Vec<f32>,
+        rows: usize,
+        features: usize,
+    ) -> PyResult<Vec<f32>> {
+        py.detach(|| {
+            self.operator
+                .forward_shared_rows(&input, &gate, rows, features)
+        })
+        .map(|step| step.output)
+        .map_err(value_error)
+    }
+
+    fn forward_shared_rows_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        input: &Bound<'_, PyAny>,
+        gate: &Bound<'_, PyAny>,
+        rows: usize,
+        features: usize,
+    ) -> PyResult<Bound<'py, PyByteArray>> {
+        let input = read_f32(input, self.max_values(), None)?;
+        let gate = read_f32(gate, self.max_values(), Some(features))?;
+        let output = self.forward_shared_rows(py, input, gate, rows, features)?;
+        write_f32(py, output.into_iter())
+    }
+
+    fn capture_shared_rows(
+        &self,
+        py: Python<'_>,
+        input: Vec<f32>,
+        gate: Vec<f32>,
+        rows: usize,
+        features: usize,
+    ) -> PyResult<PyToposResonatorLearningBatch> {
+        py.detach(|| {
+            self.operator
+                .capture_shared_rows_owned(input, gate, rows, features)
+        })
+        .map(|inner| PyToposResonatorLearningBatch { inner })
+        .map_err(value_error)
+    }
+
+    fn capture_shared_rows_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        gate: &Bound<'_, PyAny>,
+        rows: usize,
+        features: usize,
+    ) -> PyResult<PyToposResonatorLearningBatch> {
+        let input = read_f32(input, self.max_values(), None)?;
+        let gate = read_f32(gate, self.max_values(), Some(features))?;
+        self.capture_shared_rows(py, input, gate, rows, features)
+    }
 }
 
 #[pymethods]
 impl PyToposResonatorLearningBatch {
+    #[getter]
+    fn gate_layout(&self) -> &'static str {
+        self.inner.gate_layout().name()
+    }
+
+    #[getter]
+    fn gate_values(&self) -> usize {
+        self.inner.gate().len()
+    }
+
     #[getter]
     fn output(&self) -> Vec<f32> {
         self.inner.output().to_vec()
