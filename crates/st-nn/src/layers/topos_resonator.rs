@@ -153,6 +153,8 @@ fn emit_topos_resonator_meta(
             "estimated_total_ops": values.saturating_mul(estimated_ops_per_value),
             "empty": values == 0,
         });
+        data["expanded_gate_rows"] = serde_json::json!(rows);
+        data["expanded_gate_values"] = serde_json::json!(values);
         data["captured_sensitivity"] = serde_json::json!(captured);
         data["gate_layout"] = serde_json::json!(match gate_layout {
             ToposGateLayout::Elementwise => "elementwise",
@@ -167,7 +169,7 @@ fn emit_topos_resonator_meta(
         data["backward_audit_scope"] = serde_json::json!("expanded_elementwise_vjps");
         data["capture_reused"] = serde_json::json!(backward && captured);
         data["estimated_ops_scope"] =
-            serde_json::json!("pointwise_recurrence_or_vjp_excludes_audit_and_transport");
+            serde_json::json!("pointwise_recurrence_or_vjp_excludes_audit_reduction_and_transport");
         data["finite_amplification_bound"] = serde_json::json!(config.finite_amplification_bound());
         if let Some(message) = fallback {
             data["fallback"] = serde_json::json!({"from": "wgpu", "message": message});
@@ -1228,6 +1230,8 @@ mod tests {
         let event = &events[0];
         assert_eq!(event["rows"], 3);
         assert_eq!(event["gate_rows"], 1);
+        assert_eq!(event["expanded_gate_rows"], 3);
+        assert_eq!(event["expanded_gate_values"], 6);
         assert_eq!(event["trainable_parameters"], 2);
         assert_eq!(event["gate_layout"], "shared_rows");
         assert_eq!(
@@ -1235,6 +1239,170 @@ mod tests {
             "sum_axis0_no_additional_mean"
         );
         assert_eq!(event["backward_audit_scope"], "expanded_elementwise_vjps");
+    }
+
+    #[test]
+    fn shared_gate_signed_zero_identity_checks_precede_reduction() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        for zero in [0.0_f32, -0.0_f32] {
+            let mut layer = shared_layer(1, 2);
+            let gate = Tensor::from_vec(1, 1, vec![zero]).unwrap();
+            *layer.parameter_mut().value_mut() = gate.clone();
+            let input = Tensor::from_vec(2, 1, vec![zero, 0.25]).unwrap();
+            let upstream = Tensor::from_vec(2, 1, vec![1.0, 0.5]).unwrap();
+            layer.forward(&input).unwrap();
+            layer.backward(&input, &upstream).unwrap();
+            let gradient = layer.parameter().gradient().unwrap().clone();
+            let audit = layer.latest_backward_audit();
+            let changed = Tensor::from_vec(2, 1, vec![-zero, 0.25]).unwrap();
+            assert!(matches!(
+                layer.backward(&changed, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_input_mismatch"
+                })
+            ));
+            // Exercise the defensive parameter snapshot, bypassing the public
+            // invalidating accessor. Its shape differs from the expanded tape.
+            *layer.gate.value_mut() = Tensor::from_vec(1, 1, vec![-zero]).unwrap();
+            assert!(matches!(
+                layer.backward(&input, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_gate_mismatch"
+                })
+            ));
+            assert!(same_operand_bits(
+                layer.parameter().gradient().unwrap().data(),
+                gradient.data()
+            ));
+            assert_eq!(layer.latest_backward_audit(), audit);
+            *layer.gate.value_mut() = gate;
+            layer.backward(&input, &upstream).unwrap();
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn shared_gate_wgpu_mixed_routes_execute_row_reduction() {
+        if !wgpu_dense::is_available() {
+            eprintln!("Topos shared-gate mixed-route test skipped: WGPU is unavailable");
+            return;
+        }
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+        let close = |actual: &[f32], expected: &[f32], tolerance: f32| {
+            assert_eq!(actual.len(), expected.len());
+            for (a, e) in actual.iter().zip(expected) {
+                assert!((a - e).abs() <= tolerance, "{a} != {e}");
+            }
+        };
+        let caps = |gpu: bool| {
+            if gpu {
+                DeviceCaps::wgpu(32, true, 256)
+            } else {
+                DeviceCaps::cpu()
+            }
+        };
+        for rows in [1, 3, 257] {
+            let cols = 5;
+            let input = Tensor::from_fn(rows, cols, |r, c| {
+                ((r * 13 + c * 7) % 29) as f32 * 0.11 - 1.5
+            })
+            .unwrap();
+            let dy = Tensor::from_fn(rows, cols, |r, c| {
+                ((r * 5 + c * 11) % 23) as f32 * 0.031 - 0.3
+            })
+            .unwrap();
+            let make_layer = || {
+                let mut layer = shared_layer(cols, rows * cols);
+                *layer.parameter_mut().value_mut() =
+                    Tensor::from_vec(1, cols, vec![0.7, -0.8, 1.2, -1.1, 0.4]).unwrap();
+                layer
+            };
+            let (output, dx, dg) = {
+                let _guard = push_backend_policy(crate::test_backend_policy(caps(false), 1));
+                let mut layer = make_layer();
+                let output = layer.forward(&input).unwrap();
+                let dx = layer.backward(&input, &dy).unwrap();
+                (output, dx, layer.parameter().gradient().unwrap().clone())
+            };
+            for (forward_gpu, backward_gpu) in
+                [(false, false), (false, true), (true, false), (true, true)]
+            {
+                events.lock().unwrap().clear();
+                let mut layer = make_layer();
+                let actual = {
+                    let _guard =
+                        push_backend_policy(crate::test_backend_policy(caps(forward_gpu), 1));
+                    layer
+                        .forward(&input.to_layout(Layout::ColMajor).unwrap())
+                        .unwrap()
+                };
+                close(actual.data(), output.data(), 1e-5);
+                for replay in 1..=2 {
+                    let _guard =
+                        push_backend_policy(crate::test_backend_policy(caps(backward_gpu), 1));
+                    let actual = layer
+                        .backward(&input, &dy.to_layout(Layout::ColMajor).unwrap())
+                        .unwrap();
+                    close(actual.data(), dx.data(), 1e-5);
+                    let expected: Vec<_> = dg.data().iter().map(|g| g * replay as f32).collect();
+                    assert_eq!(layer.parameter().gradient().unwrap().shape(), (1, cols));
+                    close(
+                        layer.parameter().gradient().unwrap().data(),
+                        &expected,
+                        5e-5,
+                    );
+                    let audit = layer.latest_backward_audit().unwrap();
+                    assert!(audit.max_grad_input_error <= 1e-5);
+                    assert!(audit.max_grad_gate_error <= 1e-5);
+                }
+                let events = events.lock().unwrap();
+                for (name, gpu, expected_count) in [
+                    ("topos_resonator_forward", forward_gpu, 1),
+                    ("topos_resonator_backward", backward_gpu, 2),
+                ] {
+                    let matching: Vec<_> = events.iter().filter(|(op, _)| *op == name).collect();
+                    assert_eq!(matching.len(), expected_count);
+                    for (_, data) in matching {
+                        assert_eq!(data["backend"], if gpu { "wgpu_dense" } else { "cpu" });
+                        assert!(data.get("fallback").is_none());
+                    }
+                }
+                let sums: Vec<_> = events
+                    .iter()
+                    .filter(|(name, data)| {
+                        *name == "sum_axis0" && data["event_phase"] == "completed"
+                    })
+                    .collect();
+                assert_eq!(sums.len(), 2);
+                for (_, data) in sums {
+                    assert_eq!(
+                        data["kernel"],
+                        if backward_gpu {
+                            "tensor_util.sum_axis0"
+                        } else {
+                            "scalar"
+                        }
+                    );
+                    assert_eq!(
+                        data["execution_receipt"]["executed_backend"],
+                        if backward_gpu { "wgpu" } else { "cpu" }
+                    );
+                    assert!(data.get("fallback").is_none());
+                }
+            }
+        }
+        st_tensor::set_thread_meta_observer(previous);
+        eprintln!("Topos shared-gate test executed 12 CPU/WGPU route combinations with row-reduction receipts and repeated VJPs");
     }
 
     #[test]
