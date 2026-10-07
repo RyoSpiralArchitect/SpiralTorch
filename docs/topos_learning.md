@@ -172,9 +172,32 @@ The graph supports resident inference, arbitrary-seed VJP, the explicit graph
 learner and finite-checked transactional SGD. `exact` and `module_compatible`
 both use a **sum** for Topos gates, with no additional mean. Failure guards also
 check the next residual drive used by host Topos validation. They do not
-materialize the core semantic audit. Readback remains explicit; VJP recomputes
-the recurrence, and owning outputs can add GPU copies. No CPU fallback or
+materialize the core semantic audit. Readback remains explicit, and owning
+outputs can add GPU copies. No CPU fallback or
 implicit hypergradient/ModuleTrainer policy is introduced.
+
+Training/autograd/learner graph preparation now retains the drive sensitivity
+already evaluated by each Topos forward. This costs one private f32 per output
+element per Topos stage (`4 * output_len` bytes), written in the same forward
+dispatch. Backward reads it instead of unrolling the recurrence again; shared
+gate reduction, checked arithmetic and dispatch count are unchanged. Inference
+does not allocate this tape, and public low-level `PointwiseVjpPlan::new` keeps
+its recomputing behavior. No new Python/JavaScript mathematics is introduced.
+
+Only the latest opaque graph-forward token can reuse the tape, including
+multiple independent cotangents. Another forward or an accepted input/parameter
+replacement invalidates it. Older owning predictions and gradients remain
+valid. Forward failures survive a zero cotangent, and a failed cotangent does
+not poison a later VJP of a valid forward.
+
+`cargo run --locked --release -p st-backend-wgpu --example topos_graph_profile`
+emits nine synthetic shape/unroll cases, each with three warmups and nine GPU
+pass-timestamp samples. `--reverse` reverses case order. It uses zero-rate SGD
+to keep values fixed, includes full final state bits for matched verification,
+and checks that gates did not change. Compile the identical probe on both
+revisions and alternate the saved binaries; do not compare against a different
+model or algorithm. Timestamp readback is outside timed passes: this does not
+measure Python/browser end-to-end throughput or establish LLM quality.
 
 Python and WASM reuse an existing kernel object's Rust configuration; that
 object's scalar `forward`/`backward` retain their original CPU/WASM semantics.

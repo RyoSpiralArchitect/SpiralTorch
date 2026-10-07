@@ -7,6 +7,8 @@ mod learner;
 mod outputs;
 mod parameters;
 mod prediction;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod topos_tests;
 pub use learner::{
     GraphGradientAccumulator, GraphGradientBatch, GraphUpdateReadback, ResidentGraphLearner,
 };
