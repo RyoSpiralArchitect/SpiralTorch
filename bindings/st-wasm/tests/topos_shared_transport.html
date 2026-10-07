@@ -5,11 +5,11 @@
 <pre id="result" data-status="running">Running shared-row learning checks...</pre>
 <script type="module">
 import init, * as st from "/module/spiraltorch_wasm.js";
-import {checkSharedTopos} from "/topos_shared_transport.mjs";
+import {checkSharedTopos, checkToposSnapshotOwnership} from "/topos_shared_transport.mjs";
 const result = document.querySelector("#result");
 try {
-  await init();
-  const report = checkSharedTopos(st);
+  const exports = await init();
+  const report = {...checkSharedTopos(st), snapshot_ownership: checkToposSnapshotOwnership(st, exports.memory)};
   result.textContent = JSON.stringify(report);
   result.dataset.status = report.status;
 } catch (error) {

@@ -1,4 +1,53 @@
 // The same scalar-WASM contract runs in Node and an actual browser.
+export function checkToposSnapshotOwnership({ToposResonatorKernel}, memory) {
+  let checks = 0, cases = 0, memoryGrowths = 0;
+  const assert = (ok, label) => { checks++; if (!ok) throw Error(label); };
+  const bits = values => new Uint32Array(values.buffer, values.byteOffset, values.length);
+  const same = (a, b) => a.length === b.length && bits(a).every((v, i) => v === bits(b)[i]);
+  assert(memory instanceof WebAssembly.Memory, "real WASM memory required");
+  for (const shared of [false, true]) for (const [rows, features] of [[0, 3], [1, 1], [7, 17]]) {
+    const input = Float32Array.from({length: rows * features}, (_, i) => i % 4 ? (i % 11 - 5) * .3 : -0);
+    const gate = Float32Array.from({length: shared ? features : input.length}, (_, i) => (i % 7 - 3) * .4);
+    const upstream = Float32Array.from(input, (_, i) => i % 3 ? .7 : -0);
+    const kernel = new ToposResonatorKernel(.25, 5, 1, .2, 4096);
+    let batch, pulled, retained, expected;
+    try {
+      batch = shared ? kernel.captureSharedRows(input, gate, rows, features)
+        : kernel.capture(input, gate, rows, features);
+      pulled = batch.vjp(upstream);
+      const getters = [() => batch.output, () => pulled.grad_input, () => pulled.grad_gate];
+      retained = getters.map(read => read());
+      expected = retained.map(a => a.slice());
+      for (let i = 0; i < getters.length; i++) {
+        const first = retained[i], another = getters[i]();
+        assert(first instanceof Float32Array && another instanceof Float32Array, "typed snapshot contract");
+        assert(first.buffer !== memory.buffer && another.buffer !== first.buffer, "getter returned shared storage");
+        if (another.length) another[0] = NaN;
+        assert(same(first, expected[i]) && same(getters[i](), expected[i]), "JS mutation reached Rust or another snapshot");
+      }
+      memory.grow(1); memoryGrowths++;
+      for (let i = 0; i < getters.length; i++) {
+        assert(same(retained[i], expected[i]), "snapshot detached by WASM memory growth");
+        assert(same(getters[i](), expected[i]), "getter failed after WASM memory growth");
+      }
+      let failed = false;
+      try { batch.vjp(new Float32Array(input.length + 1)).free(); }
+      catch { failed = true; }
+      assert(failed, "invalid upstream was accepted");
+      const retry = batch.vjp(upstream);
+      try { assert(same(retry.grad_input, expected[1]) && same(retry.grad_gate, expected[2]), "failed VJP corrupted snapshots"); }
+      finally { retry.free(); }
+    } finally { pulled?.free(); batch?.free(); kernel.free(); }
+    memory.grow(1); memoryGrowths++;
+    for (let i = 0; i < retained.length; i++) {
+      assert(same(retained[i], expected[i]), "snapshot changed after owner destruction and memory growth");
+    }
+    cases++;
+  }
+  return {status: "passed", cases, checks, memory_growths: memoryGrowths,
+    contract: "Independent f32 snapshots remain valid after mutation, WASM memory growth, failure and owner destruction."};
+}
+
 export function checkSharedTopos({ToposResonatorKernel}) {
   let checks = 0, cases = 0;
   const assert = (ok, message) => { checks++; if (!ok) throw Error(message); };

@@ -13,7 +13,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::utils::{js_error, js_u32};
 #[cfg(target_arch = "wasm32")]
-use js_sys::Number;
+use js_sys::{Float32Array, Number};
 
 #[cfg(target_arch = "wasm32")]
 fn scalar(value: &Number, label: &str) -> Result<f32, JsValue> {
@@ -168,8 +168,9 @@ impl ToposResonatorLearningBatch {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn output(&self) -> Vec<f32> {
-        self.inner.output().to_vec()
+    pub fn output(&self) -> Float32Array {
+        // Copy directly into a JS-owned snapshot, never a view of WASM memory.
+        Float32Array::from(self.inner.output())
     }
 
     pub fn audit_json(&self) -> Result<String, JsValue> {
@@ -188,12 +189,12 @@ impl ToposResonatorLearningBatch {
 #[wasm_bindgen]
 impl ToposResonatorPullback {
     #[wasm_bindgen(getter)]
-    pub fn grad_input(&self) -> Vec<f32> {
-        self.inner.grad_input.clone()
+    pub fn grad_input(&self) -> Float32Array {
+        Float32Array::from(self.inner.grad_input.as_slice())
     }
 
     #[wasm_bindgen(getter)]
-    pub fn grad_gate(&self) -> Vec<f32> {
-        self.inner.grad_gate.clone()
+    pub fn grad_gate(&self) -> Float32Array {
+        Float32Array::from(self.inner.grad_gate.as_slice())
     }
 }
