@@ -50,14 +50,14 @@ def load():
     return data, verification
 
 
-def verify(data, verification):
+def verify(data, verification, *, revisions=REVISIONS, source_changes=None):
     assert data["schema"] == "spiraltorch.topos_nn_shared_benchmark.v1"
     assert verification["schema"] == "spiraltorch.topos_nn_shared_benchmark_verification.v1"
     plan = data["plan"]
     assert json.loads(data["plan_raw_json"]) == plan
     assert digest(data["plan_raw_json"].encode()) == verification["private_files"]["plan.json"]["sha256"]
     assert plan["schema"] == "spiraltorch.topos_nn_shared_benchmark_plan.v1"
-    assert [plan[a + "_revision"] for a in ("baseline", "candidate")] == REVISIONS
+    assert [plan[a + "_revision"] for a in ("baseline", "candidate")] == list(revisions)
     assert plan["cases"] == CASES and plan["phase_order"] == PHASES
     assert plan["case_order"] == ["forward", "reverse", "forward", "reverse"]
     assert plan["rounds"] == 20 and plan["warmup_per_route"] == 2
@@ -73,13 +73,17 @@ def verify(data, verification):
         assert build["source_revision"] == plan[arm + "_revision"]
         assert build["harness_sha256"] == plan["harness_sha256"]
         assert build["binary_sha256"] == verification["private_files"][arm + "-probe"]["sha256"]
-        assert build["binary_bytes"] == verification["private_files"][arm + "-probe"]["bytes"]
+        # Some original build records omit the duplicated size. Their complete
+        # JSON bytes are still bound above; the file inventory retains its size.
+        if "binary_bytes" in build:
+            assert build["binary_bytes"] == verification["private_files"][arm + "-probe"]["bytes"]
         assert all(re.fullmatch(r"[0-9a-f]{64}", h) for h in build["source_sha256"].values())
     before = data["builds"]["baseline"]["source_sha256"]
     after = data["builds"]["candidate"]["source_sha256"]
     assert set(before) == set(after)
-    assert {p for p in before if before[p] != after[p]} == {
-        "crates/st-core/src/dynamics/topos_resonator.rs", "crates/st-nn/src/layers/topos_resonator.rs"}
+    if source_changes is None:
+        source_changes = {"crates/st-core/src/dynamics/topos_resonator.rs", "crates/st-nn/src/layers/topos_resonator.rs"}
+    assert {p for p in before if before[p] != after[p]} == set(source_changes)
 
     expected_jobs = []
     for phase, arm in enumerate(PHASES):

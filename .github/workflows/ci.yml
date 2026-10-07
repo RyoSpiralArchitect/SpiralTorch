@@ -782,3 +782,4 @@ jobs:
         run: |
           python -I -S -B tools/test_topos_shared_transport_results.py
           python -I -S -B tools/test_topos_shared_nn_benchmark_results.py
+          python -I -S -B tools/test_topos_single_admission_results.py
