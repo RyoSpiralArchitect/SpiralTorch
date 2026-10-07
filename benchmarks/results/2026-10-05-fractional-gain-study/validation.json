@@ -1,0 +1,72 @@
+{
+  "schema": "spiraltorch.fractional_gain_publication_validation.v1",
+  "status": "completed_and_verified",
+  "study_id": "8fbdbb0749158909659fa61b834c1da4f5fea45d7e56041c260819a4ae247b58",
+  "training_source_revision": "f12c50a7ef0cf9bb6b7d26833716d4081860c024",
+  "implementation_source_revision": "ab9f4ea35c9089cf57c7a11fb593555c2d57b668",
+  "verifier_source_revision": "2f963250ce973c7e2da48a76a0fe1a751a01d428",
+  "training_process_exit_code": 0,
+  "completed_resume_exit_code": 0,
+  "completed_resume_rescored_endpoints": false,
+  "sealed_files_unchanged_after_completed_resume": true,
+  "sealed_output_files": 76,
+  "checkpoint_files": 72,
+  "primary_updates": 4608,
+  "continuation_only_updates": 18,
+  "runs": 9,
+  "checkpoint_verification_sha256": "6bee20eafcb8a268f7b26e20ff94d9760895413b366b4215758ea55208d391e6",
+  "results_sha256": "033e91e40afc741730812c1c3f08089eb173702ed69700a03df785a2898be58a",
+  "frozen_client_files": 7,
+  "frozen_runtime_files": 71,
+  "model_files_verified": 7,
+  "corpora_verified": 2,
+  "preservation": {
+    "factorial_primary": 100,
+    "factorial_client": 5,
+    "factorial_runtime": 71,
+    "two_lag_primary": 100,
+    "two_lag_client": 6,
+    "two_lag_runtime": 70,
+    "previous_gain_runtime": 71
+  },
+  "preflight": {
+    "publication": "../2026-10-05-fractional-gain-preflight/",
+    "auxiliary_training_updates": 6,
+    "continuation_only_updates": 6,
+    "heldout_losses_computed": false,
+    "preflight_sha256": "522d188e7cae9b38140bbbbbf517a6b643f15fbd94c2d8031289250ee5473b2d"
+  },
+  "environment": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 2
+  },
+  "tests": {
+    "python_regressions": {
+      "passed": 646,
+      "skipped": 0,
+      "existing_jit_deprecation_warnings": 18
+    },
+    "targeted_verifier_and_study": {
+      "passed": 80,
+      "skipped": 0
+    },
+    "benchmark_correctness": {
+      "passed": 34,
+      "skipped": 0,
+      "timing": false
+    }
+  },
+  "private_log_sha256": {
+    "primary-training.log": "baf88e4facfb16bc7253cb19990758ef81226f982155225121b9ad895c0e8be2",
+    "completed-resume.log": "e42791c41edf0448ff96f6a574d1038064b9ab5bd4b8166ff63acb2963a722f2",
+    "checkpoint-verification.log": "205c9e35f49b88f3c01bc1592c4bd328add8663e10379c30a45bc89782788a26",
+    "gain-verification-regressions.log": "59309ab4568609dc1634930e46dd03d6cca037279bff54af582ad59bfcf723e9",
+    "gain-verifier-environment-pytest.log": "7c65e96e46198511a30477b0af23dc5b4adffe6cda734e439500b71f18508e33",
+    "gain-verification-benchmark-correctness.log": "8ab5d0795c8e4c4eb72fd37bceacefb7c8bcbc59d8d72052592a64c21099df59"
+  },
+  "scope": "All predeclared arms/seeds and exploratory reused endpoints retained. Validation of saved states does not rerun training or establish geometric superiority, significance, convergence, GPU residency, or cross-math speed."
+}

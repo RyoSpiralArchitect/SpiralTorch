@@ -6,6 +6,12 @@ benefit of a longer available history. This follow-up gives amplitude its own
 parameter and asks whether that mechanism does more than an ordinary learned
 short filter. It is a quality experiment, not a throughput comparison.
 
+The [completed nine-run comparison](../benchmarks/results/2026-10-05-fractional-gain-study/README.md)
+retains all outcomes: ordinary learned short beats both GL arms on both
+endpoint sets in all three seeds, while GL full beats GL short. This is not
+evidence of a distinctive GL quality advantage; shape-chart differences
+remain an explicit follow-up question.
+
 ## Matched Arms
 
 | Arm | Strictly Past Filter | Trainable Parameters |
@@ -107,9 +113,34 @@ verifies existing results without rescoring endpoints. Summarize read-only
 with `tools/summarize_wave_gate_long_horizon.py` using plan/results/journal
 and a fresh output; the receipt summary is Torch-free.
 
+After terminal success and a no-op completed resume, verify the actual saved
+tensors as a separate read-only step. This reconstructs the summary byte for
+byte, restores each arm's exact recipe, validates parameter dtype/shape and
+registration-bound Adam state, and compares the saved gain, shape coordinate
+and effective gate norm with endpoint receipts. Native gain observation stays
+in Rust. It hashes each parameter and named Adam tensor without publishing
+weights. Use the frozen seven-file client and runtime inventories:
+
+```sh
+PYTHONPATH="$FROZEN_CLIENT:$FROZEN_PACKAGE:$REPOSITORY/tools" \
+  python -P -B "$REPOSITORY/tools/verify_fractional_gain_study.py" \
+  --study "$NEW_STUDY_DIRECTORY" --summary "$SUMMARY_JSON" \
+  --client-manifest "$CLIENT_SHA256_JSON" \
+  --runtime-manifest "$RUNTIME_SHA256_JSON" --output "$NEW_VERIFICATION_JSON"
+```
+
+The client manifest is a filename-to-SHA256 object. The runtime manifest is
+`{"source_revision": "<build commit>", "files": {"spiraltorch/...": "<SHA256>"}}`,
+relative to the package root. Build and training-launch revisions can differ
+by documentation commits; executable byte identities are verified against
+the plan. Place verification output outside the sealed client/runtime/study.
+The verifier reads continuation receipts but does not rerun those updates,
+score the model, or claim state equivalence between unlike arms. Frozen file
+inventories tolerate generated `__pycache__` only; other extras are rejected.
+
 Float32, complete unpadded prefixes and no KV cache or packed documents;
 history resets at each block. All paths are host/CPU, not resident GPU.
 Publish numeric outcomes, verification records, hashes and reproduction only,
 not weights, corpus, native packages or raw private logs. The included tiny
-random-HF fixtures validate the learning path, not pretrained quality; this
-protocol document is not a claim that the nine long runs have completed.
+random-HF fixtures validate the learning path, not pretrained quality. The
+separate completed comparison above contains the real-model outcomes.
