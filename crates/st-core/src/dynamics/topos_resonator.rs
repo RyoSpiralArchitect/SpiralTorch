@@ -494,7 +494,6 @@ fn evolve_resonance<const CAPTURE_SENSITIVITY: bool>(
     }
     let coupling = request.config.coupling();
     let mut state = vec![0.0f32; volume];
-    let mut next = vec![0.0f32; volume];
     let mut sensitivity = if CAPTURE_SENSITIVITY {
         vec![0.0f32; volume]
     } else {
@@ -503,8 +502,7 @@ fn evolve_resonance<const CAPTURE_SENSITIVITY: bool>(
     let mut last_update_linf = 0.0f32;
     let mut closure_adjustment_linf = 0.0f32;
     let mut rewritten_values = 0usize;
-    for _ in 0..request.config.iterations() {
-        last_update_linf = 0.0;
+    for iteration in 0..request.config.iterations() {
         for index in 0..volume {
             let raw =
                 require_derived_finite("resonance_drive", drive[index] + coupling * state[index])?;
@@ -521,10 +519,12 @@ fn evolve_resonance<const CAPTURE_SENSITIVITY: bool>(
             if rewritten != raw {
                 rewritten_values = rewritten_values.saturating_add(1);
             }
-            last_update_linf = last_update_linf.max((rewritten - state[index]).abs());
-            next[index] = rewritten;
+            if iteration + 1 == request.config.iterations() {
+                last_update_linf = last_update_linf.max((rewritten - state[index]).abs());
+            }
+            // Stalks are independent; retain iteration-major guard order without a second buffer.
+            state[index] = rewritten;
         }
-        std::mem::swap(&mut state, &mut next);
     }
     let mut fixed_point_residual_linf = 0.0f32;
     for index in 0..volume {
@@ -788,6 +788,191 @@ pub fn audit_topos_resonator_backward(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Frozen iteration-major, double-buffered traversal from before the in-place change.
+    fn legacy_evolution<const CAPTURE: bool>(
+        request: ToposResonatorRequest<'_>,
+    ) -> Result<EvolvedResonance, ToposResonatorError> {
+        let volume = validate_request(request)?;
+        let mut drive = Vec::with_capacity(volume);
+        for (&input, &gate) in request.input.iter().zip(request.gate) {
+            drive.push(require_derived_finite("drive", input * gate)?);
+        }
+        let coupling = request.config.coupling();
+        let mut state = vec![0.0f32; volume];
+        let mut next = vec![0.0f32; volume];
+        let mut sensitivity = if CAPTURE {
+            vec![0.0f32; volume]
+        } else {
+            Vec::new()
+        };
+        let mut last_update_linf = 0.0f32;
+        let mut closure_adjustment_linf = 0.0f32;
+        let mut rewritten_values = 0usize;
+        for _ in 0..request.config.iterations() {
+            last_update_linf = 0.0;
+            for index in 0..volume {
+                let raw = require_derived_finite(
+                    "resonance_drive",
+                    drive[index] + coupling * state[index],
+                )?;
+                let (rewritten, slope) = request.topos.saturate_with_slope(raw);
+                require_derived_finite("resonance_rewrite", rewritten)?;
+                if CAPTURE {
+                    sensitivity[index] = require_derived_finite(
+                        "drive_sensitivity",
+                        slope * (1.0 + coupling * sensitivity[index]),
+                    )?;
+                }
+                closure_adjustment_linf = closure_adjustment_linf.max((rewritten - raw).abs());
+                if rewritten != raw {
+                    rewritten_values = rewritten_values.saturating_add(1);
+                }
+                last_update_linf = last_update_linf.max((rewritten - state[index]).abs());
+                next[index] = rewritten;
+            }
+            std::mem::swap(&mut state, &mut next);
+        }
+        let mut fixed_point_residual_linf = 0.0f32;
+        for index in 0..volume {
+            let raw = require_derived_finite(
+                "fixed_point_drive",
+                drive[index] + coupling * state[index],
+            )?;
+            let target = request.topos.saturate(raw);
+            fixed_point_residual_linf =
+                fixed_point_residual_linf.max((target - state[index]).abs());
+        }
+        Ok(EvolvedResonance {
+            drive,
+            output: state,
+            drive_sensitivity: sensitivity,
+            last_update_linf,
+            fixed_point_residual_linf,
+            closure_adjustment_linf,
+            rewritten_values,
+        })
+    }
+
+    fn assert_legacy_evolution<const CAPTURE: bool>(
+        request: ToposResonatorRequest<'_>,
+        expect_success: bool,
+    ) {
+        let expected = legacy_evolution::<CAPTURE>(request);
+        assert_eq!(expected.is_ok(), expect_success);
+        let actual = evolve_resonance::<CAPTURE>(request);
+        match (actual, expected) {
+            (Ok(actual), Ok(expected)) => {
+                let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits(&actual.drive), bits(&expected.drive));
+                assert_eq!(bits(&actual.output), bits(&expected.output));
+                assert_eq!(
+                    bits(&actual.drive_sensitivity),
+                    bits(&expected.drive_sensitivity)
+                );
+                assert_eq!(
+                    actual.last_update_linf.to_bits(),
+                    expected.last_update_linf.to_bits()
+                );
+                assert_eq!(
+                    actual.fixed_point_residual_linf.to_bits(),
+                    expected.fixed_point_residual_linf.to_bits()
+                );
+                assert_eq!(
+                    actual.closure_adjustment_linf.to_bits(),
+                    expected.closure_adjustment_linf.to_bits()
+                );
+                assert_eq!(actual.rewritten_values, expected.rewritten_values);
+                let actual = finish_resonance(request, actual).unwrap();
+                let expected = finish_resonance(request, expected).unwrap();
+                assert_eq!(
+                    serde_json::to_string(&actual).unwrap(),
+                    serde_json::to_string(&expected).unwrap()
+                );
+            }
+            (actual, expected) => assert_eq!(format!("{actual:?}"), format!("{expected:?}")),
+        }
+    }
+
+    #[test]
+    fn in_place_evolution_preserves_legacy_bits_and_audits() {
+        let inputs = [
+            0.0,
+            -0.0,
+            f32::from_bits(1),
+            -f32::from_bits(1),
+            f32::from_bits(1.0f32.to_bits() - 1),
+            1.0,
+            f32::from_bits(1.0f32.to_bits() + 1),
+            -1.0,
+            2.0,
+            -40.0,
+        ];
+        let gates = [0.0, -0.0, 1.0, -1.0, 0.5, 2.0, -0.75];
+        for volume in [0, 1, 17, 64, 65, 128, 257] {
+            let input: Vec<_> = (0..volume).map(|i| inputs[i % inputs.len()]).collect();
+            let gate: Vec<_> = (0..volume).map(|i| gates[i % gates.len()]).collect();
+            for (coupling, iterations) in [(0.0, 1), (0.25, 2), (0.25, 4), (0.75, 16), (0.99, 63)] {
+                for porosity in [
+                    0.0,
+                    f32::EPSILON,
+                    f32::from_bits(f32::EPSILON.to_bits() + 1),
+                    0.2,
+                    1.0,
+                ] {
+                    for saturation in [1e-20, 1.0, 1e20] {
+                        let topos = OpenCartesianTopos::new(-1.0, 1e-6, saturation, 64, 257)
+                            .unwrap()
+                            .with_porosity(porosity)
+                            .unwrap();
+                        let request = ToposResonatorRequest {
+                            input: &input,
+                            gate: &gate,
+                            rows: usize::from(volume != 0),
+                            features: volume.max(1),
+                            config: ToposResonatorConfig::new(coupling, iterations).unwrap(),
+                            topos: &topos,
+                        };
+                        assert_legacy_evolution::<false>(request, true);
+                        assert_legacy_evolution::<true>(request, true);
+                    }
+                }
+            }
+        }
+        let topos = OpenCartesianTopos::new(-1.0, 1e-6, 1.0, 4097, 10).unwrap();
+        let request = request(
+            &inputs,
+            &[1.0; 10],
+            ToposResonatorConfig::new(f32::from_bits(1.0f32.to_bits() - 1), 4096).unwrap(),
+            &topos,
+        );
+        assert_legacy_evolution::<false>(request, true);
+        assert_legacy_evolution::<true>(request, true);
+    }
+
+    #[test]
+    fn in_place_evolution_preserves_legacy_error_order() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-6, f32::MAX, 32, 128).unwrap();
+        for (input, gate) in [
+            (vec![f32::NAN], vec![f32::INFINITY]),
+            (vec![1.0], vec![f32::NEG_INFINITY]),
+            (vec![f32::MAX, -f32::MAX], vec![2.0, 2.0]),
+            // Later elements fail earlier iterations; point-major traversal would reorder errors.
+            (vec![f32::MAX * 0.45, -f32::MAX], vec![1.0, 1.0]),
+            (vec![-f32::MAX * 0.45, f32::MAX], vec![1.0, 1.0]),
+        ] {
+            for iterations in [1, 2, 3, 16] {
+                let request = request(
+                    &input,
+                    &gate,
+                    ToposResonatorConfig::new(0.9, iterations).unwrap(),
+                    &topos,
+                );
+                assert_legacy_evolution::<false>(request, false);
+                assert_legacy_evolution::<true>(request, false);
+            }
+        }
+    }
 
     #[test]
     fn captured_pullbacks_preserve_audit_bits_ownership_and_invalid_upstream_guards() {
