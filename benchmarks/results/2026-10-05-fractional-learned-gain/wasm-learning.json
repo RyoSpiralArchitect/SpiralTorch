@@ -1,0 +1,1 @@
+{"schema":"spiraltorch.fractional_log_gain_wasm.v1","updates":600,"initial_loss":0.5310602356173215,"final_loss":0,"learned_alpha":0.6500000040213405,"learned_gain":1.5,"nonzero_order_steps":338,"nonzero_gain_steps":338,"scope":"Synthetic compiled-WASM learning, not unique parameter recovery, pretrained quality, browser, GPU or speed evidence"}

@@ -1,0 +1,227 @@
+{
+  "schema": "spiraltorch.fractional_learned_gain_validation.v1",
+  "status": "local_implementation_validation_complete",
+  "source_revision": "12d7ed80c6fae5720fd3a2fe919464a19f353c4b",
+  "parent_revision": "00d6e4aaa5a6dc267302884d6e11319f9a7f71df",
+  "environment": {
+    "system": "Darwin",
+    "release": "25.4.0",
+    "architecture": "arm64",
+    "rust": "1.98.0",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "node": "24.14.0",
+    "typescript": "5.9.2",
+    "wasm_bindgen_cli": "0.2.104",
+    "offline_model_access": true
+  },
+  "source_sha256": {
+    "crates/st-frac/src/learning.rs": "cddc86e5f854823cab622813d4fe36bafcbeb453672c5f617e27f99a5684b46e",
+    "bindings/st-py/src/fractional_learning.rs": "91d550346ece23ce6d620f23e2adbc98c27283ebce2c97fa5fb5bbba7f305aab",
+    "bindings/st-py/src/lib.rs": "3031b765d709ef36fb1c9f52bcfbb525b7f5962d001539035cf42a48bf991abb",
+    "bindings/st-py/spiraltorch/fractional_autograd.py": "abede263e03b53e9b5e5275215d18ae1328480152d1d45855a3ffe2525ca2ce1",
+    "bindings/st-py/spiraltorch/__init__.py": "d80e5ed63451e2c5cc6788ba7fef0c879cdc132e63f1d7ff2c4199040b13cd98",
+    "bindings/st-py/spiraltorch/__init__.pyi": "f8557314446d1b3fde6026da07ec485aa57252786e9fa432c1889bca4c78f328",
+    "bindings/st-py/tests/test_fractional_history_log_gain.py": "120ff80e1f052b24ebdf3de8690b6f81492d25200b5703bf1b40fea424c71d8a",
+    "bindings/st-py/tests/test_geometry_optional_dependency.py": "a9c27ff9ffc81887bf689a87d4535f38d507629e8db3318996033dfbb6e47862",
+    "bindings/st-wasm/src/fractional_learning.rs": "2577691a74d4a75e878642a86df45541f3818468fd26cffc93f5de6df56319d2",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "98a39234fe622ccdc26be4cf20858a17ad4a7dc57d1b9c2065d3758edfdee562",
+    "bindings/st-wasm/tests/fractional_learning_types.ts": "d6c3c9412b775b4aca5333b0157be4d1f5cec937b2a7b74372e2d35ba35f1521",
+    "bindings/st-wasm/tests/fractional_history_log_gain.mjs": "4981b0c934b710b0d8cdbc3de7066ccc37191cb522042afc5cba1e97dc73a4e4",
+    "docs/fractional_learning.md": "b9cc2419595458f72dec80fabb6d7928d3cc75f50d2593b1886f4e1b2994fcdb",
+    ".github/workflows/ci.yml": "cc377f6bc3e5d7dd87faed2629acc274df55a85cf4cb90a6c9f64ac9176ed9e6",
+    "Cargo.toml": "0a756da3b71ab178232acdac4e08bd29222d17530e645857edc143f03df3cc05",
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "crates/st-frac/Cargo.toml": "8e63b17de15438388774de870421bfd877bb9a4465c72cc741ca343edf1bc118",
+    "bindings/st-py/Cargo.toml": "4a59c532b2c45dd753a6691a1850e4f928e5629e959a49623f140d0e1c8082eb",
+    "bindings/st-wasm/Cargo.toml": "66d031854ee88fd70ef2b144b72897d27f117dfd7721b4440810665b31542881"
+  },
+  "runtime": {
+    "native_sha256": "c6a6099c1b11db1d0c73e7c51aaa537edecc68114a393d47f9bf9215a55596a8",
+    "wasm_sha256": "b716ff3d038ac6668a4a5d8c4ace2fda7b860e72821df981f17d18ed8c8165c7",
+    "wasm_js_sha256": "4e9a8e0cb20cf920ca3e781ddafb37f0ab83248c5c58902badd0f2cdc01c5ac1",
+    "python_package_files": 71,
+    "package_matches_source_and_final_release": true,
+    "package_read_only": true,
+    "package_unchanged_after_regression": true
+  },
+  "tests": {
+    "rust": {
+      "passed": 135,
+      "failed": 0,
+      "skipped": 0,
+      "new_learned_gain": 5,
+      "command": "cargo +1.98.0 test --locked -p st-frac"
+    },
+    "python": {
+      "passed": 586,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 18,
+      "warning_category": "torch.jit.script deprecation",
+      "new_learned_gain_subset": 29,
+      "command_prefix": "python -P -B -m pytest --import-mode=importlib -q",
+      "files": [
+        "bindings/st-py/tests/test_geometry_autograd.py",
+        "bindings/st-py/tests/test_geometry_optional_dependency.py",
+        "bindings/st-py/tests/test_fractional_learning.py",
+        "bindings/st-py/tests/test_fractional_history.py",
+        "bindings/st-py/tests/test_fractional_selective_vjp.py",
+        "bindings/st-py/tests/test_fractional_buffers.py",
+        "bindings/st-py/tests/test_fractional_memory_study.py",
+        "bindings/st-py/tests/test_fractional_history_study.py",
+        "bindings/st-py/tests/test_fractional_lag_study.py",
+        "bindings/st-py/tests/test_fractional_two_lag_study.py",
+        "bindings/st-py/tests/test_elliptic_gated_causal.py",
+        "bindings/st-py/tests/test_elliptic_anchored.py",
+        "bindings/st-py/tests/test_elliptic_gated_study.py",
+        "bindings/st-py/tests/test_elliptic_anchored_study.py",
+        "bindings/st-py/tests/test_elliptic_context_ablation.py",
+        "bindings/st-py/tests/test_elliptic_learning.py",
+        "bindings/st-py/tests/test_elliptic_directional.py",
+        "bindings/st-py/tests/test_elliptic_chart_step.py",
+        "bindings/st-py/tests/test_elliptic_causal_learning.py",
+        "bindings/st-py/tests/test_wave_gate_vjp.py",
+        "bindings/st-py/tests/test_wave_gate_learning.py",
+        "bindings/st-py/tests/test_wave_gate_radius.py",
+        "bindings/st-py/tests/test_wave_gate_conditioning_example.py",
+        "bindings/st-py/tests/test_wave_gate_long_horizon.py",
+        "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py",
+        "bindings/st-py/tests/test_elliptic_nonlinear_study.py",
+        "bindings/st-py/tests/test_elliptic_causal_study.py",
+        "bindings/st-py/tests/test_fractional_two_lag_results.py",
+        "bindings/st-py/tests/test_fractional_history_l2.py",
+        "bindings/st-py/tests/test_fractional_history_factorial.py",
+        "bindings/st-py/tests/test_fractional_history_factorial_verification.py",
+        "bindings/st-py/tests/test_fractional_history_factorial_results.py",
+        "bindings/st-py/tests/test_fractional_history_log_gain.py"
+      ]
+    },
+    "benchmark_correctness": {
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "file": "tools/test_benchmark_fractional_learning.py",
+      "command": "python -P -B -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py",
+      "hardware_timing": false
+    },
+    "wasm_fixtures": [
+      {
+        "path": "bindings/st-wasm/tests/fractional_learning.mjs",
+        "exit_code": 0
+      },
+      {
+        "path": "bindings/st-wasm/tests/fractional_history.mjs",
+        "exit_code": 0
+      },
+      {
+        "path": "bindings/st-wasm/tests/fractional_history_l2.mjs",
+        "exit_code": 0
+      },
+      {
+        "path": "bindings/st-wasm/tests/fractional_selective_vjp.mjs",
+        "exit_code": 0
+      },
+      {
+        "path": "bindings/st-wasm/tests/fractional_tiled_forward.mjs",
+        "exit_code": 0
+      },
+      {
+        "path": "bindings/st-wasm/tests/numeric_boundaries.cjs",
+        "exit_code": 0
+      },
+      {
+        "path": "bindings/st-wasm/tests/fractional_history_log_gain.mjs",
+        "exit_code": 0
+      }
+    ],
+    "typescript": {
+      "exit_code": 0,
+      "command": "tsc --noEmit --strict --target ES2020 --moduleResolution node --module commonjs bindings/st-wasm/tests/fractional_learning_types.ts"
+    },
+    "tiny_hf": {
+      "initialization": "random; frozen base weights",
+      "primary_updates": 12,
+      "continuation_reference_updates": 1,
+      "continuation_replay_updates": 1,
+      "adapter_parameters_changed": [
+        "local_gate",
+        "gate",
+        "log_alpha",
+        "log_gain"
+      ],
+      "base_weights_unchanged": true,
+      "exact_next_update_and_adam_state": true,
+      "pretrained_quality_evidence": false
+    }
+  },
+  "checks": {
+    "default_native_release_build": "passed",
+    "explicit_cpu_text_binding_check": "passed",
+    "strict_native_st_frac_clippy": "passed",
+    "strict_wasm_st_frac_clippy": "passed",
+    "python_binding_clippy": {
+      "status": "passed",
+      "scope": "--no-deps",
+      "allowed_categories": [
+        "clippy::too_many_arguments",
+        "clippy::type_complexity"
+      ],
+      "full_strict_binding_lint": false
+    },
+    "rustfmt": "passed",
+    "diff_whitespace": "passed"
+  },
+  "commands": {
+    "native_build": "cargo +1.98.0 build --locked --release --manifest-path bindings/st-py/Cargo.toml",
+    "cpu_text_check": "cargo +1.98.0 check --locked --manifest-path bindings/st-py/Cargo.toml --no-default-features --features extension-module,cpu,text",
+    "wasm_build": "cargo +1.98.0 build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release",
+    "wasm_bindgen": "wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm --target nodejs --out-dir <generated-node-module-directory>",
+    "wasm_fixture": "node <fixture-path> <generated-node-module-directory>/spiraltorch_wasm.js",
+    "rustfmt": "rustfmt +nightly-2026-04-15 --edition 2021 --check crates/st-frac/src/learning.rs bindings/st-py/src/fractional_learning.rs bindings/st-wasm/src/fractional_learning.rs"
+  },
+  "private_log_sha256": {
+    "rust-frac-tests.log": "3a696cb74066efe7f3af0ec392cd0ac0f93e1881e75ad730a4b6b0544f202fdb",
+    "python-regression-sealed.log": "cacd9e5b7e406c94343cbf6c429118308c027e6f148e41960519e21eaa9a418d",
+    "benchmark-regression.log": "f3365fd6c49d3f4ab9dbfc0353447311c1d4e12805dcb33471a409caec1e5fae",
+    "clippy-frac.log": "81fa9f78c0ff6ebfe6de05a2b71671e0520d42fd825a2ccb0393d648c8b22080",
+    "clippy-frac-wasm.log": "076d4197b1571f7f92fcb639c2b8ed5661ea3f7262ef305a1974b415fa399363",
+    "clippy-binding-scoped.log": "d54490087a0bbbc381435fb751928b9efdbc94dec99306282cfc2a17be4b197d",
+    "cpu-text-check.log": "d4077d246fd1d9f9e464004672a8ffef112209eba19cf7d7f168125206f346ca",
+    "wasm-build.log": "55da2c5936d0be533cbcfba2c20080f081dc501d9eb67f1d5cc3114e25763118",
+    "native-build-final.log": "69424daff32884351652f661ea641ab4b0a3f1bf30fa9a65e30f27b785081ed3"
+  },
+  "prior_study_preservation": {
+    "factorial_primary_files": 100,
+    "factorial_client_files": 5,
+    "factorial_runtime_files": 71,
+    "two_lag_primary_files": 100,
+    "two_lag_client_files": 6,
+    "two_lag_runtime_files": 70,
+    "total_files": 352,
+    "all_recorded_hashes_unchanged": true
+  },
+  "scope": {
+    "new_long_pretrained_training": false,
+    "speed_claim": false,
+    "browser_execution": false,
+    "gpu_residency": false,
+    "unique_parameter_recovery": false,
+    "synthetic_zero_mse": "float32 output agreement on one synthetic fixture",
+    "learned_gain_adapter_parameter_count": "2*F+2",
+    "gate_gain_redundancy_remains": true,
+    "publication_excludes": [
+      "model assets",
+      "weights",
+      "checkpoints",
+      "native runtime packages",
+      "raw private logs"
+    ]
+  },
+  "next_study_requirements": [
+    "Shared driver scalar gain trajectories",
+    "Capacity-matched ordinary short-filter control",
+    "Fixed common initial maps, data, updates and seeds"
+  ]
+}

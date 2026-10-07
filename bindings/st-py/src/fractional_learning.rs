@@ -1,7 +1,9 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
-use st_frac::learning::{FractionalGlKernel, FractionalGlLearningBatch};
+use st_frac::learning::{
+    FractionalGlGainLearningBatch, FractionalGlKernel, FractionalGlLearningBatch,
+};
 
 use crate::f32_buffer::{read_f32, write_f32};
 
@@ -17,6 +19,11 @@ pub struct PyFractionalGlKernel {
 #[pyclass(name = "FractionalGlLearningBatch", module = "spiraltorch", frozen)]
 pub struct PyFractionalGlLearningBatch {
     inner: FractionalGlLearningBatch,
+}
+
+#[pyclass(name = "FractionalGlGainLearningBatch", module = "spiraltorch", frozen)]
+pub struct PyFractionalGlGainLearningBatch {
+    inner: FractionalGlGainLearningBatch,
 }
 
 #[pymethods]
@@ -126,6 +133,38 @@ impl PyFractionalGlKernel {
         let input = read_f32(input, self.inner.max_values(), None)?;
         self.forward_history_l2(py, input, shape, axis, alpha, gain)
     }
+
+    #[allow(clippy::too_many_arguments)] // Preserve the shared scalar controls.
+    fn forward_history_log_gain(
+        &self,
+        py: Python<'_>,
+        input: Vec<f32>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+        log_gain: f32,
+    ) -> PyResult<PyFractionalGlGainLearningBatch> {
+        py.detach(|| {
+            self.inner
+                .forward_history_log_gain(&input, &shape, axis, alpha, log_gain)
+        })
+        .map(|inner| PyFractionalGlGainLearningBatch { inner })
+        .map_err(value_error)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Same controls as the sequence transport.
+    fn forward_history_log_gain_buffer(
+        &self,
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        shape: Vec<usize>,
+        axis: usize,
+        alpha: f32,
+        log_gain: f32,
+    ) -> PyResult<PyFractionalGlGainLearningBatch> {
+        let input = read_f32(input, self.inner.max_values(), None)?;
+        self.forward_history_log_gain(py, input, shape, axis, alpha, log_gain)
+    }
 }
 
 #[pymethods]
@@ -214,7 +253,131 @@ impl PyFractionalGlLearningBatch {
     }
 }
 
+#[pymethods]
+impl PyFractionalGlGainLearningBatch {
+    #[getter]
+    fn output(&self) -> Vec<f32> {
+        self.inner.output().iter().copied().collect()
+    }
+
+    #[getter]
+    fn gain(&self) -> f32 {
+        self.inner.gain()
+    }
+
+    fn output_buffer<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyByteArray>> {
+        write_f32(py, self.inner.output().iter().copied())
+    }
+
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, f32, f32)> {
+        py.detach(|| self.inner.vjp(&upstream))
+            .map(|g| (g.input, g.alpha, g.log_gain))
+            .map_err(value_error)
+    }
+
+    fn vjp_input(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.vjp_input(&upstream))
+            .map_err(value_error)
+    }
+
+    fn vjp_alpha(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<f32> {
+        py.detach(|| self.inner.vjp_alpha(&upstream))
+            .map_err(value_error)
+    }
+
+    fn vjp_log_gain(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<f32> {
+        py.detach(|| self.inner.vjp_log_gain(&upstream))
+            .map_err(value_error)
+    }
+
+    fn vjp_parameters(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(f32, f32)> {
+        py.detach(|| self.inner.vjp_parameters(&upstream))
+            .map_err(value_error)
+    }
+
+    fn jvp(
+        &self,
+        py: Python<'_>,
+        input_tangent: Vec<f32>,
+        alpha_tangent: f32,
+        log_gain_tangent: f32,
+    ) -> PyResult<Vec<f32>> {
+        py.detach(|| {
+            self.inner
+                .jvp(&input_tangent, alpha_tangent, log_gain_tangent)
+        })
+        .map_err(value_error)
+    }
+
+    fn vjp_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<(Bound<'py, PyByteArray>, f32, f32)> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        let g = py
+            .detach(|| self.inner.vjp(&upstream))
+            .map_err(value_error)?;
+        Ok((write_f32(py, g.input.into_iter())?, g.alpha, g.log_gain))
+    }
+
+    fn vjp_input_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyByteArray>> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        let g = py
+            .detach(|| self.inner.vjp_input(&upstream))
+            .map_err(value_error)?;
+        write_f32(py, g.into_iter())
+    }
+
+    fn vjp_alpha_buffer(&self, py: Python<'_>, upstream: &Bound<'_, PyAny>) -> PyResult<f32> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        py.detach(|| self.inner.vjp_alpha(&upstream))
+            .map_err(value_error)
+    }
+
+    fn vjp_log_gain_buffer(&self, py: Python<'_>, upstream: &Bound<'_, PyAny>) -> PyResult<f32> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        py.detach(|| self.inner.vjp_log_gain(&upstream))
+            .map_err(value_error)
+    }
+
+    fn vjp_parameters_buffer(
+        &self,
+        py: Python<'_>,
+        upstream: &Bound<'_, PyAny>,
+    ) -> PyResult<(f32, f32)> {
+        let len = self.inner.output().len();
+        let upstream = read_f32(upstream, len, Some(len))?;
+        py.detach(|| self.inner.vjp_parameters(&upstream))
+            .map_err(value_error)
+    }
+
+    fn jvp_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        input_tangent: &Bound<'_, PyAny>,
+        alpha_tangent: f32,
+        log_gain_tangent: f32,
+    ) -> PyResult<Bound<'py, PyByteArray>> {
+        let len = self.inner.output().len();
+        let input = read_f32(input_tangent, len, Some(len))?;
+        let dy = py
+            .detach(|| self.inner.jvp(&input, alpha_tangent, log_gain_tangent))
+            .map_err(value_error)?;
+        write_f32(py, dy.into_iter())
+    }
+}
+
 pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     parent.add_class::<PyFractionalGlKernel>()?;
-    parent.add_class::<PyFractionalGlLearningBatch>()
+    parent.add_class::<PyFractionalGlLearningBatch>()?;
+    parent.add_class::<PyFractionalGlGainLearningBatch>()
 }

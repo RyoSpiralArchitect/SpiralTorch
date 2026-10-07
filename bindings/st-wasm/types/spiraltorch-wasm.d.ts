@@ -15,6 +15,27 @@ declare module "spiraltorch-wasm" {
         forward(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
         forward_history(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
         forward_history_l2(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, gain: number): FractionalGlLearningBatch;
+        forward_history_log_gain(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, log_gain: number): FractionalGlGainLearningBatch;
+        free(): void;
+    }
+    export class FractionalGlGainLearningBatch {
+        private constructor();
+        readonly output: Float32Array;
+        readonly gain: number;
+        vjp(upstream: Float32Array): FractionalGlGainGradients;
+        vjp_input(upstream: Float32Array): Float32Array;
+        vjp_alpha(upstream: Float32Array): number;
+        vjp_log_gain(upstream: Float32Array): number;
+        /** [alpha, log_gain], with no input adjoint allocation. */
+        vjp_parameters(upstream: Float32Array): Float32Array;
+        jvp(input_tangent: Float32Array, alpha_tangent: number, log_gain_tangent: number): Float32Array;
+        free(): void;
+    }
+    export class FractionalGlGainGradients {
+        private constructor();
+        readonly input: Float32Array;
+        readonly alpha: number;
+        readonly log_gain: number;
         free(): void;
     }
     export class FractionalGlLearningBatch {

@@ -18,7 +18,8 @@ from .geometry_autograd import _input, _require_torch, _strength, _values, torch
 
 __all__ = ["fractional_gl_autograd", "fractional_gl_history_autograd",
            "fractional_gl_history_l2_autograd", "FractionalMemoryAdapter",
-           "FractionalHistoryAdapter", "FractionalL2HistoryAdapter"]
+           "FractionalHistoryAdapter", "FractionalL2HistoryAdapter",
+           "fractional_gl_history_log_gain_autograd", "FractionalGainHistoryAdapter"]
 
 
 def _kernel(**options: Any) -> Any:
@@ -124,6 +125,52 @@ if torch is not None:
                                        "forward_history_l2", gain)
 
 
+    class _FractionalGlLogGainFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, kernel: Any, value: Any, alpha: Any, log_gain: Any, axis: int) -> Any:
+            ctx.buffer_transport = _buffer_transport_available()
+            operation = getattr(kernel, "forward_history_log_gain" + ("_buffer" if ctx.buffer_transport else ""))
+            values = _buffer_values(value) if ctx.buffer_transport else _values(value)
+            ctx.snapshot = operation(values, list(value.shape), axis, alpha.detach().item(), log_gain.detach().item())
+            ctx.save_for_backward(value, alpha, log_gain)
+            ctx.save_for_forward(value, alpha, log_gain)
+            output = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
+            return _transport_output(output, value, ctx.buffer_transport)
+
+        @staticmethod
+        @torch.autograd.function.once_differentiable
+        def backward(ctx: Any, upstream: Any) -> tuple[Any, ...]:
+            value, alpha, log_gain = ctx.saved_tensors
+            need_input, need_alpha, need_gain = ctx.needs_input_grad[1:4]
+            direction = _buffer_values(upstream) if ctx.buffer_transport else _values(upstream)
+            suffix = "_buffer" if ctx.buffer_transport else ""
+            dx = da = dg = None
+            if need_input and need_alpha and need_gain:
+                dx, da, dg = getattr(ctx.snapshot, "vjp" + suffix)(direction)
+            else:
+                if need_input:
+                    dx = getattr(ctx.snapshot, "vjp_input" + suffix)(direction)
+                if need_alpha and need_gain:
+                    da, dg = getattr(ctx.snapshot, "vjp_parameters" + suffix)(direction)
+                elif need_alpha:
+                    da = getattr(ctx.snapshot, "vjp_alpha" + suffix)(direction)
+                elif need_gain:
+                    dg = getattr(ctx.snapshot, "vjp_log_gain" + suffix)(direction)
+            return (None, None if dx is None else _transport_output(dx, value, ctx.buffer_transport),
+                    None if da is None else torch.tensor(da, dtype=alpha.dtype, device=alpha.device),
+                    None if dg is None else torch.tensor(dg, dtype=log_gain.dtype, device=log_gain.device), None)
+
+        @staticmethod
+        def jvp(ctx: Any, _kernel: Any, dx: Any, da: Any, dg: Any, _axis: Any) -> Any:
+            value, _, _ = ctx.saved_tensors
+            dx = torch.zeros_like(value) if dx is None else dx
+            direction = _buffer_values(dx) if ctx.buffer_transport else _values(dx)
+            operation = ctx.snapshot.jvp_buffer if ctx.buffer_transport else ctx.snapshot.jvp
+            result = operation(direction, 0.0 if da is None else da.detach().item(),
+                               0.0 if dg is None else dg.detach().item())
+            return _transport_output(result, value, ctx.buffer_transport)
+
+
 def fractional_gl_autograd(value: Any, alpha: Any, *, axis: int, kernel: Any = None) -> Any:
     """Causal zero-padded GL on an ND axis, with true input and scalar-alpha VJPs.
 
@@ -176,6 +223,20 @@ def _checked_kernel(value: Any, alpha: Any, axis: int, kernel: Any) -> Any:
     return kernel
 
 
+def fractional_gl_history_log_gain_autograd(value: Any, alpha: Any, log_gain: Any, *,
+                                           axis: int, kernel: Any = None) -> Any:
+    """Rust normalized history with independently differentiable log amplitude.
+
+    Rust owns exp(log_gain), normalization and all three first-order derivatives.
+    Alpha and log_gain must be scalar float32 tensors. Gain overflow/underflow
+    fails closed; no clipping, higher-order AD or persistent prefix cache.
+    """
+    kernel = _checked_kernel(value, alpha, axis, kernel)
+    if not isinstance(log_gain, torch.Tensor) or log_gain.ndim != 0 or log_gain.dtype != torch.float32:
+        raise TypeError("log_gain must be a scalar float32 tensor")
+    return _FractionalGlLogGainFunction.apply(kernel, value, alpha, log_gain, axis)
+
+
 if torch is None:
     class FractionalMemoryAdapter:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -185,6 +246,9 @@ if torch is None:
         pass
 
     class FractionalL2HistoryAdapter(FractionalHistoryAdapter):
+        pass
+
+    class FractionalGainHistoryAdapter(FractionalHistoryAdapter):
         pass
 else:
     class FractionalMemoryAdapter(torch.nn.Module):
@@ -314,3 +378,32 @@ else:
             gain = _history_gain(state["gain"])
             super().set_extra_state({key: value for key, value in state.items() if key != "gain"})
             self._history_gain = gain
+
+
+    class FractionalGainHistoryAdapter(FractionalHistoryAdapter):
+        """2*F+2 parameters: local/history gates, log order, independent log gain.
+
+        Starts as identity. The positive gain and signed feature gate are
+        redundant amplitude controls, not an identifiability guarantee.
+        Full unpadded prefixes, float32 and use_cache=False remain required.
+        """
+
+        _state_schema = "spiraltorch.fractional_gain_history_adapter.v1"
+
+        def __init__(self, features: int, *, initial_alpha: float = 0.5,
+                     initial_gain: float = 1.0, strength: float = 0.1, **kernel_options: Any) -> None:
+            initial_gain = _history_gain(initial_gain)
+            super().__init__(features, initial_alpha=initial_alpha, strength=strength, **kernel_options)
+            self.log_gain = torch.nn.Parameter(torch.tensor(math.log(initial_gain), dtype=torch.float32))
+
+        def _checked_input(self, value: Any) -> float:
+            strength = super()._checked_input(value)
+            if self.log_gain.dtype != value.dtype:
+                raise TypeError("fractional history log_gain must remain float32")
+            if self.log_gain.device != value.device:
+                raise ValueError("input and log_gain must share a device")
+            return strength
+
+        def _history(self, value: Any, alpha: Any) -> Any:
+            return fractional_gl_history_log_gain_autograd(value, alpha, self.log_gain,
+                                                          axis=1, kernel=self._kernel)
