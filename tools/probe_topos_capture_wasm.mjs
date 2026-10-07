@@ -36,6 +36,7 @@ for (const [rows, features] of [[0, 3], [1, 1], [7, 17], [256, 768]]) {
       const kernel = new ToposResonatorKernel(coupling, iterations, 1, porosity, 1_048_576);
       let batch;
       let tensors;
+      let capturedAuditSha256 = null;
       try {
         const output = kernel.forward(x, gate, rows, features);
         const gradient = kernel.backward(x, gate, dy, rows, features);
@@ -43,13 +44,16 @@ for (const [rows, features] of [[0, 3], [1, 1], [7, 17], [256, 768]]) {
         if (captured) {
           batch = kernel.capture(x, gate, rows, features);
           assert(same(output, batch.output), "captured output differs");
-          assert(typeof JSON.parse(batch.audit_json()) === "object", "missing captured audit");
+          const audit = batch.audit_json();
+          assert(typeof JSON.parse(audit) === "object", "missing captured audit");
+          capturedAuditSha256 = hash(audit);
         }
       } finally {kernel.free();}
       try {
         if (batch) {
           x.fill(NaN); gate.fill(NaN);
           assert(same(tensors.output, batch.output), "snapshot reads foreign input");
+          assert(hash(batch.audit_json()) === capturedAuditSha256, "audit reads foreign input");
           rejected(() => batch.vjp(new Float32Array(dy.length + 1)));
           if (dy.length) rejected(() => batch.vjp(new Float32Array(dy.length).fill(NaN)));
           for (let repeat = 0; repeat < 2; repeat++) {
@@ -59,7 +63,8 @@ for (const [rows, features] of [[0, 3], [1, 1], [7, 17], [256, 768]]) {
             } finally {gradient.free();}
           }
         }
-        const record = {rows, features, iterations, coupling, porosity, sha256: {}};
+        const record = {rows, features, iterations, coupling, porosity,
+          captured_audit_sha256: capturedAuditSha256, sha256: {}};
         for (const [name, tensor] of Object.entries(tensors)) {
           assert(tensor.every(Number.isFinite), "nonfinite " + name);
           record.sha256[name] = hash(bytes(tensor));
