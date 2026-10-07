@@ -159,6 +159,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn zero_gate_has_no_porosity_signal_but_can_learn() {
+        for coupling in [0., 0.25, 0.95] {
+            for iterations in [1, 4, 41] {
+                let gain = (0..iterations).fold(0.0, |a, _| 1.0 + coupling * a);
+                for porosity in [0., 0.3, 1.] {
+                    let kernel =
+                        ToposResonatorKernel::new(coupling, 1., porosity, iterations).unwrap();
+                    for input in [-2., -0.25, 0., 0.25, 2.] {
+                        let (output, sensitivity) = kernel.capture(input, 0.).unwrap();
+                        assert_eq!(output, 0.);
+                        assert_eq!(sensitivity, gain);
+                        assert_eq!(kernel.vjp(input, 0., 1.).unwrap(), [0., gain * input]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hard_rewrite_matches_a_clipped_gain_control_away_from_kinks() {
+        for coupling in [0., 0.2, 0.5, 0.95] {
+            for iterations in [1, 5, 41] {
+                let kernel = ToposResonatorKernel::new(coupling, 1., 0., iterations).unwrap();
+                let gain = (0..iterations).fold(0.0_f64, |a, _| 1.0 + f64::from(coupling) * a);
+                for input in [-3., -0.9, -0.1, 0., 0.1, 0.9, 3.] {
+                    let gate = 0.8;
+                    let scaled = f64::from(input) * f64::from(gate) * gain;
+                    assert!((scaled.abs() - 1.).abs() > 1e-4);
+                    let expected = scaled.clamp(-1., 1.) as f32;
+                    let slope = if scaled.abs() < 1. { gain as f32 } else { 0. };
+                    let (output, sensitivity) = kernel.capture(input, gate).unwrap();
+                    assert!((output - expected).abs() <= 2e-6);
+                    assert!((sensitivity - slope).abs() <= 2e-6 * (1. + slope));
+                    let [dx, dg] = kernel.vjp(input, gate, 1.).unwrap();
+                    assert!((dx - slope * gate).abs() <= 2e-6 * (1. + slope));
+                    assert!((dg - slope * input).abs() <= 2e-6 * (1. + slope));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn porous_tail_is_distinct_from_hard_clipping() {
+        let hard = ToposResonatorKernel::new(0.25, 1., 0., 4).unwrap();
+        let porous = ToposResonatorKernel::new(0.25, 1., 0.3, 4).unwrap();
+        for input in [-2., 2.] {
+            let (hard_output, hard_slope) = hard.capture(input, 1.).unwrap();
+            let (porous_output, porous_slope) = porous.capture(input, 1.).unwrap();
+            assert_eq!(hard_output, input.signum());
+            assert_eq!(hard_slope, 0.);
+            assert!(porous_output.abs() < hard_output.abs());
+            assert!(porous_slope < 0.);
+            assert_eq!(hard.vjp(input, 1., 1.).unwrap(), [0., 0.]);
+            let [dx, dg] = porous.vjp(input, 1., 1.).unwrap();
+            assert!(dx < 0. && dg * input < 0.);
+        }
+    }
+
+    #[test]
     fn parameters_and_nonfinite_intermediates_fail_closed() {
         for value in [f32::NAN, f32::INFINITY, -1., 1.] {
             assert!(ToposResonatorKernel::new(value, 1., 0., 1).is_err());

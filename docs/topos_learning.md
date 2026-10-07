@@ -218,6 +218,38 @@ Handoff remains transactional and rejects stale host parameters or existing
 optimizer state unless the caller explicitly selects `reset`. A successful
 handoff invalidates the original Module's resident cache, not older owning
 outputs. Geometry and pretrained-model quality remain separate questions.
+
+### Controls Before Language-Model Claims
+
+The Torch residual adapter starts with a zero shared gate. At that point the
+finite recurrence never leaves the unsaturated branch: all porosities have the
+same output and gate gradient. A nonzero gate gradient proves connectivity,
+not that the porous part has contributed to the language-model objective.
+
+Let `A_n = sum(coupling**i for i in 0..iterations)`. Within the unsaturated
+region, the mathematical response is just `A_n * input * gate`, for every
+porosity. With zero porosity and nonnegative coupling, the entire mathematical
+response reduces to `clip(A_n * input * gate, -saturation, saturation)`.
+These identities are control designs, not permission to replace the checked
+finite-f32 implementation: rounding, kink conventions and overflow/admission
+checks still matter. Above the kernel's `f32::EPSILON` cutoff, positive porosity
+has a decreasing tail beyond saturation; its finite-unroll sensitivity can
+differ from both ordinary gain and hard clip.
+
+Matched ordinary controls should therefore use the same feature count,
+placement, residual strength, initial gate and local gain `A_n`. Otherwise a
+comparison can measure extra capacity or an initial gradient-scale difference
+rather than the porous rewrite. Matching the local gain does not make later
+optimizer trajectories identical or match wall-clock compute.
+
+`test_topos_matched_controls.py` exercises these controls through the public
+`GeometryAdapterStack` in randomly initialized, frozen GPT-2 and Llama models.
+Synthetic token IDs, a fixed nonzero gate and a deliberately small saturation
+expose the nonlinear branch in forward and loss pullback. There is no model or
+corpus download, optimizer step, pretrained/heldout score or speed claim.
+Ordinary Torch formulas stay in test references; production mathematics remains
+Rust-owned. Real FT must still establish whether the tail is encountered under
+its actual activation scale and whether it helps beyond these ordinary controls.
 The focused Rust tests exercise 300 synthetic updates and mixed
 Linear/Topos/Linear VJPs. Python compares 100 updates with independent Torch;
 `bindings/st-wasm/tests/resident_topos_graph.html` compares 100 actual browser
