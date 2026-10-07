@@ -1,0 +1,70 @@
+{
+  "schema": "spiraltorch.topos_browser_reference_guard_followup.v1",
+  "fix_source_revision": "1448b19ada2213b400208f346c81e1402bae98ce",
+  "previous_client_revision": "9ea9a7c8386094cc19798c17a704897706d759a8",
+  "runtime_source_revision": "8e1071e1e1caf1bfcb4be6dd794e601ff3eadde0",
+  "reference": {
+    "field": "grad_input",
+    "index": 0,
+    "value": "Infinity",
+    "json_type": "string"
+  },
+  "before": {
+    "exit_code": 0,
+    "status": "passed",
+    "serialized_input_vjp_max_error": null
+  },
+  "after": {
+    "exit_code": 1,
+    "status": "error",
+    "error": "Error: nonfinite comparison 0",
+    "browser_status": "error",
+    "browser_error": "Error: nonfinite comparison 0"
+  },
+  "rejected_references": {
+    "web": 27,
+    "commonjs": 27,
+    "fields": [
+      "output",
+      "grad_input",
+      "grad_gate"
+    ],
+    "value_types": [
+      "NaN",
+      "Infinity",
+      "-Infinity",
+      "null",
+      "string Infinity",
+      "string 0",
+      "object",
+      "array",
+      "boolean"
+    ]
+  },
+  "browser_result_bytes_unchanged": true,
+  "frozen_browser_result_sha256": "e5e5bd1a2c57c04d32a9c9aa9e71b2b919b3f296b6efdc061f542344ad4f9424",
+  "node_valid_result_fields_unchanged": true,
+  "browser_recovery_status": "passed",
+  "source_files_sha256": {
+    "bindings/st-wasm/tests/topos_resonator_learning.mjs": "f0cdfa997ada09a35efe7e3dad1f4904907a9a58cccc63dae8d856a3bdc264e3",
+    "bindings/st-wasm/tests/topos_learning_fixture_guards.mjs": "7ce12183d4ce1d4e0e8c504143ba67a3e90553e2b2712280b24966e7b1b78764",
+    ".github/workflows/ci.yml": "b8fffe032d5966109451fb56ee41638868c62a242efc5205d65462bd9efa6761",
+    "docs/topos_learning.md": "65deed4eaf6dd12183db1712d214fc9eb6b8bb7391337d6aad44773d4b3a99ab"
+  },
+  "local_evidence_sha256": {
+    "nodejs-nonfinite-reference-before.json": "e67b94be740dd155a2dcc459d9ececce7e97f4bb3c2289bae8163173033ce760",
+    "nodejs-nonfinite-reference-before.log": "17a3fe600e586a6f515435594ac716ba9e354e9a9fd2d78bc962862478bad70b",
+    "nodejs-nonfinite-reference-after.json": "84556dd60596d2d7988f2a8b6f663f9d42924b7341bb4cd084f400e2aa2910a3",
+    "nodejs-nonfinite-reference-after.log": "5b098f97ed1d0395d2b2ba7d1faeac3a5dd1da13a83a25b554417bd610b9aea5",
+    "finite-reference-guards-web.log": "43e10ecebd69e7d599f68caf2ba9ce19cb0ef30aacdb629ea67d1d02ba9ff113",
+    "finite-reference-guards-commonjs.log": "43e10ecebd69e7d599f68caf2ba9ce19cb0ef30aacdb629ea67d1d02ba9ff113",
+    "node-web-guard-fixed.json": "5125bcab0203e8b82b8e1ee02a9708710e3b601aa0b7c9c6c3d6ecb9e34606cd",
+    "node-commonjs-guard-fixed.json": "5d2a9e567c23f0da7817591859591b4f1f48ab9c555dd6e79b6948cca72a0a7c",
+    "browser-finite-guard-passed.json": "e5e5bd1a2c57c04d32a9c9aa9e71b2b919b3f296b6efdc061f542344ad4f9424",
+    "browser-nonfinite-reference.json": "b9ae0228aac35ecbf45860d7313a3f8b42815ac064a4346821bf53b98a751b81",
+    "browser-nonfinite-reference.jpg": "f12714f62e845d13be1763de6aef90cfec0b3baa7adeeffb066d649de3b1f129",
+    "browser-guard-recovered.json": "e5e5bd1a2c57c04d32a9c9aa9e71b2b919b3f296b6efdc061f542344ad4f9424",
+    "browser-guard-recovered.jpg": "1ac8cc35852f98c242bc23493aaee375adc51cea320c580cef242b5ab39f3cb5"
+  },
+  "scope": "Correction to the shared verification client, not Rust numerical behavior. The earlier frozen browser bundle is unchanged. Actual browser, Node ESM and CommonJS valid results remain identical; bad references now fail closed. Hashes bind retained local evidence, not independent execution provenance."
+}

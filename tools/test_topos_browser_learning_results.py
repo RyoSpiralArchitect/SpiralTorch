@@ -55,3 +55,17 @@ def test_learning_failures_and_scope_are_preserved():
     assert r["browser"]["reload_after_fixture_restoration"] == "passed"
     assert len(r["initial_observations"]) == 2
     assert not any(r[key] for key in ("pretrained_training", "heldout_rescoring", "cleanup"))
+
+
+def test_reference_guard_followup_preserves_original_evidence():
+    original = json.loads((DATA / "results.json").read_text())
+    raw = (DATA.parent / "2026-10-07-topos-browser-reference-guards.json").read_bytes()
+    assert not any(marker in raw for marker in (b"/Users/", b"/home/", b"sk-proj-", b"-----BEGIN PRIVATE"))
+    followup = json.loads(raw)
+    assert followup["before"] == {"exit_code": 0, "status": "passed", "serialized_input_vjp_max_error": None}
+    assert followup["after"]["exit_code"] == 1 and followup["after"]["status"] == "error"
+    assert followup["after"]["browser_status"] == "error"
+    assert followup["rejected_references"]["web"] == followup["rejected_references"]["commonjs"] == 27
+    assert followup["browser_result_bytes_unchanged"] and followup["node_valid_result_fields_unchanged"]
+    assert followup["browser_recovery_status"] == "passed"
+    assert followup["frozen_browser_result_sha256"] == original["browser"]["raw_report_sha256"]
