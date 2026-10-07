@@ -1,0 +1,19 @@
+{
+  "schema": "spiraltorch.fractional_multi_adapter_replay.v1",
+  "model_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "corpus_sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+  "corpus_end_marker": "*** END OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***",
+  "blocks": ["transformer.h.0.mlp", "transformer.h.1.mlp"],
+  "features": 768,
+  "seed": 41,
+  "steps": 4,
+  "checkpoint_after": 2,
+  "batch_size": 2,
+  "block_size": 128,
+  "learning_rate": 0.001,
+  "strength": 0.1,
+  "threads": 2,
+  "initial_angle": 0.4636476090008061,
+  "initial_gain": 2.23606797749979,
+  "kernel": {"kernel_len": 32, "step": 1.0, "max_values": 262144, "max_products": 8388608}
+}

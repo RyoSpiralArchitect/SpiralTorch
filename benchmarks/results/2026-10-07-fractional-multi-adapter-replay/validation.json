@@ -1,0 +1,21 @@
+{
+  "schema": "spiraltorch.fractional_multi_adapter_replay_validation.v1",
+  "status": "passed",
+  "frozen_runtime_files_checked_before_and_after_each_run": 71,
+  "regression_tests": 143,
+  "failure_preserved": {
+    "stage": "manifest admission before model load or training",
+    "source_revision": "c039a742af9c184b271b9a30505b69ffd5636c1a",
+    "reason": "The first client supplied a versioned manifest envelope to a helper expecting only its files mapping.",
+    "resolution": "Validate the envelope and pass its files mapping; add a malformed/inventory/digest regression test.",
+    "log_sha256": "192ef7f4b9504f3f2f77a7c6aa7b6b20cc215d2431c8d30d5b7be428c8eb75ea"
+  },
+  "raw_private_records_retained": true,
+  "no_cleanup_performed": true,
+  "regression_log_sha256": "b4fe754febbcb3f8231b26d9e28122c5cff8dc2ac5393117ce94e07578ce5233",
+  "scope": "Executed local tests and runs; public receipt tests are separate and do not rerun the private tensors.",
+  "frozen_runtime_files_modified_during_probe": false,
+  "final_regression_tests": 146,
+  "public_only_tests_included": 3,
+  "final_regression_log_sha256": "5f8b849764eddea2cfcbc69bd4a13b8b06e491506ba2623115899a7f57e944dd"
+}
