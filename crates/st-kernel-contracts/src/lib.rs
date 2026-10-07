@@ -20,3 +20,4 @@ pub mod normalization;
 pub mod pointwise;
 pub mod rank;
 pub mod sgd;
+pub mod topos_resonator;
