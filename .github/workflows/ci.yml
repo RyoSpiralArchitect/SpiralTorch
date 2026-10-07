@@ -778,3 +778,5 @@ jobs:
           python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_benchmark_topos_learning.py tools/test_replay_geometry_stack_update.py tools/test_topos_inlining_results.py tools/test_topos_evolution_results.py tools/test_topos_browser_learning_results.py
       - name: Verify frozen Topos NN measurements
         run: python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_topos_nn_capture_results.py tools/test_topos_shared_gate_learning.py tools/test_topos_resident_kernel_results.py tools/test_topos_resident_graph_results.py tools/test_topos_resident_capture_results.py
+      - name: Verify shared Topos transport measurements
+        run: python -I -S -B tools/test_topos_shared_transport_results.py
