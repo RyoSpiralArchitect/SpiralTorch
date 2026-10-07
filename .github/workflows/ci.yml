@@ -367,6 +367,7 @@ jobs:
           node tools/probe_topos_browser_learning.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             bindings/st-wasm/tests/topos_resonator_learning_fixture.json \
             "$RUNNER_TEMP/topos-browser-learning.json"
+          node bindings/st-wasm/tests/topos_learning_fixture_guards.mjs "$module"
       - name: Portable NN plans without WebGPU
         run: |
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features nn

@@ -20,8 +20,9 @@ export function runToposLearning(ToposResonatorKernel, fixture) {
     assert(actual.length === expected.length, "result shape");
     let maximum = 0;
     for (let i = 0; i < actual.length; i++) {
+      assert(Number.isFinite(actual[i]) && Number.isFinite(expected[i]), `nonfinite comparison ${i}`);
       const delta = Math.abs(actual[i] - expected[i]);
-      assert(Number.isFinite(actual[i]) && delta <= atol + rtol * Math.abs(expected[i]), `value mismatch ${i}`);
+      assert(delta <= atol + rtol * Math.abs(expected[i]), `value mismatch ${i}`);
       maximum = Math.max(maximum, delta);
     }
     return maximum;
