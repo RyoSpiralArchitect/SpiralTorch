@@ -136,7 +136,7 @@ impl PyToposResonatorKernel {
         rows: usize,
         features: usize,
     ) -> PyResult<PyToposResonatorLearningBatch> {
-        py.detach(|| self.operator.capture(&input, &gate, rows, features))
+        py.detach(|| self.operator.capture_owned(input, gate, rows, features))
             .map(|inner| PyToposResonatorLearningBatch { inner })
             .map_err(value_error)
     }
