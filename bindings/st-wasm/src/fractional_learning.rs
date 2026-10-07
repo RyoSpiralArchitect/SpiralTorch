@@ -99,6 +99,19 @@ impl FractionalGlKernel {
         CoreKernel::gain_from_log_gain(number(&log_gain, "log_gain")?).map_err(js_error)
     }
 
+    pub fn validate_history_window(
+        &self,
+        lag_start: Number,
+        lag_end: Number,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .validate_history_window(
+                js_u32(lag_start.as_ref(), "lag_start")? as usize
+                    ..js_u32(lag_end.as_ref(), "lag_end")? as usize,
+            )
+            .map_err(js_error)
+    }
+
     pub fn forward(
         &self,
         input: &[f32],
@@ -170,6 +183,31 @@ impl FractionalGlKernel {
                 js_u32(axis.as_ref(), "axis")? as usize,
                 number(&alpha, "alpha")?,
                 number(&log_gain, "log_gain")?,
+            )
+            .map(|inner| FractionalGlGainLearningBatch { inner })
+            .map_err(js_error)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Shared ND contract plus half-open lag bounds.
+    pub fn forward_history_log_gain_window(
+        &self,
+        input: &[f32],
+        shape: &[u32],
+        axis: Number,
+        alpha: Number,
+        log_gain: Number,
+        lag_start: Number,
+        lag_end: Number,
+    ) -> Result<FractionalGlGainLearningBatch, JsValue> {
+        self.inner
+            .forward_history_log_gain_window(
+                input,
+                &shape.iter().map(|&v| v as usize).collect::<Vec<_>>(),
+                js_u32(axis.as_ref(), "axis")? as usize,
+                number(&alpha, "alpha")?,
+                number(&log_gain, "log_gain")?,
+                js_u32(lag_start.as_ref(), "lag_start")? as usize
+                    ..js_u32(lag_end.as_ref(), "lag_end")? as usize,
             )
             .map(|inner| FractionalGlGainLearningBatch { inner })
             .map_err(js_error)

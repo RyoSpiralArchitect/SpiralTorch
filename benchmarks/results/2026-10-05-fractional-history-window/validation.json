@@ -1,0 +1,101 @@
+{
+  "schema": "spiraltorch.fractional_history_window_validation.v1",
+  "status": "passed",
+  "source_revision": "16379238c73f6890a4f754dccd4ad381436e047b",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "76f5d780a50f2eb9411d399be6fd06d250c97d59e39837b2ec63bed5244a8377",
+    "crates/st-frac/src/learning.rs": "b6927c1e9e16b333d4c262b9a307834428b2e26fddfbc543685f5f24a9c34eb5",
+    "crates/st-frac/src/learning/window.rs": "55a60c8003553a36f2b4317d656af17cf243c93c42264351e7cb3cbb20f00c0e",
+    "crates/st-frac/tests/history_window.rs": "4f51a1528facefa1ddbf6552823081d0408ec87fdce7d1255a55ce2c03494b8b",
+    "bindings/st-py/src/fractional_learning.rs": "29a363659ce03e059ed72cf1206ba58094c64ceec540d43b4e1c5683eced2741",
+    "bindings/st-py/spiraltorch/fractional_autograd.py": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "bindings/st-py/spiraltorch/__init__.pyi": "bec54983c3fac2a70ccb147366ceaf897e9fc0dde9504907cf4582e3910a92dc",
+    "bindings/st-py/tests/test_fractional_history_window.py": "294eb3efefb714df252d685cf7e9d37fed086dec467033a367d5e8c1ed82f2fc",
+    "bindings/st-wasm/src/fractional_learning.rs": "e7b53ef25cc72ac203eecc3013097c5a931e7bef713286eb83ae59b12b52a3e0",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "962585eeaddd016bd49f16a971b1f68b6350aaed1ffca5bc8d646e07cd911ac5",
+    "bindings/st-wasm/tests/fractional_learning_types.ts": "961c06af7859aae94b7cc71ee2a1efe83bf8689e1af33f7f84b6ecbe4389a287",
+    "bindings/st-wasm/tests/fractional_history_window.mjs": "61ff5467a5cf4af1a4a26a7d2200d1d57979d182a30eacd0f419b980db60441a",
+    "docs/fractional_history_window.md": "ff019079d86511018a3f14560069666687ef58dd87afbe636218da82e2c74c1d",
+    "docs/fractional_angle_study.md": "29271257bc9cd13e9716e5eea3a50a8ba2a9709ca08aa0465465c4280a9ba2da"
+  },
+  "native_sha256": "18f4c1c2bb4b76fa0e8beeca59f7fbfa0dffbc85efd72b96c45c119a63befa58",
+  "wasm_sha256": "752d4daf65ddfc5814707af2bc9a1bdf338f1d555ebe9c7d429b7439b0b05aec",
+  "wasm_javascript_sha256": "86e7b723c4edd7c3190fcef253264bdb287350a84994ba038e16a812c117edc9",
+  "runtime_manifest_sha256": "05156ff701732d1e428a0aebf741cb3667251450dadb05207800aa83243e5abc",
+  "runtime_files": 71,
+  "import_verification": {
+    "package_imports_bound": true,
+    "native_sha256": "18f4c1c2bb4b76fa0e8beeca59f7fbfa0dffbc85efd72b96c45c119a63befa58",
+    "bridge_sha256": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "window_api_present": true
+  },
+  "environment": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "system": "Darwin",
+    "machine": "arm64",
+    "device": "cpu",
+    "dtype": "float32"
+  },
+  "tests": {
+    "rust": 146,
+    "new_rust_window": 6,
+    "python_regressions": 805,
+    "new_python_window": 49,
+    "compiled_wasm_fixtures": 9,
+    "typescript": "passed",
+    "skipped": 0,
+    "existing_jit_deprecation_warnings": 18
+  },
+  "checks": {
+    "native_release": "passed",
+    "explicit_cpu_text": "passed",
+    "wasm32_release": "passed",
+    "strict_native_frac_clippy_rust197": "passed",
+    "strict_wasm_core_frac_clippy_rust197": "passed",
+    "strict_wasm_wgpu_frac_clippy_rust199": "passed",
+    "rustfmt": "passed"
+  },
+  "earlier_attempts": {
+    "native_clippy_invalid_range_fixture": {
+      "exit_code": 101,
+      "resolution": "Construct tested invalid bounds from integer pairs; same validation assertion retained."
+    },
+    "wasm_wgpu_clippy_rust197": {
+      "exit_code": 101,
+      "resolution": "Pre-existing newer lint attributes; rerun with installed Rust 1.99, no lint gate relaxed."
+    }
+  },
+  "protected_angular_study_files": {
+    "study": 76,
+    "client": 8,
+    "runtime": 71,
+    "originalDerived": 2
+  },
+  "compiled_wasm_learning_sha256": "be392796232ba0a32f4850ef0245a81ef08fa12f9e0c22186adaeca820c805bd",
+  "private_log_sha256": {
+    "rust-tests-final.log": "0a4af84de20c0ab478f44f68cb984afffae27d2c57f9546fb9ecd5b65f8b9154",
+    "native-build-committed.log": "f84bf88b9a25c4f95ccb728a7a948d705aeb0c30e66c8e85b559f55102d23168",
+    "window-tests-final.log": "3ed32b43b61e1d0c6fa4c1745b6fb15590ace8563a9e5242f3fa15e312d5942b",
+    "regressions-final.log": "c036dd40ef5cf4ab59367f3b438e5213f7e15ec79f08c6713a8d55e9a8fe9037",
+    "cpu-text-check.log": "de5fbe780856663df01a06a5681f799afd4ad32647e100505ee1579688e85be1",
+    "wasm-build.log": "9bf3e63596ad11f20edae75c95f51731d2a5e00df308d06734b0bb05086d5eba",
+    "wasm-window.log": "9d0721745abbc83a6230d3717d274b552c673400a97329190b8b296939903af1",
+    "typescript.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "clippy-frac.log": "576a0ee58c985bb7db68f89ad0aa2e2d9112898fda937e1488d054a760cca83f",
+    "clippy-frac-fixed.log": "cdbc7c7528d01c4f84075a454dc68643fe5bd940355915a1fd99bedff953e1f2",
+    "clippy-wasm.log": "4d70302c6edab63f923854b91501b83a0cef1f1aa29d94bdfb9314f0d97d5dc0",
+    "clippy-wasm-core.log": "52d38cb2636377c3d0d8b8e63e30a8e550a4c35e541b27b2ea3b5de321ae89a4",
+    "clippy-wasm-wgpu-rust199.log": "e551b960602f278f7f7c92ae0bdcfedffd8d64f9ffcd955af753c41af6ccb228",
+    "fractional_learning.mjs.log": "24af3dc645439ea79fff3b5ac6a30aaba4279e2036880eb27573b42a3c14c8fc",
+    "fractional_history.mjs.log": "7e7172876332ccd67539683c3984a4ec638d2c85ea6650f3a678b3e711990be3",
+    "fractional_history_l2.mjs.log": "8e83925c7372e46d254f9ffe00238b9afc60a839b8fa1e42d5ceadd1918d10ce",
+    "fractional_history_log_gain.mjs.log": "6a3b74bcec8d27bc0b51453ab717f5c8bd3534cb2fac55b97228bbed52c55e68",
+    "fractional_angle_chart.mjs.log": "20ea96eebd280fdb750ba712699f335332dc59ee5dc19bc6550aefbd8b5b6f02",
+    "fractional_selective_vjp.mjs.log": "9254d549dc0c73c8b21a9913fbdf5e576f3adf346d02dae7d38e4042e8bf41c2",
+    "fractional_tiled_forward.mjs.log": "146ac3c14005b71c22533da32206a07cc7e87263f3800d40ff817b933099b705",
+    "numeric_boundaries.cjs.log": "e7cea79c60d77ace27a0927c872850d202edde468e8bc17d5b0419d8f65c4f56"
+  },
+  "scope": "CPU f32 operator, first-order differentiation, synthetic compiled-WASM learning and tiny randomly initialized HF learning/resume fixtures. Not a pretrained ablation, general LLM quality, unique parameter recovery, browser/GPU residency or timing evidence. Default history behavior and previous frozen study are unchanged."
+}
