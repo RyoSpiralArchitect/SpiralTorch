@@ -1,0 +1,68 @@
+{
+  "schema": "spiraltorch.topos_nn_signed_zero_review.v1",
+  "base_revision": "e046450b67351d19c76faadcaea55336bdc0da11",
+  "review_comment": 4203253851,
+  "correction": "Require exact f32 operand bits for both forward input and saved gate before any pullback or gradient accumulation.",
+  "source_files": [
+    {
+      "path": "crates/st-nn/src/layers/topos_resonator.rs",
+      "sha256": "e81c127fbac4117dab46824f51974a0ef89de35ffd66ec1b23273bbe310d3601"
+    },
+    {
+      "path": "docs/topos_learning.md",
+      "sha256": "10c463c086d80f5aa31f91e8c883d925d135e12a791a1a43d754741c4475d367"
+    }
+  ],
+  "regression_control": {
+    "status": "expected_failure",
+    "passed": 0,
+    "failed": 2,
+    "source": "Base implementation plus the two new signed_zero_change regression tests, before the bitwise comparison correction."
+  },
+  "corrected_validation": {
+    "nn_library_tests": 764,
+    "wgpu_topos_tests": 17,
+    "actual_native_wgpu_mixed_route_marker": true,
+    "nn_enabled_wasm32_release": "passed",
+    "pinned_workspace_formatting": "passed"
+  },
+  "cases": [
+    "+0 to -0 and -0 to +0 input changes rejected",
+    "Rejected calls preserve absent or accumulated gradients and prior backward audit",
+    "Original input remains retryable with its signed-zero gate-gradient bits",
+    "Direct internal gate mutation exercises defensive snapshot comparison independently of public cache invalidation"
+  ],
+  "logs": [
+    {
+      "path": "signed-zero-red.log",
+      "sha256": "635297ae38734f40f68023a94c91537b4095a8599db2c5069be6876295524070",
+      "bytes": 2313
+    },
+    {
+      "path": "nn-signed-zero-green-all.log",
+      "sha256": "f790e951a0b7517c3a83b1cb07bd79bc228a5f1c65e11ed90cd90213f0ff502d",
+      "bytes": 67080
+    },
+    {
+      "path": "nn-signed-zero-green-wgpu.log",
+      "sha256": "35d2a9b7074ebe338eec293b9e88a046e61937863e7c2d2ef9f79ea4883c5937",
+      "bytes": 116626
+    },
+    {
+      "path": "wasm-signed-zero-green-build.log",
+      "sha256": "92eeb7fe515175832d2e0fee59d54a266f973f5f250ac7c44e2e304e86ae9e70",
+      "bytes": 758
+    },
+    {
+      "path": "fmt-signed-zero-green.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  ],
+  "performance": {
+    "new_timing_run": false,
+    "preserved_measured_candidate": "60eb80fbf0e8103ee348a50d65a4c744196c0f03",
+    "note": "Original timings predate this validation-only correction; no new speed or quality claim."
+  },
+  "scope": "Native CPU regression and native WGPU cross-route tests. wasm32 compilation is not direct execution of the NN module in WASM. Log hashes establish retained-file consistency, not independent historical execution provenance."
+}

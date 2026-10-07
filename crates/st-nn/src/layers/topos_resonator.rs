@@ -37,6 +37,15 @@ fn topos_resonator_error(error: impl std::fmt::Display) -> TensorError {
     TensorError::Generic(format!("Topos resonator contract failed: {error}"))
 }
 
+fn same_operand_bits(left: &[f32], right: &[f32]) -> bool {
+    // A captured pullback must use the exact forward operands, including signed zero.
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+}
+
 fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
     match backend {
         TensorUtilBackend::Auto => "auto",
@@ -607,12 +616,12 @@ impl ToposResonator {
                 right: cached_shape,
             });
         }
-        if input.data() != cache.saved.input() {
+        if !same_operand_bits(input.data(), cache.saved.input()) {
             return Err(TensorError::InvalidValue {
                 label: "topos_resonator_forward_input_mismatch",
             });
         }
-        if self.gate.value().data() != cache.saved.gate() {
+        if !same_operand_bits(self.gate.value().data(), cache.saved.gate()) {
             return Err(TensorError::InvalidValue {
                 label: "topos_resonator_forward_gate_mismatch",
             });
@@ -1019,6 +1028,82 @@ mod tests {
             );
         }
         assert!(losses[99] < losses[0] * 0.1);
+    }
+
+    #[test]
+    fn captured_input_signed_zero_change_is_rejected_without_mutating_state() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        for zero in [0.0_f32, -0.0_f32] {
+            let mut layer = ToposResonator::new("gate", 1, 2).unwrap();
+            let input = Tensor::from_vec(1, 2, vec![zero, 0.25]).unwrap();
+            let changed = Tensor::from_vec(1, 2, vec![-zero, 0.25]).unwrap();
+            let upstream = Tensor::from_vec(1, 2, vec![1.0, 0.5]).unwrap();
+            layer.forward(&input).unwrap();
+            assert!(matches!(
+                layer.backward(&changed, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_input_mismatch"
+                })
+            ));
+            assert!(layer.parameter().gradient().is_none());
+            assert!(layer.latest_backward_audit().is_none());
+            layer.backward(&input, &upstream).unwrap();
+            let gradient = layer
+                .parameter()
+                .gradient()
+                .unwrap()
+                .data()
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>();
+            assert_eq!(gradient[0], zero.to_bits());
+            let audit = layer.latest_backward_audit();
+            assert!(layer.backward(&changed, &upstream).is_err());
+            assert_eq!(
+                layer
+                    .parameter()
+                    .gradient()
+                    .unwrap()
+                    .data()
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                gradient
+            );
+            assert_eq!(layer.latest_backward_audit(), audit);
+        }
+    }
+
+    #[test]
+    fn cached_gate_signed_zero_change_is_rejected_before_any_accumulation() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        for zero in [0.0_f32, -0.0_f32] {
+            let mut layer = ToposResonator::new("gate", 1, 2).unwrap();
+            let gate = Tensor::from_vec(1, 2, vec![zero, 0.5]).unwrap();
+            *layer.parameter_mut().value_mut() = gate.clone();
+            let input = Tensor::from_vec(1, 2, vec![0.25, 0.5]).unwrap();
+            let upstream = Tensor::from_vec(1, 2, vec![1.0, 0.5]).unwrap();
+            layer.forward(&input).unwrap();
+            // Bypass the public invalidating accessor to exercise the defensive
+            // saved-gate check itself, not only cache invalidation.
+            *layer.gate.value_mut() = Tensor::from_vec(1, 2, vec![-zero, 0.5]).unwrap();
+            assert!(matches!(
+                layer.backward(&input, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_gate_mismatch"
+                })
+            ));
+            assert!(layer.parameter().gradient().is_none());
+            assert!(layer.latest_backward_audit().is_none());
+            *layer.gate.value_mut() = gate;
+            let dx = layer.backward(&input, &upstream).unwrap();
+            assert_eq!(dx.data()[0].to_bits(), zero.to_bits());
+            assert!(layer.parameter().gradient().is_some());
+        }
     }
 
     #[test]
