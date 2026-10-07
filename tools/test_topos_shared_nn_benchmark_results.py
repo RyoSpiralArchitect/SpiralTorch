@@ -34,6 +34,10 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def verify_original(verification, name, raw):
+    assert verification["private_files"][name] == dict(sha256=digest(raw), bytes=len(raw))
+
+
 def finite_tree(value):
     if isinstance(value, dict):
         return all(finite_tree(v) for v in value.values())
@@ -63,6 +67,9 @@ def verify(data, verification):
         assert digest(source.encode()) == plan["harness_sha256"][path]
     assert set(data["builds"]) == {"baseline", "candidate"}
     for arm, build in data["builds"].items():
+        # Original build JSON uses two-space indentation, ASCII strings and
+        # integer sizes; retain its key order to reproduce the committed bytes.
+        verify_original(verification, arm + "-build.json", (json.dumps(build, indent=2) + "\n").encode())
         assert build["source_revision"] == plan[arm + "_revision"]
         assert build["harness_sha256"] == plan["harness_sha256"]
         assert build["binary_sha256"] == verification["private_files"][arm + "-probe"]["sha256"]
@@ -82,14 +89,15 @@ def verify(data, verification):
     assert verification["counts"] == dict(native_reports=36, torch_reports=36, timed_samples=2880)
     assert data["pilots"]["excluded_from_summary"] is True
     assert [r["arm"] for r in data["pilots"]["records"]] == ["baseline", "candidate"]
+    for pilot in data["pilots"]["records"]:
+        for kind, suffix in (("native", ".json"), ("torch", "-torch.json")):
+            verify_original(verification, "pilot-" + pilot["arm"] + suffix, pilot[kind + "_raw_json"].encode())
     parsed = []
     for record in data["records"]:
         job = record["job"]
         native, torch = [json.loads(record[k + "_raw_json"]) for k in ("native", "torch")]
         for kind, suffix in (("native", ".json"), ("torch", "-torch.json")):
-            raw = record[kind + "_raw_json"].encode()
-            saved = verification["private_files"][job["name"] + suffix]
-            assert saved == dict(sha256=digest(raw), bytes=len(raw))
+            verify_original(verification, job["name"] + suffix, record[kind + "_raw_json"].encode())
         shape = [job["rows"], job["features"]]
         for receipt in (native, torch):
             assert receipt["shape"] == shape and all(type(n) is int for n in receipt["shape"])
@@ -218,8 +226,35 @@ def test_self_consistent_bad_receipts_are_rejected():
         raise AssertionError("contradictory receipt accepted")
 
 
+def test_retained_build_and_pilot_changes_are_rejected():
+    data, verification = load()
+    for index, arm in enumerate(("baseline", "candidate")):
+        mutations = [
+            lambda d: d["builds"][arm]["source_sha256"].__setitem__("crates/st-core/src/dynamics/topos_resonator.rs", "0" * 64),
+            lambda d: d["pilots"]["records"][index].__setitem__("native_raw_json", "{}"),
+            lambda d: d["pilots"]["records"][index].__setitem__("torch_raw_json", "{}"),
+        ]
+        for mutate in mutations:
+            bad = copy.deepcopy(data)
+            mutate(bad)
+            try:
+                verify(bad, verification)
+            except AssertionError:
+                continue
+            raise AssertionError("retained original record identity drift accepted")
+        for name in (arm + "-build.json", "pilot-" + arm + ".json", "pilot-" + arm + "-torch.json"):
+            bad_witness = copy.deepcopy(verification)
+            bad_witness["private_files"][name]["bytes"] += 1
+            try:
+                verify(data, bad_witness)
+            except AssertionError:
+                continue
+            raise AssertionError("incorrect original byte length accepted")
+
+
 if __name__ == "__main__":
     test_saved_records_and_hashes()
     test_incomplete_or_misaggregated_matrix_is_rejected()
     test_self_consistent_bad_receipts_are_rejected()
+    test_retained_build_and_pilot_changes_are_rejected()
     print("Saved native NN benchmark checks passed (no fresh execution)")
