@@ -19,15 +19,33 @@ fn topos_shaders_and_layout_contract_are_validated_without_gpu() {
         for porosity in [0., 0.3, 1.] {
             let program =
                 Program::Topos(ToposResonatorKernel::new(0.2, 1., porosity, iterations).unwrap());
-            for vjp in [false, true] {
-                let source = generated_source(&program, vjp);
-                let module = naga::front::wgsl::parse_str(&source).unwrap();
-                naga::valid::Validator::new(
-                    naga::valid::ValidationFlags::all(),
-                    naga::valid::Capabilities::all(),
-                )
-                .validate(&module)
-                .unwrap();
+            for variant in [
+                program.clone(),
+                Program::ToposResidualGuard(
+                    ToposResonatorKernel::new(0.2, 1., porosity, iterations).unwrap(),
+                ),
+            ] {
+                for evaluation in [
+                    Evaluation::Forward,
+                    Evaluation::RecomputedVjp,
+                    Evaluation::Capture,
+                    Evaluation::CapturedVjp,
+                ] {
+                    let source = generated_source_for(&variant, evaluation);
+                    let module = naga::front::wgsl::parse_str(&source).unwrap();
+                    naga::valid::Validator::new(
+                        naga::valid::ValidationFlags::all(),
+                        naga::valid::Capabilities::all(),
+                    )
+                    .validate(&module)
+                    .unwrap();
+                    if evaluation == Evaluation::CapturedVjp {
+                        assert!(source.contains("let sensitivity = saved_sensitivity[i]"));
+                        assert!(!source.contains("step < iterations"));
+                    } else {
+                        assert!(source.contains("step < iterations"));
+                    }
+                }
             }
             for gate in [&[5][..], &[1, 5], &[2, 3, 5]] {
                 assert!(program
@@ -106,6 +124,15 @@ fn topos_resident_forward_and_shared_vjp_execute_on_gpu() {
                     );
                 }
                 let vjp = PointwiseVjpPlan::new(forward).unwrap();
+                let captured = PointwiseVjpPlan::for_graph(
+                    PointwisePlan::topos_resonator(
+                        device.clone(),
+                        kernel,
+                        vec![input.layout().clone(), gate.layout().clone()],
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
                 for factor in [1., -0.3] {
                     let seed: Vec<_> = seed.iter().map(|v| factor * v).collect();
                     let dy = if factor == 1. {
@@ -132,6 +159,9 @@ fn topos_resident_forward_and_shared_vjp_execute_on_gpu() {
                     close(&gradients[0].snapshot().unwrap().read().unwrap(), &dx);
                     close(&gradients[1].snapshot().unwrap().read().unwrap(), &dg);
                     assert_eq!(gradients[1].layout().shape(), gate_shape);
+                    let reused = captured.run(&[&input, &gate], &dy).unwrap();
+                    close(&reused[0].snapshot().unwrap().read().unwrap(), &dx);
+                    close(&reused[1].snapshot().unwrap().read().unwrap(), &dg);
                 }
                 cases += 1;
             }

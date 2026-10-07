@@ -5,9 +5,15 @@ use super::*;
 pub(super) fn write_body(
     code: &mut String,
     kernel: ToposResonatorKernel,
-    vjp: bool,
+    evaluation: Evaluation,
     residual_guard: bool,
 ) {
+    if evaluation == Evaluation::CapturedVjp {
+        // Graph guards retain forward failures, including the residual drive.
+        code.push_str("    check(value0); check(value1);\n    let sensitivity = saved_sensitivity[i]; check(sensitivity);\n");
+        write_adjoint(code);
+        return;
+    }
     for (name, value) in [
         ("coupling", kernel.coupling()),
         ("saturation", kernel.saturation()),
@@ -50,18 +56,25 @@ pub(super) fn write_body(
     if residual_guard {
         code.push_str("    let residual_drive = checked_apply(OP_ADD, drive, checked_apply(OP_MULTIPLY, coupling, state)); check(residual_drive);\n");
     }
-    if vjp {
-        code.push_str(
-            r#"
+    if evaluation == Evaluation::RecomputedVjp {
+        write_adjoint(code);
+    } else {
+        if evaluation == Evaluation::Capture {
+            code.push_str("    saved_sensitivity[i] = sensitivity;\n");
+        }
+        code.push_str("    out[i] = state;\n}\n");
+    }
+}
+
+fn write_adjoint(code: &mut String) {
+    code.push_str(
+        r#"
     let grad_drive = checked_apply(OP_MULTIPLY, cotangent[i], sensitivity);
     out[i] = checked_apply(OP_MULTIPLY, grad_drive, value1);
     out[params[0] + i] = checked_apply(OP_MULTIPLY, grad_drive, value0);
 }
 "#,
-        );
-    } else {
-        code.push_str("    out[i] = state;\n}\n");
-    }
+    );
 }
 
 #[cfg(test)]

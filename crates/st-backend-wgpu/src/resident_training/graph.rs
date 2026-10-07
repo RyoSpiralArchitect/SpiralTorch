@@ -524,19 +524,13 @@ impl ResidentGraphTraining {
                         }
                         _ => unreachable!("pointwise stage"),
                     };
-                    let plan = Box::new(PointwiseVjpPlan::new(forward_plan)?);
+                    let plan = Box::new(PointwiseVjpPlan::for_graph(forward_plan)?);
                     let inputs: Vec<_> = std::iter::once(&activations[i])
                         .chain(ids.iter().map(|&id| &parameters[id]))
                         .collect();
                     let destinations: Vec<_> = std::iter::once(&gradients[i])
                         .chain(ids.iter().map(|&id| &raw_gradients[id]))
                         .collect();
-                    let forward = plan.forward().bind_into(
-                        &inputs,
-                        &activations[i + 1],
-                        &empty_flags,
-                        &pointwise_flags,
-                    );
                     let workspace = Box::new(plan.prepare_into(
                         &inputs,
                         &gradients[i + 1],
@@ -544,6 +538,13 @@ impl ResidentGraphTraining {
                         &empty_flags,
                         &pointwise_flags,
                     )?);
+                    let forward = plan.bind_forward(
+                        &workspace,
+                        &inputs,
+                        &activations[i + 1],
+                        &empty_flags,
+                        &pointwise_flags,
+                    );
                     Node::Pointwise {
                         plan,
                         workspace,
@@ -990,7 +991,7 @@ impl ResidentGraphTraining {
                     }
                     (Node::Pointwise { plan, forward, .. }, None)
                     | (Node::Pointwise { plan, .. }, Some(ForwardBinding::Pointwise(forward))) => {
-                        plan.forward().encode_in_pass(&mut compute, forward);
+                        plan.encode_forward_in_pass(&mut compute, forward);
                     }
                     (Node::LayerNorm(node), None) => {
                         compute.set_pipeline(

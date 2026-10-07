@@ -102,6 +102,31 @@ fn fused_source(chain: &PointwiseChain) -> String {
 }
 
 fn generated_source(program: &Program, vjp: bool) -> String {
+    generated_source_for(
+        program,
+        if vjp {
+            Evaluation::RecomputedVjp
+        } else {
+            Evaluation::Forward
+        },
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Evaluation {
+    Forward,
+    RecomputedVjp,
+    Capture,
+    CapturedVjp,
+}
+
+fn generated_source_for(program: &Program, evaluation: Evaluation) -> String {
+    let vjp = matches!(
+        evaluation,
+        Evaluation::RecomputedVjp | Evaluation::CapturedVjp
+    );
+    let captured = matches!(evaluation, Evaluation::Capture | Evaluation::CapturedVjp);
+    assert!(!captured || !matches!(program, Program::Chain(_)));
     let count = program.input_count();
     let mut code = String::new();
     for i in 0..count {
@@ -136,6 +161,15 @@ fn generated_source(program: &Program, vjp: bool) -> String {
         )
         .unwrap();
         code.push_str(crate::shader_sources::GELU_DERIVATIVE_WGSL);
+    }
+    if captured {
+        writeln!(
+            code,
+            "@group(0) @binding({}) var<storage, {}> saved_sensitivity: array<f32>;",
+            count + if vjp { 5 } else { 4 },
+            if vjp { "read" } else { "read_write" },
+        )
+        .unwrap();
     }
     // params: length, rank, grid-x, group-count, shape,
     // (offset, strides)*inputs, output flag slot.
@@ -173,7 +207,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
         topos::write_body(
             &mut code,
             *kernel,
-            vjp,
+            evaluation,
             matches!(program, Program::ToposResidualGuard(_)),
         );
         return substitute_ops(
