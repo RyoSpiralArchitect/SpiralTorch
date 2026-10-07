@@ -66,9 +66,11 @@ state with the same implementation still must reproduce the next update.
 Both N and F must fit the kernel's value budget, even when rows is zero; an
 empty input returns F zero gate gradients. Shared `vjp_audited` reports RMS of
 the reduced F gradients. The external per-element audit API is unchanged.
+`vjp_audited_elementwise` returns the same reduced gradient while streaming
+the RMS of its pre-reduction contributions, for compatibility with NN audits.
 This is CPU/scalar-WASM transport optimization, **not GPU-resident HF training**
 or evidence of better language-model quality. The native `st-nn` CPU shared
-layer below still uses its existing expanded tape and separate tensor reduction.
+layer below also uses this compact tape and core-owned row sum.
 
 Reproduce the scalar-WASM contract in Node or Chrome and compare equivalent
 finite-unroll CPU routes (including the old expanded captured control):
@@ -87,7 +89,7 @@ Timings cover forward plus both VJPs and host transport, not optimizer updates.
 ## Rust NN Learning
 
 The CPU route of `st_nn::ToposResonator` now captures that same core tape during
-forward. Backward calls `batch.vjp_audited(upstream)`, which checks finite
+forward. Backward calls `batch.vjp_audited_elementwise(upstream)`, which checks finite
 gradients and the sensitivity bound and computes the same backward audit from
 the saved transition. It does not run the finite recurrence twice again.
 This is an audit of Rust-owned results, not independent verification of an
@@ -100,7 +102,8 @@ change between forward and backward;
 only an actual CPU captured pullback reports `capture_reused: true`.
 
 Capture trades extra forward work and retained storage for cheaper backward.
-The core tape owns four N-element vectors, while the returned NN output is a
+The elementwise core tape owns four N-element vectors; a shared-row tape owns
+three N-element vectors and one F-element gate. The returned NN output is a
 separate Tensor; the older NN cache shared the caller's Tensor storage. This
 is not an inference-speed or peak-memory improvement. Stateless
 `ToposResonatorOperator::forward` and Python's no-grad path remain available
@@ -131,14 +134,21 @@ assert_eq!(grad_input.shape(), input.shape());
 assert_eq!(layer.parameter().gradient().unwrap().shape(), (1, features));
 ```
 
-Rust expands the shared gate for the core recurrence and sums its elementwise
-VJPs over rows using the existing fallible `sum_axis0` primitive. There is **no
+The CPU layer retains an unexpanded F-element gate and sums each checked f32
+VJP contribution in row-order f64 inside the core pullback. It does not allocate
+an N-element gate gradient or invoke a second tensor reduction. There is **no
 additional row average**: a mean-loss factor belongs in the upstream gradient.
-CPU uses the primitive's f64 accumulator with finite f32 output checks; the
-WGPU VJP route requests its WGPU reduction. The reduction emits its own typed
-execution receipt. Nonfinite reduction results are rejected before adding a
-gate gradient or committing the backward audit. The core backward audit still
-covers the expanded elementwise VJPs, not the reduced shared-parameter gradient.
+The row sum and final finite f32 checks match CPU `sum_axis0`. The core streams
+pre-reduction statistics in that same pass, so the NN backward audit continues
+to describe expanded elementwise VJPs, not the reduced parameter gradient.
+
+The legacy host WGPU route expands the gate only when dispatching to that
+executor and still uses its WGPU `sum_axis0` reduction and execution receipt.
+A GPU forward followed by CPU backward retains the existing recomputation and
+CPU tensor reduction. A CPU capture can serve GPU backward and later CPU
+backward without replacing its compact tape. Nonfinite sums are rejected
+before adding a gate gradient or committing a backward audit. Empty inputs
+still validate the feature gate before dispatch.
 
 Input, gate and upstream tensors are normalized by logical row/column layout,
 including the existing elementwise mode. Cache checks compare canonical input
@@ -148,16 +158,22 @@ detected before backward; WGPU cached operands are isolated as well. On
 successful accumulation, parameter values and Tensor-backed gradients are
 normalized together to row-major optimizer storage. Tape gradients already use
 that logical coordinate order. Metadata distinguishes `gate_rows` / `trainable_parameters` from
-`expanded_gate_rows` / `expanded_gate_values` and labels the raw-sum reduction.
+the logical `expanded_gate_rows` / `expanded_gate_values`. Actual executor gate
+and gate-VJP sizes are `materialized_gate_values` and
+`materialized_gate_gradient_values`; `gate_gradient_reduction_kernel` separates
+`st_core.f64_row_sum` from `tensor_util.sum_axis0`. No tensor-reduction receipt
+is fabricated for the fused core sum. `ToposGateLayout` re-exports the core
+layout enum under the existing NN API name.
 
 This is a host-Tensor Rust NN layer, usable in ordinary `Sequential`; it does
 not make that graph GPU-resident. `Sequential::backward` currently recomputes
 its activations, so direct-layer capture savings must not be generalized to
 the whole graph. Isolated parameter and WGPU operand snapshots can add copies;
 previous capture timings are not measurements of this revised path.
-Existing Python Torch adapters still perform broadcast and
-reduction in Torch; the scalar WASM core kernel still takes a full per-element
-gate. For the distinct resident NN path, use the shared-gate graph below.
+Python Torch feature-gate adapters and scalar WASM shared-row methods use the
+compact core path described above; generic Torch broadcasts still use the
+legacy expanded route. For the distinct resident NN path, use the shared-gate
+graph below.
 
 ### Resident Kernel Building Block
 

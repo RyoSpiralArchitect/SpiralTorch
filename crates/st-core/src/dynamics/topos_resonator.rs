@@ -354,9 +354,18 @@ impl ToposResonatorLearningBatch {
     }
 
     pub fn vjp(&self, grad_output: &[f32]) -> Result<ToposResonatorBackward, ToposResonatorError> {
+        self.vjp_with_gate_statistics::<false>(grad_output)
+            .map(|(backward, _)| backward)
+    }
+
+    fn vjp_with_gate_statistics<const ELEMENTWISE_RMS: bool>(
+        &self,
+        grad_output: &[f32],
+    ) -> Result<(ToposResonatorBackward, f64), ToposResonatorError> {
         validate_length("grad_output", grad_output, self.input.len())?;
         let mut grad_input = Vec::with_capacity(self.input.len());
         let mut grad_gate = Vec::with_capacity(self.gate.len());
+        let mut gate_sum_squares = 0.0_f64;
         let mut shared_sums = match self.gate_layout {
             ToposResonatorGateLayout::Elementwise => Vec::new(),
             ToposResonatorGateLayout::SharedRows => vec![0.0f64; self.gate.len()],
@@ -375,6 +384,10 @@ impl ToposResonatorLearningBatch {
                 grad_drive * self.gate[gate_index],
             )?);
             let contribution = require_derived_finite("grad_gate", grad_drive * self.input[index])?;
+            if ELEMENTWISE_RMS {
+                let contribution = f64::from(contribution);
+                gate_sum_squares += contribution * contribution;
+            }
             match self.gate_layout {
                 ToposResonatorGateLayout::Elementwise => grad_gate.push(contribution),
                 // Match Tensor::try_sum_axis0: retain finite cancellation in f64,
@@ -387,10 +400,13 @@ impl ToposResonatorLearningBatch {
         for sum in shared_sums {
             grad_gate.push(require_derived_finite("grad_gate_sum", sum as f32)?);
         }
-        Ok(ToposResonatorBackward {
-            grad_input,
-            grad_gate,
-        })
+        Ok((
+            ToposResonatorBackward {
+                grad_input,
+                grad_gate,
+            },
+            gate_sum_squares,
+        ))
     }
 
     /// Audit a pullback of this immutable, already-audited transition without
@@ -402,19 +418,45 @@ impl ToposResonatorLearningBatch {
         grad_output: &[f32],
     ) -> Result<(ToposResonatorBackward, ToposResonatorBackwardAudit), ToposResonatorError> {
         let backward = self.vjp(grad_output)?;
+        let audit = self.audit_vjp(&backward, root_mean_square(&backward.grad_gate))?;
+        Ok((backward, audit))
+    }
+
+    /// Return the same VJP as `vjp`, but audit the per-element gate contributions
+    /// before shared-row reduction. This preserves the external executor audit
+    /// convention without allocating an expanded gate-gradient buffer. Unlike
+    /// `vjp_audited`, `grad_gate_rms` is not the RMS of the returned shared VJP.
+    pub fn vjp_audited_elementwise(
+        &self,
+        grad_output: &[f32],
+    ) -> Result<(ToposResonatorBackward, ToposResonatorBackwardAudit), ToposResonatorError> {
+        let (backward, gate_sum_squares) = self.vjp_with_gate_statistics::<true>(grad_output)?;
+        let grad_gate_rms = if self.input.is_empty() {
+            0.0
+        } else {
+            (gate_sum_squares / self.input.len() as f64).sqrt()
+        };
+        let audit = self.audit_vjp(&backward, grad_gate_rms)?;
+        Ok((backward, audit))
+    }
+
+    fn audit_vjp(
+        &self,
+        backward: &ToposResonatorBackward,
+        grad_gate_rms: f64,
+    ) -> Result<ToposResonatorBackwardAudit, ToposResonatorError> {
         let max_abs_drive_sensitivity = self
             .drive_sensitivity
             .iter()
             .fold(0.0f32, |maximum, value| maximum.max(value.abs()));
-        let audit = backward_audit_from_gradients(
+        backward_audit_from_rms(
             self.step.audit.rows,
             self.step.audit.features,
             self.step.config,
             max_abs_drive_sensitivity,
-            &backward.grad_input,
-            &backward.grad_gate,
-        )?;
-        Ok((backward, audit))
+            root_mean_square(&backward.grad_input),
+            grad_gate_rms,
+        )
     }
 }
 
@@ -858,9 +900,28 @@ fn audit_from_evolved(
 pub fn validate_topos_resonator_state(
     request: ToposResonatorRequest<'_>,
 ) -> Result<(), ToposResonatorError> {
-    validate_request(request)?;
-    for (&input, &gate) in request.input.iter().zip(request.gate) {
-        require_derived_finite("drive", input * gate)?;
+    validate_topos_resonator_state_with_layout(request, ToposResonatorGateLayout::Elementwise)
+}
+
+/// Validate a drive before backend dispatch without expanding a shared gate.
+pub fn validate_topos_resonator_state_with_layout(
+    request: ToposResonatorRequest<'_>,
+    gate_layout: ToposResonatorGateLayout,
+) -> Result<(), ToposResonatorError> {
+    validate_request_with_layout(request, gate_layout)?;
+    match gate_layout {
+        ToposResonatorGateLayout::Elementwise => {
+            for (&input, &gate) in request.input.iter().zip(request.gate) {
+                require_derived_finite("drive", input * gate)?;
+            }
+        }
+        ToposResonatorGateLayout::SharedRows => {
+            for row in request.input.chunks_exact(request.features) {
+                for (&input, &gate) in row.iter().zip(request.gate) {
+                    require_derived_finite("drive", input * gate)?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -988,6 +1049,24 @@ fn backward_audit_from_gradients(
     grad_input: &[f32],
     grad_gate: &[f32],
 ) -> Result<ToposResonatorBackwardAudit, ToposResonatorError> {
+    backward_audit_from_rms(
+        rows,
+        features,
+        config,
+        max_abs_drive_sensitivity,
+        root_mean_square(grad_input),
+        root_mean_square(grad_gate),
+    )
+}
+
+fn backward_audit_from_rms(
+    rows: usize,
+    features: usize,
+    config: ToposResonatorConfig,
+    max_abs_drive_sensitivity: f32,
+    grad_input_rms: f64,
+    grad_gate_rms: f64,
+) -> Result<ToposResonatorBackwardAudit, ToposResonatorError> {
     let drive_sensitivity_bound = config.finite_amplification_bound();
     let drive_sensitivity_margin = validate_stability_bound(
         "max_abs_drive_sensitivity",
@@ -1001,8 +1080,8 @@ fn backward_audit_from_gradients(
         max_abs_drive_sensitivity,
         drive_sensitivity_bound,
         drive_sensitivity_margin,
-        grad_input_rms: root_mean_square(grad_input),
-        grad_gate_rms: root_mean_square(grad_gate),
+        grad_input_rms,
+        grad_gate_rms,
         max_grad_input_error: 0.0,
         max_grad_gate_error: 0.0,
         max_formula_tolerance_ratio: 0.0,

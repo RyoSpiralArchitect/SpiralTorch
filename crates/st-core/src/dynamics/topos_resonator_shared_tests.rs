@@ -50,6 +50,10 @@ fn shared_capture_matches_expanded_recurrence_and_tensor_reduction() {
                             .collect();
                         let expected_vjp = expected.vjp(&dy).unwrap();
                         let (actual, audit) = batch.vjp_audited(&dy).unwrap();
+                        let (elementwise_audited, elementwise_audit) =
+                            batch.vjp_audited_elementwise(&dy).unwrap();
+                        assert_eq!(elementwise_audited, actual);
+                        assert_eq!(elementwise_audit, expected.vjp_audited(&dy).unwrap().1);
                         let tensor =
                             st_tensor::Tensor::from_vec(rows, features, expected_vjp.grad_gate)
                                 .unwrap();
@@ -169,15 +173,42 @@ fn shared_shape_finite_and_budget_guards_preserve_reusability() {
         let forward = op
             .forward_shared_rows(&input, &gate, rows, features)
             .unwrap_err();
+        let validation = validate_topos_resonator_state_with_layout(
+            op.request(&input, &gate, rows, features),
+            ToposResonatorGateLayout::SharedRows,
+        )
+        .unwrap_err();
         let owned = op
             .capture_shared_rows_owned(input, gate, rows, features)
             .unwrap_err();
         assert_eq!(format!("{expected:?}"), format!("{forward:?}"));
         assert_eq!(format!("{expected:?}"), format!("{owned:?}"));
+        assert_eq!(format!("{expected:?}"), format!("{validation:?}"));
     }
     let batch = op.capture_shared_rows(&[0.2; 6], &[0.5; 3], 2, 3).unwrap();
     for dy in [vec![], vec![f32::NAN; 6], vec![f32::INFINITY; 6]] {
         assert!(batch.vjp(&dy).is_err());
     }
     assert_eq!(batch.vjp(&[0.1; 6]).unwrap().grad_gate.len(), 3);
+}
+
+#[test]
+fn elementwise_audit_preserves_finite_contributions_before_shared_cancellation() {
+    let op = operator(0.0, 1, 0.0);
+    let batch = op
+        .capture_shared_rows(&[f32::MAX, -f32::MAX], &[0.0], 2, 1)
+        .unwrap();
+    let (reduced, reduced_audit) = batch.vjp_audited(&[1.0; 2]).unwrap();
+    let (elementwise, elementwise_audit) = batch.vjp_audited_elementwise(&[1.0; 2]).unwrap();
+    assert_eq!(reduced, elementwise);
+    assert_eq!(reduced.grad_gate, [0.0]);
+    assert_eq!(reduced_audit.grad_gate_rms, 0.0);
+    assert_eq!(elementwise_audit.grad_gate_rms, f64::from(f32::MAX));
+    assert!(batch.vjp_audited_elementwise(&[2.0; 2]).is_err());
+    assert!(batch.vjp_audited_elementwise(&[f32::NAN; 2]).is_err());
+    assert!(batch.vjp_audited_elementwise(&[]).is_err());
+    assert_eq!(
+        batch.vjp_audited_elementwise(&[1.0; 2]).unwrap().1,
+        elementwise_audit
+    );
 }
