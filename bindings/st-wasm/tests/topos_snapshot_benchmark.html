@@ -1,15 +1,16 @@
 <!doctype html>
 <meta charset="utf-8">
 <link rel="icon" href="data:,">
-<title>Topos shared-row scalar WASM contract</title>
-<pre id="result" data-status="running">Running shared-row learning checks...</pre>
+<title>Topos snapshot and learning-step benchmark</title>
+<pre id="result" data-status="running">Measuring scalar-WASM learning...</pre>
 <script type="module">
 import init, * as st from "/module/spiraltorch_wasm.js";
-import {checkSharedTopos, checkToposSnapshotOwnership} from "/topos_shared_transport.mjs";
+import {runToposSnapshotBenchmark} from "/topos_snapshot_benchmark.mjs";
 const result = document.querySelector("#result");
 try {
-  const exports = await init();
-  const report = {...checkSharedTopos(st), snapshot_ownership: checkToposSnapshotOwnership(st, exports.memory)};
+  await init();
+  const order = new URLSearchParams(location.search).get("case_order") ?? "forward";
+  const report = await runToposSnapshotBenchmark(st, order);
   result.textContent = JSON.stringify(report);
   result.dataset.status = report.status;
 } catch (error) {
