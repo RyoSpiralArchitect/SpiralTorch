@@ -78,35 +78,37 @@ fn shared_capture_matches_expanded_recurrence_and_tensor_reduction() {
 
 #[test]
 fn shared_capture_owns_only_feature_gate_and_survives_source_mutation() {
-    let op = operator(0.25, 5, 0.3);
-    let mut input = vec![0.2; 6];
-    let mut gate = vec![0.5; 3];
-    let borrowed = op.capture_shared_rows(&input, &gate, 2, 3).unwrap();
-    let allocations = (
-        input.as_ptr(),
-        input.capacity(),
-        gate.as_ptr(),
-        gate.capacity(),
-    );
-    let owned = op
-        .capture_shared_rows_owned(input.clone(), gate.clone(), 2, 3)
-        .unwrap();
-    let retained = op.capture_shared_rows_owned(input, gate, 2, 3).unwrap();
-    assert_eq!(
-        (
-            retained.input.as_ptr(),
-            retained.input.capacity(),
-            retained.gate.as_ptr(),
-            retained.gate.capacity()
-        ),
-        allocations
-    );
-    input = vec![0.2; 6];
-    gate = vec![0.5; 3];
-    let snapshot = op.capture_shared_rows(&input, &gate, 2, 3).unwrap();
-    input.fill(f32::NAN);
-    gate.fill(f32::NAN);
-    drop(op);
+    let (borrowed, owned, retained, snapshot) = {
+        let op = operator(0.25, 5, 0.3);
+        let mut input = vec![0.2; 6];
+        let mut gate = vec![0.5; 3];
+        let borrowed = op.capture_shared_rows(&input, &gate, 2, 3).unwrap();
+        let allocations = (
+            input.as_ptr(),
+            input.capacity(),
+            gate.as_ptr(),
+            gate.capacity(),
+        );
+        let owned = op
+            .capture_shared_rows_owned(input.clone(), gate.clone(), 2, 3)
+            .unwrap();
+        let retained = op.capture_shared_rows_owned(input, gate, 2, 3).unwrap();
+        assert_eq!(
+            (
+                retained.input.as_ptr(),
+                retained.input.capacity(),
+                retained.gate.as_ptr(),
+                retained.gate.capacity()
+            ),
+            allocations
+        );
+        input = vec![0.2; 6];
+        gate = vec![0.5; 3];
+        let snapshot = op.capture_shared_rows(&input, &gate, 2, 3).unwrap();
+        input.fill(f32::NAN);
+        gate.fill(f32::NAN);
+        (borrowed, owned, retained, snapshot)
+    };
     for batch in [borrowed, owned, retained, snapshot.clone()] {
         assert_eq!(batch.step(), snapshot.step());
         assert_eq!(
