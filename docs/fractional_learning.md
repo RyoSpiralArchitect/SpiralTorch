@@ -342,6 +342,11 @@ residual, so changing gain also changes their effective scale.
 `log_gain` must be finite and `exp(log_gain)` must be positive and finite in
 float32. Invalid/overflowing/underflowing gains fail rather than clamp,
 including when history is empty. The positive step scale still cancels.
+`FractionalGlKernel::gain_from_log_gain(log_gain)` exposes this exact checked
+conversion without a history allocation in Rust; Python and WASM expose the
+static `FractionalGlKernel.gain_from_log_gain(log_gain)` method. `FractionalGainHistoryAdapter.gain` reads
+it for the current parameter. The [matched gain study](fractional_gain_study.md)
+records it before/after each update and compares an ordinary learned short filter.
 Only requested pullbacks are evaluated: `vjp_parameters` returns alpha and
 log-gain gradients without allocating an input gradient; input-only,
 alpha-only and log-gain-only methods are also available. Unrequested

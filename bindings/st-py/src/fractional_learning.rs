@@ -41,6 +41,11 @@ impl PyFractionalGlKernel {
         "rust_f32_cpu"
     }
 
+    #[staticmethod]
+    fn gain_from_log_gain(log_gain: f32) -> PyResult<f32> {
+        FractionalGlKernel::gain_from_log_gain(log_gain).map_err(value_error)
+    }
+
     fn configuration_json(&self) -> String {
         serde_json::json!({
             "kernel_len": self.inner.kernel_len(), "step": self.inner.step(),

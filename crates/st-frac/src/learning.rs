@@ -172,6 +172,15 @@ impl FractionalGlKernel {
         })
     }
 
+    /// Observe the same checked f32 amplitude used by the learning map.
+    pub fn gain_from_log_gain(log_gain: f32) -> Result<f32> {
+        let gain = log_gain.exp();
+        if !log_gain.is_finite() || !gain.is_finite() || gain <= 0.0 {
+            return Err(FractionalLearningError::LogGain);
+        }
+        Ok(gain)
+    }
+
     /// `exp(log_gain) * c(alpha) / ||c(alpha)||_2`, with both scalar VJPs.
     /// No order/amplitude clipping or optimizer policy is applied. The positive
     /// amplitude must remain representable in f32, including on a zero map.
@@ -183,10 +192,7 @@ impl FractionalGlKernel {
         alpha: f32,
         log_gain: f32,
     ) -> Result<FractionalGlGainLearningBatch> {
-        let gain = log_gain.exp();
-        if !log_gain.is_finite() || !gain.is_finite() || gain <= 0.0 {
-            return Err(FractionalLearningError::LogGain);
-        }
+        let gain = Self::gain_from_log_gain(log_gain)?;
         Ok(FractionalGlGainLearningBatch {
             history: self.forward_history_l2(input, shape, axis, alpha, gain)?,
             gain,
@@ -885,6 +891,10 @@ mod tests {
         let kernel = FractionalGlKernel::new(6, 0.2, 24, 144).unwrap();
         let x: Vec<_> = (0..24).map(|i| (i as f32 * 0.3).sin()).collect();
         for log_gain in [-1., 0., 0.8] {
+            assert_eq!(
+                FractionalGlKernel::gain_from_log_gain(log_gain).unwrap(),
+                log_gain.exp()
+            );
             let learned = kernel
                 .forward_history_log_gain(&x, &[2, 4, 3], 1, 2., log_gain)
                 .unwrap();

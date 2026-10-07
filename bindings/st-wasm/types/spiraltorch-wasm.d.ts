@@ -11,6 +11,7 @@
 declare module "spiraltorch-wasm" {
     /** Causal zero-padded GL, Rust f32 host execution; no WebGPU claim. */
     export class FractionalGlKernel {
+        static gain_from_log_gain(log_gain: number): number;
         constructor(kernel_len: number, step: number, max_values: number, max_products: number);
         forward(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
         forward_history(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
