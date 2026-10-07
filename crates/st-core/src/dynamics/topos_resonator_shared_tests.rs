@@ -15,6 +15,124 @@ fn bits(values: &[f32]) -> Vec<u32> {
     values.iter().map(|v| v.to_bits()).collect()
 }
 
+// Frozen pre-row-walk implementation, including error and reduction order.
+fn legacy_vjp<const ELEMENTWISE_RMS: bool>(
+    batch: &ToposResonatorLearningBatch,
+    upstream: &[f32],
+) -> Result<(ToposResonatorBackward, f64), ToposResonatorError> {
+    validate_length("grad_output", upstream, batch.input.len())?;
+    let mut dx = Vec::with_capacity(batch.input.len());
+    let mut dg = Vec::with_capacity(batch.gate.len());
+    let mut squares = 0.0_f64;
+    let mut sums = match batch.gate_layout {
+        ToposResonatorGateLayout::Elementwise => Vec::new(),
+        ToposResonatorGateLayout::SharedRows => vec![0.0_f64; batch.gate.len()],
+    };
+    for (i, &upstream) in upstream.iter().enumerate() {
+        let gate_index = match batch.gate_layout {
+            ToposResonatorGateLayout::Elementwise => i,
+            ToposResonatorGateLayout::SharedRows => i % batch.gate.len(),
+        };
+        let drive = require_derived_finite("grad_drive", upstream * batch.drive_sensitivity[i])?;
+        dx.push(require_derived_finite(
+            "grad_input",
+            drive * batch.gate[gate_index],
+        )?);
+        let contribution = require_derived_finite("grad_gate", drive * batch.input[i])?;
+        if ELEMENTWISE_RMS {
+            let value = f64::from(contribution);
+            squares += value * value;
+        }
+        match batch.gate_layout {
+            ToposResonatorGateLayout::Elementwise => dg.push(contribution),
+            ToposResonatorGateLayout::SharedRows => sums[gate_index] += f64::from(contribution),
+        }
+    }
+    for sum in sums {
+        dg.push(require_derived_finite("grad_gate_sum", sum as f32)?);
+    }
+    Ok((
+        ToposResonatorBackward {
+            grad_input: dx,
+            grad_gate: dg,
+        },
+        squares,
+    ))
+}
+
+fn compare_legacy<const ELEMENTWISE_RMS: bool>(batch: &ToposResonatorLearningBatch, dy: &[f32]) {
+    let actual = batch.vjp_with_gate_statistics::<ELEMENTWISE_RMS>(dy);
+    let expected = legacy_vjp::<ELEMENTWISE_RMS>(batch, dy);
+    match (actual, expected) {
+        (Ok((actual, squares)), Ok((expected, expected_squares))) => {
+            assert_eq!(bits(&actual.grad_input), bits(&expected.grad_input));
+            assert_eq!(bits(&actual.grad_gate), bits(&expected.grad_gate));
+            assert_eq!(squares.to_bits(), expected_squares.to_bits());
+        }
+        (Err(actual), Err(expected)) => assert_eq!(format!("{actual:?}"), format!("{expected:?}")),
+        result => panic!("legacy pullback disagreement: {result:?}"),
+    }
+}
+
+#[test]
+fn row_walk_preserves_legacy_bits_statistics_and_error_priority() {
+    let values = [0.0, -0.0, f32::from_bits(1), -0.3, 0.7, 1.3, -2.0];
+    for rows in [0, 1, 2, 7, 257] {
+        for features in [1, 3, 17, 31] {
+            let input: Vec<_> = (0..rows * features)
+                .map(|i| values[i % values.len()])
+                .collect();
+            let gate: Vec<_> = (0..features)
+                .map(|i| values[(i + 4) % values.len()])
+                .collect();
+            let op = operator(0.5, 5, 0.3);
+            for batch in [
+                op.capture_shared_rows(&input, &gate, rows, features)
+                    .unwrap(),
+                op.capture(&input, &gate.repeat(rows), rows, features)
+                    .unwrap(),
+            ] {
+                let ordinary: Vec<_> = (0..input.len())
+                    .map(|i| values[(i + 2) % values.len()])
+                    .collect();
+                for dy in [
+                    ordinary,
+                    vec![f32::MAX; input.len()],
+                    vec![f32::NAN; input.len()],
+                    vec![f32::INFINITY; input.len()],
+                    vec![0.0; input.len() + 1],
+                ] {
+                    compare_legacy::<false>(&batch, &dy);
+                    compare_legacy::<true>(&batch, &dy);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn row_walk_keeps_per_contribution_guards_before_final_shared_sum() {
+    for (coupling, input, gate, upstream) in [
+        (0.5, vec![0.0; 6], vec![1.0; 3], vec![f32::MAX; 6]),
+        (0.0, vec![0.0; 6], vec![f32::MAX; 3], vec![2.0; 6]),
+        (0.0, vec![f32::MAX; 6], vec![0.0; 3], vec![2.0; 6]),
+        (0.0, vec![f32::MAX; 6], vec![0.0; 3], vec![1.0; 6]),
+        (
+            0.0,
+            vec![f32::MAX, f32::MAX, -f32::MAX, -f32::MAX, 1.0],
+            vec![0.0],
+            vec![1.0; 5],
+        ),
+    ] {
+        let batch = operator(coupling, 5, 0.0)
+            .capture_shared_rows(&input, &gate, input.len() / gate.len(), gate.len())
+            .unwrap();
+        compare_legacy::<false>(&batch, &upstream);
+        compare_legacy::<true>(&batch, &upstream);
+        compare_legacy::<true>(&batch, &vec![0.0; input.len()]);
+    }
+}
+
 #[test]
 fn shared_capture_matches_expanded_recurrence_and_tensor_reduction() {
     let pattern = [0.0, -0.0, f32::from_bits(1), -0.3, 0.5, 1.3, -2.0];
