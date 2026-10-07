@@ -51,8 +51,9 @@ This is an audit of Rust-owned results, not independent verification of an
 external executor; WGPU results still use the full formula-comparison audit.
 
 The NN cache shares its immutable tape across repeated band pullbacks, checks
-input and gate consistency, and invalidates it on mutable parameter access or
-topos/config changes. CPU/WGPU routing can change between forward and backward;
+input and gate consistency bit-for-bit (including signed zero), and invalidates
+it on mutable parameter access or topos/config changes. CPU/WGPU routing can
+change between forward and backward;
 only an actual CPU captured pullback reports `capture_reused: true`.
 
 Capture trades extra forward work and retained storage for cheaper backward.
