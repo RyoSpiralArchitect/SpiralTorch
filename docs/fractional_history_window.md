@@ -83,3 +83,6 @@ mask. It does not yet prove which component caused the published language
 loss improvement. Any post-training intervention is a new diagnostic with
 its own immutable outputs, not a replacement for a matched training study.
 No speed or browser/GPU residency claim follows from native/WASM tests.
+
+The [saved-model diagnostic](fractional_window_diagnostic.md) uses these
+windows without training and first requires exact full-score reproduction.
