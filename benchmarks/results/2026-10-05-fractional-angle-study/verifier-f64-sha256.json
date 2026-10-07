@@ -1,0 +1,10 @@
+{
+  "source_revision": "8385e4a1876781028013764f675530ccbb96b79f",
+  "files": {
+    "verify_fractional_gain_study.py": "b3fdabd2be11c840573d4883ec94c1b09b435eb9fc05ec4e93c74e0570344085",
+    "verify_fractional_history_factorial.py": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f"
+  },
+  "targeted_verifier_tests": 86,
+  "regression_log_sha256": "e3075b3c617a302f1761491bfcf4ae9d4272f6504d6f4ca6d00853aeb7a18f1a",
+  "note": "Report absolute f32 input differences in f64 to avoid overflowing JSON diagnostics; no tolerance or training change."
+}

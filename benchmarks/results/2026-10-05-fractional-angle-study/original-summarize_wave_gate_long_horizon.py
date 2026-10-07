@@ -11,10 +11,6 @@ import statistics
 from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
 from pathlib import Path
 
-# Nearest binary64 representations of -atan(1/2) and pi/2, not host libm.
-ANGLE_LOWER_BOUND = -float.fromhex("0x1.dac670561bb4fp-2")
-ANGLE_UPPER_BOUND = float.fromhex("0x1.921fb54442d18p+0")
-
 
 def require(condition, message):
     if not condition:
@@ -456,7 +452,7 @@ def angular_order_trajectory(row):
               for phase in ("before", "after") for r in records]
     require(bool(records) and all(type(v) in (int, float) and math.isfinite(v)
             for v in angles + orders + [row.get("final_alpha")]), "invalid angular order receipt")
-    require(all(ANGLE_LOWER_BOUND < v < ANGLE_UPPER_BOUND for v in angles), "recorded angle left domain")
+    require(all(-math.atan(.5) < v < math.pi / 2 for v in angles), "recorded angle left domain")
     require(all(0 < alpha <= float.fromhex("0x1.fffffep127")
                 and math.isclose(alpha, 1 + 2*math.tan(angle), rel_tol=2e-6, abs_tol=2**-149)
                 for angle, alpha in zip(angles, orders)), "angle and native order receipts differ")
@@ -466,8 +462,8 @@ def angular_order_trajectory(row):
                     for a, b in zip(records, records[1:])), "angular order continuity differs")
     return {"initial_alpha": orders[0], "final_alpha": row["final_alpha"],
             "min_alpha": min(orders), "max_alpha": max(orders),
-            "min_angle_distance_to_lower_boundary": min(angles) - ANGLE_LOWER_BOUND,
-            "min_angle_distance_to_upper_boundary": ANGLE_UPPER_BOUND - max(angles),
+            "min_angle_distance_to_lower_boundary": min(angles) + math.atan(.5),
+            "min_angle_distance_to_upper_boundary": math.pi / 2 - max(angles),
             "chart_domain_observations_valid": True}
 
 
@@ -521,23 +517,18 @@ def two_lag_state_parity(plan, runs, checkpoint_dir):
         # numeric IDs differ across arms because the frozen order occupies a slot.
         require(list(adapter) == [*names, "_extra_state"], "checkpoint parameter names differ")
         extra = adapter["_extra_state"]
-        # Resolve the fixed v1 study recipe, including budgets omitted by callers.
-        expected_extra = {
-            "features": config["features"], "strength": config["strength"],
-            "kernel": {"step": 1.0, "max_values": 1_048_576,
-                       "max_products": 16_777_216, **config["kernel"]},
-        }
-        if arm == "lag2":
-            expected_extra.update(schema="spiraltorch.ordinary_two_lag_control.v1",
-                                  history_coefficients=[-2.0, 1.0], accumulation_dtype="float64")
-        else:
-            expected_extra.update(schema="spiraltorch.fractional_history_adapter.v1",
-                                  study_schema="spiraltorch.fractional_two_lag_control.v1",
-                                  arm=arm, initial_alpha=2.0, learnable_alpha=False)
-        require(isinstance(extra, dict) and extra == expected_extra
-                and (arm == "lag2" or extra.get("learnable_alpha") is False),
+        require(extra.get("features") == config["features"]
+                and extra.get("strength") == config["strength"]
+                and all(extra.get("kernel", {}).get(k) == v for k, v in config["kernel"].items()),
                 "checkpoint recipe differs")
-        if arm == "history_fixed_two":
+        if arm == "lag2":
+            require(extra.get("schema") == "spiraltorch.ordinary_two_lag_control.v1"
+                    and extra.get("history_coefficients") == [-2.0, 1.0]
+                    and extra.get("accumulation_dtype") == "float64", "checkpoint recipe differs")
+        else:
+            require(extra.get("study_schema") == "spiraltorch.fractional_two_lag_control.v1"
+                    and extra.get("arm") == arm and extra.get("initial_alpha") == 2.0
+                    and extra.get("learnable_alpha") is False, "checkpoint recipe differs")
             tensor_receipt(adapter["log_alpha"], ())
             require(float(adapter["log_alpha"]) == row["final_log_alpha"]
                     and float(adapter["log_alpha"].exp()) == row["final_alpha"] == 2.0,
@@ -545,19 +536,6 @@ def two_lag_state_parity(plan, runs, checkpoint_dir):
         group_list = optimizer["param_groups"]
         require(len(group_list) == 1, "checkpoint Adam groups differ")
         group = group_list[0]
-        required = {"params", "lr", "betas", "eps", "weight_decay", "amsgrad", "maximize",
-                    "foreach", "capturable", "differentiable", "fused"}
-        require(isinstance(group, dict) and required <= group.keys(),
-                "checkpoint Adam configuration incomplete")
-        betas = group["betas"]
-        require(isinstance(betas, (tuple, list)) and len(betas) == 2
-                and all(type(v) in (int, float) and math.isfinite(v) and 0 <= v < 1 for v in betas)
-                and all(type(group[k]) in (int, float) and math.isfinite(group[k]) and group[k] >= 0
-                        for k in ("lr", "eps", "weight_decay"))
-                and all(type(group[k]) is bool for k in ("amsgrad", "maximize", "capturable", "differentiable"))
-                and all(group[k] is None or type(group[k]) is bool for k in ("foreach", "fused"))
-                and ("decoupled_weight_decay" not in group or type(group["decoupled_weight_decay"]) is bool),
-                "checkpoint Adam configuration invalid")
         ids = group["params"]
         require(len(ids) == len(names) and all(type(i) is int for i in ids)
                 and len(set(ids)) == len(ids), "checkpoint Adam parameter IDs differ")

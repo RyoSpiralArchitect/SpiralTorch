@@ -16,6 +16,10 @@ remain an explicit follow-up question.
 map and first-order differentials for that follow-up. They do not change
 this frozen study or retroactively remove its optimizer-chart caveat.
 
+The subsequent [completed angular study](../benchmarks/results/2026-10-05-fractional-angle-study/README.md)
+reports its separate matched-coordinate outcomes and failed final-state
+equivalence criterion without changing the results below.
+
 ## Matched Arms
 
 | Arm | Strictly Past Filter | Trainable Parameters |

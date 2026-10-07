@@ -1,0 +1,655 @@
+{
+  "schema": "spiraltorch.fractional_angle_summary.v1",
+  "study_id": "4cb29fe3a588f7d46df6df775f781141c847b8dac6a8351450b03452c7ae917a",
+  "steps_per_run": 512,
+  "runs": 9,
+  "primary_updates": 4608,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "ordinary_angle_short": {
+          "mean_ce": 4.023867468039195,
+          "mean_delta_vs_baseline": -0.04984580079714451,
+          "mean_delta_vs_ordinary_angle_short": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_ordinary_angle_short": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.023017915089925,
+              "delta_vs_ordinary_angle_short": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.025050880511602,
+              "delta_vs_ordinary_angle_short": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.023533608516058,
+              "delta_vs_ordinary_angle_short": 0.0
+            }
+          ]
+        },
+        "history_angle_short": {
+          "mean_ce": 4.02386752433247,
+          "mean_delta_vs_baseline": -0.04984574450386958,
+          "mean_delta_vs_ordinary_angle_short": 5.6293275522515764e-08,
+          "paired_delta_sample_sd": 5.978098981951269e-08,
+          "seeds_better_than_ordinary_angle_short": 1,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.023017976681391,
+              "delta_vs_ordinary_angle_short": 6.159146614947986e-08
+            },
+            {
+              "seed": 43,
+              "ce": 4.0250508745511375,
+              "delta_vs_ordinary_angle_short": -5.960464122267695e-09
+            },
+            {
+              "seed": 47,
+              "ce": 4.023533721764882,
+              "delta_vs_ordinary_angle_short": 1.1324882454033514e-07
+            }
+          ]
+        },
+        "history_angle_full": {
+          "mean_ce": 3.992910082472695,
+          "mean_delta_vs_baseline": -0.08080318636364447,
+          "mean_delta_vs_ordinary_angle_short": -0.030957385566499518,
+          "paired_delta_sample_sd": 0.0015993410484460473,
+          "seeds_better_than_ordinary_angle_short": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.9904257078965504,
+              "delta_vs_ordinary_angle_short": -0.032592207193374634
+            },
+            {
+              "seed": 43,
+              "ce": 3.995654821395874,
+              "delta_vs_ordinary_angle_short": -0.029396059115727624
+            },
+            {
+              "seed": 47,
+              "ce": 3.9926497181256613,
+              "delta_vs_ordinary_angle_short": -0.030883890390396296
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "ordinary_angle_short": {
+          "mean_ce": 3.982157086332639,
+          "mean_delta_vs_baseline": -0.029650400082270156,
+          "mean_delta_vs_ordinary_angle_short": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_ordinary_angle_short": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.9815556555986404,
+              "delta_vs_ordinary_angle_short": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.9830723330378532,
+              "delta_vs_ordinary_angle_short": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.9818432703614235,
+              "delta_vs_ordinary_angle_short": 0.0
+            }
+          ]
+        },
+        "history_angle_short": {
+          "mean_ce": 3.9821569869915643,
+          "mean_delta_vs_baseline": -0.029650499423345078,
+          "mean_delta_vs_ordinary_angle_short": -9.934107462565105e-08,
+          "paired_delta_sample_sd": 2.4443506794629635e-07,
+          "seeds_better_than_ordinary_angle_short": 1,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.981555722653866,
+              "delta_vs_ordinary_angle_short": 6.705522537231445e-08
+            },
+            {
+              "seed": 43,
+              "ce": 3.983071953058243,
+              "delta_vs_ordinary_angle_short": -3.7997961044311523e-07
+            },
+            {
+              "seed": 47,
+              "ce": 3.9818432852625847,
+              "delta_vs_ordinary_angle_short": 1.4901161193847656e-08
+            }
+          ]
+        },
+        "history_angle_full": {
+          "mean_ce": 3.9641989593704543,
+          "mean_delta_vs_baseline": -0.04760852704445506,
+          "mean_delta_vs_ordinary_angle_short": -0.017958126962184906,
+          "paired_delta_sample_sd": 0.0009610304545502211,
+          "seeds_better_than_ordinary_angle_short": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.962662249803543,
+              "delta_vs_ordinary_angle_short": -0.01889340579509735
+            },
+            {
+              "seed": 43,
+              "ce": 3.9660990685224533,
+              "delta_vs_ordinary_angle_short": -0.016973264515399933
+            },
+            {
+              "seed": 47,
+              "ce": 3.963835559785366,
+              "delta_vs_ordinary_angle_short": -0.018007710576057434
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "Exploratory chart-aligned follow-up, not a retrospective repair of the completed log-order gain study. Report every planned arm and seed, including losing or failed outcomes.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "All arms have 1538 trainable parameters with identical names, registration order and initialization: gate, local_gate, history_angle, log_gain. The initial strictly-past filter is [-2,1] up to f32 rounding and all adapters start as exact identity.",
+    "Rust defines alpha=1+2*tan(angle), with domain -atan(1/2)<angle<pi/2 after f32 conversion, for every arm. The ordinary filter independently uses Torch exp/log-gain, sin/cos and shifts. Rust owns GL coefficients, gain conversion and GL/chart differentials; it is not replaced by Torch.",
+    "Domain policy is fixed before training: any chart exit stops the whole study, records arm/phase/attempted step/observed angle, forbids resume and endpoint scoring, and preserves earlier valid checkpoints. Do not clip, wrap, project, skip an arm or retune after a failure. Infrastructure interruption without a declared terminal failure remains resumable.",
+    "Primary CE contrasts: GL short minus ordinary short; GL full minus ordinary short; GL full minus GL short. K=3 and K=32 share the angular coordinate, but full-history normalization changes short taps as well as adding long taps. An advantage would not uniquely identify long-memory causation.",
+    "First losses must match exactly; initial gate-gradient norms use fixed rtol=2e-6, atol=2e-7. Preserve failed receipts. The short-filter preflight checked full tensors for eight updates only; do not assume bitwise or long-run state parity.",
+    "Complete all nine 512-update runs and eighteen continuation-only checks before endpoint scoring. Development must not select settings, duration, checkpoint or reported arms. Record angle, native order, gain and effective history-gate scale before/after every update.",
+    "Retain the preceding model, hashes, data partitions, Adam learning rate, strength and minibatch-order seeds. Reused Pride/Alice endpoints are exploratory and may appear in pretraining, not pristine confirmation. Do not pool previous runs as new independent seeds or infer significance or general LLM superiority.",
+    "CPU float32, frozen local GPT-2, full unpadded contexts and no KV cache or packed documents. History resets per block. Equal updates do not equalize arithmetic; no cross-math speed claim. Publish results, hashes and verification, not weights, corpus, native packages or private raw logs.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "reference_arm": "ordinary_angle_short",
+  "paired_gain_contrasts": {
+    "pride_unused_tail": {
+      "gl_short_minus_ordinary_short": {
+        "weights": {
+          "history_angle_short": 1,
+          "ordinary_angle_short": -1
+        },
+        "mean_ce_difference": 5.6293275522515764e-08,
+        "paired_sample_sd": 5.978098981951269e-08,
+        "negative_seeds": 1,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 6.159146614947986e-08
+          },
+          {
+            "seed": 43,
+            "ce_difference": -5.960464122267695e-09
+          },
+          {
+            "seed": 47,
+            "ce_difference": 1.1324882454033514e-07
+          }
+        ]
+      },
+      "gl_full_minus_ordinary_short": {
+        "weights": {
+          "history_angle_full": 1,
+          "ordinary_angle_short": -1
+        },
+        "mean_ce_difference": -0.030957385566499518,
+        "paired_sample_sd": 0.0015993410484460473,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.032592207193374634
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.029396059115727624
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.030883890390396296
+          }
+        ]
+      },
+      "gl_full_minus_gl_short": {
+        "weights": {
+          "history_angle_full": 1,
+          "history_angle_short": -1
+        },
+        "mean_ce_difference": -0.03095744185977504,
+        "paired_sample_sd": 0.0015993728354786918,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.03259226878484078
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.029396053155263502
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.030884003639220836
+          }
+        ]
+      }
+    },
+    "alice_transfer": {
+      "gl_short_minus_ordinary_short": {
+        "weights": {
+          "history_angle_short": 1,
+          "ordinary_angle_short": -1
+        },
+        "mean_ce_difference": -9.934107462565105e-08,
+        "paired_sample_sd": 2.4443506794629635e-07,
+        "negative_seeds": 1,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 6.705522537231445e-08
+          },
+          {
+            "seed": 43,
+            "ce_difference": -3.7997961044311523e-07
+          },
+          {
+            "seed": 47,
+            "ce_difference": 1.4901161193847656e-08
+          }
+        ]
+      },
+      "gl_full_minus_ordinary_short": {
+        "weights": {
+          "history_angle_full": 1,
+          "ordinary_angle_short": -1
+        },
+        "mean_ce_difference": -0.017958126962184906,
+        "paired_sample_sd": 0.0009610304545502211,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.01889340579509735
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.016973264515399933
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.018007710576057434
+          }
+        ]
+      },
+      "gl_full_minus_gl_short": {
+        "weights": {
+          "history_angle_full": 1,
+          "history_angle_short": -1
+        },
+        "mean_ce_difference": -0.01795802762111028,
+        "paired_sample_sd": 0.000961258173518814,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.018893472850322723
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.01697288453578949
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.018007725477218628
+          }
+        ]
+      }
+    }
+  },
+  "order_trajectories": {},
+  "angle_trajectories": {
+    "41:ordinary_angle_short": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.2484588772058487,
+      "min_angle": -0.2484588772058487,
+      "max_angle": 0.46364760398864746,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "41:history_angle_short": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.24845881760120392,
+      "min_angle": -0.24845881760120392,
+      "max_angle": 0.46364760398864746,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "41:history_angle_full": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.42785146832466125,
+      "min_angle": -0.42785146832466125,
+      "max_angle": 0.46364760398864746,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "43:ordinary_angle_short": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.23631715774536133,
+      "min_angle": -0.23631715774536133,
+      "max_angle": 0.46364760398864746,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "43:history_angle_short": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.23631702363491058,
+      "min_angle": -0.23631702363491058,
+      "max_angle": 0.46364760398864746,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "43:history_angle_full": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.416423499584198,
+      "min_angle": -0.416423499584198,
+      "max_angle": 0.46364760398864746,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "47:ordinary_angle_short": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.2443860024213791,
+      "min_angle": -0.2443860024213791,
+      "max_angle": 0.46705392003059387,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "47:history_angle_short": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.24438591301441193,
+      "min_angle": -0.24438591301441193,
+      "max_angle": 0.46705392003059387,
+      "nonzero_angle_gradient_steps": 511
+    },
+    "47:history_angle_full": {
+      "initial_angle": 0.46364760398864746,
+      "final_angle": -0.4232233762741089,
+      "min_angle": -0.4232233762741089,
+      "max_angle": 0.46749335527420044,
+      "nonzero_angle_gradient_steps": 511
+    }
+  },
+  "gain_trajectories": {
+    "41:ordinary_angle_short": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.20200777053833,
+      "final_log_gain": 1.6490446329116821,
+      "min_gain": 2.2360680103302,
+      "max_gain": 5.20200777053833,
+      "final_effective_history_gate_l2": 2.175660165931466,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "41:history_angle_short": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.20200777053833,
+      "final_log_gain": 1.6490446329116821,
+      "min_gain": 2.2360680103302,
+      "max_gain": 5.20200777053833,
+      "final_effective_history_gate_l2": 2.1756595663913023,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "41:history_angle_full": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.356465816497803,
+      "final_log_gain": 1.6783044338226318,
+      "min_gain": 2.2360680103302,
+      "max_gain": 5.356465816497803,
+      "final_effective_history_gate_l2": 2.341968991051026,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "43:ordinary_angle_short": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.017911911010742,
+      "final_log_gain": 1.6130138635635376,
+      "min_gain": 2.2344589233398438,
+      "max_gain": 5.017911911010742,
+      "final_effective_history_gate_l2": 2.0851648093372335,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "43:history_angle_short": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.017910957336426,
+      "final_log_gain": 1.613013744354248,
+      "min_gain": 2.2344589233398438,
+      "max_gain": 5.017910957336426,
+      "final_effective_history_gate_l2": 2.085163945766487,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "43:history_angle_full": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.174370288848877,
+      "final_log_gain": 1.643717646598816,
+      "min_gain": 2.2344589233398438,
+      "max_gain": 5.174370288848877,
+      "final_effective_history_gate_l2": 2.243330930359378,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "47:ordinary_angle_short": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.132017612457275,
+      "final_log_gain": 1.6354988813400269,
+      "min_gain": 2.2344090938568115,
+      "max_gain": 5.132017612457275,
+      "final_effective_history_gate_l2": 2.1401976502576914,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "47:history_angle_short": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.132015705108643,
+      "final_log_gain": 1.6354985237121582,
+      "min_gain": 2.2344090938568115,
+      "max_gain": 5.132015705108643,
+      "final_effective_history_gate_l2": 2.1401964175181805,
+      "nonzero_gain_gradient_steps": 511
+    },
+    "47:history_angle_full": {
+      "initial_gain": 2.2360680103302,
+      "final_gain": 5.284595489501953,
+      "final_log_gain": 1.6647961139678955,
+      "min_gain": 2.2344090938568115,
+      "max_gain": 5.284595489501953,
+      "final_effective_history_gate_l2": 2.2939817498187525,
+      "nonzero_gain_gradient_steps": 511
+    }
+  },
+  "initial_filter_receipt_parity": {
+    "41": {
+      "first_update_loss_equal": true,
+      "gate_gradient_norms_close": true,
+      "gate_gradient_rtol": 2e-06,
+      "gate_gradient_atol": 2e-07,
+      "receipts": {
+        "ordinary_angle_short": {
+          "loss": 3.896650791168213,
+          "gate_gradient_l2": 0.007748469710350037,
+          "local_gate_gradient_l2": 0.0044319964945316315,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        },
+        "history_angle_short": {
+          "loss": 3.896650791168213,
+          "gate_gradient_l2": 0.007748469710350037,
+          "local_gate_gradient_l2": 0.0044319964945316315,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        },
+        "history_angle_full": {
+          "loss": 3.896650791168213,
+          "gate_gradient_l2": 0.007748469710350037,
+          "local_gate_gradient_l2": 0.0044319964945316315,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        }
+      },
+      "status": "passed"
+    },
+    "43": {
+      "first_update_loss_equal": true,
+      "gate_gradient_norms_close": true,
+      "gate_gradient_rtol": 2e-06,
+      "gate_gradient_atol": 2e-07,
+      "receipts": {
+        "ordinary_angle_short": {
+          "loss": 3.902310848236084,
+          "gate_gradient_l2": 0.020574072375893593,
+          "local_gate_gradient_l2": 0.004920839332044125,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        },
+        "history_angle_short": {
+          "loss": 3.902310848236084,
+          "gate_gradient_l2": 0.020574072375893593,
+          "local_gate_gradient_l2": 0.004920839332044125,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        },
+        "history_angle_full": {
+          "loss": 3.902310848236084,
+          "gate_gradient_l2": 0.020574072375893593,
+          "local_gate_gradient_l2": 0.004920839332044125,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        }
+      },
+      "status": "passed"
+    },
+    "47": {
+      "first_update_loss_equal": true,
+      "gate_gradient_norms_close": true,
+      "gate_gradient_rtol": 2e-06,
+      "gate_gradient_atol": 2e-07,
+      "receipts": {
+        "ordinary_angle_short": {
+          "loss": 3.996912956237793,
+          "gate_gradient_l2": 0.01210820209234953,
+          "local_gate_gradient_l2": 0.006527972873300314,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        },
+        "history_angle_short": {
+          "loss": 3.996912956237793,
+          "gate_gradient_l2": 0.01210820209234953,
+          "local_gate_gradient_l2": 0.006527972873300314,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        },
+        "history_angle_full": {
+          "loss": 3.996912956237793,
+          "gate_gradient_l2": 0.01210820209234953,
+          "local_gate_gradient_l2": 0.006527972873300314,
+          "gate_before_update_l2": 0.0,
+          "local_gate_before_update_l2": 0.0
+        }
+      },
+      "status": "passed"
+    }
+  },
+  "angular_order_trajectories": {
+    "41:ordinary_angle_short": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.4925980865955353,
+      "min_alpha": 0.4925980865955353,
+      "max_alpha": 2.0,
+      "min_angle_distance_to_lower_boundary": 0.21518873179495746,
+      "min_angle_distance_to_upper_boundary": 1.107148722806249,
+      "chart_domain_observations_valid": true
+    },
+    "41:history_angle_short": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.49259820580482483,
+      "min_alpha": 0.49259820580482483,
+      "max_alpha": 2.0,
+      "min_angle_distance_to_lower_boundary": 0.21518879139960223,
+      "min_angle_distance_to_upper_boundary": 1.107148722806249,
+      "chart_domain_observations_valid": true
+    },
+    "41:history_angle_full": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.08795371651649475,
+      "min_alpha": 0.08795371651649475,
+      "max_alpha": 2.0,
+      "min_angle_distance_to_lower_boundary": 0.035796140676144894,
+      "min_angle_distance_to_upper_boundary": 1.107148722806249,
+      "chart_domain_observations_valid": true
+    },
+    "43:ordinary_angle_short": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.5183663964271545,
+      "min_alpha": 0.5183663964271545,
+      "max_alpha": 2.0,
+      "min_angle_distance_to_lower_boundary": 0.22733045125544482,
+      "min_angle_distance_to_upper_boundary": 1.107148722806249,
+      "chart_domain_observations_valid": true
+    },
+    "43:history_angle_short": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.5183666944503784,
+      "min_alpha": 0.5183666944503784,
+      "max_alpha": 2.0,
+      "min_angle_distance_to_lower_boundary": 0.22733058536589557,
+      "min_angle_distance_to_upper_boundary": 1.107148722806249,
+      "chart_domain_observations_valid": true
+    },
+    "43:history_angle_full": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.11542076617479324,
+      "min_alpha": 0.11542076617479324,
+      "max_alpha": 2.0,
+      "min_angle_distance_to_lower_boundary": 0.04722410941660815,
+      "min_angle_distance_to_upper_boundary": 1.107148722806249,
+      "chart_domain_observations_valid": true
+    },
+    "47:ordinary_angle_short": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.5012592077255249,
+      "min_alpha": 0.5012592077255249,
+      "max_alpha": 2.008530378341675,
+      "min_angle_distance_to_lower_boundary": 0.21926160657942706,
+      "min_angle_distance_to_upper_boundary": 1.1037424067643027,
+      "chart_domain_observations_valid": true
+    },
+    "47:history_angle_short": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.5012593865394592,
+      "min_alpha": 0.5012593865394592,
+      "max_alpha": 2.008530378341675,
+      "min_angle_distance_to_lower_boundary": 0.21926169598639422,
+      "min_angle_distance_to_upper_boundary": 1.1037424067643027,
+      "chart_domain_observations_valid": true
+    },
+    "47:history_angle_full": {
+      "initial_alpha": 2.0,
+      "final_alpha": 0.09911132603883743,
+      "min_alpha": 0.09911132603883743,
+      "max_alpha": 2.0096328258514404,
+      "min_angle_distance_to_lower_boundary": 0.04042423272669726,
+      "min_angle_distance_to_upper_boundary": 1.1033029715206961,
+      "chart_domain_observations_valid": true
+    }
+  },
+  "initial_filter_receipt_status": "passed",
+  "input_sha256": {
+    "plan": "298162f333c29f11c20cd4a8f88cb984fc4ddcb97378616179ee6b844a4f9931",
+    "results": "7693b247c1d346f4caed477b58d1c561d012e1a31be998a06c4649998c6f602c",
+    "journal": "796b1a7f9c9c936fb44d5515161346c0844155156f49157b5496d7d16dd5caa0"
+  }
+}

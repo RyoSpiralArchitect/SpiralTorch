@@ -6,6 +6,12 @@ That result remains unchanged. This new experiment removes the angle versus
 log-order optimizer-coordinate difference using the [Rust chart](fractional_angle_chart.md).
 It does not assume that fractional history will improve language quality.
 
+The [completed nine-run comparison](../benchmarks/results/2026-10-05-fractional-angle-study/README.md)
+finds lower endpoint loss for GL full on both sets in all seeds, while the
+short-filter loss gap nearly disappears. Final short-parameter tolerance
+checks nevertheless fail in all seeds; that result is preserved separately
+from successful saved-state verification and the quality measurements.
+
 ## Fixed Comparison
 
 | Arm | History | Shape Coordinate |
@@ -93,6 +99,15 @@ Repeat identical arguments with `--resume` only for a nonterminal interrupted
 run. Completed resume verifies existing artifacts without retraining or
 rescoring. Summarize the completed plan/results/journal with the frozen
 Torch-free summary tool; save into a fresh output outside primary artifacts.
+
+After terminal success, use `tools/verify_fractional_gain_study.py --coordinate
+angle` with the frozen client/runtime inventories and derived summary to
+verify saved parameters and named Adam states without retraining or scoring.
+It separately compares final ordinary-short and GL-short parameter/Adam
+tensors at the preflight tolerance (rtol=3e-6, atol=3e-7), reports byte and
+value equality separately, and retains failed tolerance checks. Valid saved
+states do not imply paired-state equivalence. This does not compare full
+gradient trajectories or establish long-run bitwise parity.
 
 These are exploratory reused books, not pristine confirmation. Three
 minibatch-order seeds do not establish significance or general LLM superiority.

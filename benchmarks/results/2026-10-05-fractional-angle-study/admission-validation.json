@@ -1,0 +1,36 @@
+{
+  "schema": "spiraltorch.fractional_angle_study_admission_validation.v1",
+  "source_revision": "758bc416d6e885e4c227464b385d474794f50a41",
+  "runtime_build_source_revision": "f8e8e6aa60f7c9a4211243e91f1f1a565d26e50b",
+  "source_sha256": {
+    "bindings/st-py/examples/hf_fractional_angle_study.py": "ed634786346e90bdb4149ac631cee6c759f1e90820b047ff5ac068e62b4f49ba",
+    "bindings/st-py/examples/hf_fractional_gain_study.py": "43a2656c6fc011c8c5a875ac104100798c307763e6627608e7da2828a3a2eac5",
+    "bindings/st-py/examples/hf_fractional_lag_study.py": "e08cb15676e73dfa14f866624c0fe9ee46ca435c0eff427aa6556bd9850d46f6",
+    "bindings/st-py/examples/hf_wave_gate_long_horizon.py": "e863f36cabd5518f34103ff99fd7f426d91bfdc7db28cc5c3fd73604fbe51d8a",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "982dbc4b73f76dfcb904d71749725137113dc1a5db868f09dcf3f4622eb83df0",
+    "bindings/st-py/examples/hf_fractional_pride_angle.json": "6afdb207919242a6f4b1f5e56cf2dd602d5dcf39c298f7de115f49d38511fe1c",
+    "tools/preflight_fractional_gain_study.py": "859c2fc6772041b451967e558c0eb17f3e480c1087dfc55543d2f3196afeb77e",
+    "tools/summarize_wave_gate_long_horizon.py": "a9d35eea5ea4a3e07fd3081b193982ba4fedf022717b3eae7c24114f919e27c7"
+  },
+  "client_sha256": {
+    "hf_fractional_angle_study.py": "ed634786346e90bdb4149ac631cee6c759f1e90820b047ff5ac068e62b4f49ba",
+    "hf_fractional_gain_study.py": "43a2656c6fc011c8c5a875ac104100798c307763e6627608e7da2828a3a2eac5",
+    "hf_fractional_lag_study.py": "e08cb15676e73dfa14f866624c0fe9ee46ca435c0eff427aa6556bd9850d46f6",
+    "hf_wave_gate_long_horizon.py": "e863f36cabd5518f34103ff99fd7f426d91bfdc7db28cc5c3fd73604fbe51d8a",
+    "hf_wave_gate_conditioning.py": "982dbc4b73f76dfcb904d71749725137113dc1a5db868f09dcf3f4622eb83df0",
+    "hf_fractional_pride_angle.json": "6afdb207919242a6f4b1f5e56cf2dd602d5dcf39c298f7de115f49d38511fe1c",
+    "preflight_fractional_gain_study.py": "859c2fc6772041b451967e558c0eb17f3e480c1087dfc55543d2f3196afeb77e",
+    "summarize_wave_gate_long_horizon.py": "a9d35eea5ea4a3e07fd3081b193982ba4fedf022717b3eae7c24114f919e27c7"
+  },
+  "native_sha256": "7146628d3977d9862151707bdd235029f13e3dab20846142edb30790e4b088b1",
+  "admission_sha256": "aae86c513b701a35134aef87fe385d8e80804d6be675c204c43363074535a1ef",
+  "admission_process_exit_code": 0,
+  "admission_log_sha256": "a7ca3ce570cf59bb05c7a55aef5207d847d446d1220a780d26f4b2f8f79d0609",
+  "regression_log_sha256": "ba3b37c1c70581b7442d0d130fc1204a2b8e2147f15f50ec8d200d3437fb2cff",
+  "python_regressions": 707,
+  "new_tests": 26,
+  "model_assets_verified": 7,
+  "corpora_verified": 2,
+  "previous_primary_files_unchanged": 76,
+  "primary_training_status": "not_started_at_admission"
+}
