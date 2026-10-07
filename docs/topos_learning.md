@@ -116,6 +116,41 @@ Existing Python Torch adapters still perform broadcast and
 reduction in Torch; the WASM core kernel still takes a full per-element gate.
 This change does not add the shared-gate NN constructor to either frontend.
 
+### Resident Kernel Building Block
+
+`st_backend_wgpu::resident_tensor::pointwise::PointwisePlan::topos_resonator`
+prepares an N-D forward operation from the validated
+`st_kernel_contracts::topos_resonator::ToposResonatorKernel`. Its gate is either
+elementwise or shared across leading axes (`[F]` or `[1, F]`). Wrapping the plan
+in `PointwiseVjpPlan` reuses the existing finite guards and deterministic
+broadcast adjoint: gate gradients are summed, never implicitly averaged.
+Topos is one indivisible operation, so every pointwise execution policy uses
+one forward dispatch. VJP recomputes the finite unroll; it does not yet store
+the drive sensitivity in a resident capture.
+
+The porous rewrite and slope are shared with `OpenCartesianTopos`; `st-core`
+retains depth/volume admission, geometry and semantic audits. The low-level
+resident kernel is not permission to bypass those policies. It does not yet
+add a `ToposResonator` stage to the portable graph, `Sequential`, the graph
+transactional optimizer, or the Python/WASM resident clients. In particular,
+do not route this gate through Scaler's module-compatible row averaging.
+
+```sh
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu --lib resident_tensor::pointwise -- --nocapture
+cargo run --locked --release -p st-backend-wgpu --example topos_resident_learning -- /tmp/topos-resident-new.json
+python tools/check_topos_shared_gate_learning.py /tmp/topos-resident-new.json /tmp/topos-resident-check-new.json
+```
+
+The probe keeps forward, mean MSE, both VJPs, gate reduction and immutable
+`gate - learning_rate * gradient` updates on GPU. It submits 100 updates before
+the first explicit readback, for each of two synthetic trajectories. Inputs
+and targets are still uploaded, plans cover four batch layouts, and per-step
+allocation remains. Results are correctness evidence, not a throughput,
+pretrained-model, browser-execution or transactional-SGD claim. The CPU Torch
+checker keeps its own gate across all updates; a distinct resident receipt
+schema prevents relabeling historical CPU runs. Use an isolated Python runtime
+without site-startup monkey patches when reproducing the comparison.
+
 The correctness-only example and independent Torch checker run two 100-update
 synthetic SGD trajectories using `Parameter::apply_step`, variable row counts
 and both tensor layouts:

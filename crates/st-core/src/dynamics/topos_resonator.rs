@@ -26,7 +26,8 @@ pub const TOPOS_RESONATOR_SCHEME: &str = "finite_picard_iteration";
 pub const TOPOS_RESONATOR_STATE: &str = "elementwise_resonance_stalk";
 pub const TOPOS_RESONATOR_STABILITY: &str = "strict_contraction_and_open_topos_envelope";
 pub const TOPOS_RESONATOR_BACKWARD: &str = "analytic_unrolled_drive_sensitivity";
-pub const TOPOS_RESONATOR_MAX_ITERATIONS: usize = 4096;
+pub const TOPOS_RESONATOR_MAX_ITERATIONS: usize =
+    st_kernel_contracts::topos_resonator::MAX_ITERATIONS;
 
 const FORMULA_ERROR_FACTOR: f64 = 512.0 * f32::EPSILON as f64;
 
@@ -871,6 +872,35 @@ fn backward_audit_from_gradients(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kernel_contract_matches_audited_capture_and_vjp_bits() {
+        use st_kernel_contracts::topos_resonator::ToposResonatorKernel;
+        let input = [-2., -1., -0., 0., 0.3, 1., 2.];
+        let gate = [1., 0.5, -1., 1., 2., 1., -1.];
+        let dy = [0.3, -1., 0., -0., 1., -0.7, 0.5];
+        for (coupling, iterations) in [(0., 1), (0.2, 5), (0.9, 16)] {
+            for porosity in [0., 0.3, 1.] {
+                let kernel = ToposResonatorKernel::new(coupling, 1., porosity, iterations).unwrap();
+                let operator = ToposResonatorOperator::new(
+                    ToposResonatorConfig::new(coupling, iterations).unwrap(),
+                    topos(1., porosity),
+                )
+                .unwrap();
+                let capture = operator.capture(&input, &gate, 1, input.len()).unwrap();
+                let (vjp, _) = capture.vjp_audited(&dy).unwrap();
+                for i in 0..input.len() {
+                    assert_eq!(
+                        kernel.capture(input[i], gate[i]).unwrap().0.to_bits(),
+                        capture.output()[i].to_bits()
+                    );
+                    let [dx, dg] = kernel.vjp(input[i], gate[i], dy[i]).unwrap();
+                    assert_eq!(dx.to_bits(), vjp.grad_input[i].to_bits());
+                    assert_eq!(dg.to_bits(), vjp.grad_gate[i].to_bits());
+                }
+            }
+        }
+    }
 
     #[test]
     fn captured_audited_vjp_matches_recomputed_audit_and_gradient_bits() {

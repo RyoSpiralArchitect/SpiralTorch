@@ -28,9 +28,14 @@ def vector(value, count, label):
 
 
 def validate_receipt(receipt):
-    require(receipt["schema"] == "spiraltorch.topos_shared_gate_learning.v1", "schema")
+    resident = receipt["schema"] == "spiraltorch.topos_resident_learning.v1"
+    require(resident or receipt["schema"] == "spiraltorch.topos_shared_gate_learning.v1", "schema")
     require(receipt["status"] == "executed", "status")
-    require(receipt["backend"] == "cpu" and receipt["dtype"] == "float32", "backend/dtype")
+    require(receipt["backend"] == ("wgpu" if resident else "cpu") and receipt["dtype"] == "float32", "backend/dtype")
+    if resident:
+        require(receipt.get("optimizer") == "resident_subtract_lr_times_gradient", "resident optimizer")
+        require(receipt.get("host_readback_during_updates") is False, "resident observation policy")
+        require(isinstance(receipt.get("adapter"), str) and bool(receipt["adapter"]), "adapter")
     require(receipt["gate_layout"] == "shared_rows", "gate layout")
     require(receipt["gate_gradient_reduction"] == "sum_without_additional_mean", "gate reduction")
     rate = receipt["learning_rate"]
@@ -64,11 +69,11 @@ def compare(receipt):
     torch.set_num_threads(2)
     errors = dict.fromkeys(("output", "grad_input", "grad_gate", "gate_after", "loss"), 0.0)
     for case in receipt["cases"]:
-        gate = torch.tensor(case["initial_gate"], dtype=torch.float32).reshape(1, 5).requires_grad_()
+        gate = torch.tensor(case["initial_gate"], dtype=torch.float32, device="cpu").reshape(1, 5).requires_grad_()
         for record in case["records"]:
             shape = record["shape"]
-            value = torch.tensor(record["input"], dtype=torch.float32).reshape(shape).requires_grad_()
-            target = torch.tensor(record["target"], dtype=torch.float32).reshape(shape)
+            value = torch.tensor(record["input"], dtype=torch.float32, device="cpu").reshape(shape).requires_grad_()
+            target = torch.tensor(record["target"], dtype=torch.float32, device="cpu").reshape(shape)
             output = reference(value, gate, case["config"])
             loss = ((output - target) ** 2).mean()
             dx, dg = torch.autograd.grad(loss, (value, gate))
@@ -77,7 +82,7 @@ def compare(receipt):
                                  ("gate_after", gate), ("loss", loss)):
                 require(bool(torch.isfinite(actual).all()), f"nonfinite Torch {name}")
                 dtype = torch.float64 if name == "loss" else torch.float32
-                expected = torch.tensor(record[name], dtype=dtype).reshape(actual.shape)
+                expected = torch.tensor(record[name], dtype=dtype, device="cpu").reshape(actual.shape)
                 require(bool(torch.isfinite(expected).all()), f"nonfinite native {name}")
                 observed = actual.detach().to(dtype)
                 torch.testing.assert_close(observed, expected, rtol=5e-4, atol=3e-5)
@@ -85,9 +90,10 @@ def compare(receipt):
                 require(math.isfinite(error), f"nonfinite comparison error {name}")
                 errors[name] = max(errors[name], error)
     return {"schema": "spiraltorch.topos_shared_gate_torch_check.v1", "status": "passed",
+            "source_backend": receipt["backend"],
             "torch": str(torch.__version__), "threads": 2, "updates": 200,
             "rtol": 5e-4, "atol": 3e-5, "max_abs_error": errors,
-            "scope": "CPU f32 closed-loop shared-gate trajectories, independent broadcast/autograd/reduction. No timing or model-quality claim."}
+            "scope": "Native f32 closed-loop shared-gate trajectories compared with CPU Torch, independent broadcast/autograd/reduction. Numeric agreement is not proof of device residency, timing or model quality."}
 
 
 def main():

@@ -37,6 +37,31 @@ def test_bounded_receipt_is_valid_without_torch():
     CHECK.validate_receipt(receipt())
 
 
+def resident_receipt():
+    payload = receipt()
+    payload.update(schema="spiraltorch.topos_resident_learning.v1", backend="wgpu",
+                   optimizer="resident_subtract_lr_times_gradient",
+                   host_readback_during_updates=False, adapter="synthetic guard fixture")
+    return payload
+
+
+def test_resident_receipt_has_a_separate_explicit_contract():
+    CHECK.validate_receipt(resident_receipt())
+
+
+@pytest.mark.parametrize("field,value", [
+    ("backend", "cpu"), ("optimizer", "Parameter::apply_step"),
+    ("host_readback_during_updates", 0), ("host_readback_during_updates", True),
+    ("adapter", ""), ("adapter", None),
+    ("schema", "spiraltorch.topos_shared_gate_learning.v1"),
+])
+def test_resident_receipt_rejects_changed_execution_labels(field, value):
+    payload = resident_receipt()
+    payload[field] = value
+    with pytest.raises(ValueError):
+        CHECK.validate_receipt(payload)
+
+
 @pytest.mark.parametrize("field,value", [
     ("shape", [True, 5]), ("shape", [257, 5]), ("step", False),
     ("input_layout", "unknown"), ("loss", float("nan")), ("loss", -1),

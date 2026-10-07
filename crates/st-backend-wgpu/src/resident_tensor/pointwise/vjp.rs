@@ -108,7 +108,7 @@ impl PointwiseVjpPlan {
     pub fn new(forward: PointwisePlan) -> Result<Self, TensorError> {
         let gpu = forward.device.runtime().context().device();
         let limits = gpu.limits();
-        let count = forward.chain.input_count();
+        let count = forward.program.input_count();
         if count + 5 > limits.max_storage_buffers_per_shader_stage as usize
             || count + 5 > limits.max_bindings_per_bind_group as usize
         {
@@ -186,7 +186,7 @@ impl PointwiseVjpPlan {
             });
         }
         let layout = buffer_layout(gpu, count + 5, &[count, count + 3]);
-        let pipeline = pipeline(gpu, &layout, generated_source(&forward.chain, true));
+        let pipeline = pipeline(gpu, &layout, generated_source(&forward.program, true));
         let reduction_layout = buffer_layout(gpu, 4, &[1, 3]);
         let reduction_pipeline = self::pipeline(gpu, &reduction_layout, reduction_source());
         Ok(Self {
@@ -617,7 +617,10 @@ mod tests {
             .repeat(20),
         )
         .unwrap();
-        for source in [generated_source(&chain, true), reduction_source()] {
+        for source in [
+            generated_source(&Program::Chain(chain), true),
+            reduction_source(),
+        ] {
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),
