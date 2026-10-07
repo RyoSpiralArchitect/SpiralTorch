@@ -310,6 +310,14 @@ pub struct ToposResonatorLearningBatch {
 }
 
 impl ToposResonatorLearningBatch {
+    pub fn input(&self) -> &[f32] {
+        &self.input
+    }
+
+    pub fn gate(&self) -> &[f32] {
+        &self.gate
+    }
+
     pub fn step(&self) -> &ToposResonatorStep {
         &self.step
     }
@@ -340,6 +348,29 @@ impl ToposResonatorLearningBatch {
             grad_input,
             grad_gate,
         })
+    }
+
+    /// Audit a pullback of this immutable, already-audited transition without
+    /// replaying its Picard iterations. External executor results still use
+    /// `audit_topos_resonator_backward` for independent formula comparison.
+    pub fn vjp_audited(
+        &self,
+        grad_output: &[f32],
+    ) -> Result<(ToposResonatorBackward, ToposResonatorBackwardAudit), ToposResonatorError> {
+        let backward = self.vjp(grad_output)?;
+        let max_abs_drive_sensitivity = self
+            .drive_sensitivity
+            .iter()
+            .fold(0.0f32, |maximum, value| maximum.max(value.abs()));
+        let audit = backward_audit_from_gradients(
+            self.step.audit.rows,
+            self.step.audit.features,
+            self.step.config,
+            max_abs_drive_sensitivity,
+            &backward.grad_input,
+            &backward.grad_gate,
+        )?;
+        Ok((backward, audit))
     }
 }
 
@@ -794,30 +825,116 @@ pub fn audit_topos_resonator_backward(
         compare_field("grad_input", &expected.grad_input, request.grad_input, true)?;
     let (max_grad_gate_error, gate_ratio) =
         compare_field("grad_gate", &expected.grad_gate, request.grad_gate, true)?;
-    let drive_sensitivity_bound = request.request.request.config.finite_amplification_bound();
+    let mut audit = backward_audit_from_gradients(
+        request.request.request.rows,
+        request.request.request.features,
+        request.request.request.config,
+        max_abs_drive_sensitivity,
+        request.grad_input,
+        request.grad_gate,
+    )?;
+    audit.max_grad_input_error = max_grad_input_error;
+    audit.max_grad_gate_error = max_grad_gate_error;
+    audit.max_formula_tolerance_ratio = input_ratio.max(gate_ratio);
+    Ok(audit)
+}
+
+fn backward_audit_from_gradients(
+    rows: usize,
+    features: usize,
+    config: ToposResonatorConfig,
+    max_abs_drive_sensitivity: f32,
+    grad_input: &[f32],
+    grad_gate: &[f32],
+) -> Result<ToposResonatorBackwardAudit, ToposResonatorError> {
+    let drive_sensitivity_bound = config.finite_amplification_bound();
     let drive_sensitivity_margin = validate_stability_bound(
         "max_abs_drive_sensitivity",
         max_abs_drive_sensitivity as f64,
         drive_sensitivity_bound,
     )?;
     Ok(ToposResonatorBackwardAudit {
-        rows: request.request.request.rows,
-        features: request.request.request.features,
-        iterations: request.request.request.config.iterations(),
+        rows,
+        features,
+        iterations: config.iterations(),
         max_abs_drive_sensitivity,
         drive_sensitivity_bound,
         drive_sensitivity_margin,
-        grad_input_rms: root_mean_square(request.grad_input),
-        grad_gate_rms: root_mean_square(request.grad_gate),
-        max_grad_input_error,
-        max_grad_gate_error,
-        max_formula_tolerance_ratio: input_ratio.max(gate_ratio),
+        grad_input_rms: root_mean_square(grad_input),
+        grad_gate_rms: root_mean_square(grad_gate),
+        max_grad_input_error: 0.0,
+        max_grad_gate_error: 0.0,
+        max_formula_tolerance_ratio: 0.0,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_audited_vjp_matches_recomputed_audit_and_gradient_bits() {
+        let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        for rows in [0, 1, 7] {
+            for (coupling, iterations) in [(0.0, 1), (0.25, 4), (0.9, 16)] {
+                for porosity in [0.0, 0.2, 1.0] {
+                    let features = 17;
+                    let input: Vec<_> = (0..rows * features)
+                        .map(|i| (i % 13) as f32 / 3.0 - 2.0)
+                        .collect();
+                    let gate: Vec<_> = (0..input.len())
+                        .map(|i| (i % 7) as f32 / 2.0 - 1.0)
+                        .collect();
+                    let topos = topos(1.0, porosity);
+                    let config = ToposResonatorConfig::new(coupling, iterations).unwrap();
+                    let operator = ToposResonatorOperator::new(config, topos.clone()).unwrap();
+                    let batch = operator.capture(&input, &gate, rows, features).unwrap();
+                    assert_eq!(bits(batch.input()), bits(&input));
+                    assert_eq!(bits(batch.gate()), bits(&gate));
+                    for sign in [-1.0, 0.0, 1.0] {
+                        let dy: Vec<_> = (0..input.len())
+                            .map(|i| sign * ((i % 11) as f32 / 7.0 - 0.5))
+                            .collect();
+                        let request = ToposResonatorBackwardRequest {
+                            request: operator.request(&input, &gate, rows, features),
+                            grad_output: &dy,
+                        };
+                        let expected = backward_topos_resonator(request).unwrap();
+                        let expected_audit =
+                            audit_topos_resonator_backward(ToposResonatorBackwardAuditRequest {
+                                request,
+                                grad_input: &expected.grad_input,
+                                grad_gate: &expected.grad_gate,
+                            })
+                            .unwrap();
+                        let (actual, audit) = batch.vjp_audited(&dy).unwrap();
+                        assert_eq!(bits(&actual.grad_input), bits(&expected.grad_input));
+                        assert_eq!(bits(&actual.grad_gate), bits(&expected.grad_gate));
+                        assert_eq!(
+                            serde_json::to_string(&audit).unwrap(),
+                            serde_json::to_string(&expected_audit).unwrap()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn captured_audited_vjp_preserves_errors_and_recovers_without_live_inputs() {
+        let batch = ToposResonatorOperator::new(ToposResonatorConfig::default(), topos(1.0, 0.2))
+            .unwrap()
+            .capture_owned(vec![1.0], vec![0.0], 1, 1)
+            .unwrap();
+        let expected = batch.vjp_audited(&[0.5]).unwrap();
+        for dy in [vec![], vec![f32::NAN], vec![f32::INFINITY], vec![f32::MAX]] {
+            assert_eq!(
+                format!("{:?}", batch.vjp_audited(&dy).unwrap_err()),
+                format!("{:?}", batch.vjp(&dy).unwrap_err())
+            );
+            assert_eq!(batch.vjp_audited(&[0.5]).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn owned_capture_retains_allocations_and_matches_borrowed_audits_and_pullbacks() {
