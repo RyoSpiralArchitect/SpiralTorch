@@ -44,6 +44,27 @@ class Recomputed(torch.autograd.Function):
                 bridge._transport_output(dg, gate, ctx.buffers), None, None)
 
 
+class ExpandedCaptured(torch.autograd.Function):
+    """Frozen expanded-gate control even when the public route is shared-row."""
+
+    @staticmethod
+    def forward(ctx, value, gate, kernel):
+        ctx.save_for_backward(value, gate)
+        features = value.shape[-1]
+        ctx.batch = kernel.capture_buffer(bridge._buffer_values(value),
+                                          bridge._buffer_values(gate),
+                                          value.numel() // features, features)
+        return bridge._transport_output(ctx.batch.output_buffer(), value, True)
+
+    @staticmethod
+    @torch.autograd.function.once_differentiable
+    def backward(ctx, upstream):
+        value, gate = ctx.saved_tensors
+        dx, dg = ctx.batch.vjp_buffer(bridge._buffer_values(upstream))
+        return (bridge._transport_output(dx, value, True),
+                bridge._transport_output(dg, gate, True), None)
+
+
 def torch_reference(value, gate, config):
     drive = value * gate
     state = torch.zeros_like(drive)
@@ -57,10 +78,14 @@ def torch_reference(value, gate, config):
     return state
 
 
-def routes(kernel):
+def routes(kernel, *, include_expanded_capture=False):
     result = ["rust_list", "rust_public", "torch_reference"]
     if hasattr(kernel, "backward_buffer"):
         result.insert(1, "rust_buffer_recomputed")
+    if include_expanded_capture:
+        if not hasattr(kernel, "capture_buffer"):
+            raise ValueError("expanded capture control requires captured bulk API")
+        result.insert(-1, "rust_expanded_captured")
     return result
 
 
@@ -70,11 +95,29 @@ def run_route(name, values, upstream, kernel, config):
         output = Recomputed.apply(value, gate.expand_as(value), kernel, name != "rust_list")
     elif name == "rust_public":
         output = st.topos_resonator_autograd(value, gate, kernel=kernel)
+    elif name == "rust_expanded_captured":
+        output = ExpandedCaptured.apply(value, gate.expand_as(value), kernel)
     elif name == "torch_reference":
         output = torch_reference(value, gate, config)
     else:
         raise ValueError("unknown route")
     return (output.detach(), *(g.detach() for g in torch.autograd.grad(output, (value, gate), upstream)))
+
+
+def route_references(values, upstream, kernel, config, names):
+    legacy = run_route("rust_list", values, upstream, kernel, config)
+    references = dict.fromkeys(names, legacy)
+    if hasattr(kernel, "capture_shared_rows") and "rust_public" in names:
+        value, gate = values
+        features = value.shape[-1]
+        _, expanded = kernel.backward(value.flatten().tolist(), gate.expand_as(value).flatten().tolist(),
+                                      upstream.flatten().tolist(), value.numel() // features, features)
+        # Independent row-order wide sum, not the new shared VJP under test.
+        sums = [0.] * features
+        for index, contribution in enumerate(expanded):
+            sums[index % features] += contribution
+        references["rust_public"] = (*legacy[:2], torch.tensor(sums).reshape_as(gate))
+    return references
 
 
 def tensor_bytes(value):
@@ -116,6 +159,7 @@ def main():
     parser.add_argument("--rounds", type=int, default=12)
     parser.add_argument("--seed", type=int, default=239)
     parser.add_argument("--native-profile", choices=["dev", "release", "unknown"], required=True)
+    parser.add_argument("--include-expanded-capture", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
@@ -130,10 +174,10 @@ def main():
     upstream = torch.randn(args.shape, generator=rng)
     kernel = st.ToposResonatorKernel(coupling=args.coupling, iterations=args.iterations, porosity=.2)
     config = json.loads(kernel.configuration_json())
-    names = routes(kernel)
+    names = routes(kernel, include_expanded_capture=args.include_expanded_capture)
     orders = round_orders(names, args.rounds)
-    reference = run_route("rust_list", values, upstream, kernel, config)
-    correctness = {n: check_result(run_route(n, values, upstream, kernel, config), reference,
+    references = route_references(values, upstream, kernel, config, names)
+    correctness = {n: check_result(run_route(n, values, upstream, kernel, config), references[n],
                                     exact=n != "torch_reference") for n in names}
     for _ in range(args.warmup):
         for name in names:
@@ -144,7 +188,7 @@ def main():
             start = time.perf_counter_ns()
             result = run_route(name, values, upstream, kernel, config)
             elapsed = (time.perf_counter_ns() - start) / 1e6
-            check_result(result, reference, exact=name != "torch_reference")
+            check_result(result, references[name], exact=name != "torch_reference")
             timings[name].append(elapsed)
     digest = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
     report = {"schema": "spiraltorch.topos_learning_benchmark.v1", "status": "measured",
@@ -156,9 +200,12 @@ def main():
               "input_sha256": [hashlib.sha256(tensor_bytes(v)).hexdigest() for v in values],
               "upstream_sha256": hashlib.sha256(tensor_bytes(upstream)).hexdigest(),
               "torch": str(torch.__version__), "machine": platform.machine(), "correctness": correctness,
+              "public_gate_reduction": "rust_row_order_f64_to_f32" if hasattr(kernel, "capture_shared_rows") else "torch_f32",
+              "public_vs_legacy": check_result(run_route("rust_public", values, upstream, kernel, config),
+                                                 references["rust_list"], exact=False),
               "warmup_per_route": args.warmup, "round_order": orders, "measurements_ms": timings,
               "median_ms": {n: statistics.median(v) for n, v in timings.items()},
-              "scope": "CPU forward + both VJPs including host transport and Torch broadcast reduction. Same finite Picard map; independent Torch arithmetic within rtol=5e-4, atol=3e-5. Not model quality, accelerator or general-library throughput."}
+              "scope": "CPU forward + both VJPs including host transport and gate reduction. Shared public gate VJP is checked bitwise against an independent row-order f64 sum of legacy per-element VJPs; legacy routes retain Torch f32 reduction. Same finite Picard map; independent Torch arithmetic and public-versus-legacy within rtol=5e-4, atol=3e-5. Not model quality, accelerator or general-library throughput."}
     with args.output.open("x") as stream:
         json.dump(report, stream, indent=2, allow_nan=False)
         stream.write("\n")

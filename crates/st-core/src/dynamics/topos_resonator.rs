@@ -300,12 +300,34 @@ pub struct ToposResonatorOperator {
     topos: OpenCartesianTopos,
 }
 
-/// Owned finite-unroll tape. The caller retains optimizer and broadcast policy.
-/// Four f32 vectors are retained; VJPs do not rerun the resonance or read live inputs.
+#[cfg(test)]
+#[path = "topos_resonator_shared_tests.rs"]
+mod shared_tests;
+
+/// Gate storage and pullback shape, selected explicitly when capturing a batch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToposResonatorGateLayout {
+    Elementwise,
+    SharedRows,
+}
+
+impl ToposResonatorGateLayout {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Elementwise => "elementwise",
+            Self::SharedRows => "shared_rows",
+        }
+    }
+}
+
+/// Owned finite-unroll tape. The caller retains optimizer policy.
+/// VJPs do not rerun resonance or read live inputs. Shared-row gates retain only
+/// `features` values and return a summed (not averaged) gate VJP of that length.
 #[derive(Clone, Debug)]
 pub struct ToposResonatorLearningBatch {
     input: Vec<f32>,
     gate: Vec<f32>,
+    gate_layout: ToposResonatorGateLayout,
     drive_sensitivity: Vec<f32>,
     step: ToposResonatorStep,
 }
@@ -319,6 +341,10 @@ impl ToposResonatorLearningBatch {
         &self.gate
     }
 
+    pub fn gate_layout(&self) -> ToposResonatorGateLayout {
+        self.gate_layout
+    }
+
     pub fn step(&self) -> &ToposResonatorStep {
         &self.step
     }
@@ -330,20 +356,36 @@ impl ToposResonatorLearningBatch {
     pub fn vjp(&self, grad_output: &[f32]) -> Result<ToposResonatorBackward, ToposResonatorError> {
         validate_length("grad_output", grad_output, self.input.len())?;
         let mut grad_input = Vec::with_capacity(self.input.len());
-        let mut grad_gate = Vec::with_capacity(self.input.len());
+        let mut grad_gate = Vec::with_capacity(self.gate.len());
+        let mut shared_sums = match self.gate_layout {
+            ToposResonatorGateLayout::Elementwise => Vec::new(),
+            ToposResonatorGateLayout::SharedRows => vec![0.0f64; self.gate.len()],
+        };
         for (index, &upstream) in grad_output.iter().enumerate() {
+            let gate_index = match self.gate_layout {
+                ToposResonatorGateLayout::Elementwise => index,
+                ToposResonatorGateLayout::SharedRows => index % self.gate.len(),
+            };
             // Keep (upstream * sensitivity) * parameter in the legacy order.
             // Caching sensitivity * parameter would change f32 rounding.
             let grad_drive =
                 require_derived_finite("grad_drive", upstream * self.drive_sensitivity[index])?;
             grad_input.push(require_derived_finite(
                 "grad_input",
-                grad_drive * self.gate[index],
+                grad_drive * self.gate[gate_index],
             )?);
-            grad_gate.push(require_derived_finite(
-                "grad_gate",
-                grad_drive * self.input[index],
-            )?);
+            let contribution = require_derived_finite("grad_gate", grad_drive * self.input[index])?;
+            match self.gate_layout {
+                ToposResonatorGateLayout::Elementwise => grad_gate.push(contribution),
+                // Match Tensor::try_sum_axis0: retain finite cancellation in f64,
+                // then round once. No expanded gate-gradient buffer is allocated.
+                ToposResonatorGateLayout::SharedRows => {
+                    shared_sums[gate_index] += f64::from(contribution);
+                }
+            }
+        }
+        for sum in shared_sums {
+            grad_gate.push(require_derived_finite("grad_gate_sum", sum as f32)?);
         }
         Ok(ToposResonatorBackward {
             grad_input,
@@ -354,6 +396,7 @@ impl ToposResonatorLearningBatch {
     /// Audit a pullback of this immutable, already-audited transition without
     /// replaying its Picard iterations. External executor results still use
     /// `audit_topos_resonator_backward` for independent formula comparison.
+    /// For shared-row captures, `grad_gate_rms` describes the reduced feature VJP.
     pub fn vjp_audited(
         &self,
         grad_output: &[f32],
@@ -420,6 +463,20 @@ impl ToposResonatorOperator {
         apply_topos_resonator(self.request(input, gate, rows, features))
     }
 
+    /// One gate per feature shared across rows, without an expanded gate or tape.
+    pub fn forward_shared_rows(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        rows: usize,
+        features: usize,
+    ) -> Result<ToposResonatorStep, ToposResonatorError> {
+        let request = self.request(input, gate, rows, features);
+        let evolved =
+            evolve_resonance_with_layout::<false>(request, ToposResonatorGateLayout::SharedRows)?;
+        finish_resonance(request, evolved)
+    }
+
     /// Capture the same audited forward and exact finite-unroll sensitivity.
     /// Inputs and gate are per-element; no reduction or averaging is introduced.
     pub fn capture(
@@ -429,10 +486,13 @@ impl ToposResonatorOperator {
         rows: usize,
         features: usize,
     ) -> Result<ToposResonatorLearningBatch, ToposResonatorError> {
-        let (step, drive_sensitivity) = self.capture_step(input, gate, rows, features)?;
+        let gate_layout = ToposResonatorGateLayout::Elementwise;
+        let (step, drive_sensitivity) =
+            self.capture_step(input, gate, rows, features, gate_layout)?;
         Ok(ToposResonatorLearningBatch {
             input: input.to_vec(),
             gate: gate.to_vec(),
+            gate_layout,
             drive_sensitivity,
             step,
         })
@@ -448,10 +508,56 @@ impl ToposResonatorOperator {
         rows: usize,
         features: usize,
     ) -> Result<ToposResonatorLearningBatch, ToposResonatorError> {
-        let (step, drive_sensitivity) = self.capture_step(&input, &gate, rows, features)?;
+        let gate_layout = ToposResonatorGateLayout::Elementwise;
+        let (step, drive_sensitivity) =
+            self.capture_step(&input, &gate, rows, features, gate_layout)?;
         Ok(ToposResonatorLearningBatch {
             input,
             gate,
+            gate_layout,
+            drive_sensitivity,
+            step,
+        })
+    }
+
+    /// Capture an unexpanded feature gate. Its VJP sums row contributions in
+    /// f64 and rounds once to f32, matching the CPU tensor reduction contract.
+    /// Both the input volume and the feature count must fit the Topos budget,
+    /// including zero-row inputs. An empty batch has a zero feature-gate VJP.
+    pub fn capture_shared_rows(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        rows: usize,
+        features: usize,
+    ) -> Result<ToposResonatorLearningBatch, ToposResonatorError> {
+        let gate_layout = ToposResonatorGateLayout::SharedRows;
+        let (step, drive_sensitivity) =
+            self.capture_step(input, gate, rows, features, gate_layout)?;
+        Ok(ToposResonatorLearningBatch {
+            input: input.to_vec(),
+            gate: gate.to_vec(),
+            gate_layout,
+            drive_sensitivity,
+            step,
+        })
+    }
+
+    /// Shared-row capture retaining both owned allocations without cloning.
+    pub fn capture_shared_rows_owned(
+        &self,
+        input: Vec<f32>,
+        gate: Vec<f32>,
+        rows: usize,
+        features: usize,
+    ) -> Result<ToposResonatorLearningBatch, ToposResonatorError> {
+        let gate_layout = ToposResonatorGateLayout::SharedRows;
+        let (step, drive_sensitivity) =
+            self.capture_step(&input, &gate, rows, features, gate_layout)?;
+        Ok(ToposResonatorLearningBatch {
+            input,
+            gate,
+            gate_layout,
             drive_sensitivity,
             step,
         })
@@ -463,9 +569,10 @@ impl ToposResonatorOperator {
         gate: &[f32],
         rows: usize,
         features: usize,
+        gate_layout: ToposResonatorGateLayout,
     ) -> Result<(ToposResonatorStep, Vec<f32>), ToposResonatorError> {
         let request = self.request(input, gate, rows, features);
-        let mut evolved = evolve_resonance::<true>(request)?;
+        let mut evolved = evolve_resonance_with_layout::<true>(request, gate_layout)?;
         let drive_sensitivity = std::mem::take(&mut evolved.drive_sensitivity);
         let step = finish_resonance(request, evolved)?;
         Ok((step, drive_sensitivity))
@@ -502,13 +609,25 @@ pub struct ToposResonatorBackwardAudit {
 }
 
 fn validate_request(request: ToposResonatorRequest<'_>) -> Result<usize, ToposResonatorError> {
+    validate_request_with_layout(request, ToposResonatorGateLayout::Elementwise)
+}
+
+fn validate_request_with_layout(
+    request: ToposResonatorRequest<'_>,
+    gate_layout: ToposResonatorGateLayout,
+) -> Result<usize, ToposResonatorError> {
     request.config.validate()?;
     let volume = checked_volume(request.rows, request.features)?;
     validate_length("input", request.input, volume)?;
-    validate_length("gate", request.gate, volume)?;
-    if volume > request.topos.max_volume() {
+    let gate_len = match gate_layout {
+        ToposResonatorGateLayout::Elementwise => volume,
+        ToposResonatorGateLayout::SharedRows => request.features,
+    };
+    validate_length("gate", request.gate, gate_len)?;
+    let budget_volume = volume.max(gate_len);
+    if budget_volume > request.topos.max_volume() {
         return Err(ToposResonatorError::ToposVolumeExceeded {
-            volume,
+            volume: budget_volume,
             max_volume: request.topos.max_volume(),
         });
     }
@@ -549,10 +668,31 @@ struct EvolvedResonance {
 fn evolve_resonance<const CAPTURE_SENSITIVITY: bool>(
     request: ToposResonatorRequest<'_>,
 ) -> Result<EvolvedResonance, ToposResonatorError> {
-    let volume = validate_request(request)?;
+    evolve_resonance_with_layout::<CAPTURE_SENSITIVITY>(
+        request,
+        ToposResonatorGateLayout::Elementwise,
+    )
+}
+
+fn evolve_resonance_with_layout<const CAPTURE_SENSITIVITY: bool>(
+    request: ToposResonatorRequest<'_>,
+    gate_layout: ToposResonatorGateLayout,
+) -> Result<EvolvedResonance, ToposResonatorError> {
+    let volume = validate_request_with_layout(request, gate_layout)?;
     let mut drive = Vec::with_capacity(volume);
-    for (&input, &gate) in request.input.iter().zip(request.gate) {
-        drive.push(require_derived_finite("drive", input * gate)?);
+    match gate_layout {
+        ToposResonatorGateLayout::Elementwise => {
+            for (&input, &gate) in request.input.iter().zip(request.gate) {
+                drive.push(require_derived_finite("drive", input * gate)?);
+            }
+        }
+        ToposResonatorGateLayout::SharedRows => {
+            for row in request.input.chunks_exact(request.features) {
+                for (&input, &gate) in row.iter().zip(request.gate) {
+                    drive.push(require_derived_finite("drive", input * gate)?);
+                }
+            }
+        }
     }
     let coupling = request.config.coupling();
     let mut state = vec![0.0f32; volume];

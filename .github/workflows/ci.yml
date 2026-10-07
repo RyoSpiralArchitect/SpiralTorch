@@ -364,6 +364,8 @@ jobs:
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
           node tools/probe_topos_capture_wasm.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             "$RUNNER_TEMP/topos-captured-vjp.json" --require-capture
+          node tools/probe_topos_shared_transport.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            "$RUNNER_TEMP/topos-shared-transport.json"
           node tools/probe_topos_browser_learning.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             bindings/st-wasm/tests/topos_resonator_learning_fixture.json \
             "$RUNNER_TEMP/topos-browser-learning.json"
@@ -720,6 +722,7 @@ jobs:
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
             bindings/st-py/tests/test_topos_capture.py \
+            bindings/st-py/tests/test_topos_shared_transport.py \
             bindings/st-py/tests/test_topos_matched_controls.py \
             bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \

@@ -216,12 +216,15 @@ if torch is not None:
 
     class _ToposResonatorFunction(torch.autograd.Function):
         @staticmethod
-        def forward(ctx: Any, value: Any, gate: Any, kernel: Any) -> Any:
+        def forward(ctx: Any, value: Any, gate: Any, kernel: Any, shared: bool) -> Any:
             features = value.shape[-1]
             rows = value.numel() // features
             ctx.buffer_transport = _buffer_transport_available()
             transport = _buffer_values if ctx.buffer_transport else _values
-            capture = kernel.capture_buffer if ctx.buffer_transport else kernel.capture
+            if shared:
+                capture = kernel.capture_shared_rows_buffer if ctx.buffer_transport else kernel.capture_shared_rows
+            else:
+                capture = kernel.capture_buffer if ctx.buffer_transport else kernel.capture
             ctx.snapshot = capture(transport(value), transport(gate), rows, features)
             ctx.save_for_backward(value, gate)
             output = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
@@ -229,7 +232,7 @@ if torch is not None:
 
         @staticmethod
         @torch.autograd.function.once_differentiable
-        def backward(ctx: Any, grad_output: Any) -> tuple[Any, Any, None]:
+        def backward(ctx: Any, grad_output: Any) -> tuple[Any, Any, None, None]:
             value, gate = ctx.saved_tensors
             operation = ctx.snapshot.vjp_buffer if ctx.buffer_transport else ctx.snapshot.vjp
             direction = _buffer_values(grad_output) if ctx.buffer_transport else _values(grad_output)
@@ -237,6 +240,7 @@ if torch is not None:
             return (
                 _transport_output(dx, value, ctx.buffer_transport),
                 _transport_output(dg, gate, ctx.buffer_transport),
+                None,
                 None,
             )
 
@@ -374,8 +378,10 @@ def wave_gate_autograd(
 def topos_resonator_autograd(value: Any, gate: Any, *, kernel: Any = None) -> Any:
     """Apply the Rust resonance with first-order gradients for input and gate.
 
-    The gate may broadcast to the input. PyTorch reduces its returned VJP
-    through that broadcast; the geometric derivative itself is computed in Rust.
+    Feature gates (optionally with singleton leading dimensions) stay unexpanded;
+    Rust sums their row VJPs in f64 and rounds once to f32, without averaging.
+    Other broadcasts use the elementwise Rust VJP and PyTorch's reduction.
+    The shared reduction need not be bit-identical to PyTorch's f32 summation.
     Float32 only; higher-order gradients, AMP and compilation are not promised.
     """
     _input(value)
@@ -386,24 +392,31 @@ def topos_resonator_autograd(value: Any, gate: Any, *, kernel: Any = None) -> An
     ):
         raise TypeError("gate must be a float32 tensor on the input device")
     expanded_gate = gate.expand_as(value)
+    features = value.shape[-1]
+    shared = gate.ndim > 0 and gate.shape[-1] == features and all(
+        size == 1 for size in gate.shape[:-1]
+    )
+    transported_gate = gate if shared else expanded_gate
     if kernel is None:
         kernel = _kernel()
     from . import ToposResonatorKernel
 
     if not isinstance(kernel, ToposResonatorKernel):
         raise TypeError("kernel must be an immutable Rust ToposResonatorKernel")
-    if value.numel() > kernel.max_values:
+    if max(value.numel(), transported_gate.numel()) > kernel.max_values:
         raise ValueError("input exceeds the geometric kernel's value budget")
     if not torch.is_grad_enabled() or not (value.requires_grad or gate.requires_grad):
         buffers = _buffer_transport_available()
         transport = _buffer_values if buffers else _values
-        forward = kernel.forward_buffer if buffers else kernel.forward
-        features = value.shape[-1]
+        if shared:
+            forward = kernel.forward_shared_rows_buffer if buffers else kernel.forward_shared_rows
+        else:
+            forward = kernel.forward_buffer if buffers else kernel.forward
         output = forward(
-            transport(value), transport(expanded_gate), value.numel() // features, features
+            transport(value), transport(transported_gate), value.numel() // features, features
         )
         return _transport_output(output, value, buffers)
-    return _ToposResonatorFunction.apply(value, expanded_gate, kernel)
+    return _ToposResonatorFunction.apply(value, transported_gate, kernel, shared)
 
 
 if torch is None:

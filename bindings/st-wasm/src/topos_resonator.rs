@@ -120,11 +120,53 @@ impl ToposResonatorKernel {
             .map(|inner| ToposResonatorLearningBatch { inner })
             .map_err(js_error)
     }
+
+    #[wasm_bindgen(js_name = forwardSharedRows)]
+    pub fn forward_shared_rows(
+        &self,
+        input: &[f32],
+        gate: &[f32],
+        rows: Number,
+        features: Number,
+    ) -> Result<Vec<f32>, JsValue> {
+        let rows = js_u32(rows.as_ref(), "rows")? as usize;
+        let features = js_u32(features.as_ref(), "features")? as usize;
+        self.operator
+            .forward_shared_rows(input, gate, rows, features)
+            .map(|step| step.output)
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = captureSharedRows)]
+    pub fn capture_shared_rows(
+        &self,
+        input: Vec<f32>,
+        gate: Vec<f32>,
+        rows: Number,
+        features: Number,
+    ) -> Result<ToposResonatorLearningBatch, JsValue> {
+        let rows = js_u32(rows.as_ref(), "rows")? as usize;
+        let features = js_u32(features.as_ref(), "features")? as usize;
+        self.operator
+            .capture_shared_rows_owned(input, gate, rows, features)
+            .map(|inner| ToposResonatorLearningBatch { inner })
+            .map_err(js_error)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl ToposResonatorLearningBatch {
+    #[wasm_bindgen(getter, js_name = gateLayout)]
+    pub fn gate_layout(&self) -> String {
+        self.inner.gate_layout().name().to_owned()
+    }
+
+    #[wasm_bindgen(getter, js_name = gateValues)]
+    pub fn gate_values(&self) -> usize {
+        self.inner.gate().len()
+    }
+
     #[wasm_bindgen(getter)]
     pub fn output(&self) -> Vec<f32> {
         self.inner.output().to_vec()
