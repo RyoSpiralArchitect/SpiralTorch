@@ -10,6 +10,13 @@ limited to PyTorch-equivalent computation. Novel geometry earns its place via
 actual gradients/updates, stability and matched learning controls, with extra
 compute and transfers reported separately.
 
+The [shared adapter placement API](geometry_adapter_stack.md) now exposes explicit
+multi-site learning through `spiraltorch.GeometryAdapterStack`. It keeps model
+ownership and parameter names intact while composing the existing Rust-backed
+WaveGate, Topos, elliptic and fractional adapters. Tiny GPT-2/Llama comparisons
+cover gradients and exact state continuation. This closes example-only placement
+wiring; it does not establish that combining geometries improves model quality.
+
 The first [geometric learning bridge](geometric_learning_bridge.md) connects the
 existing Rust Topos recurrence and VJP to a zero-initialized Torch residual gate
 and to a browser forward/VJP client. A random tiny HF loss updates that gate;

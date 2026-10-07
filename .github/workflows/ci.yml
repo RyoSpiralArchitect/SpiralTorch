@@ -711,6 +711,8 @@ jobs:
           python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "EllipticCausalLearningBatch"); assert hasattr(st, "EllipticCausalResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
           python -I -m pytest --import-mode=importlib -q \
             bindings/st-py/tests/test_geometry_autograd.py \
+            bindings/st-py/tests/test_geometry_adapters.py \
+            bindings/st-py/tests/test_geometry_adapter_stack_results.py \
             bindings/st-py/tests/test_geometry_optional_dependency.py \
             bindings/st-py/tests/test_fractional_learning.py \
             bindings/st-py/tests/test_fractional_history.py \

@@ -20,6 +20,13 @@ class GeometryOptionalDependencyTests(unittest.TestCase):
             exec('from spiraltorch import *', namespace)
             from spiraltorch import geometry_autograd as geometry
             assert geometry.torch is None
+            assert 'GeometryAdapterStack' in st.__all__ and 'GeometryAdapterStack' in namespace
+            try:
+                namespace['GeometryAdapterStack']({})
+            except RuntimeError as error:
+                assert 'PyTorch is required' in str(error)
+            else:
+                raise AssertionError('geometry stack did not reject missing PyTorch')
             for name in geometry.__all__:
                 assert name in st.__all__ and name in namespace, name
                 assert namespace[name] is getattr(geometry, name), name

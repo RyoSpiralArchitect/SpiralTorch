@@ -7,6 +7,7 @@ from typing import Any, Callable, ContextManager, Dict, Iterable, Iterator, List
 from types import ModuleType
 
 from .optim import Amegagrad, amegagrad
+from .geometry_adapters import GeometryAdapterStack as GeometryAdapterStack
 from .fractional_autograd import (
     FractionalMemoryAdapter as FractionalMemoryAdapter,
     fractional_gl_autograd as fractional_gl_autograd,
