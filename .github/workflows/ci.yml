@@ -384,6 +384,7 @@ jobs:
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
+          node bindings/st-wasm/tests/topos_graph_contract.cjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js"
       - name: Share freshly built WASM for native input replay
         uses: actions/upload-artifact@v7
         with:
@@ -651,6 +652,7 @@ jobs:
           python -P bindings/st-py/tests/test_nn_resident.py
           python -P bindings/st-py/tests/test_nn_resident_training.py
           python -P bindings/st-py/tests/test_nn_resident_graph_training.py
+          python -P bindings/st-py/tests/test_nn_resident_topos.py
           python -P bindings/st-py/tests/test_nn_resident_graph_forward.py
           python -P bindings/st-py/tests/test_nn_resident_exports.py
           python -P bindings/st-py/tests/test_nn_resident_graph_autograd.py

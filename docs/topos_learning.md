@@ -113,8 +113,8 @@ its activations, so direct-layer capture savings must not be generalized to
 the whole graph. Isolated parameter and WGPU operand snapshots can add copies;
 previous capture timings are not measurements of this revised path.
 Existing Python Torch adapters still perform broadcast and
-reduction in Torch; the WASM core kernel still takes a full per-element gate.
-This change does not add the shared-gate NN constructor to either frontend.
+reduction in Torch; the scalar WASM core kernel still takes a full per-element
+gate. For the distinct resident NN path, use the shared-gate graph below.
 
 ### Resident Kernel Building Block
 
@@ -130,10 +130,10 @@ the drive sensitivity in a resident capture.
 
 The porous rewrite and slope are shared with `OpenCartesianTopos`; `st-core`
 retains depth/volume admission, geometry and semantic audits. The low-level
-resident kernel is not permission to bypass those policies. It does not yet
-add a `ToposResonator` stage to the portable graph, `Sequential`, the graph
-transactional optimizer, or the Python/WASM resident clients. In particular,
-do not route this gate through Scaler's module-compatible row averaging.
+resident kernel is not permission to bypass those policies. Its integration
+with `Sequential` and transactional graph SGD is explicit, as described below;
+the standalone low-level plan is not that integration. In particular, do not
+route this gate through Scaler's module-compatible row averaging.
 
 ```sh
 SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-backend-wgpu --lib resident_tensor::pointwise -- --nocapture
@@ -150,6 +150,86 @@ pretrained-model, browser-execution or transactional-SGD claim. The CPU Torch
 checker keeps its own gate across all updates; a distinct resident receipt
 schema prevents relabeling historical CPU runs. Use an isolated Python runtime
 without site-startup monkey patches when reproducing the comparison.
+
+### Shared Topos Gates In Resident NN Graphs
+
+`ToposResonator::from_shared_gate(name, gate, config, topos)` takes an isolated
+snapshot of a `(1, F)` Tensor. Both shared-gate constructors now lower through
+`InferencePlan::from_module` to a dedicated `ToposResonator` graph stage and
+`gate` parameter role. A leading batch/sequence dimension can vary between
+plans; an already compiled plan retains its fixed N-D shape. Elementwise
+Topos layers remain host-only and fail explicitly when lowered to a graph.
+
+The portable graph uses schema **v5** only when Topos is present. v2/v3/v4
+plans cannot admit Topos stages or gate parameters. Rust validates coupling,
+iteration count, saturation, porosity, exclusive parameter ownership and the
+expanded activation's volume before allocating a GPU graph. The module's
+depth admission is checked during lowering; the portable stage records the
+validated finite-unroll parameters and volume bound, not a complete topos or
+an optimizer geometry. Program/cache identity preserves signed-zero bits.
+
+The graph supports resident inference, arbitrary-seed VJP, the explicit graph
+learner and finite-checked transactional SGD. `exact` and `module_compatible`
+both use a **sum** for Topos gates, with no additional mean. Failure guards also
+check the next residual drive used by host Topos validation. They do not
+materialize the core semantic audit. Readback remains explicit; VJP recomputes
+the recurrence, and owning outputs can add GPU copies. No CPU fallback or
+implicit hypergradient/ModuleTrainer policy is introduced.
+
+Python and WASM reuse an existing kernel object's Rust configuration; that
+object's scalar `forward`/`backward` retain their original CPU/WASM semantics.
+Only the module's resident entry selects WebGPU:
+
+```python
+import spiraltorch as st
+
+kernel = st.ToposResonatorKernel(coupling=.2, iterations=5,
+                               porosity=.3, max_values=24)
+model = st.nn.Sequential()
+model.add_topos_resonator("topos", st.Tensor(1, 3, [.8, -.4, 1.1]), kernel)
+base = model.inference_plan([2, 4, 3])
+training = base.compile_graph_training_wgpu(gradient_policy="exact")
+training.upload_batch_values([.25] * 24, [0.] * 24)
+training.step(.03)
+state = training.state_snapshot().read_state()  # Explicit checked readback.
+base.apply_parameters_to(model, state.to_plan())
+device = st.WgpuTensorDevice.create()
+output = model(device.upload([2, 4, 3], [.25] * 24))  # Still resident.
+```
+
+```javascript
+// After initializing the WebGPU-enabled WASM module as `st`:
+const kernel = new st.ToposResonatorKernel(.2, 5, 1, .3, 24);
+const model = new st.Sequential();
+model.addToposResonator("topos", new Float32Array([.8, -.4, 1.1]), kernel);
+kernel.free(); // The Module owns its configuration and gate.
+const base = model.inferencePlan([2, 4, 3]);
+const graph = await base.compileGraphTrainingWebGpu("exact");
+graph.uploadBatch(new Float32Array(24).fill(.25), new Float32Array(24));
+graph.step(.03);
+const snapshot = graph.stateSnapshot();
+const state = await snapshot.readState();
+const updated = state.toPlan();
+base.applyParametersTo(model, updated);
+for (const handle of [updated, state, snapshot, graph, base, model]) handle.free();
+```
+
+Handoff remains transactional and rejects stale host parameters or existing
+optimizer state unless the caller explicitly selects `reset`. A successful
+handoff invalidates the original Module's resident cache, not older owning
+outputs. Geometry and pretrained-model quality remain separate questions.
+The focused Rust tests exercise 300 synthetic updates and mixed
+Linear/Topos/Linear VJPs. Python compares 100 updates with independent Torch;
+`bindings/st-wasm/tests/resident_topos_graph.html` compares 100 actual browser
+WebGPU updates with the scalar Rust/WASM kernel. Neither is a speed claim.
+
+```sh
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --features wgpu --lib resident::graph::topos_tests -- --nocapture
+SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 python -P bindings/st-py/tests/test_nn_resident_topos.py
+node tools/test_resident_browser.cjs "$WEBGPU_MODULE_DIR" "$CHROME_EXECUTABLE" /tmp/topos-graph-new.json "" "" "" "" topos-resident-graph
+```
+
+### Host Shared-Gate Reproduction
 
 The correctness-only example and independent Torch checker run two 100-update
 synthetic SGD trajectories using `Parameter::apply_step`, variable row counts

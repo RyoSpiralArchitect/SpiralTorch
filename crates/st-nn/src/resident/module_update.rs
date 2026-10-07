@@ -97,7 +97,9 @@ impl InferencePlan {
             {
                 let shape = match before.role {
                     ParameterRole::Weight => (before.shape[0], before.shape[1]),
-                    ParameterRole::Bias | ParameterRole::Gain => (1, before.shape[0]),
+                    ParameterRole::Bias | ParameterRole::Gain | ParameterRole::Gate => {
+                        (1, before.shape[0])
+                    }
                 };
                 if role != before.role
                     || param.value().shape() != shape

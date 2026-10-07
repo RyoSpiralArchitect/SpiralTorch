@@ -27,7 +27,7 @@ fn scalar(value: &Number, label: &str) -> Result<f32, JsValue> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub struct ToposResonatorKernel {
-    operator: ToposResonatorOperator,
+    pub(crate) operator: ToposResonatorOperator,
 }
 
 #[cfg(target_arch = "wasm32")]

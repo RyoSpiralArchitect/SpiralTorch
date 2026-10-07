@@ -2,7 +2,12 @@
 //! gate adjoint uses the existing deterministic sum, with no row averaging.
 use super::*;
 
-pub(super) fn write_body(code: &mut String, kernel: ToposResonatorKernel, vjp: bool) {
+pub(super) fn write_body(
+    code: &mut String,
+    kernel: ToposResonatorKernel,
+    vjp: bool,
+    residual_guard: bool,
+) {
     for (name, value) in [
         ("coupling", kernel.coupling()),
         ("saturation", kernel.saturation()),
@@ -42,6 +47,9 @@ pub(super) fn write_body(code: &mut String, kernel: ToposResonatorKernel, vjp: b
     }
 "#,
     );
+    if residual_guard {
+        code.push_str("    let residual_drive = checked_apply(OP_ADD, drive, checked_apply(OP_MULTIPLY, coupling, state)); check(residual_drive);\n");
+    }
     if vjp {
         code.push_str(
             r#"

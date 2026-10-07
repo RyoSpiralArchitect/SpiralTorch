@@ -3888,6 +3888,26 @@ impl PySequential {
         crate::nn_resident::plan_for(&self.inner, input_shape)
     }
 
+    /// Add a Rust-owned shared last-axis gate using an existing kernel's configuration.
+    /// Host forward/backward and resident plans use the same finite-unroll rule.
+    pub fn add_topos_resonator(
+        &mut self,
+        name: String,
+        gate: &PyTensor,
+        kernel: &crate::topos_resonator::PyToposResonatorKernel,
+    ) -> PyResult<()> {
+        let operator = &kernel.operator;
+        let layer = st_nn::ToposResonator::from_shared_gate(
+            name,
+            gate.inner.clone(),
+            operator.config(),
+            operator.topos().clone(),
+        )
+        .map_err(tensor_err_to_py)?;
+        self.inner.push(layer);
+        Ok(())
+    }
+
     pub fn add(&mut self, layer: &Bound<PyAny>) -> PyResult<()> {
         let py = layer.py();
 

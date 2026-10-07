@@ -15,7 +15,7 @@ fn value_error(error: impl std::fmt::Display) -> PyErr {
 /// Explicit f32 CPU execution; GPU tensors are transported by the client.
 #[pyclass(name = "ToposResonatorKernel", module = "spiraltorch", frozen)]
 pub struct PyToposResonatorKernel {
-    operator: ToposResonatorOperator,
+    pub(crate) operator: ToposResonatorOperator,
 }
 
 #[pyclass(name = "ToposResonatorLearningBatch", module = "spiraltorch", frozen)]

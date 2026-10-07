@@ -3,6 +3,7 @@ use crate::{
     layout::{NdLayout, NdLayoutError},
     normalization::{validate_epsilon, LayerNormError, LayerNormShape},
     pointwise::{PointwiseChain, PointwiseError},
+    topos_resonator::ToposResonatorKernel,
 };
 use thiserror::Error;
 
@@ -11,6 +12,7 @@ pub enum ParameterRole {
     Weight,
     Bias,
     Gain,
+    Gate,
 }
 
 impl ParameterRole {
@@ -19,12 +21,13 @@ impl ParameterRole {
             Self::Weight => "weight",
             Self::Bias => "bias",
             Self::Gain => "gain",
+            Self::Gate => "gate",
         }
     }
 }
 
 /// Exact is a mathematical VJP. ModuleCompatible retains the legacy row
-/// average for Scaler gain and LayerNorm gain/bias, but not Linear parameters.
+/// average for Scaler gain and LayerNorm gain/bias, but not Linear or Topos gates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphGradientPolicy {
     Exact,
@@ -75,6 +78,23 @@ pub enum GraphStage {
         bias: usize,
         epsilon: f32,
     },
+    ToposResonator {
+        gate: usize,
+        kernel: ToposResonatorKernel,
+        /// Bound the expanded activation, not just the trainable gate.
+        max_volume: usize,
+    },
+}
+
+impl GraphStage {
+    /// Parameters consumed by one shape-preserving pointwise execution stage.
+    pub fn pointwise_parameters(&self) -> Option<&[usize]> {
+        match self {
+            Self::Pointwise { parameters, .. } => Some(parameters),
+            Self::ToposResonator { gate, .. } => Some(std::slice::from_ref(gate)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -97,6 +117,8 @@ pub enum GraphError {
     Pointwise(#[from] PointwiseError),
     #[error(transparent)]
     LayerNorm(#[from] LayerNormError),
+    #[error(transparent)]
+    Topos(#[from] crate::topos_resonator::ToposKernelError),
 }
 
 /// Construction validates all stages/values before a backend allocates resources.
@@ -187,6 +209,9 @@ impl GraphDefinition {
                     let mut operands = vec![input.clone()];
                     for &id in ids {
                         claim(id)?;
+                        if parameters[id].role == ParameterRole::Gate {
+                            return Err(GraphError::Stage(index));
+                        }
                         operands.push(parameter_layouts[id].clone());
                     }
                     chain.validate_layouts(&operands)?;
@@ -209,6 +234,21 @@ impl GraphDefinition {
                     }
                     validate_epsilon(*epsilon)?;
                     LayerNormShape::new(input.shape(), &g.shape)?;
+                    input.clone()
+                }
+                GraphStage::ToposResonator {
+                    gate, max_volume, ..
+                } => {
+                    claim(*gate)?;
+                    let g = &parameters[*gate];
+                    if g.role != ParameterRole::Gate
+                        || g.shape != [*input.shape().last().unwrap()]
+                        || *max_volume == 0
+                        || input.len() > *max_volume
+                    {
+                        return Err(GraphError::Stage(index));
+                    }
+                    u32::try_from(*max_volume).map_err(|_| GraphError::AddressSpace)?;
                     input.clone()
                 }
             };
@@ -252,6 +292,7 @@ impl GraphDefinition {
             GraphStage::Linear { .. } => false,
             GraphStage::Pointwise { .. } => role == ParameterRole::Gain,
             GraphStage::LayerNorm { .. } => true,
+            GraphStage::ToposResonator { .. } => false,
         }
     }
 

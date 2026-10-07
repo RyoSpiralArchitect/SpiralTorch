@@ -27,6 +27,7 @@ pub(super) enum OperationStamp {
         bias: Option<TensorContentStamp>,
     },
     Scale(Option<TensorContentStamp>),
+    ToposResonator(Option<TensorContentStamp>),
     LayerNorm {
         gain: Option<TensorContentStamp>,
         bias: Option<TensorContentStamp>,
@@ -44,6 +45,7 @@ impl OperationStamp {
                 bias: bias.content_stamp(),
             },
             InferenceOp::Scale { gain } => Self::Scale(gain.content_stamp()),
+            InferenceOp::ToposResonator { gate, .. } => Self::ToposResonator(gate.content_stamp()),
             InferenceOp::LayerNorm {
                 gain,
                 bias,
@@ -161,6 +163,19 @@ pub(super) fn same_operations(
                     InferenceOp::Scale { gain: b },
                     OperationStamp::Scale(stamp),
                 ) => same_parameter(a, b, stamp),
+                (
+                    InferenceOp::ToposResonator {
+                        gate: ag,
+                        kernel: ak,
+                        max_volume: av,
+                    },
+                    InferenceOp::ToposResonator {
+                        gate: bg,
+                        kernel: bk,
+                        max_volume: bv,
+                    },
+                    OperationStamp::ToposResonator(stamp),
+                ) => ak == bk && av == bv && same_parameter(ag, bg, stamp),
                 (
                     InferenceOp::LayerNorm {
                         gain: ag,

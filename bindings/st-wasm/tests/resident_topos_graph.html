@@ -1,0 +1,140 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Shared Topos gates in a resident Rust graph</title>
+<pre id="result" data-status="running">Checking WebGPU learning and portable handoff</pre>
+<script type="module">
+import init, * as st from "./module/spiraltorch_wasm.js";
+const result = document.querySelector("#result");
+const report = {schema: "spiraltorch.topos_resident_graph_browser.v1", status: "error", cases: []};
+const owned = new Set(), keep = value => (owned.add(value), value);
+const free = value => { owned.delete(value); value.free(); };
+const f32 = values => new Float32Array(values), f = Math.fround;
+let checks = 0;
+function check(ok, label) { checks++; if (!ok) throw Error(label); }
+function close(actual, expected, label) {
+  check(actual.length === expected.length, `${label}: length`);
+  for (let i = 0; i < actual.length; i++) {
+    check(Number.isFinite(actual[i]) && Number.isFinite(expected[i]) &&
+      Math.abs(actual[i] - expected[i]) <= 3e-5 * (1 + Math.abs(expected[i])),
+      `${label}[${i}]: ${actual[i]} != ${expected[i]}`);
+  }
+}
+function rejects(call, label) {
+  let failed = false;
+  try { const unexpected = call(); unexpected?.free?.(); } catch { failed = true; }
+  check(failed, label);
+}
+async function read(tensor) {
+  const snapshot = keep(tensor.snapshot());
+  try { return Array.from(await snapshot.readValues()); } finally { free(snapshot); }
+}
+async function readState(graph) {
+  const snapshot = keep(graph.stateSnapshot());
+  try { return keep(await snapshot.readState()); } finally { free(snapshot); }
+}
+try {
+  const adapter = await navigator.gpu?.requestAdapter({powerPreference: "high-performance"});
+  const fallback = adapter?.info?.isFallbackAdapter ?? adapter?.isFallbackAdapter ?? null;
+  check(adapter && fallback === false, "Non-fallback WebGPU adapter not confirmed");
+  report.adapter_probe = {vendor: adapter.info?.vendor, is_fallback_adapter: fallback};
+  await init();
+  const device = keep(await st.WgpuTensorDevice.create());
+  report.adapter = device.adapterInfo();
+  check(report.adapter.device_type !== "Cpu", "CPU adapter is not GPU evidence");
+  for (const porosity of [0, .3]) {
+    for (const policy of ["exact", "module_compatible"]) {
+      const kernel = keep(new st.ToposResonatorKernel(.2, 5, 1, porosity, 12));
+      const module = keep(new st.Sequential());
+      const supplied = f32([.8, -.4, 1.1]);
+      module.addToposResonator("topos", supplied, kernel);
+      supplied.fill(99);
+      const base = keep(module.inferencePlan([2, 2, 3]));
+      const serialized = base.toJson(), payload = JSON.parse(serialized);
+      check(payload.schema === "spiraltorch.nn.inference_plan.v5", "v5 schema");
+      check(payload.parameters[0].role === "gate", "gate role");
+      const restored = keep(st.InferencePlan.fromJson(serialized));
+      check(restored.toJson() === serialized, "v5 roundtrip");
+      for (const v of [2, 3, 4]) rejects(() => st.InferencePlan.fromJson(
+        JSON.stringify({...payload, schema: `spiraltorch.nn.inference_plan.v${v}`})), "schema downgrade");
+      rejects(() => module.inferencePlan([5, 3]), "expanded volume budget");
+      for (const bad of [[], new Float64Array([1]), f32([NaN]), null])
+        rejects(() => module.addToposResonator("bad", bad, kernel), "invalid gate transport");
+      const unchanged = keep(module.inferencePlan([2, 2, 3]));
+      check(unchanged.toJson() === serialized, "failed add mutated module");
+      free(unchanged);
+
+      const graph = keep(await restored.compileGraphTrainingWebGpu(policy));
+      let gate = payload.parameters[0].values.map(f);
+      const trajectory = [];
+      for (let step = 0; step < 25; step++) {
+        const input = f32(Array.from({length: 12}, (_, i) => ((i * 17 + step * 7) % 31) / 7 - 2));
+        const target = f32(Array.from(input, x => f(x * f(.13))));
+        const expanded = f32(Array.from(input, (_, i) => gate[i % 3]));
+        const output = Array.from(kernel.forward(input, expanded, 4, 3));
+        const seed = f32(output.map((y, i) => f(f(2 * f(y - target[i])) / 12)));
+        const gradients = kernel.backward(input, expanded, seed, 4, 3);
+        const dg = [0, 0, 0];
+        for (let i = 0; i < input.length; i++) dg[i % 3] = f(dg[i % 3] + gradients.grad_gate[i]);
+        gate = gate.map((value, i) => f(value - f(f(.03) * dg[i])));
+        graph.uploadBatch(input, target);
+        graph.step(.03);
+        const state = await readState(graph);
+        close(state.predictionValues(), output, `${policy}.output`);
+        close(state.inputGradientValues(), gradients.grad_input, `${policy}.dx`);
+        close(state.parameterGradientValues(0), dg, `${policy}.raw_dg`);
+        close(state.effectiveGradientValues(0), dg, `${policy}.effective_dg`);
+        close(state.parameterValues(0), gate, `${policy}.gate`);
+        check(state.parameterRole(0) === "gate", "state gate role");
+        check(Number.isFinite(state.loss), "finite loss");
+        trajectory.push({step, input: Array.from(input), target: Array.from(target),
+          output: Array.from(state.predictionValues()), dx: Array.from(state.inputGradientValues()),
+          dg: Array.from(state.parameterGradientValues(0)), gate: Array.from(state.parameterValues(0)), loss: state.loss});
+        free(state);
+      }
+      const source = keep(device.upload([3, 2], f32([-2, -.5, .3, .8, 1, 2])));
+      const view = keep(source.permute([1, 0]));
+      const held = keep(module.forward(view)), before = await read(held);
+      const parameters = keep(graph.parameterSnapshot());
+      const updated = keep(await parameters.readPlan());
+      check(base.applyParametersTo(module, updated) === 1, "gate handoff");
+      const output = keep(module.forward(view));
+      const expected = kernel.forward(f32([-2, .3, 1, -.5, .8, 2]), f32([...gate, ...gate]), 2, 3);
+      close(await read(output), expected, "module after handoff");
+      const stats = keep(module.residentCacheInfo());
+      check(stats.compilations === 2n, "handoff rebuilt graph cache");
+      free(stats); module.clearResidentCache(); free(module);
+      close(await read(held), before, "owned output survived handoff and drop");
+      report.cases.push({porosity, policy, shape: [2, 2, 3], trajectory});
+      for (const item of [held, output, view, source, parameters, updated, graph, restored, base, kernel]) free(item);
+    }
+  }
+
+  const huge = f(3.4028234663852886e38), bad = keep(new st.Sequential());
+  const guardKernel = keep(new st.ToposResonatorKernel(.5, 1, huge, 0, 1));
+  bad.addToposResonator("guard", f32([1]), guardKernel);
+  const guardPlan = keep(bad.inferencePlan([1, 1]));
+  const guarded = keep(await guardPlan.compileGraphTrainingWebGpu("exact"));
+  guarded.uploadBatch(f32([f(huge * f(.8))]), f32([f(huge * f(.8))]));
+  guarded.step(.1);
+  let rejected = false;
+  try { free(await readState(guarded)); } catch (error) { rejected = /non-finite|stage/.test(String(error)); }
+  check(rejected, "residual-drive overflow guard");
+  const snapshot = keep(guarded.parameterSnapshot()), unchanged = keep(await snapshot.readPlan());
+  close(JSON.parse(unchanged.toJson()).parameters[0].values, [1], "invalid step was atomic");
+  guarded.uploadBatch(f32([.25]), f32([0])); guarded.step(.1);
+  const recovered = await readState(guarded);
+  close(recovered.parameterValues(0), [.9875], "valid retry");
+  report.guards = {residual_drive_overflow: true, update_atomicity: true, valid_retry: true,
+    version_downgrade: true, admission: true, owning_handoff: true};
+  report.scope = "100 synthetic WebGPU graph updates vs scalar Rust/WASM; no speed or model-quality claim. Per-step verification reads are explicit.";
+  report.status = "passed";
+} catch (error) {
+  report.error = String(error.stack || error);
+} finally {
+  for (const value of owned) value.free();
+  report.checks = checks;
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = report.status;
+}
+</script>

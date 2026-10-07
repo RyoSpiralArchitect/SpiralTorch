@@ -61,6 +61,32 @@ impl WasmSequential {
         Ok(())
     }
 
+    /// Clone the existing scalar kernel's configuration into a real Rust Module.
+    /// The graph owns the shared gate; the supplied arrays/kernel may be released.
+    #[wasm_bindgen(js_name = addToposResonator)]
+    pub fn add_topos_resonator(
+        &mut self,
+        name: JsString,
+        #[wasm_bindgen(unchecked_param_type = "Float32Array")] gate: JsValue,
+        kernel: &crate::topos_resonator::ToposResonatorKernel,
+    ) -> Result<(), JsValue> {
+        let name = name
+            .as_string()
+            .ok_or_else(|| js_error("name must be a string"))?;
+        let gate = values(gate)?.to_vec();
+        let gate = Tensor::from_vec(1, gate.len(), gate).map_err(js_error)?;
+        let operator = &kernel.operator;
+        let layer = st_nn::ToposResonator::from_shared_gate(
+            name,
+            gate,
+            operator.config(),
+            operator.topos().clone(),
+        )
+        .map_err(js_error)?;
+        self.inner.push(layer);
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = addGelu)]
     pub fn add_gelu(&mut self) {
         self.inner.push(Gelu::new());

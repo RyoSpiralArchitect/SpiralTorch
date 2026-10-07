@@ -506,10 +506,8 @@ impl ResidentGraphTraining {
                         delta,
                     }
                 }
-                GraphStage::Pointwise {
-                    chain,
-                    parameters: ids,
-                } => {
+                GraphStage::Pointwise { .. } | GraphStage::ToposResonator { .. } => {
+                    let ids = node.pointwise_parameters().unwrap();
                     let mut layouts = vec![definition.layouts()[i].clone()];
                     for &id in ids {
                         layouts.push(
@@ -517,11 +515,16 @@ impl ResidentGraphTraining {
                                 .map_err(TensorError::from)?,
                         );
                     }
-                    let plan = Box::new(PointwiseVjpPlan::new(PointwisePlan::new(
-                        device.clone(),
-                        chain.clone(),
-                        layouts,
-                    )?)?);
+                    let forward_plan = match node {
+                        GraphStage::Pointwise { chain, .. } => {
+                            PointwisePlan::new(device.clone(), chain.clone(), layouts)?
+                        }
+                        GraphStage::ToposResonator { kernel, .. } => {
+                            PointwisePlan::topos_graph(device.clone(), *kernel, layouts, 0)?
+                        }
+                        _ => unreachable!("pointwise stage"),
+                    };
+                    let plan = Box::new(PointwiseVjpPlan::new(forward_plan)?);
                     let inputs: Vec<_> = std::iter::once(&activations[i])
                         .chain(ids.iter().map(|&id| &parameters[id]))
                         .collect();
@@ -545,7 +548,7 @@ impl ResidentGraphTraining {
                         plan,
                         workspace,
                         forward,
-                        parameters: ids.clone(),
+                        parameters: ids.to_vec(),
                     }
                 }
                 GraphStage::LayerNorm {

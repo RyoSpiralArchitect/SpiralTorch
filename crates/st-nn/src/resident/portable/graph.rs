@@ -1,4 +1,4 @@
-//! Version 2 preserves pointwise graphs; v3 adds LayerNorm; v4 adds subtract/divide.
+//! v2 pointwise graphs, v3 LayerNorm, v4 subtract/divide, v5 shared Topos gates.
 use super::*;
 use crate::resident::{GraphDefinition, GraphParameter, GraphStage, ParameterRole};
 use st_kernel_contracts::{
@@ -10,6 +10,7 @@ use st_kernel_contracts::{
 pub const GRAPH_PLAN_SCHEMA: &str = "spiraltorch.nn.inference_plan.v2";
 pub const GRAPH_PLAN_SCHEMA_V3: &str = "spiraltorch.nn.inference_plan.v3";
 pub const GRAPH_PLAN_SCHEMA_V4: &str = "spiraltorch.nn.inference_plan.v4";
+pub const GRAPH_PLAN_SCHEMA_V5: &str = "spiraltorch.nn.inference_plan.v5";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -31,6 +32,7 @@ enum Role {
     Weight,
     Bias,
     Gain,
+    Gate,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -48,6 +50,14 @@ enum Stage {
         gain: u32,
         bias: u32,
         epsilon: f32,
+    },
+    ToposResonator {
+        gate: u32,
+        coupling: f32,
+        iterations: u32,
+        saturation: f32,
+        porosity: f32,
+        max_volume: u32,
     },
 }
 #[derive(Serialize, Deserialize)]
@@ -70,7 +80,13 @@ enum Op {
 
 pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError> {
     let record = Record {
-        schema: if graph.stages().iter().any(|stage| {
+        schema: if graph
+            .stages()
+            .iter()
+            .any(|stage| matches!(stage, GraphStage::ToposResonator { .. }))
+        {
+            GRAPH_PLAN_SCHEMA_V5
+        } else if graph.stages().iter().any(|stage| {
             matches!(stage,
             GraphStage::Pointwise { chain, .. } if chain.steps().iter().any(|step|
                 matches!(step.op, ElementwiseOp::Subtract | ElementwiseOp::Divide)))
@@ -102,6 +118,7 @@ pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError>
                         ParameterRole::Weight => Role::Weight,
                         ParameterRole::Bias => Role::Bias,
                         ParameterRole::Gain => Role::Gain,
+                        ParameterRole::Gate => Role::Gate,
                     },
                     shape: p
                         .shape
@@ -148,6 +165,18 @@ pub(super) fn to_json(graph: &GraphDefinition) -> Result<String, InferenceError>
                             })
                             .collect::<Result<_, InferenceError>>()?,
                     },
+                    GraphStage::ToposResonator {
+                        gate,
+                        kernel,
+                        max_volume,
+                    } => Stage::ToposResonator {
+                        gate: portable_dim(*gate)?,
+                        coupling: kernel.coupling(),
+                        iterations: portable_dim(kernel.iterations())?,
+                        saturation: kernel.saturation(),
+                        porosity: kernel.porosity(),
+                        max_volume: portable_dim(*max_volume)?,
+                    },
                     GraphStage::LayerNorm {
                         gain,
                         bias,
@@ -170,12 +199,28 @@ pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> 
         GRAPH_PLAN_SCHEMA,
         GRAPH_PLAN_SCHEMA_V3,
         GRAPH_PLAN_SCHEMA_V4,
+        GRAPH_PLAN_SCHEMA_V5,
     ]
     .contains(&record.schema.as_str())
     {
         return Err(InferenceError::Schema(record.schema));
     }
-    if record.schema != GRAPH_PLAN_SCHEMA_V4 && record.stages.iter().any(|stage| matches!(stage,
+    if record.schema != GRAPH_PLAN_SCHEMA_V5
+        && (record
+            .stages
+            .iter()
+            .any(|stage| matches!(stage, Stage::ToposResonator { .. }))
+            || record
+                .parameters
+                .iter()
+                .any(|p| matches!(p.role, Role::Gate)))
+    {
+        return Err(InferenceError::Schema(format!(
+            "{} does not admit Topos gates",
+            record.schema
+        )));
+    }
+    if ![GRAPH_PLAN_SCHEMA_V4, GRAPH_PLAN_SCHEMA_V5].contains(&record.schema.as_str()) && record.stages.iter().any(|stage| matches!(stage,
         Stage::Pointwise { steps, .. } if steps.iter().any(|step| matches!(step.op, Op::Subtract | Op::Divide))))
     {
         return Err(InferenceError::Schema(format!("{} does not admit subtract/divide", record.schema)));
@@ -204,6 +249,7 @@ pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> 
                 Role::Weight => ParameterRole::Weight,
                 Role::Bias => ParameterRole::Bias,
                 Role::Gain => ParameterRole::Gain,
+                Role::Gate => ParameterRole::Gate,
             },
             shape: p.shape.into_iter().map(|v| v as usize).collect(),
             values: p.values,
@@ -240,6 +286,24 @@ pub(super) fn from_json(payload: &str) -> Result<InferencePlan, InferenceError> 
                     )
                     .map_err(GraphError::from)?,
                     parameters: parameters.into_iter().map(|id| id as usize).collect(),
+                },
+                Stage::ToposResonator {
+                    gate,
+                    coupling,
+                    iterations,
+                    saturation,
+                    porosity,
+                    max_volume,
+                } => GraphStage::ToposResonator {
+                    gate: gate as usize,
+                    kernel: crate::resident::ToposResonatorKernel::new(
+                        coupling,
+                        saturation,
+                        porosity,
+                        iterations as usize,
+                    )
+                    .map_err(GraphError::from)?,
+                    max_volume: max_volume as usize,
                 },
                 Stage::LayerNorm {
                     gain,

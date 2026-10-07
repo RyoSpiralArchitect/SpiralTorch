@@ -175,7 +175,7 @@ impl GradientOutputs {
                         parameters,
                         ..
                     },
-                    GraphStage::Pointwise { .. },
+                    GraphStage::Pointwise { .. } | GraphStage::ToposResonator { .. },
                 ) => {
                     let destinations: Vec<_> = std::iter::once(if i == 0 {
                         tensors[0].values()

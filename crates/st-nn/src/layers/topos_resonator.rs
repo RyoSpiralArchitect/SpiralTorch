@@ -251,6 +251,8 @@ pub struct ToposResonator {
     topos: OpenCartesianTopos,
     config: ToposResonatorConfig,
     last_step: RefCell<Option<ToposResonatorStepCache>>,
+    #[cfg(feature = "wgpu")]
+    resident: crate::resident::ResidentForwardCache,
 }
 
 impl ToposResonator {
@@ -304,6 +306,8 @@ impl ToposResonator {
             topos,
             config,
             last_step: RefCell::new(None),
+            #[cfg(feature = "wgpu")]
+            resident: Default::default(),
         })
     }
 
@@ -326,6 +330,26 @@ impl ToposResonator {
 
     pub fn gate_layout(&self) -> ToposGateLayout {
         self.gate_layout
+    }
+
+    /// Construct a shared-gate layer from explicit initial values. Validation
+    /// precedes insertion into a container; no implicit row averaging is added.
+    pub fn from_shared_gate(
+        name: impl Into<String>,
+        gate: Tensor,
+        config: ToposResonatorConfig,
+        topos: OpenCartesianTopos,
+    ) -> PureResult<Self> {
+        if gate.shape().0 != 1 {
+            return Err(TensorError::ShapeMismatch {
+                left: gate.shape(),
+                right: (1, gate.shape().1),
+            });
+        }
+        topos.guard_tensor("topos_resonator_gate", &gate)?;
+        let mut layer = Self::with_shared_gate(name, gate.shape().1, config, topos)?;
+        *layer.gate.value_mut() = gate.into_snapshot();
+        Ok(layer)
     }
 
     pub fn config(&self) -> ToposResonatorConfig {
@@ -898,6 +922,75 @@ fn validate_layer_topos(
 }
 
 impl Module for ToposResonator {
+    fn inference_ops(
+        &self,
+    ) -> Result<Vec<crate::resident::InferenceOp>, crate::resident::InferenceError> {
+        crate::resident::collect_inference_ops(self, 1)
+    }
+
+    fn append_inference_ops(
+        &self,
+        operations: &mut Vec<crate::resident::InferenceOp>,
+    ) -> Result<(), crate::resident::InferenceError> {
+        use crate::resident::{InferenceError, InferenceOp, ToposResonatorKernel};
+        if self.gate_layout != ToposGateLayout::SharedRows {
+            return Err(InferenceError::UnsupportedModule(
+                "ToposResonator resident graph requires SharedRows",
+            ));
+        }
+        validate_layer_topos(self.gate.value().data().len(), self.config, &self.topos)?;
+        self.gate.validate_finite("topos_resonator_gate")?;
+        let kernel = ToposResonatorKernel::new(
+            self.config.coupling(),
+            self.topos.saturation(),
+            self.topos.porosity(),
+            self.config.iterations(),
+        )
+        .map_err(st_kernel_contracts::graph::GraphError::from)?;
+        operations.push(InferenceOp::ToposResonator {
+            gate: self.gate.value().clone(),
+            kernel,
+            max_volume: self.topos.max_volume(),
+        });
+        Ok(())
+    }
+
+    fn resident_parameter_bindings(
+        &self,
+    ) -> Result<Vec<crate::resident::ResidentParameterBinding<'_>>, crate::resident::InferenceError>
+    {
+        self.inference_ops()?;
+        Ok(vec![(crate::resident::ParameterRole::Gate, &self.gate)])
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
+    {
+        self.resident.forward(self.inference_ops()?, input)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn forward_resident_snapshot(
+        &self,
+        input: &st_backend_wgpu::resident_tensor::ResidentTensor,
+    ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
+    {
+        self.resident.snapshot(self.inference_ops()?, input)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn resident_forward_stats(&self) -> Option<crate::resident::ResidentForwardStats> {
+        Some(self.resident.stats())
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn clear_resident_forward_cache(&self) {
+        self.resident.clear();
+    }
+
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         Ok(self.step_resonance(input)?.output)
     }
