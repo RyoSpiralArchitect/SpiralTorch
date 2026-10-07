@@ -75,9 +75,15 @@ def compare(receipt):
             gate = (gate - receipt["learning_rate"] * dg).detach().requires_grad_()
             for name, actual in (("output", output), ("grad_input", dx), ("grad_gate", dg),
                                  ("gate_after", gate), ("loss", loss)):
-                expected = torch.tensor(record[name], dtype=torch.float32).reshape(actual.shape)
-                torch.testing.assert_close(actual, expected, rtol=5e-4, atol=3e-5)
-                errors[name] = max(errors[name], float((actual.detach() - expected).abs().max()))
+                require(bool(torch.isfinite(actual).all()), f"nonfinite Torch {name}")
+                dtype = torch.float64 if name == "loss" else torch.float32
+                expected = torch.tensor(record[name], dtype=dtype).reshape(actual.shape)
+                require(bool(torch.isfinite(expected).all()), f"nonfinite native {name}")
+                observed = actual.detach().to(dtype)
+                torch.testing.assert_close(observed, expected, rtol=5e-4, atol=3e-5)
+                error = float((observed - expected).abs().max())
+                require(math.isfinite(error), f"nonfinite comparison error {name}")
+                errors[name] = max(errors[name], error)
     return {"schema": "spiraltorch.topos_shared_gate_torch_check.v1", "status": "passed",
             "torch": str(torch.__version__), "threads": 2, "updates": 200,
             "rtol": 5e-4, "atol": 3e-5, "max_abs_error": errors,

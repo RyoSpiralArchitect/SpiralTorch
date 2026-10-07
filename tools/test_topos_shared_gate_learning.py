@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -74,3 +75,22 @@ def test_trajectory_guard_rejects_incomplete_or_mislabeled_run(change):
         payload["cases"][0]["config"]["coupling"] = float("nan")
     with pytest.raises(ValueError):
         CHECK.validate_receipt(payload)
+
+
+def test_review_torch_loss_overflow_cannot_be_certified(monkeypatch):
+    pytest.importorskip("torch")
+    spec = importlib.util.spec_from_file_location("benchmark_topos_module_reference",
+                                                PATH.with_name("benchmark_topos_module_reference.py"))
+    reference = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reference)
+    monkeypatch.setitem(sys.modules, "benchmark_topos_module_reference", reference)
+    payload = receipt()
+    for case in payload["cases"]:
+        case["initial_gate"] = [0.0] * 5
+        for record in case["records"]:
+            record["target"] = [float(2 ** 70)] * len(record["target"])
+            record["loss"] = float(2 ** 140)
+            record["gate_after"] = [0.0] * 5
+    CHECK.validate_receipt(payload)
+    with pytest.raises(ValueError, match="nonfinite Torch loss"):
+        CHECK.compare(payload)

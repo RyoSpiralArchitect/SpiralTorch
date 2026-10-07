@@ -76,15 +76,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .expect("shared gate gradient")
                     .data()
                     .to_vec();
-                gate_after = parameter
-                    .value()
-                    .data()
-                    .iter()
-                    .zip(&grad_gate)
-                    .map(|(gate, gradient)| gate - learning_rate * gradient)
-                    .collect();
-                *parameter.value_mut() = Tensor::from_vec(1, features, gate_after.clone())?;
-                parameter.zero_gradient();
+                parameter.apply_step(learning_rate)?;
+                gate_after = parameter.value().data().to_vec();
                 Ok(())
             })?;
             records.push(json!({
@@ -104,6 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let report = json!({
         "schema": "spiraltorch.topos_shared_gate_learning.v1", "status": "executed",
         "backend": "cpu", "dtype": "float32", "learning_rate": learning_rate,
+        "optimizer": "Parameter::apply_step",
         "gate_layout": "shared_rows", "gate_gradient_reduction": "sum_without_additional_mean",
         "cases": cases,
         "scope": "Rust NN Sequential, two synthetic 100-update SGD trajectories with one gate per feature and variable rows. Sequential backward recaptures its forward activations. No timing, GPU residency, pretrained-model or quality claim."

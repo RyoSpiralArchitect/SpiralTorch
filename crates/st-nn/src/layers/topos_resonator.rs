@@ -499,11 +499,15 @@ impl ToposResonator {
             .borrow_mut()
             .replace(ToposResonatorStepCache {
                 saved: ToposResonatorSaved::Recomputed {
-                    input: input.clone(),
-                    gate: saved_gate,
-                    output: output.clone(),
+                    input: input.snapshot(),
+                    gate: saved_gate.into_snapshot(),
+                    output: output.snapshot(),
                 },
-                parameter_gate: self.gate.value().clone(),
+                parameter_gate: self
+                    .gate
+                    .value()
+                    .to_layout(Layout::RowMajor)?
+                    .into_snapshot(),
                 audit,
                 backward_audit: None,
             });
@@ -520,7 +524,11 @@ impl ToposResonator {
             .borrow_mut()
             .replace(ToposResonatorStepCache {
                 saved: ToposResonatorSaved::Captured(Arc::new(batch)),
-                parameter_gate: self.gate.value().clone(),
+                parameter_gate: self
+                    .gate
+                    .value()
+                    .to_layout(Layout::RowMajor)?
+                    .into_snapshot(),
                 audit,
                 backward_audit: None,
             });
@@ -673,7 +681,7 @@ impl ToposResonator {
                 grad_gate.try_sum_axis0_with_backend(backend)?,
             )?,
         };
-        self.gate.accumulate_euclidean(&grad_gate)
+        self.gate.accumulate_euclidean_row_major(&grad_gate)
     }
 
     /// Differentiates the exact cached transition and accumulates its gate gradient.
@@ -710,8 +718,9 @@ impl ToposResonator {
                 label: "topos_resonator_forward_input_mismatch",
             });
         }
-        if self.gate.value().shape() != cache.parameter_gate.shape()
-            || !same_operand_bits(self.gate.value().data(), cache.parameter_gate.data())
+        let parameter_gate = self.gate.value().to_layout(Layout::RowMajor)?;
+        if parameter_gate.shape() != cache.parameter_gate.shape()
+            || !same_operand_bits(parameter_gate.data(), cache.parameter_gate.data())
         {
             return Err(TensorError::InvalidValue {
                 label: "topos_resonator_forward_gate_mismatch",
@@ -1065,6 +1074,93 @@ mod tests {
     }
 
     #[test]
+    fn review_column_major_gate_optimizer_updates_follow_logical_coordinates() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        let input = Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let upstream = Tensor::from_fn(2, 2, |_, _| 1.0).unwrap();
+        for tape in ["euclidean", "realgrad", "hypergrad"] {
+            let make = |layout| {
+                let mut layer = ToposResonator::with_config(
+                    "gate",
+                    2,
+                    2,
+                    ToposResonatorConfig::new(0.0, 1).unwrap(),
+                )
+                .unwrap();
+                *layer.parameter_mut().value_mut() =
+                    Tensor::zeros(2, 2).unwrap().to_layout(layout).unwrap();
+                match tape {
+                    "realgrad" => layer.parameter_mut().attach_realgrad(0.01).unwrap(),
+                    "hypergrad" => layer.attach_hypergrad(-1.0, 0.01).unwrap(),
+                    _ => (),
+                }
+                layer
+            };
+            let mut row = make(Layout::RowMajor);
+            let mut col = make(Layout::ColMajor);
+            for _ in 0..3 {
+                assert_eq!(
+                    row.forward(&input).unwrap().data(),
+                    col.forward(&input).unwrap().data()
+                );
+                row.backward(&input, &upstream).unwrap();
+                col.backward(&input, &upstream).unwrap();
+                row.parameter_mut().apply_step(0.01).unwrap();
+                col.parameter_mut().apply_step(0.01).unwrap();
+                assert_eq!(
+                    row.parameter().value().data(),
+                    col.parameter()
+                        .value()
+                        .to_layout(Layout::RowMajor)
+                        .unwrap()
+                        .data(),
+                    "{tape}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn review_parameter_snapshot_rejects_shared_dlpack_writes() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        for shared in [false, true] {
+            for export_first in [false, true] {
+                let mut layer = if shared {
+                    shared_layer(2, 4)
+                } else {
+                    ToposResonator::new("gate", 2, 2).unwrap()
+                };
+                let input = Tensor::from_vec(2, 2, vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+                let before = export_first.then(|| layer.parameter().value().to_dlpack().unwrap());
+                layer.forward(&input).unwrap();
+                layer.backward(&input, &input).unwrap();
+                let gradient = layer.parameter().gradient().unwrap().data().to_vec();
+                let audit = layer.latest_backward_audit();
+                let exported =
+                    before.unwrap_or_else(|| layer.parameter().value().to_dlpack().unwrap());
+                // The export stays live and there is no concurrent Rust read.
+                unsafe {
+                    let data = (*exported).dl_tensor.data.cast::<f32>();
+                    *data = 0.5;
+                    (*exported).deleter.unwrap()(exported);
+                }
+                assert!(matches!(
+                    layer.backward(&input, &input),
+                    Err(TensorError::InvalidValue {
+                        label: "topos_resonator_forward_gate_mismatch"
+                    })
+                ));
+                assert_eq!(layer.parameter().gradient().unwrap().data(), gradient);
+                assert_eq!(layer.latest_backward_audit(), audit);
+            }
+        }
+    }
+
+    #[test]
     fn shared_gate_vjp_matches_finite_differences_without_batch_averaging() {
         let _policy = crate::execution::push_backend_policy(
             crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
@@ -1280,6 +1376,71 @@ mod tests {
             *layer.gate.value_mut() = gate;
             layer.backward(&input, &upstream).unwrap();
         }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn review_wgpu_cached_operands_are_isolated_from_dlpack_writes() {
+        if !wgpu_dense::is_available() {
+            eprintln!("Topos WGPU snapshot test skipped: WGPU is unavailable");
+            return;
+        }
+        let _policy = push_backend_policy(crate::test_backend_policy(
+            DeviceCaps::wgpu(32, true, 256),
+            1,
+        ));
+        let write_first = |tensor: &Tensor, value: f32| {
+            let exported = tensor.to_dlpack().unwrap();
+            // Synchronous host write while the live DLPack export owns storage.
+            unsafe {
+                *(*exported).dl_tensor.data.cast::<f32>() = value;
+                (*exported).deleter.unwrap()(exported);
+            }
+        };
+        for shared in [false, true] {
+            let mut layer = if shared {
+                shared_layer(2, 4)
+            } else {
+                ToposResonator::new("gate", 2, 2).unwrap()
+            };
+            let input = Tensor::from_vec(2, 2, vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+            let upstream = Tensor::from_fn(2, 2, |_, _| 0.5).unwrap();
+            let output = layer.forward(&input).unwrap();
+            assert!(matches!(
+                &layer.last_step.borrow().as_ref().unwrap().saved,
+                ToposResonatorSaved::Recomputed { .. }
+            ));
+            let original_output = output.data().to_vec();
+            write_first(&output, 5.0);
+            assert_eq!(layer.latest_output().unwrap().data(), original_output);
+            write_first(&input, 0.5);
+            assert!(matches!(
+                layer.backward(&input, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_input_mismatch"
+                })
+            ));
+            assert!(layer.parameter().gradient().is_none());
+            assert!(layer.latest_backward_audit().is_none());
+            write_first(&input, 0.1);
+            layer.backward(&input, &upstream).unwrap();
+            let gradient = layer.parameter().gradient().unwrap().data().to_vec();
+            let audit = layer.latest_backward_audit();
+            write_first(layer.parameter().value(), 0.5);
+            assert!(matches!(
+                layer.backward(&input, &upstream),
+                Err(TensorError::InvalidValue {
+                    label: "topos_resonator_forward_gate_mismatch"
+                })
+            ));
+            assert_eq!(layer.parameter().gradient().unwrap().data(), gradient);
+            assert_eq!(layer.latest_backward_audit(), audit);
+            write_first(layer.parameter().value(), 1.0);
+            layer.backward(&input, &upstream).unwrap();
+        }
+        eprintln!(
+            "Topos WGPU snapshot test executed isolated input/gate/output checks and valid retries"
+        );
     }
 
     #[cfg(feature = "wgpu")]

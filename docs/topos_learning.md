@@ -99,19 +99,26 @@ covers the expanded elementwise VJPs, not the reduced shared-parameter gradient.
 
 Input, gate and upstream tensors are normalized by logical row/column layout,
 including the existing elementwise mode. Cache checks compare canonical input
-bits and the original parameter snapshot, not the differently shaped expanded
-shared gate. Metadata distinguishes `gate_rows` / `trainable_parameters` from
+bits and an isolated canonical parameter snapshot, not the differently shaped
+expanded shared gate. Synchronized writes through a writable DLPack alias are
+detected before backward; WGPU cached operands are isolated as well. On
+successful accumulation, parameter values and Tensor-backed gradients are
+normalized together to row-major optimizer storage. Tape gradients already use
+that logical coordinate order. Metadata distinguishes `gate_rows` / `trainable_parameters` from
 `expanded_gate_rows` / `expanded_gate_values` and labels the raw-sum reduction.
 
 This is a host-Tensor Rust NN layer, usable in ordinary `Sequential`; it does
 not make that graph GPU-resident. `Sequential::backward` currently recomputes
 its activations, so direct-layer capture savings must not be generalized to
-the whole graph. Existing Python Torch adapters still perform broadcast and
+the whole graph. Isolated parameter and WGPU operand snapshots can add copies;
+previous capture timings are not measurements of this revised path.
+Existing Python Torch adapters still perform broadcast and
 reduction in Torch; the WASM core kernel still takes a full per-element gate.
 This change does not add the shared-gate NN constructor to either frontend.
 
 The correctness-only example and independent Torch checker run two 100-update
-synthetic SGD trajectories with variable row counts and both tensor layouts:
+synthetic SGD trajectories using `Parameter::apply_step`, variable row counts
+and both tensor layouts:
 
 ```sh
 cargo run --locked --release -p st-nn --example topos_shared_gate_probe -- /tmp/topos-shared-new.json
@@ -122,6 +129,13 @@ Both commands require fresh output paths. The checker uses a true `(1, F)`
 Torch leaf gate, native broadcasting, autograd and mean loss, keeping its own
 weights across all updates rather than resetting to Rust weights. This is not
 a speed comparison or evidence about pretrained-model quality.
+Reference values, observed values and comparison errors must remain finite;
+the saved Rust f64 loss is not downcast to f32 for comparison. A historically
+passing fixture does not cover every guard: the separately appended
+[review corrections](../benchmarks/results/2026-10-07-topos-shared-gate-review.json)
+retain the new adversarial failures and corrected validation. The original
+bundle's `parent_revision` means comparison base, not immediate source parent;
+its measured source's immediate parent is `7c9d4f33161685d589af18ae6f3710b817c4dd43`.
 
 Rust callers with owned `Vec<f32>` inputs can use
 `ToposResonatorOperator::capture_owned(input, gate, rows, features)` to transfer

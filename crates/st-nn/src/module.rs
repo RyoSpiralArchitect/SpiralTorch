@@ -33,7 +33,7 @@ use st_core::runtime::trainer_optimizer::TrainerParameterOptimizerState;
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
     topos::OpenCartesianTopos, AmegaHypergrad, AmegaRealgrad, ComplexTensor, LanguageWaveEncoder,
-    PackedB, PureResult, Tensor, TensorContentStamp, TensorError, Tile,
+    Layout, PackedB, PureResult, Tensor, TensorContentStamp, TensorError, Tile,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -353,6 +353,35 @@ impl Parameter {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Accumulates logical row-major derivatives and aligns optimizer storage.
+    pub(crate) fn accumulate_euclidean_row_major(&mut self, update: &Tensor) -> PureResult<()> {
+        let update = update.to_layout(Layout::RowMajor)?;
+        if self.value.layout() == Layout::RowMajor
+            && self
+                .gradient
+                .as_ref()
+                .is_none_or(|g| g.layout() == Layout::RowMajor)
+        {
+            return self.accumulate_euclidean(&update);
+        }
+        let value = self.value.to_layout(Layout::RowMajor)?;
+        let gradient = self
+            .gradient
+            .as_ref()
+            .map(|g| g.to_layout(Layout::RowMajor))
+            .transpose()?;
+        // Tape accumulators use logical row-major coordinates. Stage the
+        // Tensor-backed accumulator too, restoring it if accumulation fails.
+        let previous_gradient = std::mem::replace(&mut self.gradient, gradient);
+        if let Err(error) = self.accumulate_euclidean(&update) {
+            self.gradient = previous_gradient;
+            return Err(error);
+        }
+        self.value = value;
+        self.invalidate_value_caches();
         Ok(())
     }
 
@@ -1242,6 +1271,54 @@ mod tests {
 
         assert_eq!(buffers, 1);
         assert_eq!(param.gradient().unwrap().data(), &[1.0, -0.5]);
+    }
+
+    #[test]
+    fn row_major_accumulation_aligns_existing_gradient_and_parameter() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        let values = Tensor::from_vec(2, 2, vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+        let gradient = Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let mut parameter = Parameter::new("gate", values.to_layout(Layout::ColMajor).unwrap());
+        parameter
+            .accumulate_euclidean(&gradient.to_layout(Layout::ColMajor).unwrap())
+            .unwrap();
+        parameter.accumulate_euclidean_row_major(&gradient).unwrap();
+        assert_eq!(parameter.value().layout(), Layout::RowMajor);
+        assert_eq!(parameter.gradient().unwrap().layout(), Layout::RowMajor);
+        assert_eq!(parameter.gradient().unwrap().data(), &[2.0, 4.0, 6.0, 8.0]);
+        parameter.apply_step(0.01).unwrap();
+        for (actual, expected) in parameter
+            .value()
+            .data()
+            .iter()
+            .zip([0.08_f32, 0.16, 0.24, 0.32])
+        {
+            assert!((actual - expected).abs() < 1e-7);
+        }
+    }
+
+    #[test]
+    fn row_major_accumulation_failure_preserves_existing_storage() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        let value = Tensor::from_vec(2, 2, vec![0.1, 0.2, 0.3, 0.4])
+            .unwrap()
+            .to_layout(Layout::ColMajor)
+            .unwrap();
+        let gradient = Tensor::from_fn(2, 2, |_, _| f32::MAX)
+            .unwrap()
+            .to_layout(Layout::ColMajor)
+            .unwrap();
+        let mut parameter = Parameter::new("gate", value.clone());
+        parameter.accumulate_euclidean(&gradient).unwrap();
+        assert!(parameter.accumulate_euclidean_row_major(&gradient).is_err());
+        assert_eq!(parameter.value().layout(), Layout::ColMajor);
+        assert_eq!(parameter.value().data(), value.data());
+        assert_eq!(parameter.gradient().unwrap().layout(), Layout::ColMajor);
+        assert_eq!(parameter.gradient().unwrap().data(), gradient.data());
     }
 
     #[test]
