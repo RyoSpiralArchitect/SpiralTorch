@@ -1,0 +1,73 @@
+{
+  "study_id": "0138640e620371d7dfa0cb760f6d59b96ac20b5ff21a5ca14fc6369e3962fcef",
+  "status": "completed",
+  "runs": {
+    "41:history_window_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-nivsjqf7.pt",
+        "sha256": "6950d30c0a6cba599528a86a285f0d931d946767cffe6a99c28bc213aaf444c5"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "41:history_window_full": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-f7y0rcwz.pt",
+        "sha256": "f4dd16e26246babfd03ca86294814f248f3e05ec62105721cb4ffc00244f6619"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:history_window_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-brpejh83.pt",
+        "sha256": "7c90660f05e128b39fc74b600be2d33eb32747398307a42804271e0b1d7c1b63"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "43:history_window_full": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-eivjmrjz.pt",
+        "sha256": "02c1e9fce58cde581844f51465b78c483dab01d4859ea3867dc91bcae7eba01c"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:history_window_short": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-ofgmgn82.pt",
+        "sha256": "3bfdd6fb357e2659f45b46153cad09ba503a6b2b298fc39ef7f36c30969962e6"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    },
+    "47:history_window_full": {
+      "status": "completed",
+      "cursor": 512,
+      "checkpoint": {
+        "filename": "checkpoint-jalk7iix.pt",
+        "sha256": "bf0117ade9a7abe5ced10d52f100aa0b9b8dacbaa32e24bedc13fb5ad5c215af"
+      },
+      "resume_next_update_equal": true,
+      "frozen_base_unchanged": true,
+      "extra_validation_updates": 2
+    }
+  },
+  "results_sha256": "5c68019016475ebd8d9ca8e23e1529b8c6ddc05943e730996dcb6890f6717fa6"
+}

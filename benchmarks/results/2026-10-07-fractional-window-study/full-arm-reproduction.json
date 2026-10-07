@@ -1,0 +1,70 @@
+{
+  "schema": "spiraltorch.fractional_window_full_reproduction.v1",
+  "current_study_id": "0138640e620371d7dfa0cb760f6d59b96ac20b5ff21a5ca14fc6369e3962fcef",
+  "previous_study_id": "4cb29fe3a588f7d46df6df775f781141c847b8dac6a8351450b03452c7ae917a",
+  "current_results_sha256": "5c68019016475ebd8d9ca8e23e1529b8c6ddc05943e730996dcb6890f6717fa6",
+  "previous_results_sha256": "7693b247c1d346f4caed477b58d1c561d012e1a31be998a06c4649998c6f602c",
+  "current_verification_sha256": "d61367f5655a6d20653c31f9f212f1b3142aa9da86d74bb033f832ffbda5a2ba",
+  "previous_verification_sha256": "fcf57f3fc1848bf193d8c5b04698c8940d0db6eeb446927cea5aa32d11edb818",
+  "baseline_equal": true,
+  "counts_as_additional_independent_seeds": false,
+  "old_short_parameter_parity_status": "failed",
+  "runs": {
+    "41": {
+      "current_checkpoint": {
+        "filename": "checkpoint-f7y0rcwz.pt",
+        "sha256": "f4dd16e26246babfd03ca86294814f248f3e05ec62105721cb4ffc00244f6619"
+      },
+      "previous_checkpoint": {
+        "filename": "checkpoint-i0sy8tyd.pt",
+        "sha256": "6ebbf86ab15299fe1a93a47d2edace01aa8359c5830d8e00aa1009c47dc45eae"
+      },
+      "parity": {
+        "records_equal": true,
+        "development_equal": true,
+        "endpoint_scores_equal": true,
+        "initial_parameters_equal": true,
+        "saved_parameter_receipts_equal": true,
+        "saved_named_adam_receipts_equal": true
+      }
+    },
+    "43": {
+      "current_checkpoint": {
+        "filename": "checkpoint-eivjmrjz.pt",
+        "sha256": "02c1e9fce58cde581844f51465b78c483dab01d4859ea3867dc91bcae7eba01c"
+      },
+      "previous_checkpoint": {
+        "filename": "checkpoint-kjnfrv4o.pt",
+        "sha256": "9176bcbcf22b88c50df1c7edfc3971e502ceed3078a3c518ba575f7a9dccd149"
+      },
+      "parity": {
+        "records_equal": true,
+        "development_equal": true,
+        "endpoint_scores_equal": true,
+        "initial_parameters_equal": true,
+        "saved_parameter_receipts_equal": true,
+        "saved_named_adam_receipts_equal": true
+      }
+    },
+    "47": {
+      "current_checkpoint": {
+        "filename": "checkpoint-jalk7iix.pt",
+        "sha256": "bf0117ade9a7abe5ced10d52f100aa0b9b8dacbaa32e24bedc13fb5ad5c215af"
+      },
+      "previous_checkpoint": {
+        "filename": "checkpoint-3zb_ixjp.pt",
+        "sha256": "b60aab79e9ba965b7417ecb197e5ca594901b3c5ecbb330e131c01b37aeab160"
+      },
+      "parity": {
+        "records_equal": true,
+        "development_equal": true,
+        "endpoint_scores_equal": true,
+        "initial_parameters_equal": true,
+        "saved_parameter_receipts_equal": true,
+        "saved_named_adam_receipts_equal": true
+      }
+    }
+  },
+  "scope": "Exact numeric trajectory/endpoint and hash-bound parameter/named-Adam receipt comparison. Current checkpoint contents were newly verified; original checkpoint bytes and their existing verified receipts were preserved. Different study recipes remain distinct. This is replay, not additional independent quality evidence.",
+  "status": "exact_replay"
+}
