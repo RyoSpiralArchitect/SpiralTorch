@@ -784,3 +784,4 @@ jobs:
           python -I -S -B tools/test_topos_shared_nn_benchmark_results.py
           python -I -S -B tools/test_topos_single_admission_results.py
           python -I -S -B tools/test_topos_core_row_vjp_results.py
+          python -I -S -B tools/test_topos_wasm_snapshot_results.py

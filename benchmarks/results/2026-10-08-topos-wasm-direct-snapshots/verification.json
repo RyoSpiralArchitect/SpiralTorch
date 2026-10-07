@@ -1,0 +1,238 @@
+{
+  "schema": "spiraltorch.topos_snapshot_verification.v1",
+  "runtime": {
+    "cpu": "Apple M4",
+    "os": "26.4.1",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "0.2.104",
+    "node": "v24.14.0",
+    "browser": "154.0.8037.98",
+    "features": "webgpu",
+    "measured_backend": "scalar WASM, not WebGPU"
+  },
+  "counts": {
+    "browser_processes": 4,
+    "conditions": 9,
+    "timed_samples": 1440,
+    "zero_clock_samples": 547,
+    "learning_updates": 3168
+  },
+  "contracts": {
+    "baseline_node_raw_json": "{\n  \"status\": \"passed\",\n  \"cases\": 27,\n  \"checks\": 469,\n  \"learning\": {\n    \"updates\": 240,\n    \"initial_loss\": 0.1815934291127772,\n    \"final_loss\": 4.440892098500626e-15,\n    \"matched_wide_sum_trajectory_exact\": true,\n    \"next_update_exact\": true\n  },\n  \"scope\": \"Scalar WASM execution. Same Rust recurrence, not independent math or GPU/speed/LLM-quality evidence.\",\n  \"schema\": \"spiraltorch.topos_shared_transport.v1\",\n  \"snapshot_ownership\": {\n    \"status\": \"passed\",\n    \"cases\": 6,\n    \"checks\": 121,\n    \"memory_growths\": 12,\n    \"contract\": \"Independent f32 snapshots remain valid after mutation, WASM memory growth, failure and owner destruction.\"\n  },\n  \"wasm_sha256\": \"d75c68f68b7076e5a3ec9c416232f8382d7bb817b994becbf0e89fd6a6cf5eb8\",\n  \"wrapper_sha256\": \"fe4fa10d8f25e7578b192f6ad3c009e94c45193afc981336f6bd558328a9ab66\",\n  \"fixture_sha256\": \"068d0008c1c646031f55873a9f19a2ff0cc2413c9e5c5860b37fb7407b33d6eb\",\n  \"node\": \"v24.14.0\"\n}\n",
+    "baseline_browser_raw_json": "{\n  \"status\": \"passed\",\n  \"cases\": 27,\n  \"checks\": 469,\n  \"learning\": {\n    \"updates\": 240,\n    \"initial_loss\": 0.1815934291127772,\n    \"final_loss\": 4.440892098500626e-15,\n    \"matched_wide_sum_trajectory_exact\": true,\n    \"next_update_exact\": true\n  },\n  \"scope\": \"Scalar WASM execution. Same Rust recurrence, not independent math or GPU/speed/LLM-quality evidence.\",\n  \"snapshot_ownership\": {\n    \"status\": \"passed\",\n    \"cases\": 6,\n    \"checks\": 121,\n    \"memory_growths\": 12,\n    \"contract\": \"Independent f32 snapshots remain valid after mutation, WASM memory growth, failure and owner destruction.\"\n  },\n  \"wasm_sha256\": \"f975adae7c9dfa52b50fa3a4b092d3588e55eb251e12802d57fffe2d3929e66c\",\n  \"page_sha256\": \"c5a1e93e0e6517ae4f61c9d23030e48851b52bc400a70f072298839a7720ef1f\",\n  \"launch_flags\": [\n    \"--enable-unsafe-webgpu\"\n  ],\n  \"tiles_mnk_request\": \"\",\n  \"kernels_request\": \"\",\n  \"accumulations_request\": \"\",\n  \"shapes_request\": \"\",\n  \"fixture_request\": \"topos-shared-transport\",\n  \"asset_sha256\": {\n    \"/\": \"c5a1e93e0e6517ae4f61c9d23030e48851b52bc400a70f072298839a7720ef1f\",\n    \"/module/spiraltorch_wasm.js\": \"049e8a55ce2bbf6e057ada669b02b25fcadd4fa3db4d2a2b7dd9cab970509a68\",\n    \"/module/spiraltorch_wasm_bg.wasm\": \"f975adae7c9dfa52b50fa3a4b092d3588e55eb251e12802d57fffe2d3929e66c\",\n    \"/topos_shared_transport.mjs\": \"068d0008c1c646031f55873a9f19a2ff0cc2413c9e5c5860b37fb7407b33d6eb\",\n    \"/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js\": \"57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd\"\n  },\n  \"browser_version\": \"154.0.8037.98\",\n  \"page_errors\": [],\n  \"console_messages\": []\n}\n",
+    "candidate_node_raw_json": "{\n  \"status\": \"passed\",\n  \"cases\": 27,\n  \"checks\": 469,\n  \"learning\": {\n    \"updates\": 240,\n    \"initial_loss\": 0.1815934291127772,\n    \"final_loss\": 4.440892098500626e-15,\n    \"matched_wide_sum_trajectory_exact\": true,\n    \"next_update_exact\": true\n  },\n  \"scope\": \"Scalar WASM execution. Same Rust recurrence, not independent math or GPU/speed/LLM-quality evidence.\",\n  \"schema\": \"spiraltorch.topos_shared_transport.v1\",\n  \"snapshot_ownership\": {\n    \"status\": \"passed\",\n    \"cases\": 6,\n    \"checks\": 121,\n    \"memory_growths\": 12,\n    \"contract\": \"Independent f32 snapshots remain valid after mutation, WASM memory growth, failure and owner destruction.\"\n  },\n  \"wasm_sha256\": \"8e5106ff3b551288e8d326c1f6206e67f48a5407eec2d2014d8335c9977da310\",\n  \"wrapper_sha256\": \"88a1d2eb95c6734c113ced78bd105e49272c08fe9b39e38dc54250a4fc1498b5\",\n  \"fixture_sha256\": \"068d0008c1c646031f55873a9f19a2ff0cc2413c9e5c5860b37fb7407b33d6eb\",\n  \"node\": \"v24.14.0\"\n}\n",
+    "candidate_browser_raw_json": "{\n  \"status\": \"passed\",\n  \"cases\": 27,\n  \"checks\": 469,\n  \"learning\": {\n    \"updates\": 240,\n    \"initial_loss\": 0.1815934291127772,\n    \"final_loss\": 4.440892098500626e-15,\n    \"matched_wide_sum_trajectory_exact\": true,\n    \"next_update_exact\": true\n  },\n  \"scope\": \"Scalar WASM execution. Same Rust recurrence, not independent math or GPU/speed/LLM-quality evidence.\",\n  \"snapshot_ownership\": {\n    \"status\": \"passed\",\n    \"cases\": 6,\n    \"checks\": 121,\n    \"memory_growths\": 12,\n    \"contract\": \"Independent f32 snapshots remain valid after mutation, WASM memory growth, failure and owner destruction.\"\n  },\n  \"wasm_sha256\": \"8f041651af49d801602c9eb61c961523bc571182fa986d7b9d4115306ebc817d\",\n  \"page_sha256\": \"c5a1e93e0e6517ae4f61c9d23030e48851b52bc400a70f072298839a7720ef1f\",\n  \"launch_flags\": [\n    \"--enable-unsafe-webgpu\"\n  ],\n  \"tiles_mnk_request\": \"\",\n  \"kernels_request\": \"\",\n  \"accumulations_request\": \"\",\n  \"shapes_request\": \"\",\n  \"fixture_request\": \"topos-shared-transport\",\n  \"asset_sha256\": {\n    \"/\": \"c5a1e93e0e6517ae4f61c9d23030e48851b52bc400a70f072298839a7720ef1f\",\n    \"/module/spiraltorch_wasm.js\": \"73693d4a983fff04dfca496df364d8ebec843c61e38e1190c578f96a8fef8e61\",\n    \"/module/spiraltorch_wasm_bg.wasm\": \"8f041651af49d801602c9eb61c961523bc571182fa986d7b9d4115306ebc817d\",\n    \"/topos_shared_transport.mjs\": \"068d0008c1c646031f55873a9f19a2ff0cc2413c9e5c5860b37fb7407b33d6eb\",\n    \"/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js\": \"57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd\"\n  },\n  \"browser_version\": \"154.0.8037.98\",\n  \"page_errors\": [],\n  \"console_messages\": []\n}\n"
+  },
+  "legacy_raw_json": "{\n  \"schema\": \"spiraltorch.topos_capture_wasm_probe.v1\",\n  \"status\": \"passed\",\n  \"captured\": true,\n  \"cases\": [\n    {\n      \"rows\": 0,\n      \"features\": 3,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"583b8c88782e90674c76df5a434d1340ca17a3844ecb82afc9edb50feafc3023\",\n      \"sha256\": {\n        \"output\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_input\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_gate\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n      }\n    },\n    {\n      \"rows\": 0,\n      \"features\": 3,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"658d19f0fd28a2f05fab01b6ed51ee85666c61286259bbf8e715af8b705542a9\",\n      \"sha256\": {\n        \"output\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_input\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_gate\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n      }\n    },\n    {\n      \"rows\": 0,\n      \"features\": 3,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"dafbce4054717c6c0ef46654b658ef4514fcef41a830881cce7f19cea30e8239\",\n      \"sha256\": {\n        \"output\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_input\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_gate\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n      }\n    },\n    {\n      \"rows\": 0,\n      \"features\": 3,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"b01fc4434659e98fa3a60522151af513c9a851bc3d7270baff33f716a9c7be46\",\n      \"sha256\": {\n        \"output\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_input\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_gate\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n      }\n    },\n    {\n      \"rows\": 0,\n      \"features\": 3,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"047e679a1c8fe3e5b2b04d3ed50d365d93e610a56bb972624169639212131060\",\n      \"sha256\": {\n        \"output\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_input\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_gate\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n      }\n    },\n    {\n      \"rows\": 0,\n      \"features\": 3,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"91deb780c56325433398e3d71f28f7c527cb86ff4681952c0bd0d55153c23ba1\",\n      \"sha256\": {\n        \"output\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_input\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n        \"grad_gate\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n      }\n    },\n    {\n      \"rows\": 1,\n      \"features\": 1,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"8da14dfcfd7adae2eddfda95c556cff39829d17cd89cdffe289785993f5768b8\",\n      \"sha256\": {\n        \"output\": \"e00e5eb9444182f352323374ef4e08ebcb784725fdd4fd612d7730540b3e0c8c\",\n        \"grad_input\": \"df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119\",\n        \"grad_gate\": \"df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119\"\n      }\n    },\n    {\n      \"rows\": 1,\n      \"features\": 1,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"e58e1d9c3e8db6da720cd975d35480dc4145d4dc1e86b094ef8dfb943cb1d5f6\",\n      \"sha256\": {\n        \"output\": \"f5d0e6a1ef58365ccc7978108def5c353ffb71071ab95632c6fd1c5ab028163b\",\n        \"grad_input\": \"53c8bdd7fce391651d6d9d7f0fb38cfb0e9cec24c701e5034149d86320e42ae5\",\n        \"grad_gate\": \"9f9cbfac2d19f9d099b42efa54735e201caf7028b1bcee1c008e69f16a75ce3e\"\n      }\n    },\n    {\n      \"rows\": 1,\n      \"features\": 1,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"51ae8b77ad61735b8483f2f0a01efd36be7833b8724faf16772042f2035755a8\",\n      \"sha256\": {\n        \"output\": \"e00e5eb9444182f352323374ef4e08ebcb784725fdd4fd612d7730540b3e0c8c\",\n        \"grad_input\": \"df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119\",\n        \"grad_gate\": \"df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119\"\n      }\n    },\n    {\n      \"rows\": 1,\n      \"features\": 1,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"fff566397d383089977cdf21ecb268d17b9d38fdb93a8e1babcdbd7b7cc08104\",\n      \"sha256\": {\n        \"output\": \"acd5e20e79f7e50fe932150137a7b24e83e35f669b671cfe12af0e67e1396810\",\n        \"grad_input\": \"046421d5213dce34c5da79b02663f1ee58e9f01df34fd60449b0ad75df8a154d\",\n        \"grad_gate\": \"cd6dadd93ec030124e99f775f9641faeeb5b1740ec7bcce875d479dea2f6f58a\"\n      }\n    },\n    {\n      \"rows\": 1,\n      \"features\": 1,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"0c4963cd5f84469a9032c0ac5feabc66180cb7afb573fdde0111990d5d6766c6\",\n      \"sha256\": {\n        \"output\": \"e00e5eb9444182f352323374ef4e08ebcb784725fdd4fd612d7730540b3e0c8c\",\n        \"grad_input\": \"df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119\",\n        \"grad_gate\": \"df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119\"\n      }\n    },\n    {\n      \"rows\": 1,\n      \"features\": 1,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"2eee26c882a79f9f07e350639fe262f3dfa0d25447c2851845781143708952cd\",\n      \"sha256\": {\n        \"output\": \"dba8ab734ef300677c43bb085f16d878401b8425fdbac99742667f088ce5ae73\",\n        \"grad_input\": \"22433f703dd8392a87c21815d97071868a7841ad199fa404b01fa4538fc81025\",\n        \"grad_gate\": \"71807c3c52403df4eb77543b52ea7c156eac55c92154ff835a61857257aee20a\"\n      }\n    },\n    {\n      \"rows\": 7,\n      \"features\": 17,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"de96573b382413c9da080de40a9f84a6480f21b3888e1db86cd890d63bbc2b38\",\n      \"sha256\": {\n        \"output\": \"06ea5843316722227fdb39e1aa71dc1b9c715e648c9da4688cc344b6d264177b\",\n        \"grad_input\": \"fbff3868c285dc6b2a826af246823d8992ca23319d55077cd0c08f3221f15efe\",\n        \"grad_gate\": \"78943109d17b25cddd3c5b75df46b076fcc6e357b930eaa024d350573254774d\"\n      }\n    },\n    {\n      \"rows\": 7,\n      \"features\": 17,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"c1450837dc580fefc04cafe8b5b3e8f6627ebddff98993ea00fb75812b14dcba\",\n      \"sha256\": {\n        \"output\": \"d249ae481c236a6cd0cd0e8a5b62425b90825ebea299d70bdd706998c3437bbb\",\n        \"grad_input\": \"52596aafc58f4837fa9ce90dae55ccd17b596649a77dc41058ca19df414cf7d0\",\n        \"grad_gate\": \"7923511bd711b57a9a81e1684cd5d6e1ef5f7ace6414b076fa3368c296313c01\"\n      }\n    },\n    {\n      \"rows\": 7,\n      \"features\": 17,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"9ee615e4bdbceebc70249077b36adbde30d6233b4e9b795b05b72a5ba0f2d2bf\",\n      \"sha256\": {\n        \"output\": \"3d15a3b8960b22b894ddc5a49f1f480368eca086ea553b4efef10e27ce3ae234\",\n        \"grad_input\": \"30b10640e7492aed2333207ec25099b311202532e382cb7b509bf7b82051e59f\",\n        \"grad_gate\": \"1c0e36139682c28be9610865e92391f06d760179397698c63c70657baa8f1bbf\"\n      }\n    },\n    {\n      \"rows\": 7,\n      \"features\": 17,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"d77b0a6f24c8b4f144a3fa77eb2ddb54ec586e0e22011469699b3e8c8b4cd0fe\",\n      \"sha256\": {\n        \"output\": \"dd423a297a3873e532ea02c451072049f700dfae285d1674d9751f9704d3533d\",\n        \"grad_input\": \"15f1b6d8f13623f8c0b68a36c369beb1949af19961c2ba7d7b852da680e5d929\",\n        \"grad_gate\": \"f6e30bc4625b2e456a3983182ec61e3942d8e4d7aa50319fd12f576631c740e6\"\n      }\n    },\n    {\n      \"rows\": 7,\n      \"features\": 17,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"ebdc5de12089e3066d398fd3f4a19109354e0435e8f0cc166d7f210acf06dc78\",\n      \"sha256\": {\n        \"output\": \"c3b7ab2116fd9dde84a3342a809f5892b9221fdcec64e96c12fa0aab25bfdd8c\",\n        \"grad_input\": \"de8404bbbd96df2fea33c8f57fb93a37a85eba756a1de483486267d59d5d248f\",\n        \"grad_gate\": \"7ce2011563e9d891b3ef744cb3dc3356d80cd108316f1aca6ca98a5761a44d72\"\n      }\n    },\n    {\n      \"rows\": 7,\n      \"features\": 17,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"a4c4ce70a4bbb4131a6120c64003d33867fd68a4fd059b3bf1c89d615e3d93f3\",\n      \"sha256\": {\n        \"output\": \"d2661fae39d49d63f2ebb5399485f63bdd5aa347f438ae03e553291e48fca97a\",\n        \"grad_input\": \"b1b8ad4671d77e81bd1ae4b7b620564f09db2c0dca4b8dfa8ca7324e65cada86\",\n        \"grad_gate\": \"2179114d50f26c874c2c93feaf81b66e0b38df22bedef3eb61bfd54291353f9d\"\n      }\n    },\n    {\n      \"rows\": 256,\n      \"features\": 768,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"ddc4b445e6ddac25c014de873048f6cd60142e65b0503402c19f58ffe8e6f97f\",\n      \"sha256\": {\n        \"output\": \"fb4577cfd3e47e7edaa14f10d82c831df8c8fb3d21af87cbc7de7bcf05cdeca2\",\n        \"grad_input\": \"5abca7b8b528739ce591501e86f7ecb7f5ce7324fefec798ef8dceb8da1af113\",\n        \"grad_gate\": \"db6cc2d97467c6c84eef0ccb00a42c9684629a9dcdab543a020b231989448fe7\"\n      }\n    },\n    {\n      \"rows\": 256,\n      \"features\": 768,\n      \"iterations\": 1,\n      \"coupling\": 0,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"d293bb4396483c7a003dc3c6ac290d7514452b6e42214e024582adf9c3eaf546\",\n      \"sha256\": {\n        \"output\": \"1a40bfc6e29c02eb04453cdf52cfebed13db0ba519632b340d59fa4bac59b4f8\",\n        \"grad_input\": \"57e443e1e6ef9f50bf416ace7fb8a0b22d5ff78162cc3fd139cdec55bccb528d\",\n        \"grad_gate\": \"f621c4cd660089bbdb2b93a0a6a5252405191b5faba46d1f9821ce96e9ada77c\"\n      }\n    },\n    {\n      \"rows\": 256,\n      \"features\": 768,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"0bea6560284758a1b4eb5fde452fb5e15a984afbcf19943bdf3cc7ecda03de7c\",\n      \"sha256\": {\n        \"output\": \"46d153b190ab379fe43d504dab7a1efaa6f9f7cb1187aa4366eed53c1156c7b8\",\n        \"grad_input\": \"f8a53530d77a2e3b2c406effad869c457505ba8c74292c20ce241179d57d55e0\",\n        \"grad_gate\": \"44c7d54ae86616e773d621afb50678f802d898655f6d1c11e6f7a46d5d632bb6\"\n      }\n    },\n    {\n      \"rows\": 256,\n      \"features\": 768,\n      \"iterations\": 4,\n      \"coupling\": 0.25,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"699d4be9c081a96f3d61a97897a1a44c54d08d9e38a269c083d3a07394652da4\",\n      \"sha256\": {\n        \"output\": \"71097f3298fe7a5aadd907349fb21a1928a5f740d0fef21a802202be140394a2\",\n        \"grad_input\": \"91bce07fa5b040552d2c56acd45ca8caa9c0aa80a3be885f54b2cf8ba4da09bf\",\n        \"grad_gate\": \"9dd6853a8a7784a578c5d6d9a295ee328e99ebc5bf0457d209efe9a972e25bfe\"\n      }\n    },\n    {\n      \"rows\": 256,\n      \"features\": 768,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0,\n      \"captured_audit_sha256\": \"f93239393aa2a6e337a6233c4f52795838ef689480489e52c59f2f232cde497b\",\n      \"sha256\": {\n        \"output\": \"8db776a5ae1e39d394c5b15dfa146e4847e1eeaa8e43a003bd005fef616fb3bf\",\n        \"grad_input\": \"419c271f6b588e3bf22645a92827aa8dc7f54eff101fe671c9162a1f66498003\",\n        \"grad_gate\": \"22d2b34f5673d1ea30a7aee8e30741484f0fb341239b2ea15ceebe05fdf4488d\"\n      }\n    },\n    {\n      \"rows\": 256,\n      \"features\": 768,\n      \"iterations\": 16,\n      \"coupling\": 0.75,\n      \"porosity\": 0.2,\n      \"captured_audit_sha256\": \"c5afce2dd54d7cad248ea79602f1e6cbecce845b875f09889a8ace0ae12c2e80\",\n      \"sha256\": {\n        \"output\": \"bd736eb301ac8ffbc90b9539ee62dcc1606a63b8e4ef622878a0806d8e429cbc\",\n        \"grad_input\": \"a2ab07d574f37a918764a23cc3ccf7817fae2bbdec2858408df8c60eefec8af1\",\n        \"grad_gate\": \"c0423650488d8599ed0491ef60e47ccc69f5f891738fa963242676d595ee4823\"\n      }\n    }\n  ],\n  \"learning\": {\n    \"updates\": 240,\n    \"initial_loss\": 0.13497054626500438,\n    \"final_loss\": 9.992007221626409e-15,\n    \"gate_sha256\": \"05c103275a402afac10769ce4efcdc0306a298e5d3a246e119c4a6b3b3de3bd8\",\n    \"legacy_trajectory_exact\": true,\n    \"next_update_exact\": true\n  },\n  \"ownership_cases\": [\n    {\n      \"mode\": \"alias\",\n      \"output_sha256\": \"890d79e89b532dadee3ee3bb411e6d8d28813bc49a8dfec0ef34591df00e105a\",\n      \"audit_sha256\": \"adc59797881f36624334f3758b21f1655ead33ca223bc72d5d7d64367db6c431\",\n      \"grad_input_sha256\": \"7e2ef9db00a21524e3cdd897ba5332e88bb06bb41d957004b6dcf1c359bfaef4\",\n      \"grad_gate_sha256\": \"7e2ef9db00a21524e3cdd897ba5332e88bb06bb41d957004b6dcf1c359bfaef4\"\n    },\n    {\n      \"mode\": \"overlap\",\n      \"output_sha256\": \"78c24e0ef03b24797841927481e895a4c810cf45aba79f4361e946ce3f6dfca6\",\n      \"audit_sha256\": \"8f82a6cc33216e043a5f586f4aff759fd028f98bf31d917ae5437aa8d9f6ee90\",\n      \"grad_input_sha256\": \"34c60594cefda78b234ee60ae5f6915a67ea57b0820c969d2f68158943762808\",\n      \"grad_gate_sha256\": \"7e2ef9db00a21524e3cdd897ba5332e88bb06bb41d957004b6dcf1c359bfaef4\"\n    }\n  ],\n  \"module_format\": \"nodejs\",\n  \"capture_required\": true,\n  \"guard_checks\": 54,\n  \"wasm_sha256\": \"8e5106ff3b551288e8d326c1f6206e67f48a5407eec2d2014d8335c9977da310\",\n  \"wrapper_sha256\": \"88a1d2eb95c6734c113ced78bd105e49272c08fe9b39e38dc54250a4fc1498b5\",\n  \"probe_sha256\": \"e85cc54489369ce613fd824040d526eae7c7256566ccebcc756b03c3d9ec2ec5\",\n  \"node\": \"v24.14.0\",\n  \"scope\": \"Node-hosted scalar WASM. Not browser/WebGPU or timing evidence.\"\n}\n",
+  "source_review": {
+    "base": "370eb3fb59483f59c940a737d94437a798d82e15",
+    "head": "6b3bcd5cc68bf342a1294b8ee489dad5d0c6442f",
+    "result": "No actionable P1/P2; static read-only review including locked js-sys/wasm-bindgen source. No independent runtime execution."
+  },
+  "notes": [
+    "Baseline and candidate both passed 469 shared-transport checks/240 updates plus121 ownership checks/12 explicit memory.grow operations in both Node and real Chrome.",
+    "Public Topos class TypeScript declarations are unchanged. Generated low-level WASM ABI changes with the return representation: always keep each generated wrapper paired with its WASM binary.",
+    "Candidate was built from the tracked patch and then committed without changing those source bytes; candidate-build.json records the build checkout and source-freeze distinction.",
+    "547 clock samples are zero. Any ratio with a zero arm median is omitted, never treated as a 100% speedup. The initial derived summary remains local; the corrected null-ratio derivation is used for publication.",
+    "This is synthetic closed-loop shared-gate learning, not pretrained fine-tuning, general optimizer speed, WebGPU, independent mathematics or model-quality evidence.",
+    "Rust semantic core/NN and Python sources are unchanged; Python and Torch were not rebuilt or retimed for this WASM transport-only change."
+  ],
+  "private_files": {
+    "baseline-bindgen-nodejs.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "baseline-bindgen-web.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "baseline-browser-contract.json": {
+      "sha256": "725b7e8104ccb458233d40282e0c4d7e249638410472d243bd4630c9dde944f5",
+      "bytes": 1626
+    },
+    "baseline-browser-contract.log": {
+      "sha256": "0b80f75dbf9d612a8c99aeef94bfe2e9c96fc36887a116c8c5d1b7a43558a6fb",
+      "bytes": 178
+    },
+    "baseline-build.json": {
+      "sha256": "e3783e24392066aeafdc4a5a46c8907871e65a7c25b4858169a0f0a28df4898f",
+      "bytes": 1146
+    },
+    "baseline-build.log": {
+      "sha256": "3fb8c93b1b051e829633f447bdf1e2ed48099c6d75db2de1373b13f46fe02677",
+      "bytes": 111651
+    },
+    "baseline-node/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": {
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "bytes": 4526
+    },
+    "baseline-node/spiraltorch_wasm.d.ts": {
+      "sha256": "683b8479e3395292e1063e465ff7fade57d740bf71817c1c0fb9e9f76cf68d5b",
+      "bytes": 72182
+    },
+    "baseline-node/spiraltorch_wasm.js": {
+      "sha256": "fe4fa10d8f25e7578b192f6ad3c009e94c45193afc981336f6bd558328a9ab66",
+      "bytes": 476215
+    },
+    "baseline-node/spiraltorch_wasm_bg.wasm": {
+      "sha256": "d75c68f68b7076e5a3ec9c416232f8382d7bb817b994becbf0e89fd6a6cf5eb8",
+      "bytes": 10055949
+    },
+    "baseline-node/spiraltorch_wasm_bg.wasm.d.ts": {
+      "sha256": "acce56f594a608296a4c820b3bcf1465f19ba1659d2435e0f78192a1fdc71a4a",
+      "bytes": 92583
+    },
+    "baseline-node-contract.json": {
+      "sha256": "e5d0438a9226be2aaa320296f1c8f8378bc15dedf8c4c53264b32af23646105d",
+      "bytes": 947
+    },
+    "baseline-node-contract.log": {
+      "sha256": "136ba8e85682caf8923cf9f69e25c1a2095ca4fdba4aa125c1138b325703753a",
+      "bytes": 836
+    },
+    "baseline-web/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": {
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "bytes": 4526
+    },
+    "baseline-web/spiraltorch_wasm.d.ts": {
+      "sha256": "a9f1a8da1eebf6d8b6a2c326a24cbe2c9b2bc7afc8ffd750fccd94c9c8bae118",
+      "bytes": 163579
+    },
+    "baseline-web/spiraltorch_wasm.js": {
+      "sha256": "049e8a55ce2bbf6e057ada669b02b25fcadd4fa3db4d2a2b7dd9cab970509a68",
+      "bytes": 480514
+    },
+    "baseline-web/spiraltorch_wasm_bg.wasm": {
+      "sha256": "f975adae7c9dfa52b50fa3a4b092d3588e55eb251e12802d57fffe2d3929e66c",
+      "bytes": 10050278
+    },
+    "baseline-web/spiraltorch_wasm_bg.wasm.d.ts": {
+      "sha256": "6d76b9e56220efbf6809d3b0f2f8f56879be130220e8b8d216cab4aecf2ec312",
+      "bytes": 92583
+    },
+    "candidate-bindgen-nodejs.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "candidate-bindgen-web.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "candidate-browser-contract.json": {
+      "sha256": "4ae49d960fd0ad0c311f745a9aef8a366ce8d2b8db40d87c28323faa3bd5ea97",
+      "bytes": 1626
+    },
+    "candidate-browser-contract.log": {
+      "sha256": "2a1cf655d1e0db0f2b23402617bbd9b745eef4caa7900b1d59a09e150e9efd46",
+      "bytes": 179
+    },
+    "candidate-build.json": {
+      "sha256": "067ea156fef82fa1ec1ecb426479809973e274344149b41a0ace511d5201945c",
+      "bytes": 1593
+    },
+    "candidate-build.log": {
+      "sha256": "e3b21e28f007e8c97cb56ca34601ebf1088a0a6a5c10ce948955e634d760cdb0",
+      "bytes": 111651
+    },
+    "candidate-legacy.json": {
+      "sha256": "cb3552836f7c684287f501678f8814021a6359c27ed945df152328c2c0119823",
+      "bytes": 13901
+    },
+    "candidate-legacy.log": {
+      "sha256": "7fd2af3c8afcf73503bbd7e238fe004b5d27facc1c45127727fe2a01fb77e4c5",
+      "bytes": 299
+    },
+    "candidate-node/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": {
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "bytes": 4526
+    },
+    "candidate-node/spiraltorch_wasm.d.ts": {
+      "sha256": "a7991a929dcd8e937c66dc9eb79ea5f3d28af01b3cd3e2179e04a0a3243b15a7",
+      "bytes": 72182
+    },
+    "candidate-node/spiraltorch_wasm.js": {
+      "sha256": "88a1d2eb95c6734c113ced78bd105e49272c08fe9b39e38dc54250a4fc1498b5",
+      "bytes": 475870
+    },
+    "candidate-node/spiraltorch_wasm_bg.wasm": {
+      "sha256": "8e5106ff3b551288e8d326c1f6206e67f48a5407eec2d2014d8335c9977da310",
+      "bytes": 10055556
+    },
+    "candidate-node/spiraltorch_wasm_bg.wasm.d.ts": {
+      "sha256": "296efc56090b2387476b06e52451f43933a8fd91850445108ef71d08e76ea9f8",
+      "bytes": 92544
+    },
+    "candidate-node-contract.json": {
+      "sha256": "f11e88201ab9b7c7af9d1fcfd1fbb8d88a9dd77f62fa5846200748c9ad66fb0c",
+      "bytes": 947
+    },
+    "candidate-node-contract.log": {
+      "sha256": "95955d95bd050600b0cd01d2d680854cdd74292f7a92cf340158233ff14596fb",
+      "bytes": 836
+    },
+    "candidate-web/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": {
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+      "bytes": 4526
+    },
+    "candidate-web/spiraltorch_wasm.d.ts": {
+      "sha256": "87f3f73e586fcdff5d5293a0113bc8112459c56b0fa8a4d234abfe897a6fbcdb",
+      "bytes": 163540
+    },
+    "candidate-web/spiraltorch_wasm.js": {
+      "sha256": "73693d4a983fff04dfca496df364d8ebec843c61e38e1190c578f96a8fef8e61",
+      "bytes": 480169
+    },
+    "candidate-web/spiraltorch_wasm_bg.wasm": {
+      "sha256": "8f041651af49d801602c9eb61c961523bc571182fa986d7b9d4115306ebc817d",
+      "bytes": 10049885
+    },
+    "candidate-web/spiraltorch_wasm_bg.wasm.d.ts": {
+      "sha256": "296efc56090b2387476b06e52451f43933a8fd91850445108ef71d08e76ea9f8",
+      "bytes": 92544
+    },
+    "p0-baseline.json": {
+      "sha256": "96084112d5256218ca88a9fcee70f04daf998dd97e6abd109ee797f4c2a00dfb",
+      "bytes": 144697
+    },
+    "p0-baseline.log": {
+      "sha256": "5a7f28b153337dab2c487cac24b013c79c3128db5bb750b07658b9f0d64cf9a7",
+      "bytes": 174
+    },
+    "p1-candidate.json": {
+      "sha256": "8e1d0678babf98b041b4a8a71d0ee4859a3e0a2ef2244a5db2b7a069f60c8e23",
+      "bytes": 144114
+    },
+    "p1-candidate.log": {
+      "sha256": "0ebecf5ed66fc3c9aefe6af5e863937e8d1df71f39a5d77d0ab2e00060402d48",
+      "bytes": 175
+    },
+    "p2-candidate.json": {
+      "sha256": "a756c30ce0ce2f498e6362e74006919a10bbbf91f9f831769d4c59640c1577e4",
+      "bytes": 144365
+    },
+    "p2-candidate.log": {
+      "sha256": "ef35621a9243ed8900729dc0966e443b110caec2eb6651c1f926f3206cd8b82e",
+      "bytes": 175
+    },
+    "p3-baseline.json": {
+      "sha256": "2dd706da33d83aaced8f4f3f12398219b1ab66a2b022fdd2521651f362a47d30",
+      "bytes": 144422
+    },
+    "p3-baseline.log": {
+      "sha256": "db88b08bd12a9f92bf01a0df8f10ff39a2975f3ea01afa91e0e761f92f220fd6",
+      "bytes": 174
+    },
+    "plan.json": {
+      "sha256": "afad358f3e899dc3cec82185b50941b009c7541de136f6d9cfd1eabf52e1d3ca",
+      "bytes": 2557
+    },
+    "summary-resolved-ratios.json": {
+      "sha256": "cc6ba34e263b02606f8794cfdd6e69212309769eb111aa265ad57ece613347b3",
+      "bytes": 7142
+    },
+    "summary.json": {
+      "sha256": "17d6e32c3f69679477050aae44b7484ba5f716ef2b118d759f0d1e332d4d42b0",
+      "bytes": 7136
+    }
+  }
+}
