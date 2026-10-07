@@ -159,6 +159,76 @@ fn topos_handoff_preserves_shape_and_rejects_program_changes_before_mutation() {
         .unwrap();
 }
 
+#[test]
+fn topos_review_rejected_handoff_preserves_capture_and_backward_replay() {
+    let context = crate::execution::RuntimeExecutionContext::from_device_caps_with_config(
+        st_core::backend::device_caps::DeviceCaps::cpu(),
+        Default::default(),
+    );
+    let _cpu = crate::execution::push_backend_policy(context.backend_policy());
+    for state in 0..3 {
+        let mut module = layer(&[0.8, -0.4], 0.3, 8);
+        if state == 1 {
+            module.attach_hypergrad(-1., 0.01).unwrap();
+        }
+        if state == 2 {
+            module.attach_realgrad(0.01).unwrap();
+        }
+        let base = plan(&module, &[2, 2]);
+        let updated = base.with_graph_values(vec![vec![0.1, 0.2]]).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.25, 0.5, 0.75, -0.25]).unwrap();
+        let seed = Tensor::from_vec(2, 2, vec![0.; 4]).unwrap();
+        let expected = module.forward(&input).unwrap();
+        if state == 0 {
+            module.backward(&input, &seed).unwrap();
+        }
+        let before = serde_json::to_value(module.parameter().optimizer_checkpoint_state()).unwrap();
+        assert!(matches!(
+            base.apply_parameters_to(&mut module, &updated, ModuleOptimizerStatePolicy::Reject),
+            Err(InferenceError::ModuleUpdate(
+                "optimizer state is attached; explicit reset is required"
+            ))
+        ));
+        assert_eq!(
+            module.latest_output().as_ref(),
+            Some(&expected),
+            "state={state}"
+        );
+        assert_eq!(
+            serde_json::to_value(module.parameter().optimizer_checkpoint_state()).unwrap(),
+            before
+        );
+        assert_eq!(
+            plan(&module, &[2, 2]).to_json().unwrap(),
+            base.to_json().unwrap()
+        );
+        assert!(module.backward(&input, &seed).is_ok(), "state={state}");
+        assert_eq!(
+            base.apply_parameters_to(&mut module, &updated, ModuleOptimizerStatePolicy::Reset)
+                .unwrap(),
+            1
+        );
+        assert!(module.latest_output().is_none());
+    }
+}
+
+#[test]
+fn topos_review_lowering_checks_the_same_optimizer_alignment_as_host_forward() {
+    let mut module = layer(&[0.8, -0.4], 0.3, 8);
+    let other = OpenCartesianTopos::new(-1., 1e-6, 0.25, 16, 8)
+        .unwrap()
+        .with_porosity(0.3)
+        .unwrap();
+    module
+        .parameter_mut()
+        .attach_hypergrad_with_topos(-1., 0.01, other)
+        .unwrap();
+    let input = Tensor::from_vec(2, 2, vec![0.25; 4]).unwrap();
+    assert!(module.forward(&input).is_err());
+    assert!(InferencePlan::from_module(&module, NdLayout::contiguous(&[2, 2]).unwrap()).is_err());
+    assert!(module.resident_parameter_bindings().is_err());
+}
+
 #[cfg(feature = "wgpu")]
 mod gpu {
     use super::*;
@@ -384,6 +454,28 @@ mod gpu {
         module.clear_resident_forward_cache();
         drop(module);
         close(&held.snapshot().unwrap().read().unwrap(), expected.data());
+    }
+
+    #[test]
+    fn topos_review_cached_resident_route_revalidates_optimizer_alignment() {
+        let Some(runtime) = runtime() else { return };
+        let device = TensorDevice::new(runtime).unwrap();
+        let mut module = layer(&[0.8, -0.4], 0.3, 8);
+        let input = device.upload(&[2, 2], &[0.25; 4]).unwrap();
+        let held = module.forward_resident(&input).unwrap();
+        let expected = held.snapshot().unwrap().read().unwrap();
+        let before = module.resident_forward_stats().unwrap();
+        let other = OpenCartesianTopos::new(-1., 1e-6, 0.25, 16, 8)
+            .unwrap()
+            .with_porosity(0.3)
+            .unwrap();
+        module
+            .parameter_mut()
+            .attach_hypergrad_with_topos(-1., 0.01, other)
+            .unwrap();
+        assert!(module.forward_resident(&input).is_err());
+        assert_eq!(module.resident_forward_stats().unwrap(), before);
+        close(&held.snapshot().unwrap().read().unwrap(), &expected);
     }
 
     #[test]

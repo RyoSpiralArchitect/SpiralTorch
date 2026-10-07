@@ -939,6 +939,7 @@ impl Module for ToposResonator {
             ));
         }
         validate_layer_topos(self.gate.value().data().len(), self.config, &self.topos)?;
+        self.validate_optimizer_topos_alignment()?;
         self.gate.validate_finite("topos_resonator_gate")?;
         let kernel = ToposResonatorKernel::new(
             self.config.coupling(),
