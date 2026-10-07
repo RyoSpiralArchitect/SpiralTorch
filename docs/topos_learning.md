@@ -60,5 +60,12 @@ Torch finite unroll. Native routes must match bitwise; Torch comparisons allow
 the documented f32 tolerance. `tools/probe_topos_capture_wasm.mjs` checks scalar
 WASM parity, learning and saved-gate continuation in Node, not WebGPU speed.
 
+The browser page `bindings/st-wasm/tests/topos_resonator_learning.html` uses
+captured VJPs for its gate-learning loop. Its shared `.mjs` contract also runs
+in Node CI through `tools/probe_topos_browser_learning.mjs`, keeping browser
+and CLI checks aligned. The page reports import/fixture failures explicitly
+and bypasses fixture HTTP caching. See the
+[browser execution and reproduction record](../benchmarks/results/2026-10-07-topos-browser-captured-learning/README.md).
+
 The [matched measurements and single-update migration replay](../benchmarks/results/2026-10-07-topos-captured-vjp/README.md)
 publish all conditions, hashes and numerical receipts, not model weights or text.
