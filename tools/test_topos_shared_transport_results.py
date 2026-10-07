@@ -45,6 +45,15 @@ def verify_measurements(data):
                     assert math.isfinite(check["max_abs_error"]) and check["max_abs_error"] >= 0
                     if route != "torch_reference":
                         assert check["max_abs_error"] == 0
+                        if not (route == "rust_public" and field == "gate_gradient" and run["variant"] == "after"):
+                            assert check["sha256"] == case["correctness"]["rust_list"][field]["sha256"]
+                    else:
+                        # Every recorded maximum fits the absolute tolerance alone.
+                        # This stricter frozen-bundle bound suffices for the advertised
+                        # allclose contract without inferring unrecorded tensor norms.
+                        assert check["max_abs_error"] <= 3e-5
+                    if route == "rust_public":
+                        assert case["public_vs_legacy"][field]["sha256"] == check["sha256"]
             assert case["public_vs_legacy"]["output"]["max_abs_error"] == 0
             assert case["public_vs_legacy"]["input_gradient"]["max_abs_error"] == 0
             assert 0 <= case["public_vs_legacy"]["gate_gradient"]["max_abs_error"] <= 1e-5
@@ -89,6 +98,34 @@ def test_saved_matrix_and_rejection_controls():
         raise AssertionError("contradictory saved benchmark accepted")
 
 
+def test_error_and_parity_claims_reject_self_consistent_counterexamples():
+    data = load()
+    mutations = []
+    for field in ("output", "input_gradient", "gate_gradient"):
+        bad = copy.deepcopy(data)
+        bad["runs"][0]["cases"][0]["correctness"]["torch_reference"][field]["max_abs_error"] = .001
+        mutations.append(bad)
+        bad = copy.deepcopy(data)
+        bad["runs"][0]["cases"][0]["public_vs_legacy"][field]["sha256"] = "0" * 64
+        mutations.append(bad)
+    for route, field in (("rust_public", "output"), ("rust_public", "input_gradient"),
+                         ("rust_expanded_captured", "gate_gradient")):
+        bad = copy.deepcopy(data)
+        # Forge every run equally, so temporal consistency alone cannot catch it.
+        for run in bad["runs"]:
+            for case in run["cases"]:
+                case["correctness"][route][field]["sha256"] = "0" * 64
+                if route == "rust_public":
+                    case["public_vs_legacy"][field]["sha256"] = "0" * 64
+        mutations.append(bad)
+    for bad in mutations:
+        try:
+            verify_measurements(bad)
+        except AssertionError:
+            continue
+        raise AssertionError("contradictory tolerance or exact-parity claim accepted")
+
+
 def test_hashes_runtime_identity_and_wasm_receipts():
     seen = set()
     for line in (BUNDLE / "SHA256SUMS").read_text().splitlines():
@@ -99,6 +136,10 @@ def test_hashes_runtime_identity_and_wasm_receipts():
     assert len(seen) == 3
     data = load()
     verification = json.loads((BUNDLE / "verification.json").read_text())
+    verify_identities(data, verification)
+
+
+def verify_identities(data, verification):
     assert verification["production_source"] == data["production_source"] == "f52629934a408ee353aceeb3c0b8b461e93cb3b5"
     for run in data["runs"]:
         for case in run["cases"]:
@@ -117,9 +158,41 @@ def test_hashes_runtime_identity_and_wasm_receipts():
     assert data["wasm"]["node"]["learning"] == data["wasm"]["browser_final"]["learning"]
     assert data["wasm"]["browser_final"]["page_errors"] == data["wasm"]["browser_final"]["console_messages"] == []
     assert data["wasm"]["browser_final"]["page_sha256"] == verification["source_sha256"]["bindings/st-wasm/tests/topos_shared_transport.html"]
+    fixture = verification["source_sha256"]["bindings/st-wasm/tests/topos_shared_transport.mjs"]
+    node = data["wasm"]["node"]
+    assert node["fixture_sha256"] == fixture
+    assert data["wasm"]["legacy_node"]["wasm_sha256"] == node["wasm_sha256"]
+    assert data["wasm"]["legacy_node"]["wrapper_sha256"] == node["wrapper_sha256"]
+    for name in ("browser_initial", "browser_final"):
+        browser = data["wasm"][name]
+        assets = browser["asset_sha256"]
+        assert assets["/module/spiraltorch_wasm_bg.wasm"] == browser["wasm_sha256"] == verification["artifact_sha256"]["wasm_web"]
+        assert assets["/"] == browser["page_sha256"]
+        assert assets["/topos_shared_transport.mjs"] == fixture
+
+
+def test_loaded_wasm_identity_contradictions_are_rejected():
+    data = load()
+    verification = json.loads((BUNDLE / "verification.json").read_text())
+    for mutate in (
+        lambda d: d["wasm"]["browser_final"]["asset_sha256"].__setitem__("/module/spiraltorch_wasm_bg.wasm", "0" * 64),
+        lambda d: d["wasm"]["browser_initial"]["asset_sha256"].__setitem__("/", "0" * 64),
+        lambda d: d["wasm"]["browser_final"]["asset_sha256"].__setitem__("/topos_shared_transport.mjs", "0" * 64),
+        lambda d: d["wasm"]["node"].__setitem__("fixture_sha256", "0" * 64),
+        lambda d: d["wasm"]["node"].__setitem__("wrapper_sha256", "0" * 64),
+    ):
+        bad = copy.deepcopy(data)
+        mutate(bad)
+        try:
+            verify_identities(bad, verification)
+        except AssertionError:
+            continue
+        raise AssertionError("contradictory WASM identity accepted")
 
 
 if __name__ == "__main__":
     test_saved_matrix_and_rejection_controls()
+    test_error_and_parity_claims_reject_self_consistent_counterexamples()
     test_hashes_runtime_identity_and_wasm_receipts()
+    test_loaded_wasm_identity_contradictions_are_rejected()
     print("Saved shared-transport consistency checks passed (no fresh execution)")
