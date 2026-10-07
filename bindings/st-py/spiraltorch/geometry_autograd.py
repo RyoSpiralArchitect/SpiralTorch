@@ -11,10 +11,9 @@ import json
 import math
 from typing import Any
 
-try:
-    import torch
-except ImportError:  # Optional dependency; importing SpiralTorch remains valid.
-    torch = None
+from ._torch_transport import (
+    _buffer_transport_available, _buffer_values, _transport_output, torch,
+)
 
 __all__ = [
     "ToposResonatorAdapter",
@@ -169,47 +168,43 @@ if torch is not None:
             conditioning: Any,
         ) -> Any:
             features = value.shape[-1]
+            ctx.buffer_transport = _buffer_transport_available()
+            transport = _buffer_values if ctx.buffer_transport else _values
             arguments = (
-                _values(value),
-                _values(gate),
-                _values(bias),
+                transport(value),
+                transport(gate),
+                transport(bias),
                 value.numel() // features,
                 features,
             )
             ctx.has_radius = log_radius is not None
-            ctx.snapshot = (
-                kernel.forward_with_log_radius(*arguments, _values(log_radius)[0])
-                if ctx.has_radius
-                else kernel.forward(*arguments)
-            )
+            name = "forward_with_log_radius" if ctx.has_radius else "forward"
+            operation = getattr(kernel, name + ("_buffer" if ctx.buffer_transport else ""))
+            ctx.snapshot = operation(*arguments, *([log_radius.detach().item()] if ctx.has_radius else []))
             # Keep Torch's version checks, but the mathematical pullback reads
             # only the owned Rust snapshot, never current adapter parameters.
             ctx.save_for_backward(value, gate, bias, log_radius)
             if conditioning is not None:
                 conditioning.update(json.loads(ctx.snapshot.conditioning_json()))
-            return torch.tensor(
-                ctx.snapshot.output, device=value.device, dtype=value.dtype
-            ).reshape(value.shape)
+            output = ctx.snapshot.output_buffer() if ctx.buffer_transport else ctx.snapshot.output
+            return _transport_output(output, value, ctx.buffer_transport)
 
         @staticmethod
         @torch.autograd.function.once_differentiable
         def backward(ctx: Any, grad_output: Any) -> tuple[Any, ...]:
             value, gate, bias, log_radius = ctx.saved_tensors
-            gradients = (
-                ctx.snapshot.vjp_with_log_radius(_values(grad_output))
-                if ctx.has_radius
-                else ctx.snapshot.vjp(_values(grad_output))
-            )
+            name = "vjp_with_log_radius" if ctx.has_radius else "vjp"
+            operation = getattr(ctx.snapshot, name + ("_buffer" if ctx.buffer_transport else ""))
+            direction = _buffer_values(grad_output) if ctx.buffer_transport else _values(grad_output)
+            gradients = operation(direction)
             parameters = (
                 (value, gate, bias, log_radius)
                 if ctx.has_radius
                 else (value, gate, bias)
             )
             result = tuple(
-                torch.tensor(
-                    gradient, device=parameter.device, dtype=parameter.dtype
-                ).reshape(parameter.shape)
-                for gradient, parameter in zip(gradients, parameters)
+                _transport_output(gradient, parameter, ctx.buffer_transport and index < 3)
+                for index, (gradient, parameter) in enumerate(zip(gradients, parameters))
             )
             return result + ((None, None) if ctx.has_radius else (None, None, None))
 

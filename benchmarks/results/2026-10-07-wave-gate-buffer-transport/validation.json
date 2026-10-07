@@ -1,0 +1,94 @@
+{
+  "schema": "spiraltorch.wave_gate_transport_validation.v1",
+  "source_revision": "ea0b954dd8f25e8d39846a42dc29737bb91cb685",
+  "parent_revision": "3c6296d1e831fb4ab30553acaeb87a55e394ad37",
+  "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+  "rust_wave_gate_tests": 21,
+  "python_regressions": 844,
+  "benchmark_and_replay_tests": 99,
+  "client_sha256": {
+    "benchmark_wave_gate_learning.py": "5437a189ade87eac4fb8054fa6841efc89b4b8b0a5f7737e014be284b7aabf86",
+    "probe_wave_gate_wasm.mjs": "525460bf169d77ca036bdda4f8170aa2334fb7fd3cfd35ceb2200f9ed9e20c2c",
+    "replay_geometry_stack_update.py": "bb4a0751d85d9ecb89fb9b91d31a35281ec24ec4861f191581dec2719cd5ba7f"
+  },
+  "logs": {
+    "rust-wave-gate.log": {
+      "sha256": "2573bef2759fa0372631c720d4097daf5530e594ed2b051d5474facb8bb244b7",
+      "exit_code": 0
+    },
+    "native-build.log": {
+      "sha256": "7a5d2b9840aa9afadf287e6b47c36a0cd3323f9dba0a68bfc277b0fb89587cd0",
+      "exit_code": 0
+    },
+    "wasm-build.log": {
+      "sha256": "43d0bdc8d2309996ed5a2acfc2994da921babc46bd4caa74abfe98d4d1b72d5d",
+      "exit_code": 0
+    },
+    "tests-initial.log": {
+      "sha256": "814de3865bd08dd2d2b9ecd29d1aa87237c0f7a2c4f02cdb2c4428d51d6eabf5",
+      "exit_code": 1
+    },
+    "tests-wave-gate.log": {
+      "sha256": "1c161c495ed340a8fc442ee5bd8cfeb488097a68009f85b686a66bd09c29e2c2",
+      "exit_code": 0
+    },
+    "tests-regressions.log": {
+      "sha256": "c80d6987de2b1a65fa4f2097dbf3dee58ba027dbd1cb22d1bd9e75462db03a38",
+      "exit_code": 0
+    },
+    "tests-benchmarks-final.log": {
+      "sha256": "21213139a1ff27a891f74a94aaf52910e31364468557cf69a00d6f73e1738331",
+      "exit_code": 0
+    },
+    "clippy-st-nn.log": {
+      "sha256": "7842398fc24503cc9eb1909b595b6714262c63e3d3bded7a200b597330213a24",
+      "exit_code": 101
+    },
+    "clippy-st-nn-advisory.log": {
+      "sha256": "36647871697367683338ef38a18def933bdfff5432549f11fb06eeeb86fb8874",
+      "exit_code": 0
+    },
+    "clippy-python-advisory.log": {
+      "sha256": "4c24a943f4eb4a731493072f29c3737442bd82b2f0eaf1c600086ea19dcb65f1",
+      "exit_code": 0
+    },
+    "pretrained-replay.log": {
+      "sha256": "239ca7bba5172afa76c8848fabf964dbb91d9bf18f87eee9d58e65b1045b697f",
+      "exit_code": 1
+    },
+    "pretrained-replay-v2.log": {
+      "sha256": "d89e9a6a3d4948f1723931a55d4c31bd5eb26f6de1ac2ce98fbec2b3713a200a",
+      "exit_code": 0
+    },
+    "tests-public-receipts.log": {
+      "sha256": "285a0fcb19d88aef8d3a8bf03456688755f33b03ab786144fe993e1bc0fc4738",
+      "exit_code": 0
+    },
+    "tests-regressions-final.log": {
+      "sha256": "0758f5de8a0945260c9735d328b50318cc7e75b9bce22e8d3cccfd292591064b",
+      "exit_code": 0
+    }
+  },
+  "strict_clippy": {
+    "exit_code": 101,
+    "diagnostics": 23,
+    "diagnostic_files_unchanged_from_parent": true,
+    "scope": "st-nn --lib -D warnings; no new strict-lint pass is claimed"
+  },
+  "setup_failures_preserved": [
+    {
+      "stage": "pytest_collection",
+      "before_test_bodies": true,
+      "cause": "Ancestor package discovered outside checkout; rerun with explicit confcutdir/rootdir"
+    },
+    {
+      "stage": "replay_manifest_preflight",
+      "before_model_loading": true,
+      "cause": "Extra field in generated manifest; a new two-field envelope was created without changing the verifier",
+      "failed_manifest_sha256": "1bcbaf9cc882e4ad6e81cc544277f31c6e208f023d83cad8adc18c4f89eaf497"
+    }
+  ],
+  "no_cleanup_performed": true,
+  "private_states_logs_and_original_artifacts_retained": true,
+  "python_regressions_with_public_receipts": 848
+}

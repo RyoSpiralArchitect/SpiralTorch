@@ -11,10 +11,10 @@ from __future__ import annotations
 import json
 import math
 import struct
-from functools import lru_cache
 from typing import Any
 
 from .geometry_autograd import _input, _require_torch, _strength, _values, torch
+from ._torch_transport import _buffer_transport_available, _buffer_values, _transport_output
 
 __all__ = ["fractional_gl_autograd", "fractional_gl_history_autograd",
            "fractional_gl_history_l2_autograd", "FractionalMemoryAdapter",
@@ -27,28 +27,6 @@ def _kernel(**options: Any) -> Any:
     from . import FractionalGlKernel
 
     return FractionalGlKernel(**options)
-
-
-@lru_cache(maxsize=1)
-def _buffer_transport_available() -> bool:
-    if torch is None:
-        return False
-    try:
-        torch.empty(0, dtype=torch.float32, device="cpu").numpy()
-    except (ImportError, RuntimeError):
-        return False
-    return True
-
-
-def _buffer_values(value: Any) -> Any:
-    return value.detach().to(device="cpu").resolve_neg().contiguous().numpy()
-
-
-def _transport_output(values: Any, like: Any, buffers: bool) -> Any:
-    if buffers:
-        # Retain an exported view so the bytearray cannot resize under a CPU Tensor.
-        return torch.frombuffer(memoryview(values), dtype=like.dtype).to(device=like.device).reshape_as(like)
-    return torch.tensor(values, dtype=like.dtype, device=like.device).reshape_as(like)
 
 
 def _capture_fractional(ctx: Any, kernel: Any, value: Any, alpha: Any,

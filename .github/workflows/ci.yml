@@ -754,9 +754,11 @@ jobs:
             bindings/st-py/tests/test_wave_gate_vjp.py \
             bindings/st-py/tests/test_wave_gate_learning.py \
             bindings/st-py/tests/test_wave_gate_radius.py \
+            bindings/st-py/tests/test_wave_gate_buffers.py \
+            bindings/st-py/tests/test_wave_gate_transport_results.py \
             bindings/st-py/tests/test_wave_gate_conditioning_example.py \
             bindings/st-py/tests/test_wave_gate_long_horizon.py \
             bindings/st-py/tests/test_wave_gate_long_horizon_summary.py \
             bindings/st-py/tests/test_elliptic_nonlinear_study.py \
             bindings/st-py/tests/test_elliptic_causal_study.py
-          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_replay_geometry_stack_update.py

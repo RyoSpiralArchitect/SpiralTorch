@@ -65,6 +65,34 @@ Torch GPU tensors incur explicit CPU copies; WASM runs scalar Rust here.
 The text encoder/infusion API remains on the native module and is not included
 in this parameter-owned adapter.
 
+### Bulk Host Transport
+
+Python also exposes `forward_buffer`, `forward_with_log_radius_buffer`,
+`output_buffer`, `vjp_buffer`, and `vjp_with_log_radius_buffer`. Inputs must export
+C-contiguous, native-endian float32 buffers (`array('f')`, NumPy arrays or typed
+memoryviews), not untyped bytes. Rust copies them before releasing the GIL;
+output and gradient bytearrays are fresh owners, never aliases of the immutable
+snapshot. The radius derivative is still a scalar. Empty batches are supported.
+
+`wave_gate_autograd` and `WaveGateAdapter` select this transport when Torch/NumPy
+interop is available, with the existing list route as the optional-dependency
+fallback. Negative views and noncontiguous inputs are materialized explicitly.
+WaveGate and fractional adapters share only these transport helpers, not their
+mathematics. This reduces Python scalar boxing; it is **not** zero-copy, a new
+learning rule, a selective VJP, or a resident GPU path. The radius kernel reuses
+row scratch storage in Rust, including WASM, without changing reduction order.
+
+`tools/benchmark_wave_gate_learning.py --native-profile release --log-radius
+1.38629436112 --output result.json` compares an explicit list route, the public
+bridge and an independent differentiable Torch reference. All request the same
+input/gate/bias/radius gradients. Omit `--log-radius` to test the legacy map.
+The report retains per-round timings, errors and tensor/native/source hashes;
+cross-build comparisons require matching output and gradient bytes first.
+CPU host-transport timings are not model-throughput or quality evidence.
+The [matched transport receipts](../benchmarks/results/2026-10-07-wave-gate-buffer-transport/README.md)
+include old/new bitwise parity, a saved mixed-adapter HF update and scalar WASM
+continuation. The large CPU cases remain slower than the matched Torch reference.
+
 For a cached HF model, the local-only
 `bindings/st-py/examples/hf_elliptic_learning.py --geometry wave_gate` probe
 compares off, the parameter-matched tangent map at zero, and WaveGate.
