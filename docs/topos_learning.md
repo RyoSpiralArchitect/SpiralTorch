@@ -41,6 +41,18 @@ typed `grad_input` and `grad_gate` arrays. Copies outlive their Rust handles;
 call `.free()` on batches and pullbacks when finished. A batch can outlive its
 kernel. Direct Rust consumers use the same `ToposResonatorLearningBatch` core.
 
+Rust callers with owned `Vec<f32>` inputs can use
+`ToposResonatorOperator::capture_owned(input, gate, rows, features)` to transfer
+both allocations into the tape without cloning them. The vectors are consumed
+even on error, and any spare capacity is retained; borrowed `capture` remains
+available with its existing behavior.
+Python sequence/buffer capture and WASM capture use this owned path after
+establishing Rust ownership. Foreign inputs are still copied and remain safe
+to modify or discard after capture. This removes two internal N-element copies,
+not the foreign-memory safety copy, and does not change the four-vector tape
+or imply whole-process memory or throughput gains. See the
+[owned-capture measurements](../benchmarks/results/2026-10-07-topos-owned-capture/README.md).
+
 For matched performance comparisons, `tools/benchmark_topos_learning.py`
 requests both input and broadcast-gate gradients on every route: legacy list,
 bulk with recurrence recomputation, public captured bulk, and an independent

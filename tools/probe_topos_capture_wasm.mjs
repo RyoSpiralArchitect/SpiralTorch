@@ -75,6 +75,45 @@ for (const [rows, features] of [[0, 3], [1, 1], [7, 17], [256, 768]]) {
   }
 }
 
+const ownershipCases = [];
+if (captured) {
+  for (const mode of ["alias", "overlap"]) {
+    const source = Float32Array.of(.2, -.3, .6, .5, -.7, .9);
+    const original = source.slice();
+    const x = source.subarray(0, 4), gate = mode === "alias" ? x : source.subarray(2, 6);
+    const dy = Float32Array.of(.1, -.2, .3, -.4);
+    const owner = new ToposResonatorKernel(.4, 5, 1, .2, 64);
+    let batch, output, gradient, audit;
+    try {
+      output = owner.forward(x, gate, 2, 2);
+      gradient = owner.backward(x, gate, dy, 2, 2);
+      batch = owner.capture(x, gate, 2, 2);
+      audit = batch.audit_json();
+      assert(same(source, original), "capture mutated an aliased JS input");
+      rejected(() => owner.capture(x, gate, 1, 3));
+      rejected(() => owner.capture(Float32Array.of(NaN), Float32Array.of(1), 1, 1));
+      const next = owner.capture(x, gate, 2, 2);
+      try {assert(same(next.output, output), "failed capture corrupted the kernel");}
+      finally {next.free();}
+    } finally {owner.free();}
+    try {
+      source.fill(NaN);
+      batch.output.fill(NaN);
+      assert(same(batch.output, output) && batch.audit_json() === audit, "alias escaped into the snapshot");
+      for (let repeat = 0; repeat < 2; repeat++) {
+        const pulled = batch.vjp(dy);
+        try {
+          assert(same(pulled.grad_input, Float32Array.from(gradient.grad_input)) &&
+            same(pulled.grad_gate, Float32Array.from(gradient.grad_gate)), "aliased capture VJP differs");
+        } finally {pulled.free();}
+      }
+      ownershipCases.push({mode, output_sha256: hash(bytes(output)), audit_sha256: hash(audit),
+        grad_input_sha256: hash(bytes(Float32Array.from(gradient.grad_input))),
+        grad_gate_sha256: hash(bytes(Float32Array.from(gradient.grad_gate)))});
+    } finally {batch?.free();}
+  }
+}
+
 const kernel = new ToposResonatorKernel(.4, 5, 1, .2, 64);
 let learning;
 try {
@@ -115,6 +154,7 @@ try {
   }
 } finally {kernel.free();}
 const report = {schema: "spiraltorch.topos_capture_wasm_probe.v1", status: "passed", captured, cases, learning,
+  ownership_cases: ownershipCases,
   module_format: initSync ? "web" : "nodejs", capture_required: option === "--require-capture",
   guard_checks: guardChecks, wasm_sha256: hash(wasm), wrapper_sha256: hash(await readFile(modulePath)),
   probe_sha256: hash(await readFile(fileURLToPath(import.meta.url))), node: process.version,

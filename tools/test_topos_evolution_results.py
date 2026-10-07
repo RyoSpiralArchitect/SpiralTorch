@@ -1,4 +1,4 @@
-"""Verify all frozen in-place Topos results without timing or training."""
+"""Verify frozen Topos copy-elision results without timing or training."""
 
 import gzip
 import hashlib
@@ -7,11 +7,12 @@ from pathlib import Path
 import statistics
 
 DATA = Path(__file__).resolve().parents[1] / "benchmarks/results/2026-10-07-topos-in-place-evolution"
+OWNED_DATA = DATA.with_name("2026-10-07-topos-owned-capture")
 ROUTES = ("rust_list", "rust_buffer_recomputed", "rust_public", "torch_reference")
 
 
-def read(name):
-    raw = (DATA / name).read_bytes()
+def read(name, directory=DATA):
+    raw = (directory / name).read_bytes()
     return json.loads(gzip.decompress(raw) if name.endswith(".gz") else raw)
 
 
@@ -20,14 +21,19 @@ def digest(raw):
 
 
 def test_closed_numeric_archive_and_runtime_identity():
-    entries = dict(line.split("  ", 1)[::-1] for line in (DATA / "SHA256SUMS").read_text().splitlines())
-    assert set(entries) == {p.name for p in DATA.iterdir() if p.name != "SHA256SUMS"}
+    for directory in (DATA, OWNED_DATA):
+        check_closed_archive(directory)
+
+
+def check_closed_archive(directory):
+    entries = dict(line.split("  ", 1)[::-1] for line in (directory / "SHA256SUMS").read_text().splitlines())
+    assert set(entries) == {p.name for p in directory.iterdir() if p.name != "SHA256SUMS"}
     for name, expected in entries.items():
-        raw = (DATA / name).read_bytes()
+        raw = (directory / name).read_bytes()
         assert digest(raw) == expected
         raw = gzip.decompress(raw) if name.endswith(".gz") else raw
         assert not any(marker in raw for marker in (b"/Users/", b"/home/", b"sk-proj-", b"-----BEGIN PRIVATE"))
-    v, s = read("verification.json.gz"), read("summary.json")
+    v, s = read("verification.json.gz", directory), read("summary.json", directory)
     before, after = v["runtime_before"], v["runtime_after"]
     assert len(before["files"]) == len(after["files"]) == 73
     assert before["files"].keys() == after["files"].keys()
@@ -37,7 +43,12 @@ def test_closed_numeric_archive_and_runtime_identity():
 
 
 def test_every_raw_report_pair_gradient_and_statistic():
-    m, v, s = read("measurements.json.gz"), read("verification.json.gz"), read("summary.json")
+    for directory in (DATA, OWNED_DATA):
+        check_paired_measurements(directory)
+
+
+def check_paired_measurements(directory):
+    m, v, s = (read(name, directory) for name in ("measurements.json.gz", "verification.json.gz", "summary.json"))
     assert digest(m["plan_json"]) == v["pair_plan_sha256"]
     plan = json.loads(m["plan_json"])
     assert plan["client_sha256"] == v["client_sha256"]["benchmark_topos_learning_py"]
@@ -106,3 +117,32 @@ def test_wasm_audit_learning_and_scope_receipts():
     assert v["validation"]["strict_wasm_clippy"]["exit_code"] == 0
     assert not any(v["validation"][k] for k in ("pretrained_training", "heldout_rescoring", "cleanup"))
     assert len(v["initial_attempts"]) == 2
+
+
+def test_owned_capture_wasm_aliasing_abi_and_scope_receipts():
+    v = read("verification.json.gz", OWNED_DATA)
+    a, b = v["wasm_before"], v["wasm_after"]
+    assert a.keys() == b.keys()
+    assert {k for k in a if a[k] != b[k]} == {"wasm_sha256", "wrapper_sha256"}
+    assert len(a["cases"]) == 24
+    assert all(len(c["captured_audit_sha256"]) == 64 for c in a["cases"])
+    assert a["probe_sha256"] == v["client_sha256"]["ownership_wasm_probe_mjs"]
+    assert a["capture_required"] and a["captured"] and a["status"] == "passed"
+    assert a["guard_checks"] == 54 and a["learning"]["updates"] == 240
+    assert a["learning"]["legacy_trajectory_exact"] and a["learning"]["next_update_exact"]
+    assert [c["mode"] for c in a["ownership_cases"]] == ["alias", "overlap"]
+    assert all(len(value) == 64 for c in a["ownership_cases"] for key, value in c.items() if key != "mode")
+    for phase in ("before", "after"):
+        for key in ("wasm_sha256", "wrapper_sha256"):
+            assert v["initial_wasm_" + phase][key] == v["wasm_" + phase][key]
+    abi = v["wasm_abi"]
+    assert abi["typescript_line_multiset_identical"]
+    assert set(abi["topos_classes"]) == {"ToposResonatorKernel", "ToposResonatorLearningBatch"}
+    for result in abi["topos_classes"].values():
+        assert result["wrapper_identical"] and result["typescript_identical"]
+        assert len(result["wrapper_sha256"]) == len(result["typescript_sha256"]) == 64
+    assert v["validation"]["strict_wasm_clippy"]["exit_code"] == 0
+    assert v["validation"]["rust_core_full"] == 1022
+    assert v["validation"]["python_geometry"] == 1038
+    assert not any(v["validation"][k] for k in ("pretrained_training", "heldout_rescoring", "cleanup"))
+    assert len(v["initial_attempts"]) == 1
