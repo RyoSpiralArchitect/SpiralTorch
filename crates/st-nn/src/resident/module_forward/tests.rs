@@ -346,9 +346,16 @@ fn cache_tracks_trainer_updates_layout_shape_topology_and_explicit_clear() {
     let first_expected = model.forward(&host).unwrap();
     let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1., 0.01, 0.01);
     trainer.prepare(&mut model).unwrap();
-    model
-        .backward(&host, &Tensor::from_vec(4, 3, vec![0.5; 12]).unwrap())
-        .unwrap();
+    let gradient = Tensor::from_vec(4, 3, vec![0.5; 12]).unwrap();
+    assert!(matches!(
+        model.backward(&host, &gradient),
+        Err(st_tensor::TensorError::InvalidValue {
+            label: "sequential_forward_missing"
+        })
+    ));
+    // Preparation changes parameter training state and invalidates the capture.
+    assert_eq!(model.forward(&host).unwrap(), first_expected);
+    model.backward(&host, &gradient).unwrap();
     trainer.step(&mut model).unwrap();
     let output = model.forward_resident(&input).unwrap();
     let expected = model.forward(&host).unwrap();
