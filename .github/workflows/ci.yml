@@ -300,6 +300,18 @@ jobs:
         env:
           SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
         run: cargo test --locked -p spiral-selfsup --features wgpu --release --test info_nce_tensor -- --test-threads=1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Public Python attention handles on a real GPU
+        env:
+          SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS: "1"
+          SPIRALTORCH_STRICT_GPU: "1"
+        run: |
+          python -m pip install "maturin>=1.9,<2"
+          maturin build --release --locked -m bindings/st-py/Cargo.toml --out "$RUNNER_TEMP/attention-wheel"
+          python -m pip install --no-deps --force-reinstall --no-cache-dir "$RUNNER_TEMP/attention-wheel/"*.whl
+          python -I -B bindings/st-py/tests/test_wgpu_attention.py -v
 
   wasm-build:
     name: spiraltorch-wasm (wasm32 build)
@@ -408,6 +420,13 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
           node bindings/st-wasm/tests/topos_graph_contract.cjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js"
+      - name: Share the public WebGPU client for browser validation
+        uses: actions/upload-artifact@v7
+        with:
+          name: resident-attention-webgpu
+          path: ${{ runner.temp }}/spiraltorch-wasm-webgpu/
+          if-no-files-found: error
+          retention-days: 1
       - name: Share freshly built WASM for native input replay
         uses: actions/upload-artifact@v7
         with:

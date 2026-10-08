@@ -128,6 +128,25 @@ regressions are `bindings/st-py/tests/test_wgpu_attention.py` and
 `bindings/st-wasm/tests/resident_attention_clients.html`; the latter expects a
 fresh full `webgpu` package in its adjacent `module/` directory.
 
+CI also executes the Python regression with the real-GPU opt-in on macOS, using a
+fresh default-feature wheel and an isolated Python import. The WASM job uploads
+the already-built browser package as `resident-attention-webgpu` for one day.
+For a checkout with limited disk space, download that artifact from the CI run
+whose head matches the intended PR revision into a fresh directory under
+`target/`. Do not substitute a package from an earlier run. For example, a package
+under `target/attention-client-ci/` can be exercised at:
+
+```text
+http://127.0.0.1:8783/bindings/st-wasm/tests/resident_attention_clients.html?module=/target/attention-client-ci/spiraltorch_wasm.js
+```
+
+Only same-origin module URLs are accepted. Require `passed: true` and all 18
+fixture cases; the page exposes a downloadable JSON result. Preserve the CI run
+and head IDs, downloaded module/WASM hashes, fixture hash and result together.
+This is public-client execution evidence, not a replacement for the separate
+kernel SGD, strided-layout and wide-range tests. Uploading an artifact or passing
+its declaration check alone is not browser execution evidence.
+
 The generator `tools/generate_resident_attention_vjp_torch_fixture.py` refuses
 to overwrite an existing fixture. Regenerate to a new path with PyTorch 2.12.1
 and optional global patches disabled, then compare bytes. This bounded synthetic
