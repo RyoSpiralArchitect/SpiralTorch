@@ -220,6 +220,19 @@ on wasm32; its optional `bptt_scan_elapsed_us` is `null` there rather than calli
 unsupported `std::time::Instant::now()` or fabricating a zero-duration result.
 Isolated parameter and WGPU operand snapshots can add copies;
 previous capture timings are not measurements of this revised path.
+
+`bindings/st-py/tests/test_nn_sequential_capture.py` also compares 48 synthetic
+SGD updates with independent CPU Torch: two seeds, twelve steps each, with and
+without Topos in a Dropout/Linear/GELU/Linear model. A separately advanced seeded
+Dropout stream supplies the same masks to the reference; this does not assert
+RNG equivalence with Torch Dropout. Losses, outputs, input VJPs and updated
+parameters are checked at every step (`rtol=5e-4`, `atol=3e-5`). Both optimizers
+retain their own parameter trajectories after initialization. Two differently
+scaled pullbacks per prediction test accumulation without forward replay.
+Parameter gradients are checked indirectly through their SGD updates, not a
+Python gradient-inspection API. This is a correctness test, not pretrained FT,
+a speed comparison or evidence that Topos improves model quality.
+
 Python Torch feature-gate adapters and scalar WASM shared-row methods use the
 compact core path described above; generic Torch broadcasts still use the
 legacy expanded route. For the distinct resident NN path, use the shared-gate
