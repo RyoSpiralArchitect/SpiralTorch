@@ -71,8 +71,11 @@ pub fn run_sequential_forward_tape_contract() -> String {
     child.push(ToposResonator::new("topos", 2, 3).unwrap());
     let mut topos = Sequential::new();
     topos.push(child);
+    topos.attach_realgrad(0.01).unwrap();
     let input = Tensor::from_vec(2, 3, vec![0.25; 6]).unwrap();
     topos.forward(&input).unwrap();
+    assert!(topos.scale_learning_rates(f32::NAN).is_err());
+    topos.scale_learning_rates(0.5).unwrap();
     topos.zero_accumulators().unwrap();
     let expected = topos.backward(&input, &input).unwrap();
     topos.zero_accumulators().unwrap();

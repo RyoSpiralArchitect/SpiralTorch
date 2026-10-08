@@ -245,11 +245,17 @@ pub(crate) fn scale_module_learning_rates<M: Module + ?Sized>(
     module: &mut M,
     factor: f32,
 ) -> PureResult<()> {
+    module.scale_learning_rates(factor)
+}
+
+pub(crate) fn validate_module_learning_rate_scale<M: Module + ?Sized>(
+    module: &M,
+    factor: f32,
+) -> PureResult<()> {
     if factor <= 0.0 || !factor.is_finite() {
         return Err(TensorError::NonPositiveLearningRate { rate: factor });
     }
-    module.visit_parameters(&mut |parameter| parameter.validate_learning_rate_scale(factor))?;
-    module.visit_parameters_mut(&mut |parameter| parameter.try_scale_learning_rate(factor))
+    module.visit_parameters(&mut |parameter| parameter.validate_learning_rate_scale(factor))
 }
 
 pub(crate) fn parameter_control_error(error: impl std::fmt::Display) -> TensorError {

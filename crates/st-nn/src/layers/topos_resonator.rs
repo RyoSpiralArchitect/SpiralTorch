@@ -1056,6 +1056,10 @@ impl Module for ToposResonator {
         Ok(())
     }
 
+    fn scale_learning_rates(&mut self, factor: f32) -> PureResult<()> {
+        self.gate.try_scale_learning_rate(factor)
+    }
+
     fn infuse_text(&mut self, text: &str) -> PureResult<()> {
         let Some(encoder) = self.encoder.as_ref() else {
             return Ok(());

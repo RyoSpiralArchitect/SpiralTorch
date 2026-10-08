@@ -168,6 +168,48 @@ fn gradient_clearing_preserves_nested_topos_forward_but_parameter_updates_do_not
     assert!(sequence.backward(&input, &input).is_err());
 }
 
+#[test]
+fn optimizer_rate_scaling_is_prevalidated_and_preserves_the_forward_tape() {
+    let _guard = crate::test_global_state_lock();
+    let mut child = Sequential::new();
+    child.push(Linear::new("first", 1, 1).unwrap());
+    child.push(ToposResonator::new("last", 1, 1).unwrap());
+    let mut sequence = Sequential::new();
+    sequence.push(child);
+    sequence
+        .visit_parameters_mut(&mut |p| {
+            p.attach_realgrad(if p.name().starts_with("last") {
+                f32::MAX
+            } else {
+                0.01
+            })
+        })
+        .unwrap();
+    let rates = |model: &Sequential| {
+        let mut rates = Vec::new();
+        model
+            .visit_parameters(&mut |p| {
+                rates.push(p.realgrad().unwrap().learning_rate());
+                Ok(())
+            })
+            .unwrap();
+        rates
+    };
+    let input = Tensor::from_vec(1, 1, vec![0.25]).unwrap();
+    sequence.forward(&input).unwrap();
+    let before = rates(&sequence);
+    for factor in [2., 0., f32::NAN, f32::INFINITY] {
+        assert!(sequence.scale_learning_rates(factor).is_err());
+        assert_eq!(rates(&sequence), before);
+    }
+    sequence.scale_learning_rates(0.5).unwrap();
+    assert_eq!(
+        rates(&sequence),
+        before.iter().map(|v| v * 0.5).collect::<Vec<_>>()
+    );
+    sequence.backward(&input, &input).unwrap();
+}
+
 struct Counted {
     forwards: Rc<Cell<usize>>,
     untracked: Rc<Cell<usize>>,

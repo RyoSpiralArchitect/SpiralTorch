@@ -341,6 +341,14 @@ impl Module for Sequential {
         Ok(())
     }
 
+    fn scale_learning_rates(&mut self, factor: f32) -> PureResult<()> {
+        crate::optim::validate_module_learning_rate_scale(self, factor)?;
+        for layer in &mut self.layers {
+            layer.scale_learning_rates(factor)?;
+        }
+        Ok(())
+    }
+
     fn visit_parameters_mut(
         &mut self,
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,

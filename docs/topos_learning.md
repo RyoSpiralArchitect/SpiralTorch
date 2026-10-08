@@ -176,6 +176,8 @@ not make that graph GPU-resident. Host `Sequential` retains the inputs from its
 actual forward and reuses them for backward, including repeated band pullbacks.
 It no longer reruns the layers to reconstruct activations: Dropout masks,
 recurrent state and the Topos tape remain those used by the original prediction.
+This removes container-driven replay, not any internal recomputation a child
+module chooses to perform; it is not a claim that every graph is replay-free.
 The latest successful forward is authoritative; a new or failed forward,
 structural/mutable-parameter access, state load, text infusion or mode change
 invalidates it. Input/parameter guards reject mismatches before child pullbacks.
@@ -184,7 +186,11 @@ invalidates the tape, but does not roll back already accumulated gradients.
 Clear accumulators before restarting such a failed step.
 
 `zero_accumulators()` clears gradients without discarding the captured forward,
-including nested sequences and Topos. Containers and band schedules call
+including nested sequences and Topos. `Module::scale_learning_rates` likewise
+keeps the capture while prevalidating all optimizer rates before mutation.
+Trainer coherence-driven LR adjustments use this path at their original point
+before backward; moving them after backward is not required. Arbitrary mutable
+parameter visits still invalidate the container capture. Containers and band schedules call
 `Module::backward_retained`; the built-in LSTM, SpiralRnn, WaveRnn, WaveScan,
 coherence scan and coherence-wave layers support this without consuming their
 forward caches. Their ordinary one-shot `backward` remains available. Custom

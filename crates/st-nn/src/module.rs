@@ -1043,6 +1043,14 @@ pub trait Module {
         }
     }
 
+    /// Scales optimizer rates without changing parameter values. Cache-owning
+    /// modules whose mutable visitor invalidates forward state should override
+    /// this optimizer-only operation, prevalidating every rate before mutation.
+    fn scale_learning_rates(&mut self, factor: f32) -> PureResult<()> {
+        crate::optim::validate_module_learning_rate_scale(self, factor)?;
+        self.visit_parameters_mut(&mut |parameter| parameter.try_scale_learning_rate(factor))
+    }
+
     /// Clears accumulators across every parameter.
     fn zero_accumulators(&mut self) -> PureResult<()> {
         self.visit_parameters_mut(&mut |param| {
