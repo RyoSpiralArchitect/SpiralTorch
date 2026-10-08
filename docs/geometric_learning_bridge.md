@@ -113,7 +113,7 @@ All constructor arguments are explicit. Rows/features/counts reject fractional,
 negative, nonfinite and coercible non-number JS values before integer conversion.
 Callers own the optimizer and broadcast reductions, not a second geometric rule.
 
-## Evidence And Next Operators
+## Evidence And Connected Operators
 
 See the [complete wiring experiment](../benchmarks/results/2026-10-02-topos-learning-bridge/README.md).
 It includes native finite differences inside/outside saturation, actual HF loss
@@ -121,10 +121,16 @@ updates, adapter/optimizer continuation, and browser/native forward/VJP agreemen
 The random tiny HF experiment is deliberately not pretrained FT evidence or a
 claim of improved language quality. It preserves adverse development-loss results.
 
-The [elliptic/Lie bridge](elliptic_learning_bridge.md) now has numerical repairs,
-batched Rust VJPs and a bounded pretrained-model connection. Next expose the
-existing Rust WaveGate derivatives under the same learning/continuation tests.
-Only after those individually work should combinations be evaluated. Each needs
+The [elliptic/Lie bridge](elliptic_learning_bridge.md),
+[WaveGate](wave_gate_learning.md), and
+[fractional/history operators](fractional_learning.md) now expose Rust-owned
+learning derivatives and explicit capture/continuation boundaries. Their guides
+distinguish native/scalar-WASM mechanics checks from bounded model experiments.
+The [Topos guide](topos_learning.md) covers shared feature gates, actual host
+Sequential captures, and the separate explicit resident graph route. The Torch
+adapter remains a CPU bridge; a resident NN graph is not resident HF execution.
+
+Combinations still need independent evidence. Each mechanism needs
 an identity or disabled control, a simple parameter-count control, fixed data and
 seeds, saturation/gradient diagnostics and an explicitly priced execution boundary.
 Resident acceleration follows demonstrated demand; it must preserve the same VJP.

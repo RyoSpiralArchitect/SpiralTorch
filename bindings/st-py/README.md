@@ -12,12 +12,14 @@ making NumPy, PyTorch, Transformers, or provider SDKs mandatory dependencies.
 python -m pip install -U spiraltorch
 ```
 
-Published baseline: **Version 0.4.27**. Wheels support CPython 3.8+, Linux x86_64,
+Package version: **Version 0.4.28**. Wheels target CPython 3.8+, Linux x86_64,
 Windows x86_64, and macOS 14+ universal2. The default wheel includes WGPU with
 CPU fallback; a compatible GPU and the appropriate execution route are still
 required for GPU use.
 
-This source tree can be ahead of PyPI. The documentation links below follow
+Source version metadata does not prove publication; check the
+[PyPI release history](https://pypi.org/project/spiraltorch/#history) for available
+wheels. This source tree can be ahead of PyPI. The documentation links below follow
 main and identify source-only paths where applicable. Check the
 [package changelog](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/bindings/st-py/CHANGELOG.md)
 and your installed version before using a new API.
