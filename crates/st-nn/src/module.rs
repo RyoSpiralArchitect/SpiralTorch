@@ -885,6 +885,13 @@ pub trait Module {
         self.forward(&input)
     }
 
+    /// Forward without retaining a container's backward activations. This is
+    /// not evaluation mode; individual layers may still retain their own state.
+    /// Containers override this to propagate the request to nested children.
+    fn forward_untracked_owned(&self, input: Tensor) -> PureResult<Tensor> {
+        self.forward_owned(input)
+    }
+
     /// Propagates a gradient backwards. Implementations should populate the
     /// relevant parameter accumulators before returning the gradient with
     /// respect to `input`.

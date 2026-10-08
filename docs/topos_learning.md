@@ -172,9 +172,31 @@ is fabricated for the fused core sum. `ToposGateLayout` re-exports the core
 layout enum under the existing NN API name.
 
 This is a host-Tensor Rust NN layer, usable in ordinary `Sequential`; it does
-not make that graph GPU-resident. `Sequential::backward` currently recomputes
-its activations, so direct-layer capture savings must not be generalized to
-the whole graph. Isolated parameter and WGPU operand snapshots can add copies;
+not make that graph GPU-resident. Host `Sequential` retains the inputs from its
+actual forward and reuses them for backward, including repeated band pullbacks.
+It no longer reruns the layers to reconstruct activations: Dropout masks,
+recurrent state and the Topos tape remain those used by the original prediction.
+The latest successful forward is authoritative; a new or failed forward,
+structural/mutable-parameter access, state load, text infusion or mode change
+invalidates it. Input/parameter guards reject mismatches before child pullbacks.
+Shape/input validation failures permit a valid retry; a child backward failure
+invalidates the tape, but does not roll back already accumulated gradients.
+Clear accumulators before restarting such a failed step.
+
+`eval()` changes layer behavior, not gradient recording. Explicit
+`Sequential::forward_untracked` / `forward_untracked_owned` (Python:
+`model.forward_untracked(x)`) bypass container activation retention, propagate
+through nested sequences and invalidate any old host tape. Individual layers
+may still keep their own internal caches. The original owned-forward path is
+used there; this is not an implicit CPU fallback for resident inputs.
+
+Saved activation snapshots increase retained host memory and can prevent
+in-place storage reuse. Protected row-major parameters use cheap content stamps;
+foreign or non-row-major parameters require isolated comparison values. This
+is a correctness repair and removal of redundant forward executions, not a
+measured wall-clock or peak-memory improvement. The existing WASM WebGPU graph
+already uses its separate opaque forward tokens and is unchanged.
+Isolated parameter and WGPU operand snapshots can add copies;
 previous capture timings are not measurements of this revised path.
 Python Torch feature-gate adapters and scalar WASM shared-row methods use the
 compact core path described above; generic Torch broadcasts still use the
