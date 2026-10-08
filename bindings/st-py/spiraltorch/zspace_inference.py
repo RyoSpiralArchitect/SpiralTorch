@@ -74,7 +74,8 @@ __all__ = [
 ]
 
 
-@dataclass(slots=True)
+# Python 3.8/3.9 do not accept the dataclass slots keyword.
+@dataclass(**({"slots": True} if sys.version_info >= (3, 10) else {}))
 class ZMetrics:
     """Typed metrics container fed into :class:`ZSpaceTrainer`."""
 
