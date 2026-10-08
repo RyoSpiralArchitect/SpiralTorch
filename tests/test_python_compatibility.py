@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Source import boundaries; legacy simulation is not an older interpreter."""
 
+import ast
+import collections.abc
 import json
 from pathlib import Path
 import subprocess
 import sys
 import textwrap
+import types
+import typing
 import unittest
 
 
@@ -14,6 +18,54 @@ PACKAGE = ROOT / "bindings/st-py/spiraltorch"
 
 
 class PythonCompatibilityTests(unittest.TestCase):
+    def test_callback_aliases_do_not_require_runtime_pep585_or_pep604(self):
+        # Evaluate only the source aliases with pre-3.9 standard-library types.
+        # This is a focused regression, not a Python 3.8 interpreter substitute.
+        class LegacyMeta(type):
+            def __getitem__(cls, item):
+                raise TypeError("legacy runtime type is not subscriptable")
+
+            def __or__(cls, other):
+                raise TypeError("legacy runtime type does not support unions")
+
+        class LegacyType(metaclass=LegacyMeta):
+            pass
+
+        cases = {
+            "hf_generation.py": ("CheckpointGenerationRunner",),
+            "hf_ft_status.py": ("HandoffRunner", "HandoffPackageRunner"),
+            "hf_adapter_executor.py": (
+                "CommandRunner", "ProcessStarted", "ProcessProgress",
+                "ProcessStopRequested", "StopRequestLoader",
+            ),
+        }
+        for filename, names in cases.items():
+            with self.subTest(module=filename):
+                path = PACKAGE / filename
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                namespace = {"subprocess": types.SimpleNamespace(CompletedProcess=LegacyType)}
+                for node in tree.body:
+                    if isinstance(node, ast.ImportFrom) and node.level == 0:
+                        if node.module == "typing":
+                            for imported in node.names:
+                                namespace[imported.asname or imported.name] = getattr(typing, imported.name)
+                        elif node.module == "collections.abc":
+                            for imported in node.names:
+                                namespace[imported.asname or imported.name] = LegacyType
+                found = set()
+                for node in tree.body:
+                    if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                        continue
+                    target = node.targets[0]
+                    if not isinstance(target, ast.Name) or target.id not in names:
+                        continue
+                    found.add(target.id)
+                    with self.subTest(alias=target.id):
+                        self.assertFalse(any(isinstance(part, ast.BitOr) for part in ast.walk(node.value)))
+                        value = eval(compile(ast.Expression(node.value), str(path), "eval"), namespace)
+                        self.assertIs(typing.get_origin(value), collections.abc.Callable)
+                self.assertEqual(found, set(names))
+
     def test_minimum_interpreter_gate_reuses_installed_linux_wheel(self):
         for workflow in ("ci.yml", "wheels.yml", "release_wheels.yml"):
             with self.subTest(workflow=workflow):
