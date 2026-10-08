@@ -77,7 +77,8 @@ node tools/test_resident_browser.cjs "$OUT/module" "$CHROME" \
 ```
 
 Here `OUT` is a new directory, `CHROME` points to a Chrome executable,
-`wasm-bindgen` is version 0.2.104, and the browser harness needs `playwright`
+the `wasm-bindgen` CLI matches the selected source checkout's Cargo.lock
+(historical measurements: 0.2.104), and the browser harness needs `playwright`
 available to Node. The benchmark JSON validator checks six shapes, two scopes,
 18 intervals per route and scaled error at most one; the browser fixture
 rejects an incomplete report.

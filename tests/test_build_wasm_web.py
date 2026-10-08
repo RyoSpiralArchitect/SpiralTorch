@@ -1,6 +1,7 @@
 """Build-profile tests with a fake wasm-pack; no Rust toolchain is required."""
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BuildWasmWebTests(unittest.TestCase):
+    def test_ci_bindgen_cli_matches_locked_rust_schema(self):
+        lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
+        versions = re.findall(r'^name = "wasm-bindgen"\nversion = "([^"]+)"$', lock, re.MULTILINE)
+        self.assertEqual(len(versions), 1, "Expected one locked wasm-bindgen schema")
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        pins = re.findall(r'cargo install wasm-bindgen-cli --version (\S+) --locked', workflow)
+        self.assertEqual(pins, versions, "The JS generator must match the locked Rust crate")
+        docs = (ROOT / "docs/resident_zspace_attention.md").read_text(encoding="utf-8")
+        self.assertIn(f"currently {versions[0]}", docs)
+
+    def test_ownership_probe_uses_public_web_init_without_skipping_node_tests(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        exercise = workflow.split("- name: Exercise real WASM bindings and learning loops", 1)[1]
+        exercise = exercise.split("\n      - ", 1)[0]
+        for target, directory in [("nodejs", "node"), ("web", "web")]:
+            self.assertIn(f'--target {target} --out-dir "$RUNNER_TEMP/spiraltorch-wasm-{directory}"', exercise)
+        self.assertIn('printf \'{"type":"module"}\\n\' > "$RUNNER_TEMP/spiraltorch-wasm-web/package.json"', exercise)
+        self.assertIn('module="$RUNNER_TEMP/spiraltorch-wasm-node/spiraltorch_wasm.js"', exercise)
+        self.assertIn('node bindings/st-wasm/tests/autograd_sgd.cjs "$module"', exercise)
+        self.assertIn('node tools/probe_topos_shared_transport.mjs "$RUNNER_TEMP/spiraltorch-wasm-web"', exercise)
+        self.assertNotIn("--debug", exercise)
+        probe = (ROOT / "tools/probe_topos_shared_transport.mjs").read_text(encoding="utf-8")
+        self.assertIn("checkToposSnapshotOwnership(api, exports.memory)", probe)
+        self.assertIn("api.initSync({module: wasm})", probe)
+
     def run_profile(self, *arguments):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

@@ -80,7 +80,9 @@ cargo run --locked --release -p st-backend-wgpu --example consensus_readback_ben
 cargo build --locked --release -p st-backend-wgpu --target wasm32-unknown-unknown --example consensus_readback_bench_browser
 ```
 
-Generate web assets with wasm-bindgen 0.2.104 using --out-name spiraltorch_wasm.
+Generate web assets with the wasm-bindgen CLI matching the selected source
+checkout's Cargo.lock, using --out-name spiraltorch_wasm. The historical
+measurements used 0.2.104; do not reuse that CLI for a newer locked schema.
 Use tools/test_resident_browser.cjs with the consensus-readback-bench fixture
 and an isolated test Chrome, then run torch_bench.py against the native JSON.
 Rotate runtime order native/browser/Torch, browser/Torch/native,

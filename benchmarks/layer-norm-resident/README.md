@@ -70,7 +70,8 @@ cargo +1.98.0 build --locked --release -p st-backend-wgpu \
   --target wasm32-unknown-unknown --example layer_norm_resident_browser
 ```
 
-For the browser test, generate that example with wasm-bindgen 0.2.104 using
+For the browser test, generate that example with the wasm-bindgen CLI matching
+the selected source checkout's Cargo.lock (historical measurements: 0.2.104), using
 `--target web --out-name spiraltorch_wasm`, then use
 `tools/test_resident_browser.cjs MODULE_DIR CHROME NEW_REPORT "" "" "" "" layer-norm-resident`.
 The harness launches an isolated test browser, never the user's profile.
