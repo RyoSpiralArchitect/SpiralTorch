@@ -12,7 +12,7 @@ making NumPy, PyTorch, Transformers, or provider SDKs mandatory dependencies.
 python -m pip install -U spiraltorch
 ```
 
-Package version: **Version 0.4.28**. Wheels target CPython 3.8+, Linux x86_64,
+Package version: **Version 0.4.29**. Wheels target CPython 3.8+, Linux x86_64,
 Windows x86_64, and macOS 14+ universal2. The default wheel includes WGPU with
 CPU fallback; a compatible GPU and the appropriate execution route are still
 required for GPU use.

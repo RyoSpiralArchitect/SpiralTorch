@@ -2,7 +2,29 @@
 
 ## Unreleased
 
+## 0.4.29
+
+- Carry forward the learning, geometry, resident execution, Python compatibility,
+  and documentation changes described under 0.4.28 below. The 0.4.28 tag's three
+  wheels built successfully, but release attachment failed before signing and
+  that version was not uploaded to PyPI. Keep its tag unchanged; this version
+  requires a fresh official build, signed release assets, and verified upload.
+- Validate tracked Cargo/Python license metadata before wheel builds. Declare
+  the active benchmark fixture's existing AGPL license and supplement three
+  exact historical fixture hashes without changing their evidence bytes.
+  Preserve the frozen manifest bytes under Windows checkout conversion.
+- Refresh the grouped Rust dependency updates for bitflags, crossbeam-channel,
+  uuid, smallvec, and the wasm-bindgen/web-sys family. Align the WASM JavaScript
+  generator with the locked Rust schema at 0.2.129, with an early mismatch
+  regression and source-specific replay instructions. Historical benchmark
+  toolchain pins remain historical; this is not a new performance comparison.
+
+Package version metadata is preparation, not confirmation of publication.
+Consult the [release runbook](../../docs/ops/release.md) and PyPI release history.
+
 ## 0.4.28
+
+Source milestone; not published to PyPI because release attachment failed.
 
 ### Learning And Geometry
 
