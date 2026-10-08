@@ -12,10 +12,10 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Sequence
 
 from .generation_control import zspace_generation_control
 from .runtime_imports import _require_trusted_runtime_device_route_contract
@@ -678,7 +678,7 @@ class ZSpaceCheckpointSweepJob:
 
 CheckpointGenerationRunner = Callable[
     [Sequence[str]],
-    subprocess.CompletedProcess[str] | None,
+    Optional["subprocess.CompletedProcess[str]"],
 ]
 
 
