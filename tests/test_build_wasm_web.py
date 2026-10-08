@@ -1,6 +1,7 @@
 """Build-profile tests with a fake wasm-pack; no Rust toolchain is required."""
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BuildWasmWebTests(unittest.TestCase):
+    def test_ci_bindgen_cli_matches_locked_rust_schema(self):
+        lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
+        versions = re.findall(r'^name = "wasm-bindgen"\nversion = "([^"]+)"$', lock, re.MULTILINE)
+        self.assertEqual(len(versions), 1, "Expected one locked wasm-bindgen schema")
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        pins = re.findall(r'cargo install wasm-bindgen-cli --version (\S+) --locked', workflow)
+        self.assertEqual(pins, versions, "The JS generator must match the locked Rust crate")
+        docs = (ROOT / "docs/resident_zspace_attention.md").read_text(encoding="utf-8")
+        self.assertIn(f"currently {versions[0]}", docs)
+
     def run_profile(self, *arguments):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

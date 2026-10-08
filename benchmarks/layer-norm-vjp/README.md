@@ -82,8 +82,9 @@ timings here do not measure a multi-operation resident training graph.
 ## Replay
 
 Use a fresh output directory instead of overwriting the originals. Run on a
-compatible GPU host with Rust 1.98.0, `wasm32-unknown-unknown`, matching
-`wasm-bindgen` 0.2.104, Node with `playwright`, and Chrome:
+compatible GPU host with Rust 1.98.0, `wasm32-unknown-unknown`, the `wasm-bindgen`
+CLI matching the selected source checkout's Cargo.lock (historical measurements:
+0.2.104), Node with `playwright`, and Chrome:
 
 ```sh
 OUT=$(mktemp -d)

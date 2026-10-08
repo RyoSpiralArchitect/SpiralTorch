@@ -17,6 +17,8 @@ jobs:
           python-version: "3.12"
       - name: Test workspace inventory resolver
         run: python3 -m unittest tests/test_list_workspace_crates.py
+      - name: Check WASM build profiles and locked CLI schema
+        run: python3 -I -B tests/test_build_wasm_web.py
       - name: Test resident benchmark admission
         run: |
           python3 -I tests/test_resident_rank_bench.py
@@ -335,7 +337,7 @@ jobs:
       - name: WASM build profiles sanitize host flags
         run: python3 -S tests/test_build_wasm_web.py
       - name: Install matching WASM JavaScript generator
-        run: cargo install wasm-bindgen-cli --version 0.2.104 --locked
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - name: Exercise real WASM bindings and learning loops
         run: |
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \

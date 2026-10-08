@@ -161,9 +161,10 @@ SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked \
 Without the runtime-test environment variable, GPU-specific unit tests return
 early. A green default test run alone is not GPU-execution evidence.
 
-Browser build (wasm-bindgen CLI must match Cargo.lock, currently 0.2.104):
+Browser build (wasm-bindgen CLI must match Cargo.lock, currently 0.2.129):
 
 ```bash
+cargo install wasm-bindgen-cli --version 0.2.129 --locked
 env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
   -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS \
   -u LIBRARY_PATH -u PKG_CONFIG_PATH RUSTFLAGS= \
