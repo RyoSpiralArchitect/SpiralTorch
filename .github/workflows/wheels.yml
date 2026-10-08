@@ -35,6 +35,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.py }}
+      - name: Check repository license metadata before building
+        run: python -I -B scripts/security/generate_repo_manifest.py --check-only
       - name: Set macOS deployment target
         if: matrix.macos_deployment_target != ''
         run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_deployment_target }}" >> "$GITHUB_ENV"

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "declarations": [
+    {
+      "manifest": "benchmarks/results/2026-09-21-bounded-gelu/reproduction/wasm-shim/Cargo.toml",
+      "sha256": "043c16bdf6a8f080b6bd37066c11021ad5d575230c70395947d1757279c1ef11",
+      "license": "AGPL-3.0-or-later"
+    },
+    {
+      "manifest": "benchmarks/results/2026-09-21-owned-host-forward/reproduction/wasm-shim/Cargo.toml",
+      "sha256": "f75ed448c795d84a3b1ddadf29c04f1cc31479845bd862b2c6980677d2d02bc5",
+      "license": "AGPL-3.0-or-later"
+    },
+    {
+      "manifest": "benchmarks/results/2026-09-21-positional-geometry/reproduction/fixture/Cargo.toml",
+      "sha256": "41f1a4c565f1aed09a1f4babbbf9e78bda81c10fd8e7c52cce6c37033a718ab4",
+      "license": "AGPL-3.0-or-later"
+    }
+  ]
+}
