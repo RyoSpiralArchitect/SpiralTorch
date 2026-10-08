@@ -182,6 +182,7 @@ jobs:
           python -P ../../tools/smoke_zspace_runtime_protocols.py
           python -I ../../tools/smoke_dlpack_interop.py
           python -I ../../tools/smoke_autograd.py
+          python -I ../../tools/smoke_learning_stack.py
       - name: Upload
         uses: actions/upload-artifact@v7
         with:

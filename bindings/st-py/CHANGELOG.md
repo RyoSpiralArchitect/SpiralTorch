@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Gate installed wheels on native Sequential captures, shared-Topos learning
+  and weight handoff, WaveGate/Elliptic/fractional-history derivatives, and
+  resident plan round-tripping. These bounded CPU mechanics checks require no
+  optional ML packages and do not claim GPU execution or LLM quality gains.
+
 - Shorten the repository and PyPI entry points; relocate detailed APIs, training
   recipes, browser examples, and build validation to indexed topic guides.
   Preserve the README Python smoke surface after the move. Centralize the

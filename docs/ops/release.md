@@ -65,6 +65,15 @@ atomic SGD failure/ownership checks, a 300-step multiclass logits-loss fixture,
 and a 400-step affine LayerNorm learning fixture run
 on every installed release wheel before upload. This is a mechanics gate,
 not a claim about LLM fine-tuning quality.
+`tools/smoke_learning_stack.py` additionally exercises the installed native
+Sequential forward capture, a 24-update shared-Topos learning loop and exact
+weight-only prediction handoff, WaveGate/Elliptic/fractional-history VJPs against
+finite differences, and owned typed-buffer transport. It round-trips the
+resident Linear/GELU/LayerNorm/Topos plan but does not dispatch a GPU; passing
+this portable release smoke is not evidence of real-GPU execution. The same
+smoke runs for manual wheel artifacts and PR CI. Its isolated regression also
+blocks Torch, NumPy, Transformers, and pytest to check the dependency-light
+native route, rather than skipping missing features.
 Catalog v4 records every normal-admission profile plus
 Rust-owned byte/node/depth limits
 for serialized Python/WASM surfaces; typed Rust admission has no serialized
