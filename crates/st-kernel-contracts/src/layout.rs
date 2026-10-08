@@ -179,6 +179,14 @@ impl NdLayout {
         Ok(next)
     }
 
+    /// Select one index and remove its axis without changing storage order.
+    pub fn select(&self, axis: usize, index: usize) -> Result<Self, NdLayoutError> {
+        let mut next = self.narrow(axis, index, 1)?;
+        next.shape.remove(axis);
+        next.strides.remove(axis);
+        Ok(next)
+    }
+
     pub fn reshape(&self, shape: &[usize]) -> Result<Self, NdLayoutError> {
         let mut next = Self::contiguous(shape)?;
         if !self.is_contiguous() || next.len != self.len {
@@ -260,6 +268,34 @@ pub fn broadcast_shape(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdLay
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_preserves_strides_offsets_broadcasts_and_scalar_views() {
+        let base = NdLayout::contiguous(&[2, 3, 4]).unwrap();
+        let view = base.permute(&[2, 0, 1]).unwrap().select(1, 1).unwrap();
+        assert_eq!(view.shape(), &[4, 3]);
+        assert_eq!(view.strides(), &[1, 4]);
+        assert_eq!(view.offset(), 12);
+        assert_eq!(view.len(), 12);
+        assert_eq!(view.required_storage_len().unwrap(), 24);
+        let broadcast = NdLayout::contiguous(&[3])
+            .unwrap()
+            .broadcast_to(&[5, 3])
+            .unwrap();
+        assert_eq!(broadcast.select(0, 4).unwrap().offset(), 0);
+        let scalar = NdLayout::contiguous(&[3]).unwrap().select(0, 2).unwrap();
+        assert!(scalar.shape().is_empty());
+        assert_eq!(scalar.len(), 1);
+        assert_eq!(scalar.offset(), 2);
+        let empty = NdLayout::contiguous(&[0, 3]).unwrap().select(1, 2).unwrap();
+        assert_eq!(empty.shape(), &[0]);
+        assert_eq!(empty.len(), 0);
+        assert!(base.select(0, 2).is_err());
+        assert!(base.select(3, 0).is_err());
+        assert!(base.select(0, usize::MAX).is_err());
+        assert!(NdLayout::contiguous(&[0, 3]).unwrap().select(0, 0).is_err());
+        assert!(scalar.select(0, 0).is_err());
+    }
 
     fn check_rows(layout: &NdLayout) {
         let actual = layout.row_major_rows();

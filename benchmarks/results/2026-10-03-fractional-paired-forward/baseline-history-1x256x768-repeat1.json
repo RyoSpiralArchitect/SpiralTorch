@@ -1,0 +1,163 @@
+{
+  "schema": "spiraltorch.fractional_learning_benchmark.v1",
+  "status": "measured",
+  "shape": [
+    1,
+    256,
+    768
+  ],
+  "kernel_len": 32,
+  "alpha": 0.9,
+  "step": 1.0,
+  "map": "history",
+  "seed": 239,
+  "input_requires_grad": false,
+  "alpha_requires_grad": true,
+  "dtype": "float32",
+  "device": "cpu",
+  "threads": 2,
+  "native_profile_declared": "release",
+  "native_sha256": "03688b35493309801bcd1c269fcd09442d0b9af572c043a97e7fdeee3dd76d0b",
+  "bridge_sha256": "c0e9e68e31d6ded0540cd2c5f431d69a18e578e218c9e66cc7cb2b8f5c046447",
+  "benchmark_sha256": "ceb0822fdb9e0f0698c48465924b4cf87352824cc91a39eddfd62d2d952e9b4c",
+  "input_sha256": "5734e5cf9522cfc656a3ad1e46fba3ef3258be2165e551532f869838f21dee9f",
+  "upstream_sha256": "3dab55a6cc65fa11ddeeee742c0a018ad12fc0c76f77cb3b758c92f3e2dd2c4b",
+  "torch": "2.12.1",
+  "machine": "arm64",
+  "correctness": {
+    "rust_joint": {
+      "max_abs_output_error": 0.0,
+      "abs_alpha_gradient_error": 0.0,
+      "alpha_gradient": -34.19247055053711,
+      "output_sha256": "3474f83122c681d805206efcd5bdaacaa5a5a8463020019a5c9ad088fbd24a75",
+      "alpha_gradient_sha256": "1597dd91ce44e990d9dd62f32236aeec4a895e8be7487baf8ebf89b1bc21bec9"
+    },
+    "rust_selective": {
+      "max_abs_output_error": 0.0,
+      "abs_alpha_gradient_error": 0.0,
+      "alpha_gradient": -34.19247055053711,
+      "output_sha256": "3474f83122c681d805206efcd5bdaacaa5a5a8463020019a5c9ad088fbd24a75",
+      "alpha_gradient_sha256": "1597dd91ce44e990d9dd62f32236aeec4a895e8be7487baf8ebf89b1bc21bec9"
+    },
+    "torch_conv1d": {
+      "max_abs_output_error": 2.384185791015625e-07,
+      "abs_alpha_gradient_error": 1.1444091796875e-05,
+      "alpha_gradient": -34.192481994628906,
+      "output_sha256": "ed5d30c5e63bff1adb4c02f854772e026d8aac5c193b6c9d720a727730206db0",
+      "alpha_gradient_sha256": "252b6d7535fcd80378701c969081a3790395a48969988e3fc8a6908ee45297d4"
+    }
+  },
+  "round_order": [
+    [
+      "rust_joint",
+      "rust_selective",
+      "torch_conv1d"
+    ],
+    [
+      "rust_joint",
+      "torch_conv1d",
+      "rust_selective"
+    ],
+    [
+      "rust_selective",
+      "rust_joint",
+      "torch_conv1d"
+    ],
+    [
+      "rust_selective",
+      "torch_conv1d",
+      "rust_joint"
+    ],
+    [
+      "torch_conv1d",
+      "rust_joint",
+      "rust_selective"
+    ],
+    [
+      "torch_conv1d",
+      "rust_selective",
+      "rust_joint"
+    ],
+    [
+      "rust_joint",
+      "rust_selective",
+      "torch_conv1d"
+    ],
+    [
+      "rust_joint",
+      "torch_conv1d",
+      "rust_selective"
+    ],
+    [
+      "rust_selective",
+      "rust_joint",
+      "torch_conv1d"
+    ],
+    [
+      "rust_selective",
+      "torch_conv1d",
+      "rust_joint"
+    ],
+    [
+      "torch_conv1d",
+      "rust_joint",
+      "rust_selective"
+    ],
+    [
+      "torch_conv1d",
+      "rust_selective",
+      "rust_joint"
+    ]
+  ],
+  "warmup_per_route": 2,
+  "measurements_ms": {
+    "rust_joint": [
+      39.204291,
+      35.723125,
+      33.804333,
+      33.250625,
+      43.359042,
+      34.028416,
+      33.728916,
+      33.798958,
+      35.19525,
+      33.45725,
+      33.6745,
+      37.40775
+    ],
+    "rust_selective": [
+      26.831625,
+      22.013375,
+      21.866709,
+      20.446667,
+      22.401292,
+      20.770208,
+      21.138375,
+      21.492875,
+      26.3705,
+      21.406208,
+      21.14075,
+      21.215416
+    ],
+    "torch_conv1d": [
+      3.059958,
+      2.702542,
+      2.799708,
+      2.610875,
+      2.650042,
+      2.570834,
+      2.970667,
+      2.949542,
+      2.601125,
+      2.902083,
+      2.985125,
+      2.733667
+    ]
+  },
+  "median_ms": {
+    "rust_joint": 33.9163745,
+    "rust_selective": 21.449541500000002,
+    "torch_conv1d": 2.7666874999999997
+  },
+  "scope": "Same finite GL map and requested order VJP; forward, AD and native host transport included. CPU float32 interfaces; backend accumulation differs within declared tolerance. Not a quality, GPU, adapter/model throughput or general-library speed claim. Native profile is declared, not inferred from the binary."
+}

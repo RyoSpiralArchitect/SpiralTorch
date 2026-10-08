@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
+import subprocess
+import textwrap
 import unittest
 
 
@@ -12,6 +15,52 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_package_version_matches_native_manifest_and_lock(self) -> None:
+        metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
+        version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
+        manifest = (ROOT / "bindings/st-py/Cargo.toml").read_text(encoding="utf-8")
+        native_version = re.search(r'^version = "([^"]+)"$', manifest, re.MULTILINE).group(1)
+        self.assertEqual(native_version, version)
+        lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
+        locked_versions = re.findall(
+            r'^name = "spiraltorch-py"\nversion = "([^"]+)"$', lock, re.MULTILINE
+        )
+        self.assertEqual(locked_versions, [version])
+
+    def test_manual_publish_contract_rejects_missing_tag_before_build(self) -> None:
+        workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")
+        contract = workflow.split("\n  release_contract:\n", 1)[1].split("\n  wheels:\n", 1)[0]
+        script = textwrap.dedent(contract.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0])
+        metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
+        version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
+        for publish, tag, expected_code in (("true", "", 1), ("false", "", 0),
+                                            ("true", f"v{version}", 0)):
+            with self.subTest(publish=publish, tag=tag):
+                env = dict(os.environ, EVENT_NAME="workflow_dispatch", REF_NAME="main",
+                           INPUT_PUBLISH_PYPI=publish, INPUT_RELEASE_TAG=tag,
+                           INPUT_CHECKOUT_REF=tag)
+                result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env,
+                                        text=True, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, expected_code, result.stdout + result.stderr)
+                if expected_code:
+                    self.assertIn("publish_pypi=true requires release_tag", result.stderr)
+        self.assertIn("INPUT_PUBLISH_PYPI: ${{ inputs.publish_pypi }}", contract)
+
+    def test_direct_pypi_publish_waits_for_verified_github_release(self) -> None:
+        workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")
+        publish = workflow.split("\n  pypi:\n", 1)[1].split("\n  verify_pypi:\n", 1)[0]
+        needs = publish.split("\n    needs:", 1)[1].split("\n    if:", 1)[0]
+        self.assertEqual(set(re.findall(r"^      - (\w+)$", needs, re.MULTILINE)),
+                         {"wheels", "attach"})
+        self.assertIn("github.event_name == 'workflow_dispatch'", publish)
+        self.assertIn("inputs.publish_pypi == 'true'", publish)
+        self.assertNotIn("always()", publish)
+        self.assertNotIn("continue-on-error", publish)
+        attach = workflow.split("\n  attach:\n", 1)[1]
+        self.assertIn("    needs: wheels\n", attach)
+        self.assertNotIn("continue-on-error", attach)
+        self.assertIn("await finalize({", attach)
+
     def test_draft_recovery_reads_exact_retained_payload_without_regeneration(self) -> None:
         recovery = (ROOT / ".github/workflows/recover_github_release.yml").read_text()
         self.assertIn("recoveryArtifact({", recovery)
@@ -66,7 +115,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_release_docs_match_active_package_version(self) -> None:
         metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
         version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
-        for path in ["README.md", "docs/ops/release.md"]:
+        for path in ["docs/ops/release.md"]:
             with self.subTest(path=path):
                 text = (ROOT / path).read_text(encoding="utf-8")
                 versions = re.findall(r"\b(?:VERSION=|release_tag=v)(\d+\.\d+\.\d+)", text)

@@ -1,0 +1,100 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust anchored elliptic learning</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {EllipticWarpKernel} from "/module/spiraltorch_wasm.js";
+const out = document.querySelector("#result");
+const report = {schema:"spiraltorch.elliptic_anchored_browser.v1",status:"running"};
+function assert(ok, message) { if (!ok) throw Error(message); }
+function reject(fn) {
+  let rejected=false;
+  try { const value=fn(); value?.free(); } catch { rejected=true; }
+  assert(rejected,"expected rejection");
+}
+let kernel, snapshot;
+try {
+  await init();
+  kernel=new EllipticWarpKernel(1,3,2,64);
+  const x=new Float32Array([1,.2,.3, 1,-.4,.2, 1,.5,-.6, 1,-.3,-.2]);
+  const seed=Float32Array.from({length:36},(_,i)=>Math.cos(i*.3));
+  function loss(input,raw) {
+    const batch=kernel.forwardAnchored(input,raw);
+    try { return batch.features.reduce((sum,v,i)=>sum+v*seed[i],0); }
+    finally { batch.free(); }
+  }
+  report.vjp_errors=[];
+  for(const raw of [-.7,0,.8]) {
+    const batch=kernel.forwardAnchored(x,raw);
+    const g=batch.vjp(seed);
+    try {
+      let error=0;
+      const dx=g.orientations;
+      for(let i=0;i<x.length;i++) {
+        const plus=x.slice(),minus=x.slice(); plus[i]+=.001; minus[i]-=.001;
+        error=Math.max(error,Math.abs((loss(plus,raw)-loss(minus,raw))/(plus[i]-minus[i])-dx[i]));
+      }
+      const hi=Math.fround(raw+.001),lo=Math.fround(raw-.001);
+      const gateError=Math.abs((loss(x,hi)-loss(x,lo))/(hi-lo)-g.rawMix);
+      assert(error<.004 && gateError<.004,"joint VJP finite differences");
+      report.vjp_errors.push({raw,orientation:error,gate:gateError});
+      if(raw===0) {
+        const local=kernel.forward(x);
+        try {
+          assert(batch.features.every((v,i)=>Object.is(v,local.features[i])),"zero forward not exact");
+          assert(dx.every((v,i)=>Object.is(v,local.vjp(seed)[i])),"zero VJP not exact");
+          assert(Math.abs(g.rawMix)>.01,"gate cannot start learning");
+        } finally { local.free(); }
+      }
+    } finally { g.free(); batch.free(); }
+  }
+  snapshot=kernel.forwardAnchored(x,-.3);
+  const owned=snapshot.features;
+  const first=new Float32Array(36); first.fill(1,0,9);
+  const firstG=snapshot.vjp(first);
+  try {
+    assert(firstG.orientations.slice(3).every(v=>v===0),"cross-row VJP leak");
+    assert(firstG.rawMix!==0,"single-token gate should learn against the fixed anchor");
+  } finally { firstG.free(); }
+  const changed=x.slice(); changed[4]+=2; changed[7]-=2;
+  const other=kernel.forwardAnchored(changed,-.3);
+  try { assert(other.features.slice(0,9).every((v,i)=>v===owned[i]),"cross-row forward leak"); }
+  finally { other.free(); }
+  owned.fill(NaN); assert(snapshot.features.every(Number.isFinite),"snapshot alias");
+  for(const bad of [NaN,Infinity,-Infinity,1e100,"0",null,true])
+    reject(()=>kernel.forwardAnchored(x,bad));
+  reject(()=>kernel.forwardAnchored(new Float32Array(195),0));
+  reject(()=>kernel.forwardAnchored(new Float32Array([0,0,1]),100));
+  reject(()=>snapshot.vjp(new Float32Array(36).fill(NaN)));
+  const empty=kernel.forwardAnchored(new Float32Array(),0);
+  const emptyG=empty.vjp(new Float32Array());
+  try { assert(empty.features.length===0 && emptyG.rawMix===0,"empty batch"); }
+  finally { emptyG.free(); empty.free(); }
+  const targetBatch=kernel.forwardAnchored(x,-.6);
+  const target=targetBatch.features; targetBatch.free();
+  let raw=0;
+  const losses=[];
+  for(let step=0;step<=150;step++) {
+    const batch=kernel.forwardAnchored(x,raw);
+    try {
+      const values=batch.features;
+      losses.push(values.reduce((sum,v,i)=>sum+(v-target[i])**2/36,0));
+      if(step===150)break;
+      const g=batch.vjp(Float32Array.from(values,(v,i)=>2*(v-target[i])/36));
+      try { raw=Math.fround(raw-.3*g.rawMix); } finally { g.free(); }
+    } finally { batch.free(); }
+  }
+  assert(losses.at(-1)<losses[0]*.05,"Rust anchored gate did not learn");
+  report.learning_losses=losses; report.learned_raw_mix=raw;
+  const before=snapshot.vjp(seed);
+  const expected=before.orientations,expectedGate=before.rawMix; before.free();
+  kernel.free(); kernel=null;
+  const after=snapshot.vjp(seed);
+  try {
+    assert(after.rawMix===expectedGate && after.orientations.every((v,i)=>v===expected[i]),"snapshot lifetime");
+  } finally { after.free(); }
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+finally { snapshot?.free(); kernel?.free(); }
+out.textContent=JSON.stringify(report,null,2); out.dataset.status=report.status;
+</script>

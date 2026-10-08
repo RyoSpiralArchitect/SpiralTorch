@@ -1,0 +1,21 @@
+{
+  "schema": "spiraltorch.wave_gate_radius_protocol.v1",
+  "scope": "paired 32-update radius pilot; not whole-book FT or a speed benchmark",
+  "model_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "corpus_sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+  "corpus_end_marker": "*** END OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***",
+  "block": "transformer.h.0.mlp",
+  "features": 768,
+  "seeds": [41, 43, 47],
+  "arms": ["off", "tangent", "wave_gate_radius1", "wave_gate_radius4", "wave_gate_learnable_radius1", "wave_gate_learnable_radius4"],
+  "steps": 32,
+  "batch_size": 2,
+  "block_size": 128,
+  "development_blocks": 16,
+  "train_probe_blocks": 8,
+  "evaluate_every": 8,
+  "learning_rate": 0.001,
+  "strength": 0.1,
+  "threads": 2,
+  "interpretation": "Fixed endpoint and all conditions reported. Seed-specific batches are exactly paired. Radius arms share Rust f64 intermediate math; fixed/learnable compare identical initial radii. Learnable radius adds one scalar beyond 1536 gate/bias parameters, so it is not parameter-count-matched to tangent. Sparse development probe is already used, not an untouched test set. No significance, generalization or speed claim."
+}

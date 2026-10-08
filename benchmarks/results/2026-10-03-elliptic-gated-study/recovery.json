@@ -1,0 +1,29 @@
+{
+  "schema": "spiraltorch.local_study_recovery.v1",
+  "observed_at": "2026-10-02T16:58:40.688Z",
+  "study_id": "24ab0ab87cfeecd63371faf27f8ce5876f571d80902cc88659795251b3fe1cb1",
+  "prior_process": "tool handle missing; matching OS process absent",
+  "prior_exit_code": null,
+  "cause": "unknown; not inferred from an unfinished journal",
+  "verified_saved_checkpoints": [
+    "41:tangent",
+    "41:elliptic",
+    "41:gated_tangent",
+    "41:gated_elliptic",
+    "43:tangent"
+  ],
+  "completed_runs": [
+    "41:tangent",
+    "41:elliptic",
+    "41:gated_tangent",
+    "41:gated_elliptic"
+  ],
+  "resume_cursor": {
+    "run": "43:tangent",
+    "step": 64
+  },
+  "journal_before_sha256": "e86de2f43308e8487ee1c381f9fba2b723b27bbcc7244bf805685d659679a964",
+  "prior_log_sha256": "66962a9bd8ba5423effb557cd6347df24ed4989c410e22c5a08ece26fcc01c40",
+  "source_and_native_hashes": "matched sealed plan",
+  "lost_unsaved_updates": "unknown; resume from committed cursor only"
+}

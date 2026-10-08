@@ -1,0 +1,84 @@
+{
+  "schema": "spiraltorch.topos_saturation_inlining.v1",
+  "status": "measured",
+  "source_revision": "9c37f618896ef985b4befde0ec7fb2da5366bf12",
+  "parent_revision": "fc2fb987cac9765bdf2c5f3e398f8e09ecf4197d",
+  "baseline_runtime_source": "bfdbbc3035a4e67f179913933f53a6eae35b60c9",
+  "change": "Four cross-crate inline hints; no formula, loop, audit, validation or derivative changes.",
+  "hardware": "Apple M4",
+  "native_rust": "1.97.0",
+  "wasm_clippy_rust": "1.99.0",
+  "primary_processes": 32,
+  "pilot_processes": 12,
+  "screen_processes": 1,
+  "pairs_per_condition": 4,
+  "order": "AB, BA, BA, AB",
+  "aggregation": "Median of four process medians per phase; paired_ratios are individual before/after medians.",
+  "rows": [
+    {
+      "iterations": 4,
+      "size": "small",
+      "paired_ratios": [
+        0.7761197691764152,
+        1.113349960619585,
+        1.5751137043892305,
+        1.2191203911994866
+      ],
+      "before_ms": 0.08086475,
+      "after_ms": 0.07061425,
+      "bulk_before_ms": 0.1051455,
+      "bulk_after_ms": 0.08840599999999998,
+      "torch_before_ms": 0.2174585,
+      "torch_after_ms": 0.21834375
+    },
+    {
+      "iterations": 4,
+      "size": "large",
+      "paired_ratios": [
+        0.8691118902380073,
+        1.024231921198046,
+        1.096261165100304,
+        1.1239909582845369
+      ],
+      "before_ms": 6.492562749999999,
+      "after_ms": 6.127572750000001,
+      "bulk_before_ms": 8.3316665,
+      "bulk_after_ms": 7.33945825,
+      "torch_before_ms": 4.62909375,
+      "torch_after_ms": 4.765072999999999
+    },
+    {
+      "iterations": 16,
+      "size": "small",
+      "paired_ratios": [
+        1.098911414970889,
+        1.1383106365108884,
+        1.3707751928683696,
+        1.3156765799256505
+      ],
+      "before_ms": 0.17260425000000001,
+      "after_ms": 0.1422605,
+      "bulk_before_ms": 0.32427075,
+      "bulk_after_ms": 0.2594065,
+      "torch_before_ms": 0.8001247499999999,
+      "torch_after_ms": 0.8091042500000001
+    },
+    {
+      "iterations": 16,
+      "size": "large",
+      "paired_ratios": [
+        1.0150463557419196,
+        1.025488419174096,
+        1.0272060132341656,
+        1.0330185262306157
+      ],
+      "before_ms": 23.05376075,
+      "after_ms": 22.589333,
+      "bulk_before_ms": 37.99969825,
+      "bulk_after_ms": 32.50142674999999,
+      "torch_before_ms": 18.751614500000002,
+      "torch_after_ms": 18.7850415
+    }
+  ],
+  "scope": "CPU forward plus input and broadcast-gate gradients, transport and reduction included. No confidence interval, browser, WebGPU, full-model throughput or quality claim. Large captured inputs remain slower than Torch; negative pairs retained."
+}

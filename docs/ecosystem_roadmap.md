@@ -2,6 +2,145 @@
 
 SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape for the Python bindings, and a TypeScript-powered collaboration canvas. This document captures the near-term ecosystem priorities so contributors can converge on the same themes while the core crates continue to evolve.
 
+## Learning Geometry Rail
+
+Return the main research effort to language-model learning, while retaining the
+vision correctness fixtures as regression controls. Keep the pure speed race
+limited to PyTorch-equivalent computation. Novel geometry earns its place via
+actual gradients/updates, stability and matched learning controls, with extra
+compute and transfers reported separately.
+
+The [shared adapter placement API](geometry_adapter_stack.md) now exposes explicit
+multi-site learning through `spiraltorch.GeometryAdapterStack`. It keeps model
+ownership and parameter names intact while composing the existing Rust-backed
+WaveGate, Topos, elliptic and fractional adapters. Tiny GPT-2/Llama comparisons
+cover gradients and exact state continuation. This closes example-only placement
+wiring; it does not establish that combining geometries improves model quality.
+
+The first [geometric learning bridge](geometric_learning_bridge.md) connects the
+existing Rust Topos recurrence and VJP to a zero-initialized Torch residual gate
+and to a browser forward/VJP client. A random tiny HF loss updates that gate;
+the three-seed control experiment does **not** establish a quality advantage.
+The [elliptic/Lie connection](elliptic_learning_bridge.md) now repairs near-pole
+derivatives and large finite norms, owns batched VJPs in Rust, and reaches both
+trainable projections in a bounded pretrained GPT-2 run. Its tangent-linear
+control performs better on the tiny authored corpus; this is not a quality win.
+The [WaveGate pullback repair](wave_gate_learning.md) now includes the missing
+parameter saturation derivative, separates raw VJPs from training-policy rewrites,
+and hardens shared CPU/WGPU projection arithmetic. Its Rust/Python Tensor API is
+available, together with an owned Rust forward snapshot consumed by a Torch
+residual adapter and a WASM learning client. Isolated off/tangent/WaveGate
+controls precede combinations. Rust owns each geometric
+rule; Python/WASM own transport and orchestration, not replacement mathematics.
+Pretrained FT quality, mixed precision and resident geometric execution remain
+open, rather than being inferred from the wiring tests.
+
+The [paired novel conditioning pilot](../benchmarks/results/2026-10-02-wave-gate-pride-conditioning/README.md)
+now exercises 12 conditions and actual adapter/Adam continuation. WaveGate learns,
+but the tangent control is slightly better in all three minibatch schedules.
+No logged training input reaches elementwise saturation; relaxing its threshold
+changes nothing. Rust-owned projection-gain observations instead motivate testing
+an explicitly parameterized, learnable projection radius with a preserved initial
+gain. The [radius pilot](../benchmarks/results/2026-10-02-wave-gate-pride-radius/README.md)
+now connects that scalar through Rust/Python/WASM and completes 18 conditions.
+All 15 active adapter/Adam continuations match exactly. Learning radius improves
+its fixed-radius controls very slightly, but tangent remains best in all seeds.
+Widening radius approaches the linear map, not proof of geometric advantage.
+The [fixed 512-update study](../benchmarks/results/2026-10-02-wave-gate-long-horizon/README.md)
+now completes all nine runs, exact continuations and delayed evaluation on 120
+unused within-book blocks and 32 transfer-book blocks. Every active arm improves
+versus the frozen baseline, but tangent remains best for every seed on both sets.
+Learned radius grows from 4 to about 9.2-9.3 and improves fixed radius without
+closing that gap. Nonlinear controls and directional/relational geometry remain
+open; this is an implemented learning mechanism, not a geometric quality or
+speed win. CI now exercises the geometric clients and exact tiny-HF continuation
+instead of leaving that coverage solely in local experiments.
+
+The [causal factorial](elliptic_causal_study.md) and
+[learned-context comparison](elliptic_gated_study.md) retain ordinary tangent
+controls as the stronger learning path. A signed context gate modestly improves
+the elliptic mean, but geometry still loses in every seed on both reused sets.
+The [frozen-checkpoint intervention](elliptic_context_ablation.md) then separates
+local gain, fixed-anchor correction and true context; its outcomes are not
+retraining evidence. The resulting [Rust-owned anchored operator](elliptic_anchored_learning.md)
+connects the same input/shared-gate VJPs to Python/HF and WASM without adding a
+sequence cache or quadratic anchor attention.
+
+The [anchored training study](../benchmarks/results/2026-10-03-elliptic-anchored-study/README.md)
+now completes four equally parameterized arms across three seeds and 512 updates
+each. Fixed-anchor elliptic improves over gated-context elliptic in all seeds on
+both sets (-0.028651 mean Pride CE, -0.011172 Alice), but ordinary anchored tangent
+still wins every seed (+0.116164 and +0.064956 primary geometry gaps). All saved
+states and exact continuations are verified; six old-control replays are not
+independent confirmations. Before adding another mixer, inspect nonlinear chart
+feature/gradient conditioning against the ordinary control. The experiment does
+not establish that conditioning causes the remaining gap, nor any speed advantage.
+
+The [directional learning connection](elliptic_directional_learning.md) now adds
+native pointwise/anchored JVPs beside those VJPs, including Python forward-mode
+and a WASM client. A training-only frozen-checkpoint probe separates increased
+directional anisotropy from a uniform gradient-collapse claim. Composed JVP/VJP
+operators drive a bounded synthetic Gauss-Newton fit; no alternate gradient is
+silently inserted into the production adapter. Whether this helps actual LM
+optimization remains a matched-training question, not a concluded quality win.
+
+The [chart-step study](../benchmarks/results/2026-10-03-elliptic-chart-step-study/README.md)
+now completes four matched arms across three seeds. Rust's mean two-coordinate
+metric corrects an explicit Adam proposal while preserving that proposal's norm;
+ordinary tangent receives the same optimizer treatment as the geometric arm.
+All twelve 512-update runs and exact continuations pass. The correction changes
+elliptic directions substantially (mean cosine 0.531-0.561), but mean CE changes
+by +0.001270 on Pride and -0.003290 on Alice versus ordinary elliptic Adam, with
+only one improving seed per set. Tangent remains better in every seed. Six Adam
+controls exactly reproduce their historical states; this is not independent
+replication. Keep the correction explicit and experimental rather than making
+it a default or claiming that a mean chart metric fixes the remaining gap.
+
+The [fractional memory bridge](fractional_learning.md) independently connects
+the existing `st-frac` causal GL map, input VJP and shared-order alpha derivative
+to Rust snapshots, optional Torch AD and a WASM learning client. A tiny HF loss
+updates the identity-start gate and alpha with exact Adam continuation; an
+actual wasm32 synthetic fit learns its target order. This is finite-history,
+host-f32 learning connectivity, not pretrained quality or resident performance.
+Matched pointwise/fixed-order/learned-order controls precede any combination
+with the geometric adapters above.
+The [paired Rust forward](../benchmarks/results/2026-10-03-fractional-paired-forward/README.md)
+shares output/order-differential input reads and tiles trailing features without
+changing that map. Native-binary GPT-2 update parity and actual wasm32 regressions
+pass. Its matched Python-inclusive CPU operator time improves, while remaining
+slower than the ordinary Torch reference; list-based host transport remains a
+separate optimization target. This is not a model-quality or resident-GPU claim.
+The [fractional LM protocol](fractional_memory_study.md) now makes these three
+active controls executable with paired schedules, a shared frozen baseline,
+fixed/learned-order receipts and exact interruption/resume tests. The
+[completed nine-run result](../benchmarks/results/2026-10-03-fractional-memory-study/README.md)
+verifies all 4608 updates and continuations. Learned alpha reaches 0.7733-0.8269;
+it slightly improves fixed GL on Pride and slightly worsens it on Alice. The
+pointwise control remains best in every seed on both sets, so the shared Rust
+learning connection is established without claiming a quality or speed win.
+
+Its independent local/history follow-up keeps the ordinary pointwise gain
+separate from Rust's strictly-past fractional taps. The same snapshot and true
+input/order derivatives reach Rust, Python AD and WASM, without subtracting
+large rounded current values. `FractionalHistoryAdapter` is an experimental
+`2*F+1`-parameter alternative, not a replacement for the `F+1` full-GL adapter
+or a capacity-matched quality win. Its causal, joint-learning and resume
+fixtures are complemented by a pretrained comparison with ordinary causal
+controls; do not mix different mathematics into the PyTorch speed track.
+The [completed independent-history study](fractional_history_study.md) compares pointwise,
+learned ordinary EMA, fixed GL history and learned GL history under the same
+three-seed/512-update schedule. Matching the learned arms' parameter count is
+not matching their filter prior or compute. All twelve runs and exact Adam
+continuations completed: learned GL slightly improves over learned EMA in
+every seed on both reused evaluation sets, while EMA beats fixed-order GL.
+Learned alpha moves near 1, where strict GL becomes a single previous-step
+map. The [completed ordinary single-lag study](fractional_lag_study.md) confirms
+exact Torch-shift/fixed-Rust parity through saved Adam states and endpoints.
+Learning from one improves both reused sets in all three seeds, but its order
+moves near two, where GL history is a short two-tap map. Fixed-two controls and
+bounded-history ablations remain necessary; this is not proof that long
+fractional memory, rather than short causal mixing, explains the difference.
+
 ## Restarted execution slice: vision across Rust, Python, and browser
 
 Current scope of the vision execution path:
@@ -19,7 +158,8 @@ Current scope of the vision execution path:
 | Portable input checkpoint | Order/cursor, shuffle and transform RNG | Same Rust loader/transform state | Transform state; integrated trainer also owns order/cursor/shuffle |
 | Unified resident training boundary | Model/input/schedule owner, explicit settlement and bound checkpoint | Thin Rust-owned trainer client | Same Rust owner, async settlement; fresh-document and cross-runtime restart exercised |
 | Matched real-image learning correctness | Rust/WGPU execution via Python client | Bounded CIFAR-10 / PyTorch comparison; shared-trainer native process restart | Open |
-| Transfer-inclusive training throughput and memory | Open | Open | Open |
+| Transfer-inclusive training throughput | Rust/WGPU execution via Python client | Bounded matched native timing; large-batch gap remains | Open |
+| Training peak GPU memory | Open | Open | Open |
 
 The compiled ConvNeXt training path now connects model-owned gradients to
 resident parameter updates with version checks, stale-gradient rejection and
@@ -99,6 +239,16 @@ browser real-image restart, throughput or a Z-space policy advantage.
    recording that environment separately. Neither synthetic loss decrease nor
    kernel timings close these remaining gates; new model families or a model
    hub are not prerequisites.
+   The [first transfer-inclusive timing sweep](../benchmarks/results/2026-10-02-vision-training-throughput/README.md)
+   now completes 180 workers across three seeds, batches 1/16/64 and both plain
+   and identity-feedback modes. All final weights match the eager Torch
+   reference within the existing bound; all 90 baseline/candidate Rust
+   checkpoints are identical. Combining receipt and feedback-scalar readback
+   preserves correctness but does not establish a general speedup. The
+   large-batch throughput gap remains around 21x on this small Apple M4 model.
+   Profile GPU passes, then optimize the measured dominant reductions; do not
+   label host settlement time as mapping-only cost. Peak GPU memory and browser
+   real-image throughput remain open gates.
 2. **Restartable input and trainer state.** Keep model snapshots distinct from
    data order/cursor, augmentation RNG and schedule state, then connect their
    restart contracts. Specify whether rejected updates retry or consume a batch.
@@ -134,9 +284,97 @@ browser real-image restart, throughput or a Z-space policy advantage.
    rerun the same controls; do not count more reports or tuned seeds as progress.
    The [fixed-model probe](../benchmarks/results/2026-10-01-vision-feedback-stationarity/README.md)
    now shows substantial gate activity on all six frozen initial/final models,
-   despite stable full-pass loss. Next implement an opt-in, checkpointed Rust
-   observation window and compare it with the existing default. Coverage-based
-   aggregation is a candidate, not a demonstrated quality or stability improvement.
+   despite stable full-pass loss. An opt-in, checkpointed
+   [Rust observation window](resident_vision_feedback.md#optional-observation-windows)
+   now preserves partial aggregates and the original default. Native/Python/WASM
+   checks cover windowed transitions and restart. The
+   [window comparison](../benchmarks/results/2026-10-01-vision-feedback-window/README.md)
+   now completes matched learning and latency probes: frozen-model gate activity
+   disappears, but regression detection is delayed and learning does not improve
+   over the relevant controls. Retain the default, preserve this negative result,
+   and advance transfer-inclusive execution measurements rather than tune until
+   these development seeds favor a window. Model-derived proposal production and
+   its latent-state restart remain separate future optimizer gates.
+
+### Focus Handoff: Back To Language Models
+
+The [bounded convolution diagnostic](../benchmarks/results/2026-10-02-vision-vjp-profile/README.md)
+closes this vision execution slice without claiming the remaining performance
+gap is solved. All 54 cases preserve both routes' complete reference checkpoints.
+At batch 64 the existing convolution VJP passes total about 3.2 ms against a
+roughly 63 ms profiled host step. The rest is unattributed; neither convolution
+dominance nor a mapping-only explanation follows. Shared NN graph backward and
+execution waits remain candidates to examine on language-model workloads.
+Browser real-image restart, peak memory and useful vision policy remain open,
+but are not prerequisites for returning the main development effort to LLMs.
+
+The next learning slice is the existing Rust-owned repetition-unlikelihood
+objective used by HF/PEFT, not another reporting surface or a complete HF
+backend replacement. The retained
+[GPT-2 long-horizon result](benchmarks/hf_periodic_gpt2_pride_full_corpus_256step_20260823.json)
+records early benefit followed by later reversal and unequal auxiliary-loss
+magnitudes at equal nominal strength. This motivates testing an explicit Rust
+objective budget/normalization or update-time schedule, not declaring cumulative
+over-application proven. Preserve the current default as a frozen control;
+include gradient accumulation, masked tokens and resumed optimizer-update clocks
+in the new contract. Then compare ordinary FT, the frozen intervention and one
+prespecified candidate over the same longer horizon with fresh seeds, held-out
+causal-LM loss and generated-text assessment. Decoding-only controls must not
+stand in for a learning improvement. HF retains its differentiable model graph;
+resident Linear/normalization/adapter execution can migrate in separately tested
+slices rather than delaying this learning question for a complete decoder port.
+
+The [aligned schedule comparison](../benchmarks/results/2026-10-02-llm-schedule-v2/README.md)
+now completes nine 256-update runs and all 432 continuations. Ordinary FT learns,
+but decay loses to both constant intervention and ordinary FT on the final loop
+score in all three seeds. The held-out-loss safety margin passes, not a claim of
+equivalent loss or better language. Keep this negative result and the separately
+invalidated v1 attempt; do not extend schedule search until these seeds favor it.
+
+The next language rails preserve Z-Space integration and independent PyTorch
+controls rather than choosing between them:
+
+1. **Improve the learning mechanism.** Inspect teacher-forced candidate exposure
+   and generated-context repetition using the shared Rust periodicity rules.
+   Candidate selection, objective budget and control semantics stay in Rust;
+   Python/HF and WASM expose the same contracts. A generated-context intervention
+   is a hypothesis, not an established fix. Freeze new quality controls and
+   account for extra compute before testing it; never turn held-out prompts into
+   training data.
+2. **Connect resident causal attention and Z-bias.** Carry Q/K/V projections,
+   causal attention and output projection without intermediate host readback.
+   Compare both zero-bias and the same nonzero geometric bias with PyTorch, so
+   the numerical reference computes the same operation. Masking, sequence/head
+   layout and cached-query offsets require explicit shared semantics before KV
+   cache expansion; do not implement a separate client-side interpretation.
+   The [first resident forward slice](resident_zspace_attention.md) now covers
+   causal offsets and both score biases, with matched PyTorch fixtures on native
+   WGPU and browser WebGPU. Frozen QKV/output projection lowering now connects
+   existing `Linear` and `ZRBFAttention` parameters and geometric bias without
+   activation readback, with 12 matched full-chain controls on both clients.
+   This is mean-only inference; uncertainty outputs, backward, KV-cache ownership
+   and complete decoder integration remain open.
+3. **Measure the complete language path.** Require numerical agreement before
+   transfer-inclusive throughput measurements, with resident-only timings
+   labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are
+   distinct observations, not interchangeable performance evidence. Learning
+   quality remains a separate matched-model, matched-budget gate.
+   The [first full-chain comparison](../benchmarks/results/2026-10-02-attention-key-tiling/README.md)
+   now retains all plain/zero/Z-RBF controls, including a rejected unconditional
+   key-tiling rollout. A shape-selected tile improves the measured 128/256-token
+   regimes versus the previous ST kernel, but still trails PyTorch MPS; short
+   samples remain sensitive to warmup. The next
+   [projection-only comparison](../benchmarks/results/2026-10-02-attention-projection-kernels/README.md)
+   connects existing Register2x2 kernels to both projections, with native/WASM
+   parity. The explicit 16x16 preset improves the measured larger inputs, while
+   Scalar remains the default because short/device behavior is not settled.
+   Attention now reads Q/K/V and broadcast biases directly from N-D views,
+   removing their temporary materializations while preserving inherited guards.
+   The [direct-view comparison](../benchmarks/results/2026-10-02-attention-strided-inputs/README.md)
+   finds short-input gains but mixed/noisy wide-input timings; negative results
+   and a post-hoc sensitivity run are retained. Output head merging and
+   submission costs remain optimization targets. These are inference
+   measurements, not a reason to claim LLM quality gains.
 
 Other model kinds still route through legacy `SimpleCnn`; this slice changes
 only ConvNeXt. Model hub, more model families, and broader interop follow the

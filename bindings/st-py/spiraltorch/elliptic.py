@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 try:  # pragma: no cover - torch optional during build
@@ -28,13 +29,40 @@ _TORCH_ERROR_MESSAGE = (
     "PyTorch is required for elliptic autograd support; install the 'torch' package to"
     " enable this functionality."
 )
+_LAST_TELEMETRY = ContextVar("spiraltorch_elliptic_telemetry", default=None)
+
+
+class _LazyTelemetry:
+    """Keep the immutable Rust snapshot until a caller requests Python objects."""
+
+    __slots__ = ("_batch", "_data")
+
+    def __init__(self, batch: Any) -> None:
+        self._batch = batch
+        self._data = None
+
+    def get(self) -> List[Any]:
+        if self._data is None:
+            self._data = self._batch.telemetry()
+            self._batch = None
+        return self._data
+
+
+def _require_native() -> None:
+    global _EllipticWarp, _EllipticTelemetry
+    if _EllipticWarp is None:
+        # The facade imports helpers before all native classes are registered.
+        try:
+            from . import EllipticWarp as _EllipticWarp
+            from . import EllipticTelemetry as _EllipticTelemetry
+        except (ImportError, AttributeError) as error:
+            raise RuntimeError("Rust elliptic warp bindings are unavailable") from error
 
 
 def _require_torch() -> None:
     if torch is None:
         raise RuntimeError(_TORCH_ERROR_MESSAGE)
-    if _EllipticWarp is None:
-        raise RuntimeError("Rust elliptic warp bindings are unavailable")
+    _require_native()
 
 
 def _reshape(values: List[Any], shape: Sequence[int]) -> Any:
@@ -83,61 +111,70 @@ else:
 
         @staticmethod
         def forward(  # type: ignore[override]
-            ctx: torch.autograd.FunctionCtx, warp: "_EllipticWarp", orientation: "torch.Tensor"
+            ctx: torch.autograd.FunctionCtx,
+            warp: "_EllipticWarp",
+            orientation: "torch.Tensor",
         ) -> "torch.Tensor":
             _require_torch()
-            if not isinstance(warp, _EllipticWarp):  # pragma: no cover - defensive guard
+            if not isinstance(
+                warp, _EllipticWarp
+            ):  # pragma: no cover - defensive guard
                 raise TypeError("warp must be a spiraltorch.EllipticWarp instance")
-            if orientation.size(-1) != 3:
+            if (
+                not isinstance(orientation, torch.Tensor)
+                or orientation.dtype != torch.float32
+            ):
+                raise TypeError("elliptic autograd requires float32 tensors")
+            if orientation.ndim < 1 or orientation.size(-1) != 3:
                 raise ValueError("orientation tensor must have last dimension == 3")
+            if orientation.numel() // 3 > 65_536:
+                raise ValueError("elliptic autograd exceeds the 65536-row budget")
 
             device = orientation.device
             dtype = orientation.dtype
-            flat = orientation.reshape(-1, orientation.size(-1))
-            features: List[torch.Tensor] = []
-            jacobian: List[torch.Tensor] = []
-            telemetry: List[Optional[_EllipticTelemetry]] = []
-
-            for row in flat:
-                vec = row.detach().to(torch.float32).cpu().tolist()
-                result = warp.map_orientation_differential(vec)
-                if result is None:
-                    features.append(torch.zeros(9, device=device, dtype=dtype))
-                    jacobian.append(torch.zeros((9, row.numel()), device=device, dtype=dtype))
-                    telemetry.append(None)
-                    continue
-                tele, feats, jac = result
-                features.append(torch.tensor(feats, device=device, dtype=dtype))
-                jacobian.append(torch.tensor(jac, device=device, dtype=dtype))
-                telemetry.append(tele)
-
-            feature_tensor = torch.stack(features)
-            jac_tensor = torch.stack(jacobian)
-            ctx.save_for_backward(jac_tensor)
-            ctx._input_shape = orientation.shape  # type: ignore[attr-defined]
-            EllipticWarpFunction._last_shape = orientation.shape[:-1]
-            EllipticWarpFunction._last_telemetry = telemetry
-            return feature_tensor.reshape(*orientation.shape[:-1], -1)
+            batch = warp.map_orientations_batch(
+                orientation.detach().cpu().reshape(-1).tolist()
+            )
+            feature_tensor = torch.tensor(batch.features, device=device, dtype=dtype)
+            ctx.save_for_backward(orientation)
+            ctx.save_for_forward(orientation)
+            ctx.batch = batch
+            _LAST_TELEMETRY.set((orientation.shape[:-1], _LazyTelemetry(batch)))
+            return feature_tensor.reshape(*orientation.shape[:-1], 9)
 
         @staticmethod
+        def jvp(ctx, _warp, tangent):
+            (orientation,) = ctx.saved_tensors
+            if tangent is None:
+                tangent = torch.zeros_like(orientation)
+            values = ctx.batch.jvp(tangent.detach().cpu().reshape(-1).tolist())
+            return torch.tensor(
+                values, device=orientation.device, dtype=orientation.dtype
+            ).reshape(*orientation.shape[:-1], 9)
+
+        @staticmethod
+        @torch.autograd.function.once_differentiable
         def backward(  # type: ignore[override]
             ctx: torch.autograd.FunctionCtx, grad_output: "torch.Tensor"
         ) -> Tuple[None, "torch.Tensor"]:
-            (jac_tensor,) = ctx.saved_tensors
-            grad = grad_output.reshape(-1, grad_output.shape[-1])
-            grad_input = torch.bmm(grad.unsqueeze(1), jac_tensor).squeeze(1)
-            input_shape = getattr(ctx, "_input_shape")
-            grad_input = grad_input.reshape(*input_shape)
+            (orientation,) = ctx.saved_tensors
+            values = ctx.batch.vjp(grad_output.detach().cpu().reshape(-1).tolist())
+            grad_input = torch.tensor(
+                values, device=orientation.device, dtype=orientation.dtype
+            ).reshape(orientation.shape)
             return None, grad_input
 
         @classmethod
         def last_telemetry(cls, *, as_dict: bool = False) -> Optional[Any]:
-            data = cls._last_telemetry
-            if data is None:
+            state = _LAST_TELEMETRY.get()
+            if state is None:
                 return None
-            shape = cls._last_shape or ()
+            shape, snapshot = state
+            data = snapshot.get()
             if as_dict:
-                converted = [tele.as_dict() if tele is not None else None for tele in data]
+                converted = [
+                    tele.as_dict() if tele is not None else None for tele in data
+                ]
             else:
                 converted = data
             leading = list(shape)
@@ -147,9 +184,18 @@ else:
 
 
 def elliptic_warp_autograd(
-    warp: "_EllipticWarp", orientation: "torch.Tensor", *, return_telemetry: bool = False
+    warp: "_EllipticWarp",
+    orientation: "torch.Tensor",
+    *,
+    return_telemetry: bool = False,
 ) -> Any:
-    """Apply the elliptic warp with autograd support.
+    """Apply the Rust batched f32 map and first-order VJP/JVP (CPU transport).
+
+    Degenerate rows, chart poles and the azimuth cut raise rather than silently
+    replacing features/gradients by zero. ``torch.autograd.forward_ad`` uses the
+    native JVP. Higher-order gradients and ``torch.func`` transforms are unsupported.
+    Python telemetry objects are materialized only when requested, including via
+    ``EllipticWarpFunction.last_telemetry()``; the Rust map and VJP are unchanged.
 
     Args:
         warp: Rust-backed :class:`EllipticWarp` instance.
@@ -167,12 +213,14 @@ def elliptic_warp_autograd(
 
 
 def elliptic_warp_features(
-    warp: "_EllipticWarp", orientations: Iterable[Sequence[float]], *, as_dict: bool = True
+    warp: "_EllipticWarp",
+    orientations: Iterable[Sequence[float]],
+    *,
+    as_dict: bool = True,
 ) -> List[Tuple[List[float], Optional[Any]]]:
     """Compute elliptic features and telemetry for a list of orientations."""
 
-    if _EllipticWarp is None:
-        raise RuntimeError("Rust elliptic warp bindings are unavailable")
+    _require_native()
     results: List[Tuple[List[float], Optional[Any]]] = []
     for orientation in orientations:
         result = warp.map_orientation_differential(list(orientation))
@@ -227,7 +275,9 @@ def elliptic_warp_partial(
     """
 
     _require_torch()
-    features, telemetry = elliptic_warp_autograd(warp, orientation, return_telemetry=True)
+    features, telemetry = elliptic_warp_autograd(
+        warp, orientation, return_telemetry=True
+    )
     from .zspace_inference import elliptic_partial_from_telemetry
 
     bundle = elliptic_partial_from_telemetry(

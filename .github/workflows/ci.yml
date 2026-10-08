@@ -165,13 +165,15 @@ jobs:
         run: bash scripts/run_rust_clippy_strict.sh
       - name: build + test core
         run: |
-          cargo test --locked -p st-frac --release --test fft_numerics
+          cargo test --locked -p st-frac --release --test fft_numerics --test learning --test history_learning --test selective_learning
+          cargo test --locked -p st-frac --release --lib learning::tests
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
       - name: test upper stack
         if: matrix.run_upper_stack
         run: |
           cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_feature_ownership --test ensemble
+          cargo run --locked -p st-tensor --release --no-default-features --features cpu,faer --example readme_autograd
           cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
@@ -196,7 +198,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: build + test core
         run: |
-          cargo test --locked -p st-frac --release --test fft_numerics
+          cargo test --locked -p st-frac --release --test fft_numerics --test learning --test history_learning --test selective_learning
+          cargo test --locked -p st-frac --release --lib learning::tests
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
   wgpu-macos:
@@ -268,7 +271,7 @@ jobs:
           cargo test --locked --release -p st-backend-wgpu resident_training -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_tensor -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_graph:: -- --test-threads=1
-          cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward -- --test-threads=1
+          cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward --test resident_attention_chain -- --test-threads=1
           cargo test --locked --release -p st-nn --features wgpu --lib conv2d_resident_matches_host_and_refreshes_parameters -- --test-threads=1
           cargo test --locked --release -p st-nn --features wgpu --lib conv2d_resident_vjp_matches_module_backward_and_refreshes_parameters -- --test-threads=1
           cargo test --locked --release -p st-nn --features wgpu --lib depthwise_resident_vjp_matches_module_backward_without_host_accumulation -- --test-threads=1
@@ -350,12 +353,37 @@ jobs:
           node bindings/st-wasm/tests/tensor_mean.cjs "$module"
           node bindings/st-wasm/tests/classification.cjs "$module"
           node bindings/st-wasm/tests/rank_adaptation.cjs "$module"
+          node bindings/st-wasm/tests/fractional_learning.mjs "$module"
+          node bindings/st-wasm/tests/fractional_history.mjs "$module"
+          node bindings/st-wasm/tests/fractional_history_l2.mjs "$module"
+          node bindings/st-wasm/tests/fractional_history_log_gain.mjs "$module"
+          node bindings/st-wasm/tests/fractional_history_window.mjs "$module"
+          node bindings/st-wasm/tests/fractional_angle_chart.mjs "$module"
+          node bindings/st-wasm/tests/fractional_selective_vjp.mjs "$module"
+          node bindings/st-wasm/tests/fractional_tiled_forward.mjs "$module"
+          node bindings/st-wasm/tests/elliptic_directional.mjs "$module"
+          node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
+          node tools/probe_topos_capture_wasm.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            "$RUNNER_TEMP/topos-captured-vjp.json" --require-capture
+          node tools/probe_topos_shared_transport.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            "$RUNNER_TEMP/topos-shared-transport.json"
+          node tools/probe_topos_browser_learning.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+            bindings/st-wasm/tests/topos_resonator_learning_fixture.json \
+            "$RUNNER_TEMP/topos-browser-learning.json"
+          node bindings/st-wasm/tests/topos_learning_fixture_guards.mjs "$module"
       - name: Portable NN plans without WebGPU
         run: |
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features nn
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu"
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+      - name: Host NN forward tapes compiled to scalar WASM
+        run: |
+          cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --example sequential_forward_tape_contract
+          wasm-bindgen target/wasm32-unknown-unknown/release/examples/sequential_forward_tape_contract.wasm \
+            --target nodejs --out-dir "$RUNNER_TEMP/sequential-forward-tape"
+          node -e 'console.log(require(process.argv[1]).run_sequential_forward_tape_contract())' \
+            "$RUNNER_TEMP/sequential-forward-tape/sequential_forward_tape_contract.js"
       - name: Browser WebGPU binding build
         run: |
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib
@@ -366,6 +394,7 @@ jobs:
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"
+          node bindings/st-wasm/tests/topos_graph_contract.cjs "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js"
       - name: Share freshly built WASM for native input replay
         uses: actions/upload-artifact@v7
         with:
@@ -396,6 +425,12 @@ jobs:
           node bindings/st-wasm/tests/vision_input_checkpoint.cjs \
             "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
             "$RUNNER_TEMP/vision-input-checkpoint-python/vision-input-checkpoint.json"
+          node bindings/st-wasm/tests/zspace_feedback_window.cjs \
+            "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
+            "$RUNNER_TEMP/vision-input-checkpoint-python/feedback-window.json"
+          node bindings/st-wasm/tests/repetition_objective.cjs \
+            "$RUNNER_TEMP/vision-input-checkpoint-wasm/spiraltorch_wasm.js" \
+            "$RUNNER_TEMP/vision-input-checkpoint-python/repetition-objective.json"
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
@@ -448,15 +483,29 @@ jobs:
           python -I tools/test_vision_trainer_matched_learning.py
           python -I tools/test_vision_feedback_ablation.py
           python -I tools/test_vision_feedback_stationarity.py
+          python -I tools/test_vision_feedback_windows.py
+          python -I tools/test_vision_training_timing.py
+          python -I tools/test_vision_gpu_profile.py
       - name: Public vision input checkpoint and native replay fixture
         env:
           SPIRALTORCH_INPUT_CHECKPOINT_HANDOFF: ${{ runner.temp }}/vision-input-checkpoint.json
         run: python -I bindings/st-py/tests/test_vision_input_checkpoint.py
+      - name: Public Rust feedback window and native replay fixture
+        env:
+          SPIRALTORCH_FEEDBACK_WINDOW_HANDOFF: ${{ runner.temp }}/feedback-window.json
+        run: python -I bindings/st-py/tests/test_zspace_feedback_window.py
+      - name: Native repetition objective replay fixture
+        run: |
+          python -I tools/verify_repetition_objective_clients.py \
+            --output-fixture "$RUNNER_TEMP/repetition-objective.json"
       - name: Share fresh Python input checkpoint for WASM replay
         uses: actions/upload-artifact@v7
         with:
           name: vision-input-checkpoint-python
-          path: ${{ runner.temp }}/vision-input-checkpoint.json
+          path: |
+            ${{ runner.temp }}/vision-input-checkpoint.json
+            ${{ runner.temp }}/feedback-window.json
+            ${{ runner.temp }}/repetition-objective.json
           if-no-files-found: error
           retention-days: 1
       - name: Sanity-check packaged stubs
@@ -576,11 +625,18 @@ jobs:
         run: |
           spiral-runtime-preflight --list-presets
           python -P tools/smoke_hf_console_scripts.py
-      - name: Run README python blocks
+      - name: Run README and reference Python blocks
         env:
           PYTHONNOUSERSITE: "1"
         run: |
-          python -P tools/run_readme_python_blocks.py --readme README.md --cwd .
+          python -P tools/run_readme_python_blocks.py --cwd . \
+            --readme README.md \
+            --readme bindings/st-py/README.md \
+            --readme docs/reference/installation.md \
+            --readme docs/reference/native-api.md \
+            --readme docs/reference/learning.md \
+            --readme docs/reference/geometry.md \
+            --readme docs/reference/wasm.md
       - name: Run hello_session example
         env:
           PYTHONNOUSERSITE: "1"
@@ -594,13 +650,18 @@ jobs:
           python -P bindings/st-py/tests/test_native_binding_ownership.py
           python -P bindings/st-py/tests/test_tensor_out.py
           python -P bindings/st-py/tests/test_autograd_prepacked.py
+          python -P bindings/st-py/tests/test_geometry_optional_dependency.py
           python -P bindings/st-py/tests/test_gelu_host.py
           python -P tests/test_configure_pypi_token_secret.py
           python -P tests/test_llm_char_vae_context_guidance.py
           python -P tests/test_publish_pypi_wheels.py
           python -P tests/test_release_runbook.py
+          python -P tests/test_documentation_entrypoints.py
+          python -P tests/test_readme_python_blocks.py
           python -P tests/test_release_status.py
           python -P tests/test_release_workflows.py
+          python -I tests/test_release_learning_smoke.py
+          python -I tests/test_python_compatibility.py
           python -P tests/test_run_char_vae_context_chain.py
           python -P tests/test_run_pypi_publish_from_release.py
           python -P tests/test_runtime_imports.py
@@ -612,6 +673,7 @@ jobs:
           python -P bindings/st-py/tests/test_nn_resident.py
           python -P bindings/st-py/tests/test_nn_resident_training.py
           python -P bindings/st-py/tests/test_nn_resident_graph_training.py
+          python -P bindings/st-py/tests/test_nn_resident_topos.py
           python -P bindings/st-py/tests/test_nn_resident_graph_forward.py
           python -P bindings/st-py/tests/test_nn_resident_exports.py
           python -P bindings/st-py/tests/test_nn_resident_graph_autograd.py
@@ -658,5 +720,101 @@ jobs:
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py bindings/st-py/tests/test_classification.py bindings/st-py/tests/test_classification_torch.py bindings/st-py/tests/test_autograd_sgd.py bindings/st-py/tests/test_layer_norm.py bindings/st-py/tests/test_layer_norm_autograd.py bindings/st-py/tests/test_row_indexing.py bindings/st-py/tests/test_tensor_mean.py
           python -I examples/autograd_tied_embedding.py
           python -I tools/smoke_autograd.py
+          python -I tools/smoke_learning_stack.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_fft_numerics.py
           python -I tools/smoke_fft.py
+      - name: LLM schedule study orchestration and assessment
+        run: |
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_hf_repetition_schedule_study.py tools/test_assess_hf_repetition_schedule_study.py
+      - name: Rust-owned geometry learning and exact HF continuation
+        env:
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+          HF_DATASETS_OFFLINE: "1"
+          TOKENIZERS_PARALLELISM: "false"
+          OMP_NUM_THREADS: "2"
+        run: |
+          python -m pip install "transformers==4.57.6"
+          python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticGatedCausalLearningBatch"); assert hasattr(st, "EllipticGatedCausalResidualAdapter")'
+          python -I -c 'import spiraltorch as st; assert hasattr(st, "EllipticAnchoredLearningBatch"); assert hasattr(st, "EllipticAnchoredResidualAdapter")'
+          python -I -c 'import spiraltorch as st; assert hasattr(st, "FractionalGlKernel"); assert hasattr(st, "FractionalMemoryAdapter"); assert hasattr(st, "FractionalHistoryAdapter")'
+          python -I -c 'import spiraltorch as st; import torch; import transformers; assert hasattr(st, "WaveGateKernel"); assert hasattr(st, "WaveGateAdapter"); assert hasattr(st, "EllipticLearningBatch"); assert hasattr(st, "EllipticResidualAdapter"); assert hasattr(st, "EllipticCausalLearningBatch"); assert hasattr(st, "EllipticCausalResidualAdapter"); assert hasattr(st, "ToposResonatorKernel")'
+          python -I -m pytest --import-mode=importlib -q \
+            bindings/st-py/tests/test_geometry_autograd.py \
+            bindings/st-py/tests/test_topos_capture.py \
+            bindings/st-py/tests/test_topos_shared_transport.py \
+            bindings/st-py/tests/test_nn_sequential_capture.py \
+            bindings/st-py/tests/test_topos_matched_controls.py \
+            bindings/st-py/tests/test_topos_capture_results.py \
+            bindings/st-py/tests/test_geometry_adapters.py \
+            bindings/st-py/tests/test_geometry_adapter_stack_results.py \
+            bindings/st-py/tests/test_geometry_optional_dependency.py \
+            bindings/st-py/tests/test_fractional_learning.py \
+            bindings/st-py/tests/test_fractional_history.py \
+            bindings/st-py/tests/test_fractional_history_l2.py \
+            bindings/st-py/tests/test_fractional_history_log_gain.py \
+            bindings/st-py/tests/test_fractional_history_window.py \
+            bindings/st-py/tests/test_fractional_window_diagnostic.py \
+            bindings/st-py/tests/test_fractional_window_results.py \
+            bindings/st-py/tests/test_fractional_window_study.py \
+            bindings/st-py/tests/test_fractional_window_study_results.py \
+            bindings/st-py/tests/test_fractional_active_support_results.py \
+            bindings/st-py/tests/test_fractional_multi_adapter_replay.py \
+            bindings/st-py/tests/test_fractional_multi_adapter_results.py \
+            bindings/st-py/tests/test_fractional_gain_study.py \
+            bindings/st-py/tests/test_fractional_gain_verification.py \
+            bindings/st-py/tests/test_fractional_gain_results.py \
+            bindings/st-py/tests/test_fractional_angle_chart.py \
+            bindings/st-py/tests/test_fractional_angle_results.py \
+            bindings/st-py/tests/test_fractional_angle_study.py \
+            bindings/st-py/tests/test_fractional_selective_vjp.py \
+            bindings/st-py/tests/test_fractional_buffers.py \
+            bindings/st-py/tests/test_fractional_memory_study.py \
+            bindings/st-py/tests/test_fractional_history_study.py \
+            bindings/st-py/tests/test_fractional_lag_study.py \
+            bindings/st-py/tests/test_fractional_two_lag_study.py \
+            bindings/st-py/tests/test_fractional_history_factorial.py \
+            bindings/st-py/tests/test_fractional_history_factorial_verification.py \
+            bindings/st-py/tests/test_fractional_history_factorial_results.py \
+            bindings/st-py/tests/test_fractional_two_lag_results.py \
+            bindings/st-py/tests/test_elliptic_gated_causal.py \
+            bindings/st-py/tests/test_elliptic_anchored.py \
+            bindings/st-py/tests/test_elliptic_gated_study.py \
+            bindings/st-py/tests/test_elliptic_anchored_study.py \
+            bindings/st-py/tests/test_elliptic_context_ablation.py \
+            bindings/st-py/tests/test_elliptic_learning.py \
+            bindings/st-py/tests/test_elliptic_directional.py \
+            bindings/st-py/tests/test_elliptic_chart_step.py \
+            bindings/st-py/tests/test_elliptic_causal_learning.py \
+            bindings/st-py/tests/test_wave_gate_vjp.py \
+            bindings/st-py/tests/test_wave_gate_learning.py \
+            bindings/st-py/tests/test_wave_gate_radius.py \
+            bindings/st-py/tests/test_wave_gate_buffers.py \
+            bindings/st-py/tests/test_wave_gate_transport_results.py \
+            bindings/st-py/tests/test_wave_gate_conditioning_example.py \
+            bindings/st-py/tests/test_wave_gate_long_horizon.py \
+            bindings/st-py/tests/test_wave_gate_long_horizon_summary.py \
+            bindings/st-py/tests/test_elliptic_nonlinear_study.py \
+            bindings/st-py/tests/test_elliptic_causal_study.py
+          python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_benchmark_fractional_learning.py tools/test_benchmark_fractional_window.py tools/test_benchmark_wave_gate_learning.py tools/test_benchmark_topos_learning.py tools/test_replay_geometry_stack_update.py tools/test_topos_inlining_results.py tools/test_topos_evolution_results.py tools/test_topos_browser_learning_results.py
+      - name: Verify frozen Topos NN measurements
+        run: python -I -m pytest --import-mode=importlib --confcutdir=tools --rootdir=tools -q tools/test_topos_nn_capture_results.py tools/test_topos_shared_gate_learning.py tools/test_topos_resident_kernel_results.py tools/test_topos_resident_graph_results.py tools/test_topos_resident_capture_results.py tools/test_benchmark_topos_shared_module_reference.py
+      - name: Verify shared Topos transport measurements
+        run: |
+          python -I -S -B tools/test_topos_shared_transport_results.py
+          python -I -S -B tools/test_topos_shared_nn_benchmark_results.py
+          python -I -S -B tools/test_topos_single_admission_results.py
+          python -I -S -B tools/test_topos_core_row_vjp_results.py
+          python -I -S -B tools/test_topos_wasm_snapshot_results.py
+          python -I -S -B benchmarks/results/2026-10-08-topos-core-forward-traversal/verify_v2.py
+      - name: Select minimum supported CPython (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.8"
+      - name: Verify installed wheel on CPython 3.8 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -I -c 'import sys; assert sys.version_info[:2] == (3, 8)'
+          python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+          python -I tools/smoke_learning_stack.py

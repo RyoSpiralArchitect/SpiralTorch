@@ -1,0 +1,370 @@
+{
+  "schema": "spiraltorch.fractional_history_factorial_checkpoint_verification.v1",
+  "status": "passed",
+  "study_id": "d133d43f6bc4f281b8717d513e3c7c5ab4374c401ce3d98db43d38799e9cc75b",
+  "training_source_revision": "d9d995911217233705fbd80b4d33253a25c7ebff",
+  "planned_runs_verified": 12,
+  "primary_updates": 6144,
+  "continuation_only_updates": 24,
+  "artifacts": {
+    "plan": "83e147b0de79cfe3d2b6f3090c31032b6dee01d4227f60b3e96a9c0982f7fd92",
+    "results": "12648d1f08c29bfdd2666624b07c4b38e9cc609b2ae10ac62fa9afdb9276eff4",
+    "journal": "4d81a102ba941589b14e1dfe90a18207010a9b150ff93a4eeb4a5ff4aba95781"
+  },
+  "summary_artifact_sha256": "04e2eb2d816bbe7ef93371c5b5512693b082bfd726e472ddae4b0a178592a5fd",
+  "summary_source_sha256": "25af45fd5a45830332e3792f3f805ba0d9e59b1ae54db15506f11d8d01527e67",
+  "verifier_sha256": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f",
+  "summary_rebuilt_byte_identical": true,
+  "historical_raw_full": {
+    "status": "exact_replay",
+    "current_study_id": "d133d43f6bc4f281b8717d513e3c7c5ab4374c401ce3d98db43d38799e9cc75b",
+    "previous_study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
+    "counts_as_additional_independent_seeds": false,
+    "runs": {
+      "41": {
+        "parity": {
+          "baseline_equal": true,
+          "records_equal": true,
+          "development_equal": true,
+          "endpoints_equal": true,
+          "initial_parameters_equal": true,
+          "saved_parameters_equal": true,
+          "named_adam_equal": true
+        },
+        "current_checkpoint": {
+          "filename": "checkpoint-8r4ychbf.pt",
+          "sha256": "a2b6b746396df5856dfb501daccd43baf7270d768e6a8a7cd5aa973c27e351be"
+        },
+        "previous_checkpoint": {
+          "filename": "checkpoint-k2t4anxe.pt",
+          "sha256": "d38be04961144b0ca92cde1d1bac7ce1ce5bc3bd16543addd5d43e2146f6655f"
+        }
+      },
+      "43": {
+        "parity": {
+          "baseline_equal": true,
+          "records_equal": true,
+          "development_equal": true,
+          "endpoints_equal": true,
+          "initial_parameters_equal": true,
+          "saved_parameters_equal": true,
+          "named_adam_equal": true
+        },
+        "current_checkpoint": {
+          "filename": "checkpoint-wllke5_9.pt",
+          "sha256": "45546ebcddfc5a455b124e904f61b0a6eb44670aaf6af73111e134643643ae6f"
+        },
+        "previous_checkpoint": {
+          "filename": "checkpoint-7_xjt11o.pt",
+          "sha256": "5014e501b71d9797298c5f4ab6a27e2e004857fb684e5711f21026f127101216"
+        }
+      },
+      "47": {
+        "parity": {
+          "baseline_equal": true,
+          "records_equal": true,
+          "development_equal": true,
+          "endpoints_equal": true,
+          "initial_parameters_equal": true,
+          "saved_parameters_equal": true,
+          "named_adam_equal": true
+        },
+        "current_checkpoint": {
+          "filename": "checkpoint-rum5tmpt.pt",
+          "sha256": "a49cfe204a7beff852218bd6e685f97e06e06ad906ddcd381a56ee8da8a072aa"
+        },
+        "previous_checkpoint": {
+          "filename": "checkpoint-0e33g3m7.pt",
+          "sha256": "0cb33b9d8952e0bf4058ece2c8746145e0baddb96b8bf17159a582c7c71e2837"
+        }
+      }
+    }
+  },
+  "runs": {
+    "41:history_raw_short": {
+      "checkpoint": {
+        "filename": "checkpoint-6kugmp77.pt",
+        "sha256": "8ff773bf58cdff4ecbd5cca55ceca0bfd760895a6294a2abb13afcaec773442c"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "1ca879b42f44d62d71de7328ea30700c293d18a0c3d22b88c97621f9e7c36a2f",
+      "final_alpha": 2.5075135231018066,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 3,
+        "alpha": 2.5075135231018066,
+        "coefficient_l2": 3.1400530411252907,
+        "lag_3_plus_energy_fraction": 0.0,
+        "first_two_past_coefficients": [
+          -2.5075135231018066,
+          1.8900552988052368
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "41:history_raw_full": {
+      "checkpoint": {
+        "filename": "checkpoint-8r4ychbf.pt",
+        "sha256": "a2b6b746396df5856dfb501daccd43baf7270d768e6a8a7cd5aa973c27e351be"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "5f443556ab45fc4a0719cd17dc7721c8160d520f39212e2f2a4ae2ed52ab4165",
+      "final_alpha": 4.055050373077393,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 32,
+        "alpha": 4.055050373077393,
+        "coefficient_l2": 8.606292434857636,
+        "lag_3_plus_energy_fraction": 0.2599875532553529,
+        "first_two_past_coefficients": [
+          -4.055050373077393,
+          6.1941914558410645
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "41:history_l2_short": {
+      "checkpoint": {
+        "filename": "checkpoint-wxvqsdg3.pt",
+        "sha256": "80c0d83a4ae29a1fd7e80461238dd78eae63cfded865e0426b417be4067a4784"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "5ff427e736218ae3fd261ad2f045e30d9415017efa7791358495c103de0356b9",
+      "final_alpha": 1.0400850772857666,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 3,
+        "alpha": 1.0400850772857666,
+        "coefficient_l2": 2.23606805092015,
+        "lag_3_plus_energy_fraction": 0.0,
+        "first_two_past_coefficients": [
+          -2.235619068145752,
+          0.04480748251080513
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "41:history_l2_full": {
+      "checkpoint": {
+        "filename": "checkpoint-1wgeeys0.pt",
+        "sha256": "294dc218fbd78883705aa7f284d908e73cf7e0bfb87276f1a610a9b34aefd778"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "8971040b96e1f2352ca2eafe27a50ab1d71d489b890e54918c70215a57b06bdf",
+      "final_alpha": 0.9601835012435913,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 32,
+        "alpha": 0.9601835012435913,
+        "coefficient_l2": 2.2360680624974045,
+        "lag_3_plus_energy_fraction": 6.957240134124941e-05,
+        "first_two_past_coefficients": [
+          -2.2355473041534424,
+          -0.044505830854177475
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "43:history_raw_short": {
+      "checkpoint": {
+        "filename": "checkpoint-nq38k7ts.pt",
+        "sha256": "ac45caee081dc22da206e4cc305baa235d477dc9666f1fe5efe9ee1d5da27909"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "a5d0a357a553264047e4bd7ee3e8d3c5a5f0bc16ef0a83226501ed96ba0d0178",
+      "final_alpha": 2.541064977645874,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 3,
+        "alpha": 2.541064977645874,
+        "coefficient_l2": 3.20790741285182,
+        "lag_3_plus_energy_fraction": 0.0,
+        "first_two_past_coefficients": [
+          -2.541064977645874,
+          1.9579731225967407
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "43:history_raw_full": {
+      "checkpoint": {
+        "filename": "checkpoint-wllke5_9.pt",
+        "sha256": "45546ebcddfc5a455b124e904f61b0a6eb44670aaf6af73111e134643643ae6f"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "2a46ab1a7f56407913a280d9c6d6be014e5235928585bf0fc677fe3d419887bc",
+      "final_alpha": 3.7574100494384766,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 32,
+        "alpha": 3.7574100494384766,
+        "coefficient_l2": 7.105948575939504,
+        "lag_3_plus_energy_fraction": 0.18893623844764412,
+        "first_two_past_coefficients": [
+          -3.7574100494384766,
+          5.180360317230225
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "43:history_l2_short": {
+      "checkpoint": {
+        "filename": "checkpoint-twmly4ix.pt",
+        "sha256": "781377d3cf0019ebc2996645bf651152be9758104d8427208a6798b339fd0c5d"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "9ec2735568e689ee81a4dab413208830a7da9589637e059fb0532dcd6cd3190e",
+      "final_alpha": 1.0550870895385742,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 3,
+        "alpha": 1.0550870895385742,
+        "coefficient_l2": 2.236067904598582,
+        "lag_3_plus_energy_fraction": 0.0,
+        "first_two_past_coefficients": [
+          -2.235220193862915,
+          0.06156589090824127
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "43:history_l2_full": {
+      "checkpoint": {
+        "filename": "checkpoint-uagk7u0m.pt",
+        "sha256": "48be08068ab59cc9e376fadd8e3735ab5e26c27c8ca01bef635e8fbcacb93254"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "2a3c54af6cb82147c51b901492021aaa8dadd85c8f2939003b979fb310487313",
+      "final_alpha": 0.9752413630485535,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 32,
+        "alpha": 0.9752413630485535,
+        "coefficient_l2": 2.2360680646453854,
+        "lag_3_plus_energy_fraction": 2.5948862653450348e-05,
+        "first_two_past_coefficients": [
+          -2.235867738723755,
+          -0.027678517624735832
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "47:history_raw_short": {
+      "checkpoint": {
+        "filename": "checkpoint-5tfzazno.pt",
+        "sha256": "c24d61c1883de720f42768c4d39032755cbf5a2639e0e32f6c7c72e0a1b4e7e3"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "e04af548386503c3b8d31aa1711a73aec1f3265a9846fa694657a4c6ce28330c",
+      "final_alpha": 2.5777010917663574,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 3,
+        "alpha": 2.5777010917663574,
+        "coefficient_l2": 3.2831909894331015,
+        "lag_3_plus_energy_fraction": 0.0,
+        "first_two_past_coefficients": [
+          -2.5777010917663574,
+          2.0334208011627197
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "47:history_raw_full": {
+      "checkpoint": {
+        "filename": "checkpoint-rum5tmpt.pt",
+        "sha256": "a49cfe204a7beff852218bd6e685f97e06e06ad906ddcd381a56ee8da8a072aa"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "365b538de273908a3ea3f6178085eab3637c0242e5a46720a116ec76bafaee91",
+      "final_alpha": 3.9513843059539795,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 32,
+        "alpha": 3.9513843059539795,
+        "coefficient_l2": 8.050713041317733,
+        "lag_3_plus_energy_fraction": 0.23451215607527368,
+        "first_two_past_coefficients": [
+          -3.9513843059539795,
+          5.831027030944824
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "47:history_l2_short": {
+      "checkpoint": {
+        "filename": "checkpoint-r732ytmh.pt",
+        "sha256": "4ef2ef027f2cef1b98e5b54ba9e9b37c357615e79d3aeda44d83aa1d9889c3ec"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "9381f8aaf84cf206d3d0d6356dff05684e1a1fcae216df0cc35e23575ea78138",
+      "final_alpha": 1.047629952430725,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 3,
+        "alpha": 1.047629952430725,
+        "coefficient_l2": 2.2360681205744695,
+        "lag_3_plus_energy_fraction": 0.0,
+        "first_two_past_coefficients": [
+          -2.2354342937469482,
+          0.053236812353134155
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    },
+    "47:history_l2_full": {
+      "checkpoint": {
+        "filename": "checkpoint-49uhferh.pt",
+        "sha256": "65c761c9f5774c1024468382cb536b017074f7dc6825278252e64ec501c059b6"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "finite_parameters_and_moments": true,
+      "final_parameter_sha256": "5600b993e0c8fd72cd5b34085c0f900c7746cc008509e51ec3bd70e9f9c5fa7e",
+      "final_alpha": 0.9688782691955566,
+      "filter_description": {
+        "backend": "rust_f32_cpu",
+        "kernel_len": 32,
+        "alpha": 0.9688782691955566,
+        "coefficient_l2": 2.236068126723694,
+        "lag_3_plus_energy_fraction": 4.1632061858848803e-05,
+        "first_two_past_coefficients": [
+          -2.235750913619995,
+          -0.034790217876434326
+        ],
+        "scope": "Post-hoc native unit-impulse description, not a hidden-state variance or memory-quality test."
+      }
+    }
+  },
+  "scope": "Saved state and sealed receipts, not reexecution of continuation or model scoring. State validity and historical replay are separate criteria; inspect both statuses.",
+  "frozen_files_verified": {
+    "client": 5,
+    "runtime": 71
+  },
+  "manifest_sha256": {
+    "client": "342cd59d95d7f1c956d2f9c9eca62e70c7db68f994dca1480bdea063abf83c47",
+    "runtime": "74eaa67d2fc61d707b92528531e759ffc9f9dd64b9d361490dbab859cd9a5cff"
+  }
+}

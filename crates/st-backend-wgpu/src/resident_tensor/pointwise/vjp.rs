@@ -1,5 +1,6 @@
 //! Checked reverse-mode pointwise contributions and deterministic unbroadcast.
-//! Forward is recomputed from immutable inputs; no mutable tape escapes.
+//! Public plans recompute; serialized graphs may retain private Topos sensitivity.
+//! No mutable tape escapes either route.
 use super::*;
 use crate::runtime::timestamps::PassTimestampCursor;
 use st_kernel_contracts::pointwise::BroadcastAdjoint;
@@ -24,6 +25,13 @@ pub struct PointwiseVjpPlan {
     reduction_pipeline: wgpu::ComputePipeline,
     reductions: Vec<Reduction>,
     contribution_len: usize,
+    capture: Option<ForwardCapture>,
+}
+
+#[derive(Debug)]
+struct ForwardCapture {
+    layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::ComputePipeline,
 }
 
 /// Private to one execution: public run() calls never share mutable scratch.
@@ -32,6 +40,7 @@ pub(crate) struct VjpWorkspace {
     contributions: wgpu::Buffer,
     contribution_binding: wgpu::BindGroup,
     reductions: Vec<ReductionWorkspace>,
+    sensitivity: Option<wgpu::Buffer>,
 }
 
 enum ReductionWorkspace {
@@ -106,11 +115,23 @@ fn reduction_source() -> String {
 impl PointwiseVjpPlan {
     /// Preparation is opt-in: existing forward-only plans compile no VJP shader.
     pub fn new(forward: PointwisePlan) -> Result<Self, TensorError> {
+        Self::prepare(forward, false)
+    }
+
+    /// Only the latest graph forward owns this private tape. Inputs/parameters
+    /// are fixed until the graph invalidates that forward's opaque identity.
+    pub(crate) fn for_graph(forward: PointwisePlan) -> Result<Self, TensorError> {
+        let capture = !matches!(forward.program, Program::Chain(_));
+        Self::prepare(forward, capture)
+    }
+
+    fn prepare(forward: PointwisePlan, capture: bool) -> Result<Self, TensorError> {
         let gpu = forward.device.runtime().context().device();
         let limits = gpu.limits();
-        let count = forward.chain.input_count();
-        if count + 5 > limits.max_storage_buffers_per_shader_stage as usize
-            || count + 5 > limits.max_bindings_per_bind_group as usize
+        let count = forward.program.input_count();
+        let bindings = count + 5 + usize::from(capture);
+        if bindings > limits.max_storage_buffers_per_shader_stage as usize
+            || bindings > limits.max_bindings_per_bind_group as usize
         {
             return Err(TensorError::Limit("VJP input bindings"));
         }
@@ -185,8 +206,28 @@ impl PointwiseVjpPlan {
                 second,
             });
         }
-        let layout = buffer_layout(gpu, count + 5, &[count, count + 3]);
-        let pipeline = pipeline(gpu, &layout, generated_source(&forward.chain, true));
+        let layout = buffer_layout(gpu, bindings, &[count, count + 3]);
+        let pipeline = pipeline(
+            gpu,
+            &layout,
+            generated_source_for(
+                &forward.program,
+                if capture {
+                    Evaluation::CapturedVjp
+                } else {
+                    Evaluation::RecomputedVjp
+                },
+            ),
+        );
+        let capture = capture.then(|| {
+            let layout = buffer_layout(gpu, count + 5, &[count, count + 3, count + 4]);
+            let pipeline = self::pipeline(
+                gpu,
+                &layout,
+                generated_source_for(&forward.program, Evaluation::Capture),
+            );
+            ForwardCapture { layout, pipeline }
+        });
         let reduction_layout = buffer_layout(gpu, 4, &[1, 3]);
         let reduction_pipeline = self::pipeline(gpu, &reduction_layout, reduction_source());
         Ok(Self {
@@ -197,6 +238,7 @@ impl PointwiseVjpPlan {
             reduction_pipeline,
             reductions,
             contribution_len,
+            capture,
         })
     }
 
@@ -287,6 +329,19 @@ impl PointwiseVjpPlan {
         flags: &wgpu::Buffer,
     ) -> Result<(), TensorError> {
         let workspace = self.prepare_into(inputs, cotangent, gradients, inherited, flags)?;
+        // A standalone call has no preceding graph forward. Public new() does
+        // not use this route, but keep private captured plans safe to run too.
+        if self.capture.is_some() {
+            let output = runtime::empty_buffer::<f32>(
+                self.forward.device.runtime().context().device(),
+                "vjp.capture.output",
+                self.forward.layouts[0].len().max(1),
+                wgpu::BufferUsages::STORAGE,
+            )?;
+            let binding = self.bind_forward(&workspace, inputs, &output, inherited, flags);
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            self.encode_forward_in_pass(&mut pass, &binding);
+        }
         self.encode_prepared(encoder, &workspace, gradients.iter().copied());
         Ok(())
     }
@@ -310,6 +365,18 @@ impl PointwiseVjpPlan {
             self.contribution_len.max(1),
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         )?;
+        let sensitivity = self
+            .capture
+            .as_ref()
+            .map(|_| {
+                runtime::empty_buffer::<f32>(
+                    gpu,
+                    "topos.sensitivity",
+                    self.forward.layouts[0].len().max(1),
+                    wgpu::BufferUsages::STORAGE,
+                )
+            })
+            .transpose()?;
         let buffers: Vec<_> = inputs
             .iter()
             .copied()
@@ -320,6 +387,7 @@ impl PointwiseVjpPlan {
                 flags,
                 cotangent,
             ])
+            .chain(sensitivity.as_ref())
             .collect();
         let contribution_binding = bind(gpu, &self.layout, &buffers);
         let mut reductions = Vec::with_capacity(self.reductions.len());
@@ -363,7 +431,53 @@ impl PointwiseVjpPlan {
             contributions,
             contribution_binding,
             reductions,
+            sensitivity,
         })
+    }
+
+    pub(crate) fn bind_forward(
+        &self,
+        workspace: &VjpWorkspace,
+        inputs: &[&wgpu::Buffer],
+        output: &wgpu::Buffer,
+        inherited: &wgpu::Buffer,
+        flags: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        let Some(capture) = &self.capture else {
+            return self.forward.bind_into(inputs, output, inherited, flags);
+        };
+        assert_eq!(inputs.len(), self.forward.layouts.len());
+        assert!(flags.size() >= (u64::from(self.forward.flag_slot) + 1) * 4);
+        let buffers: Vec<_> = inputs
+            .iter()
+            .copied()
+            .chain([
+                output,
+                &self.forward.metadata,
+                inherited,
+                flags,
+                workspace.sensitivity.as_ref().expect("prepared Topos tape"),
+            ])
+            .collect();
+        bind(
+            self.forward.device.runtime().context().device(),
+            &capture.layout,
+            &buffers,
+        )
+    }
+
+    pub(crate) fn encode_forward_in_pass<'a>(
+        &'a self,
+        pass: &mut wgpu::ComputePass<'a>,
+        binding: &'a wgpu::BindGroup,
+    ) {
+        if let Some(capture) = &self.capture {
+            pass.set_pipeline(&capture.pipeline);
+            pass.set_bind_group(0, binding, &[]);
+            pass.dispatch_workgroups(self.forward.grid[0], self.forward.grid[1], 1);
+        } else {
+            self.forward.encode_in_pass(pass, binding);
+        }
     }
 
     /// Re-encode the same bindings without allocating buffers or bind groups.
@@ -617,7 +731,10 @@ mod tests {
             .repeat(20),
         )
         .unwrap();
-        for source in [generated_source(&chain, true), reduction_source()] {
+        for source in [
+            generated_source(&Program::Chain(chain), true),
+            reduction_source(),
+        ] {
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),

@@ -11987,6 +11987,69 @@ mod tests {
     }
 
     #[test]
+    fn coherence_lr_adjustment_keeps_nested_sequential_forward_for_band_pullbacks() {
+        let _guard = crate::test_global_state_lock();
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1., 0.05, 0.01);
+        let topos = OpenCartesianTopos::new(-1., 1e-6, 1., 16, 64).unwrap();
+        let mut child = Sequential::new();
+        child.push(
+            crate::ToposResonator::with_config_and_topos(
+                "topos",
+                1,
+                2,
+                Default::default(),
+                topos.clone(),
+            )
+            .unwrap(),
+        );
+        child.push(Linear::new("lin", 2, 3).unwrap());
+        let mut model = Sequential::new();
+        model.push(child);
+        trainer.prepare_with_topos(&mut model, topos).unwrap();
+        trainer.spectral_policy = Some(
+            SpectralLearningRatePolicy::default()
+                .with_smoothing(1.0)
+                .with_event_smoothing(1.0)
+                .with_sheet_gain(0.0)
+                .with_spin_gain(0.0)
+                .with_phase_gain(0.0)
+                .with_stuck_phase_gain(0.0)
+                .with_energy_gain(0.0),
+        );
+        trainer.pending_coherence =
+            Some(coherence_signal_for_weights(vec![1., 0., 0., 0.], 0.8, 0.0));
+        let previous_rate = trainer.hyper_learning_rate;
+        let previous_state = model.state_dict().unwrap();
+        let schedule = trainer.roundtable(
+            1,
+            3,
+            RoundtableConfig {
+                top_k: 1,
+                mid_k: 1,
+                bottom_k: 1,
+                here_tolerance: 1e-6,
+                ..RoundtableConfig::default()
+            },
+        );
+        let stats = trainer
+            .train_epoch(
+                &mut model,
+                &mut MeanSquaredError::new(),
+                vec![(
+                    Tensor::from_vec(1, 2, vec![0.25, -0.5]).unwrap(),
+                    Tensor::from_vec(1, 3, vec![1., 0.5, -0.5]).unwrap(),
+                )],
+                &schedule,
+            )
+            .unwrap();
+        assert_eq!(stats.batches, 1);
+        assert!(stats.total_loss.is_finite());
+        assert!((trainer.hyper_learning_rate / previous_rate - 1.).abs() > 1e-3);
+        assert!(trainer.last_spectral_metrics.is_some());
+        assert_ne!(model.state_dict().unwrap(), previous_state);
+    }
+
+    #[test]
     fn spectral_policy_control_is_dimension_invariant_at_distribution_extremes() {
         fn policy() -> SpectralLearningRatePolicy {
             SpectralLearningRatePolicy::default()

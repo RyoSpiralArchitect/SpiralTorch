@@ -1,0 +1,1 @@
+{"schema":"spiraltorch.fractional_history_l2_wasm.v1","updates":500,"initial_loss":0.2195702135724794,"final_loss":0.0000676152559847477,"learned_alpha":0.7231869829086626,"nonzero_order_steps":499,"scope":"Synthetic learning through compiled WASM, not pretrained quality, unique order recovery, browser or GPU evidence"}

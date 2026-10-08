@@ -1,0 +1,51 @@
+{
+  "schema": "spiraltorch.elliptic_causal_factorial_preflight.v1",
+  "status": "preflight_passed_not_training_complete",
+  "python_tests": {
+    "passed": 90,
+    "failed": 0,
+    "skipped": 0
+  },
+  "local_test_log_sha256": "f079a8d24bb2b94a919ef8cdd3d459daa1bda95d2040c0abaf4c73cadf4f4b7f",
+  "source_sha256": {
+    "bindings/st-py/examples/hf_elliptic_causal_study.py": "39456844f9e59169cc4fd901853c78bc4f2b0dfdfb53f4c870808699ad807813",
+    "bindings/st-py/examples/hf_elliptic_pride_causal.json": "2bbd6433195a2e43f57c32aab3571568bbea6c6f1c1ddfed0d1f70107cf388a7",
+    "bindings/st-py/examples/hf_elliptic_nonlinear_study.py": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "bindings/st-py/examples/hf_wave_gate_long_horizon.py": "c1dc7419dea1a420fb6e444f1a50a68c37ee95bcbf6ea63b025dcb9d84c11463",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "bbf058df42555e190c2025f879af2170c20bf6be4763a5c6a6a6cd4ad876dece",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "795e86e209c8437def9d3de02605ed6784dde6d6460d1c3c10006bfdc1ab0c9e",
+    "bindings/st-py/spiraltorch/elliptic.py": "6fefa5d5d6ec26a2391d18628d5bc7f85f121d668b954e1e8ff2c008b833c9c2",
+    "bindings/st-py/tests/test_elliptic_causal_study.py": "db774f58ced1f112ced56c2452b057f9c460096fd6856cc7346f7e69f0b90500",
+    "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py": "2dc35312351f1910927a31cc411e82cd84adfcc386e9de569783601b37ba6409",
+    "tools/summarize_wave_gate_long_horizon.py": "c3219056df8f05b415bffb490c186cdfe10e5920aebf8e689c44fe8fb79846ef"
+  },
+  "native_sha256": "36acfb9d2d4128a8a006c9fa5ba74f5ffb72c0a662bc11b2248ced5770201292",
+  "previous_nonlinear_summary_regression": {
+    "byte_exact": true,
+    "sha256": "32df1bfee318e813f0ed34aab732f07ef8ef9847a03faa1b76d80207d9b052cd"
+  },
+  "planned_runs": 12,
+  "primary_updates_per_run": 512,
+  "limitations": [
+    "Tiny-HF tests are not pretrained-model quality evidence.",
+    "Causal ordinary attention uses Torch; the geometric composition and VJP are Rust owned.",
+    "Paired parameters and data, not matched arithmetic, expressivity or compute.",
+    "Reused exploratory endpoints; no speed or significance claim."
+  ],
+  "after_parent_optional_dependency_fix": {
+    "python_tests": {
+      "passed": 91,
+      "failed": 0,
+      "skipped": 0
+    },
+    "local_test_log_sha256": "2118bfd2dad7681d454f23873a0b51258a62323c7876c791f2d103cccedbc5d1",
+    "tested_bridge_sha256": "73b9702a71fb889882912817916e61412935639929baa237089bea59090400f6",
+    "frozen_study_runtime_modified": false
+  },
+  "launch": {
+    "study_id": "2d5860c91905b26b6b29e729b94cfa9c710bb11ade2e4125f827c778a89c3954",
+    "source_revision": "03cee5fb8c65cffefaf4d60da4c5691a32dc6175",
+    "plan_uncompressed_sha256": "ec96bd52de101ab6e1d0e88768ccb3e406894326bbe5ddf386b15c16ff1fa39c",
+    "completion_claim": false
+  }
+}

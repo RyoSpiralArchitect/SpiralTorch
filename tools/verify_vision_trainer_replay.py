@@ -38,6 +38,13 @@ def verify_recipe_contract(runner, recipe, seed, contract):
     control = contract.get("intervention")
     scale, feedback = recipe.get("control_scale"), recipe.get("optimizer_feedback", False)
     require(type(feedback) is bool, "invalid feedback recipe")
+    width = recipe.get("feedback_window_observations", 1)
+    require(type(width) is int and 1 <= width < 2 ** 53, "invalid feedback window recipe")
+    if feedback:
+        require(config.get("optimizer_feedback", {}).get("loss_window_observations", 1) == width,
+                "recipe feedback window differs from raw contract")
+    else:
+        require(width == 1, "feedback window requires feedback")
     if scale is None:
         require(control is None and not feedback and "optimizer_feedback" not in config,
                 "unexpected optimizer intervention")

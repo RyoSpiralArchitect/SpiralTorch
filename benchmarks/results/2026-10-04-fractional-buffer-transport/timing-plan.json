@@ -1,0 +1,43 @@
+{
+  "schema": "spiraltorch.fractional_buffer_timing_plan.v1",
+  "status": "planned_not_measured",
+  "planned_at": "2026-10-03T15:25:58.104Z",
+  "parent_revision": "987a05bae5d8b47f95ee3c9e56eec3ed72253577",
+  "comparison": "list_vs_buffer",
+  "routes": [
+    "rust_list",
+    "rust_buffer",
+    "torch_conv1d"
+  ],
+  "shapes": [
+    [
+      2,
+      128,
+      768
+    ],
+    [
+      1,
+      256,
+      768
+    ]
+  ],
+  "maps": [
+    "full",
+    "history"
+  ],
+  "repetitions": 3,
+  "rounds": 12,
+  "warmup_per_route": 2,
+  "seed": 239,
+  "kernel_len": 32,
+  "alpha": 0.9,
+  "step": 1,
+  "threads": 2,
+  "native_profile": "release",
+  "native_sha256": "5caece088b275f15f83a1bfb8e7216613c9470faf3f01f46ddf4b0f95f05f8f4",
+  "bridge_sha256": "40353142cf73192c3c704645bb75e3fe1eb591b8fe871e05b29693b8c4dc8531",
+  "benchmark_sha256": "f83a1a4f340bb95a78af85084195d4c52616f11b03df7f0877c324b54d63d315",
+  "rust_core_sha256": "1a9b4882bc36e85e6b265c77c194ecc4f01b49d087474bf3f8527fd86b405b99",
+  "native_buffer_source_sha256": "3e5dd4cff1a0c5b4d1138d26303bc9dbf2b629c94d33bebb572e338c691273c8",
+  "scope": "Same Rust kernel/binary/math, explicit list vs buffer transport with selective order VJP; CPU float32 interfaces; full host transport included. Fresh processes, all route permutations twice. Ambient-load diagnostic, not isolated/model/GPU throughput."
+}

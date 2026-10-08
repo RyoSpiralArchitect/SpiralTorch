@@ -177,6 +177,7 @@ fn optimizer_reset_is_explicit_and_the_existing_trainer_can_prepare_again() {
     trainer.prepare(&mut model).unwrap();
     let after_handoff = state(&model);
     let x = Tensor::from_vec(4, 2, vec![0.25; 8]).unwrap();
+    model.forward(&x).unwrap();
     model
         .backward(&x, &Tensor::from_vec(4, 2, vec![0.5; 8]).unwrap())
         .unwrap();

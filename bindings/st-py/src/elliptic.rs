@@ -1,13 +1,169 @@
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::IntoPyObjectExt;
-use st_core::theory::microlocal::{EllipticTelemetry, EllipticWarp};
+use st_core::theory::microlocal::{
+    EllipticAnchoredLearningBatch, EllipticCausalLearningBatch, EllipticChartStep,
+    EllipticGatedCausalLearningBatch, EllipticLearningBatch, EllipticTelemetry, EllipticWarp,
+};
 
 type EllipticDifferential = (PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>);
 
 #[pyclass(name = "EllipticWarp", module = "spiraltorch")]
 pub struct PyEllipticWarp {
     warp: EllipticWarp,
+}
+
+#[pyclass(name = "EllipticLearningBatch", module = "spiraltorch", frozen)]
+pub struct PyEllipticLearningBatch {
+    inner: EllipticLearningBatch,
+}
+
+#[pyclass(name = "EllipticChartStep", module = "spiraltorch", frozen)]
+pub struct PyEllipticChartStep {
+    inner: EllipticChartStep,
+}
+
+#[pymethods]
+impl PyEllipticChartStep {
+    #[getter]
+    fn values(&self) -> Vec<f32> {
+        self.inner.values.clone()
+    }
+    #[getter]
+    fn metric(&self) -> Vec<f64> {
+        self.inner.metric.to_vec()
+    }
+    #[getter]
+    fn damped_condition(&self) -> f64 {
+        self.inner.damped_condition
+    }
+    #[getter]
+    fn proposal_l2(&self) -> f64 {
+        self.inner.proposal_l2
+    }
+    #[getter]
+    fn step_l2(&self) -> f64 {
+        self.inner.step_l2
+    }
+    #[getter]
+    fn cosine(&self) -> Option<f64> {
+        self.inner.cosine
+    }
+}
+
+#[pyclass(name = "EllipticCausalLearningBatch", module = "spiraltorch", frozen)]
+pub struct PyEllipticCausalLearningBatch {
+    inner: EllipticCausalLearningBatch,
+}
+
+#[pyclass(name = "EllipticAnchoredLearningBatch", module = "spiraltorch", frozen)]
+pub struct PyEllipticAnchoredLearningBatch {
+    inner: EllipticAnchoredLearningBatch,
+}
+
+#[pymethods]
+impl PyEllipticAnchoredLearningBatch {
+    #[getter]
+    fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    #[getter]
+    fn mix(&self) -> f32 {
+        self.inner.mix()
+    }
+
+    fn jvp(&self, py: Python<'_>, orientations: Vec<f32>, raw_mix: f32) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.jvp(&orientations, raw_mix))
+            .map_err(value_error)
+    }
+
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, f32)> {
+        py.detach(|| self.inner.vjp(&upstream))
+            .map(|g| (g.orientations, g.raw_mix))
+            .map_err(value_error)
+    }
+}
+
+#[pyclass(
+    name = "EllipticGatedCausalLearningBatch",
+    module = "spiraltorch",
+    frozen
+)]
+pub struct PyEllipticGatedCausalLearningBatch {
+    inner: EllipticGatedCausalLearningBatch,
+}
+
+#[pymethods]
+impl PyEllipticGatedCausalLearningBatch {
+    #[getter]
+    fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    #[getter]
+    fn mix(&self) -> f32 {
+        self.inner.mix()
+    }
+
+    /// Returns (orientation gradient, sum-reduced shared raw-mix gradient).
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<(Vec<f32>, f32)> {
+        py.detach(|| self.inner.vjp(&upstream))
+            .map(|g| (g.orientations, g.raw_mix))
+            .map_err(value_error)
+    }
+}
+
+#[pymethods]
+impl PyEllipticCausalLearningBatch {
+    #[getter]
+    fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.vjp(&upstream)).map_err(value_error)
+    }
+}
+
+fn value_error(error: impl std::fmt::Display) -> PyErr {
+    PyValueError::new_err(error.to_string())
+}
+
+#[pymethods]
+impl PyEllipticLearningBatch {
+    fn chart_step(
+        &self,
+        py: Python<'_>,
+        proposal: Vec<f32>,
+        relative_damping: f32,
+    ) -> PyResult<PyEllipticChartStep> {
+        py.detach(|| self.inner.chart_step(&proposal, relative_damping))
+            .map(|inner| PyEllipticChartStep { inner })
+            .map_err(value_error)
+    }
+    #[getter]
+    fn features(&self) -> Vec<f32> {
+        self.inner.features().to_vec()
+    }
+
+    fn telemetry(&self) -> Vec<PyEllipticTelemetry> {
+        self.inner
+            .telemetry()
+            .iter()
+            .cloned()
+            .map(PyEllipticTelemetry::from)
+            .collect()
+    }
+
+    fn vjp(&self, py: Python<'_>, upstream: Vec<f32>) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.vjp(&upstream)).map_err(value_error)
+    }
+
+    fn jvp(&self, py: Python<'_>, tangent: Vec<f32>) -> PyResult<Vec<f32>> {
+        py.detach(|| self.inner.jvp(&tangent)).map_err(value_error)
+    }
 }
 
 #[pyclass(name = "EllipticTelemetry", module = "spiraltorch")]
@@ -29,15 +185,14 @@ impl PyEllipticWarp {
         curvature_radius: f32,
         sheet_count: Option<usize>,
         spin_harmonics: Option<usize>,
-    ) -> Self {
-        let mut warp = EllipticWarp::new(curvature_radius);
-        if let Some(sheets) = sheet_count {
-            warp = warp.with_sheet_count(sheets);
-        }
-        if let Some(harmonics) = spin_harmonics {
-            warp = warp.with_spin_harmonics(harmonics);
-        }
-        Self { warp }
+    ) -> PyResult<Self> {
+        let warp = EllipticWarp::for_learning(
+            curvature_radius,
+            sheet_count.unwrap_or(2),
+            spin_harmonics.unwrap_or(1),
+        )
+        .map_err(value_error)?;
+        Ok(Self { warp })
     }
 
     #[getter]
@@ -56,13 +211,94 @@ impl PyEllipticWarp {
     }
 
     #[pyo3(signature = (sheet_count=None, spin_harmonics=None))]
-    fn configure(&mut self, sheet_count: Option<usize>, spin_harmonics: Option<usize>) {
-        if let Some(sheets) = sheet_count {
-            self.warp = self.warp.clone().with_sheet_count(sheets);
-        }
-        if let Some(harmonics) = spin_harmonics {
-            self.warp = self.warp.clone().with_spin_harmonics(harmonics);
-        }
+    fn configure(
+        &mut self,
+        sheet_count: Option<usize>,
+        spin_harmonics: Option<usize>,
+    ) -> PyResult<()> {
+        self.warp = EllipticWarp::for_learning(
+            self.warp.curvature_radius(),
+            sheet_count.unwrap_or(self.warp.sheet_count()),
+            spin_harmonics.unwrap_or(self.warp.spin_harmonics()),
+        )
+        .map_err(value_error)?;
+        Ok(())
+    }
+
+    #[pyo3(signature = (orientations, *, max_rows=65_536))]
+    fn map_orientations_batch(
+        &self,
+        py: Python<'_>,
+        orientations: Vec<f32>,
+        max_rows: usize,
+    ) -> PyResult<PyEllipticLearningBatch> {
+        py.detach(|| self.warp.differentiate_batch(&orientations, max_rows))
+            .map(|inner| PyEllipticLearningBatch { inner })
+            .map_err(value_error)
+    }
+
+    #[pyo3(signature = (orientations, *, raw_mix, max_rows=65_536))]
+    fn map_anchored_batch(
+        &self,
+        py: Python<'_>,
+        orientations: Vec<f32>,
+        raw_mix: f32,
+        max_rows: usize,
+    ) -> PyResult<PyEllipticAnchoredLearningBatch> {
+        py.detach(|| {
+            self.warp
+                .differentiate_anchored_batch(&orientations, raw_mix, max_rows)
+        })
+        .map(|inner| PyEllipticAnchoredLearningBatch { inner })
+        .map_err(value_error)
+    }
+
+    #[pyo3(signature = (orientations, *, batch_size, sequence_length, max_rows=65_536, max_pairs=1_048_576))]
+    fn map_causal_batch(
+        &self,
+        py: Python<'_>,
+        orientations: Vec<f32>,
+        batch_size: usize,
+        sequence_length: usize,
+        max_rows: usize,
+        max_pairs: usize,
+    ) -> PyResult<PyEllipticCausalLearningBatch> {
+        py.detach(|| {
+            self.warp.differentiate_causal_batch(
+                &orientations,
+                batch_size,
+                sequence_length,
+                max_rows,
+                max_pairs,
+            )
+        })
+        .map(|inner| PyEllipticCausalLearningBatch { inner })
+        .map_err(value_error)
+    }
+
+    #[allow(clippy::too_many_arguments)] // Keep the existing causal batch keyword API.
+    #[pyo3(signature = (orientations, *, batch_size, sequence_length, raw_mix, max_rows=65_536, max_pairs=1_048_576))]
+    fn map_gated_causal_batch(
+        &self,
+        py: Python<'_>,
+        orientations: Vec<f32>,
+        batch_size: usize,
+        sequence_length: usize,
+        raw_mix: f32,
+        max_rows: usize,
+        max_pairs: usize,
+    ) -> PyResult<PyEllipticGatedCausalLearningBatch> {
+        py.detach(|| {
+            self.warp.differentiate_gated_causal_batch(
+                &orientations,
+                [batch_size, sequence_length],
+                raw_mix,
+                max_rows,
+                max_pairs,
+            )
+        })
+        .map(|inner| PyEllipticGatedCausalLearningBatch { inner })
+        .map_err(value_error)
     }
 
     fn map_orientation(&self, orientation: Vec<f32>) -> PyResult<Option<PyEllipticTelemetry>> {
@@ -222,6 +458,11 @@ impl PyEllipticTelemetry {
 pub fn register(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyEllipticWarp>()?;
     module.add_class::<PyEllipticTelemetry>()?;
+    module.add_class::<PyEllipticLearningBatch>()?;
+    module.add_class::<PyEllipticChartStep>()?;
+    module.add_class::<PyEllipticAnchoredLearningBatch>()?;
+    module.add_class::<PyEllipticCausalLearningBatch>()?;
+    module.add_class::<PyEllipticGatedCausalLearningBatch>()?;
     module.add("__doc__", "Elliptic microlocal warp helpers")?;
     let _ = py;
     Ok(())

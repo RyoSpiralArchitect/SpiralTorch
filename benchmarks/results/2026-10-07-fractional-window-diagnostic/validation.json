@@ -1,0 +1,67 @@
+{
+  "schema": "spiraltorch.fractional_history_window_validation.v1",
+  "status": "passed",
+  "diagnostic_process_exit_code": 0,
+  "diagnostic_source_revision": "1ff85d7fd181dcbf9e23936556e53a74c870aaa7",
+  "results_sha256": "ba2c0985fdb46ded4b9528971b0be829a0e3e25b933a2ceee667d9c3361d747e",
+  "summary_sha256": "9dbc46b5318b295c2c8b5e1e513af8b62d9c0ca9d767ac98be5c537c6ed7ef8a",
+  "source_sha256": {
+    "diagnostic": "46440bdcda527c80df610d423105f7ef8985568d9a9ee4352f7f36188184ee04",
+    "helper": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f"
+  },
+  "summary_source_sha256": "8fc31ed92acdd00ca4006cb8663e9790039f65a4c411a7ed10d3b24937118f37",
+  "environment": {
+    "frozen_files_verified": {
+      "study": 76,
+      "client": 8,
+      "original_runtime": 71,
+      "candidate_runtime": 71
+    },
+    "original_runtime_source_revision": "f8e8e6aa60f7c9a4211243e91f1f1a565d26e50b",
+    "candidate_runtime_source_revision": "16379238c73f6890a4f754dccd4ad381436e047b",
+    "original_native_sha256": "7146628d3977d9862151707bdd235029f13e3dab20846142edb30790e4b088b1",
+    "candidate_native_sha256": "18f4c1c2bb4b76fa0e8beeca59f7fbfa0dffbc85efd72b96c45c119a63befa58",
+    "candidate_fractional_bridge_sha256": "6c38ad7627b5bf4128a54f91bbc08c8f930a54480ac031212a0f1499bd58a8d5",
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  },
+  "full_replay_blocks": 456,
+  "full_replay_means": 6,
+  "intervention_blocks": 1368,
+  "training_updates": 0,
+  "optimizer_steps": 0,
+  "frozen_manifest_inputs_preserved": true,
+  "frozen_base_unchanged": true,
+  "regressions": {
+    "exit_code": 0,
+    "passed": 815,
+    "skipped": 0,
+    "warnings": 18,
+    "new_diagnostic_tests": 10,
+    "existing_warning": "Torch JIT deprecation"
+  },
+  "private_logs": {
+    "targeted-tests.log": {
+      "sha256": "812d0a0169ad44d1c0e249c030632764f24467cdf35aa0d415b3d5d57cf75297",
+      "bytes": 98
+    },
+    "regressions-final.log": {
+      "sha256": "5897b3da432d2bb60f1fd562618d8ec11c5e9f082f7caa76f9d96183e52898fc",
+      "bytes": 1429
+    },
+    "diagnostic.log": {
+      "sha256": "7a76588eef7c409eea87f27c5efe5d5975ad3568e43d1f581ec4ca33c4ba9858",
+      "bytes": 3378
+    },
+    "publication-tests.log": {
+      "sha256": "ebd938888ffaa2af3581cec946b9b58fbc84d3d34af429b416dd4a0ad79f1a12",
+      "bytes": 98
+    }
+  },
+  "scope": "Post-training dependence at fixed learned parameters, not matched-training causation, independent heldout evidence, unique long-memory benefit, speed or general LLM quality.",
+  "public_artifact_checks": {
+    "exit_code": 0,
+    "passed": 4,
+    "model_execution": false
+  }
+}

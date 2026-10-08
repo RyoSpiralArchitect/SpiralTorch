@@ -4,6 +4,40 @@ This runbook keeps the PyPI path explicit and auditable. The safe default is a
 GitHub Actions dry-run: it validates the signed release wheels and PyPI state
 without uploading.
 
+## Release Cadence
+
+Prefer a small release after a coherent, reviewed user-visible milestone rather
+than waiting for the whole research roadmap. This is a maintainer checkpoint,
+not a timed job or permission to publish an unfinished branch.
+
+1. Close the prerequisite PR stack in parent-first order. Record the exact
+   reviewed source SHA and its passing checks; do not tag a working tree or an
+   unrelated CI-green revision.
+2. Inspect the current PyPI version, existing tags, and GitHub Release state.
+   Choose the next unused version. Never reuse a version that was tagged or
+   partially published, and never move an existing release tag.
+3. Prepare a narrow release PR: synchronize `bindings/st-py/Cargo.toml`,
+   `bindings/st-py/pyproject.toml`, and the `spiraltorch-py` entry in `Cargo.lock`.
+   Move reviewed items from `bindings/st-py/CHANGELOG.md`'s Unreleased section
+   into that version, with API changes, source-only limitations, and validation
+   scope. Update this runbook's version examples and the package README version
+   together. A version bump is preparation, not evidence of publication.
+4. Review and merge that release PR after its checks pass. Verify the merged
+   source and tag that exact commit as `v<package-version>`. The official wheel
+   workflow must install and test all three platform wheels, retain the signed
+   payload, and finish the verified GitHub Release before a PyPI upload.
+5. Run readiness with `--no-clipboard`, then the publish dry-run. Select an
+   actual publish method explicitly only after the release assets and package
+   metadata agree. Never read a clipboard token merely to inspect readiness.
+6. Verify the published wheel hashes and simple-index visibility. Record
+   success only after verification; for an uncertain upload, inspect first
+   rather than rebuilding, retagging, or re-uploading.
+
+Keep release history in the package changelog, operational commands here, and
+API examples in the topic guides. The root README is an entry point, not a
+second release runbook. Update `docs/repository-stats.md` independently; its
+generated size counts are not a release or performance gate.
+
 ## Release Wheel Workflows
 
 - Manual wheel artifact build: `.github/workflows/wheels.yml`
@@ -16,7 +50,12 @@ without uploading.
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
 Both PyPI workflows call the same manifest-backed wheel validator before any
-token or trusted-publisher upload. Official release builds also execute all HF
+token or trusted-publisher upload. The direct manual publish job also depends
+on successful signed-asset attachment and verified GitHub Release publication;
+it cannot race that job or publish to PyPI after its failure. Official release
+requests with `publish_pypi=true` and no `release_tag` fail before building,
+while a build-only preflight can still omit the tag. Official release builds
+also execute all HF
 and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
 They also execute the installed wheel through the Rust-owned runtime protocol
@@ -31,6 +70,22 @@ atomic SGD failure/ownership checks, a 300-step multiclass logits-loss fixture,
 and a 400-step affine LayerNorm learning fixture run
 on every installed release wheel before upload. This is a mechanics gate,
 not a claim about LLM fine-tuning quality.
+`tools/smoke_learning_stack.py` additionally exercises the installed native
+Sequential forward capture, a 24-update shared-Topos learning loop and exact
+weight-only prediction handoff, WaveGate/Elliptic/fractional-history VJPs against
+finite differences, and owned typed-buffer transport. It round-trips the
+resident Linear/GELU/LayerNorm/Topos plan but does not dispatch a GPU; passing
+this portable release smoke is not evidence of real-GPU execution. The same
+smoke runs for manual wheel artifacts and PR CI. Its isolated regression also
+blocks Torch, NumPy, Transformers, and pytest to check the dependency-light
+native route, rather than skipping missing features.
+On Linux, PR CI and both wheel-build workflows also install the same wheel
+under CPython 3.8 and execute the learning-stack smoke before completion or
+artifact upload. This does not rebuild Rust or test optional HF dependencies.
+Other platform wheels still use their configured Python 3.12 smoke; the Linux
+minimum-version gate is not an all-platform/all-version compatibility claim.
+The separate source regression simulates the pre-3.10 dataclass signature to
+catch unsupported `slots` arguments; simulation alone is not runtime evidence.
 Catalog v4 records every normal-admission profile plus
 Rust-owned byte/node/depth limits
 for serialized Python/WASM surfaces; typed Rust admission has no serialized
@@ -88,7 +143,7 @@ final publication rechecks the known release ID.
 ## Common Variables
 
 ```bash
-VERSION=0.4.27
+VERSION=0.4.28
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 ```
@@ -106,7 +161,8 @@ python scripts/release_status.py \
   --no-clipboard
 ```
 
-Expected pre-publish shape for `0.4.27` is:
+Expected pre-publish shape for `0.4.28`, after the official wheel build and
+verified GitHub Release have completed, is:
 
 ```text
 local_versions ... consistent=yes
@@ -119,8 +175,8 @@ Current helpers also print concrete resume commands:
 
 ```text
 token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
-publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.27 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
-publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.27 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.28 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.28 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
 trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
 next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```

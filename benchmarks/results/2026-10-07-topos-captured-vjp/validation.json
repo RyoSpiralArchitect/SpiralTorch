@@ -1,0 +1,73 @@
+{
+  "schema": "spiraltorch.topos_capture_validation.v1",
+  "source_revision": "bfdbbc3035a4e67f179913933f53a6eae35b60c9",
+  "rust_core_tests": 10,
+  "rust_nn_tests": 7,
+  "python_regressions": 983,
+  "benchmark_and_replay_tests": 114,
+  "client_sha256": {
+    "benchmark_topos_learning.py": "e62da98cea2e730454f89331cb5d86a5d4ca2d28e6a8922ae7a88b949cfa6e7f",
+    "probe_topos_capture_wasm.mjs": "af79a22fe75158c1bdd0b7b2ee67073f506ec9a19ecb75e9e91145b54f150f80",
+    "replay_geometry_stack_update.py": "5a2f221a9d47766b5c2808b0f99b47e6eea67ea355a86e90a30fdb86393d7674"
+  },
+  "logs": {
+    "rust-topos.log": {
+      "sha256": "33a09703611801dd4d28159e6247b24655f199c124cefd3469ece58e215a8476",
+      "exit_code": 0
+    },
+    "rust-nn-topos.log": {
+      "sha256": "2d3a7e2b42d0d806650c25bc9d8bc26caa45b2151859118643f50965a5d445df",
+      "exit_code": 0
+    },
+    "native-build.log": {
+      "sha256": "50b5d9b7b9c56a2fd49ea6539b2bc93c49c9fdfa76fbecbbdca43054bc5fc55a",
+      "exit_code": 0
+    },
+    "wasm-build.log": {
+      "sha256": "5b4cf2029b775a537dc5097d32213afb61a3d7ea1dd40be1943e7229fada3942",
+      "exit_code": 0
+    },
+    "tests-topos.log": {
+      "sha256": "1ed6312d57bc745a61433b21a1717b3206dfa910ab3fad6d997da7d3e996a807",
+      "exit_code": 0
+    },
+    "tests-regressions.log": {
+      "sha256": "5a8c98fe35f02f11b916aed28f3186c881b2954ec302f24affed1ed583987fa1",
+      "exit_code": 2
+    },
+    "tests-regressions-v2.log": {
+      "sha256": "546690faf62d0c00da2faa2109670d02ee60043c1239ffb73f6e2704ab77b264",
+      "exit_code": 0
+    },
+    "tests-benchmarks.log": {
+      "sha256": "34b69978b628aedd2266dba00983a4e20d6a633a783dce3a41d09ac33b969605",
+      "exit_code": 0
+    },
+    "wasm-before.log": {
+      "sha256": "ca6a5fa1a72d56b547891ab7870526ebc1e1250c92ea33c572cd9f9911228abd",
+      "exit_code": 0
+    },
+    "wasm-after.log": {
+      "sha256": "0628a9dbb2f88653b6be201a321e217a85519f896c2150c963ec67d1afac26f3",
+      "exit_code": 0
+    },
+    "pretrained-replay.log": {
+      "sha256": "d89e9a6a3d4948f1723931a55d4c31bd5eb26f6de1ac2ce98fbec2b3713a200a",
+      "exit_code": 0
+    },
+    "tests-regressions-final.log": {
+      "sha256": "47fc8d8cf8a8cbd6409db81689f860d18d475d72e8280bebb20cfb4a33e8251b",
+      "exit_code": 0
+    }
+  },
+  "setup_failure_preserved": {
+    "stage": "pytest_collection",
+    "before_test_bodies": true,
+    "collection_errors": 4,
+    "cause": "Empty test inventory from wrong CI slice selected unrelated historical benchmark scripts. Explicit 52-file inventory rerun passed."
+  },
+  "strict_workspace_clippy": "not_rerun_for_this_revision",
+  "no_cleanup_performed": true,
+  "private_states_logs_and_original_artifacts_retained": true,
+  "python_regressions_with_public_receipts": 987
+}

@@ -1,0 +1,551 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_summary.v1",
+  "study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
+  "steps_per_run": 512,
+  "runs": 12,
+  "primary_updates": 6144,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "lag2": {
+          "mean_ce": 4.055657884147432,
+          "mean_delta_vs_baseline": -0.018055384688907772,
+          "mean_delta_vs_lag2": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_lag2": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.055642845233281,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.055721877018611,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.055608930190404,
+              "delta_vs_lag2": 0.0
+            }
+          ]
+        },
+        "history_fixed_two": {
+          "mean_ce": 4.055657884147432,
+          "mean_delta_vs_baseline": -0.018055384688907772,
+          "mean_delta_vs_lag2": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_lag2": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.055642845233281,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.055721877018611,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.055608930190404,
+              "delta_vs_lag2": 0.0
+            }
+          ]
+        },
+        "history_learned_two": {
+          "mean_ce": 4.047328408559164,
+          "mean_delta_vs_baseline": -0.026384860277175903,
+          "mean_delta_vs_lag2": -0.008329475588268428,
+          "paired_delta_sample_sd": 0.000825858702778528,
+          "seeds_better_than_lag2": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.046492660045624,
+              "delta_vs_lag2": -0.0091501851876572
+            },
+            {
+              "seed": 43,
+              "ce": 4.048223314682643,
+              "delta_vs_lag2": -0.007498562335968018
+            },
+            {
+              "seed": 47,
+              "ce": 4.047269250949224,
+              "delta_vs_lag2": -0.008339679241180065
+            }
+          ]
+        },
+        "history_learned_one": {
+          "mean_ce": 4.054341469208399,
+          "mean_delta_vs_baseline": -0.019371799627940334,
+          "mean_delta_vs_lag2": -0.001316414939032562,
+          "paired_delta_sample_sd": 0.00026276840056562833,
+          "seeds_better_than_lag2": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.054039784272512,
+              "delta_vs_lag2": -0.0016030609607691204
+            },
+            {
+              "seed": 43,
+              "ce": 4.054634940624237,
+              "delta_vs_lag2": -0.0010869363943735166
+            },
+            {
+              "seed": 47,
+              "ce": 4.054349682728449,
+              "delta_vs_lag2": -0.0012592474619550487
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "lag2": {
+          "mean_ce": 4.001160219311714,
+          "mean_delta_vs_baseline": -0.01064726710319519,
+          "mean_delta_vs_lag2": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_lag2": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.0011836141347885,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.001240506768227,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.001056537032127,
+              "delta_vs_lag2": 0.0
+            }
+          ]
+        },
+        "history_fixed_two": {
+          "mean_ce": 4.001160219311714,
+          "mean_delta_vs_baseline": -0.01064726710319519,
+          "mean_delta_vs_lag2": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_lag2": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.0011836141347885,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 4.001240506768227,
+              "delta_vs_lag2": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 4.001056537032127,
+              "delta_vs_lag2": 0.0
+            }
+          ]
+        },
+        "history_learned_two": {
+          "mean_ce": 3.9968444605668387,
+          "mean_delta_vs_baseline": -0.014963025848070632,
+          "mean_delta_vs_lag2": -0.00431575874487559,
+          "paired_delta_sample_sd": 0.00040948214031615894,
+          "seeds_better_than_lag2": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.99668125808239,
+              "delta_vs_lag2": -0.004502356052398682
+            },
+            {
+              "seed": 43,
+              "ce": 3.9973942935466766,
+              "delta_vs_lag2": -0.003846213221549988
+            },
+            {
+              "seed": 47,
+              "ce": 3.9964578300714493,
+              "delta_vs_lag2": -0.004598706960678101
+            }
+          ]
+        },
+        "history_learned_one": {
+          "mean_ce": 4.0003310069441795,
+          "mean_delta_vs_baseline": -0.011476479470729828,
+          "mean_delta_vs_lag2": -0.0008292123675346375,
+          "paired_delta_sample_sd": 0.00016758497311422323,
+          "seeds_better_than_lag2": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 4.000175289809704,
+              "delta_vs_lag2": -0.0010083243250846863
+            },
+            {
+              "seed": 43,
+              "ce": 4.000564284622669,
+              "delta_vs_lag2": -0.0006762221455574036
+            },
+            {
+              "seed": 47,
+              "ce": 4.000253446400166,
+              "delta_vs_lag2": -0.0008030906319618225
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "The preceding learned-from-one orders moved near two without establishing convergence. This is a fresh exploratory follow-up, not confirmation that two is optimal or that long memory is useful.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "All four arms have independent zero local/history feature gates and start at identity. Ordinary lag2 has 1536 total/trainable parameters, fixed-two GL has 1537 total/1536 trainable, and learned GL has 1537 trainable parameters. The frozen no-adapter model is the shared zero-update baseline.",
+    "lag2 uses ordinary Torch h[t]=-2*x[t-1]+x[t-2], with missing taps zero. Float64 intermediate accumulation matches the Rust map before its float32 output boundary. At alpha=2 and step=1, Rust strictly-past GL is the same map; fixed-two versus lag2 tests implementation parity, not independent quality evidence.",
+    "Require exact same-math per-step losses, common gate-gradient receipts, development scores, final gates/named Adam state and per-block endpoints for this CPU-f32 protocol. Preserve a mismatch as a failed parity criterion, not a quality advantage.",
+    "Learned-two starts at alpha=2 but retains all Rust order derivatives, including older taps whose forward coefficients vanish at the integer. Learned-one reruns the previous recipe from scratch with the current frozen runtime; historical endpoints are not pooled as independent repetitions.",
+    "Primary contrasts: fixed-two minus lag2 for parity; learned-two minus fixed-two for learnable departure from the two-tap filter; learned-one minus learned-two for initialization; learned-one minus lag2 for the preceding learned recipe against the short filter.",
+    "Complete all twelve 512-update runs and 24 continuation-only updates before endpoint evaluation. Development does not select checkpoints, hyperparameters, duration or the reported arm. Preserve losing outcomes and report moving orders without claiming convergence.",
+    "Pride/Alice are reused exploratory endpoints, potentially in pretraining, not untouched confirmation. Seeds vary paired minibatch order, not independently acquired corpora. No unique fractional-memory, significance or general-LLM claim follows from a small quality difference.",
+    "CPU float32 interfaces, frozen local GPT-2, complete unpadded contexts, no KV cache or packed documents. History resets at each 128-token block. All arms retain the shared K=32 budget; the ordinary map uses two past taps. Training wall time is not a same-math performance benchmark.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "reference_arm": "lag2",
+  "paired_fractional_contrasts": {
+    "pride_unused_tail": {
+      "fixed_two_minus_lag2": {
+        "weights": {
+          "history_fixed_two": 1,
+          "lag2": -1
+        },
+        "mean_ce_difference": 0.0,
+        "paired_sample_sd": 0.0,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.0
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.0
+          }
+        ]
+      },
+      "learned_two_minus_fixed_two": {
+        "weights": {
+          "history_learned_two": 1,
+          "history_fixed_two": -1
+        },
+        "mean_ce_difference": -0.008329475588268428,
+        "paired_sample_sd": 0.000825858702778528,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0091501851876572
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.007498562335968018
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.008339679241180065
+          }
+        ]
+      },
+      "learned_one_minus_learned_two": {
+        "weights": {
+          "history_learned_one": 1,
+          "history_learned_two": -1
+        },
+        "mean_ce_difference": 0.007013060649235865,
+        "paired_sample_sd": 0.0005707392056300109,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.00754712422688808
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.006411625941594501
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.007080431779225016
+          }
+        ]
+      },
+      "learned_one_minus_lag2": {
+        "weights": {
+          "history_learned_one": 1,
+          "lag2": -1
+        },
+        "mean_ce_difference": -0.001316414939032562,
+        "paired_sample_sd": 0.00026276840056562833,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0016030609607691204
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0010869363943735166
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0012592474619550487
+          }
+        ]
+      }
+    },
+    "alice_transfer": {
+      "fixed_two_minus_lag2": {
+        "weights": {
+          "history_fixed_two": 1,
+          "lag2": -1
+        },
+        "mean_ce_difference": 0.0,
+        "paired_sample_sd": 0.0,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.0
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.0
+          }
+        ]
+      },
+      "learned_two_minus_fixed_two": {
+        "weights": {
+          "history_learned_two": 1,
+          "history_fixed_two": -1
+        },
+        "mean_ce_difference": -0.00431575874487559,
+        "paired_sample_sd": 0.00040948214031615894,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.004502356052398682
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.003846213221549988
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.004598706960678101
+          }
+        ]
+      },
+      "learned_one_minus_learned_two": {
+        "weights": {
+          "history_learned_one": 1,
+          "history_learned_two": -1
+        },
+        "mean_ce_difference": 0.0034865463773409524,
+        "paired_sample_sd": 0.0003128797885123944,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0034940317273139954
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.0031699910759925842
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.003795616328716278
+          }
+        ]
+      },
+      "learned_one_minus_lag2": {
+        "weights": {
+          "history_learned_one": 1,
+          "lag2": -1
+        },
+        "mean_ce_difference": -0.0008292123675346375,
+        "paired_sample_sd": 0.00016758497311422323,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.0010083243250846863
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0006762221455574036
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0008030906319618225
+          }
+        ]
+      }
+    }
+  },
+  "order_trajectories": {
+    "41:history_fixed_two": {
+      "learnable_order": false,
+      "initial_alpha": 2.0,
+      "final_alpha": 2.0,
+      "final_log_alpha": 0.6931471824645996,
+      "min_alpha": 2.0,
+      "max_alpha": 2.0,
+      "nonzero_order_gradient_steps": 0
+    },
+    "41:history_learned_two": {
+      "learnable_order": true,
+      "initial_alpha": 2.0,
+      "final_alpha": 4.055050373077393,
+      "final_log_alpha": 1.399963140487671,
+      "min_alpha": 2.0,
+      "max_alpha": 4.055050373077393,
+      "nonzero_order_gradient_steps": 511
+    },
+    "41:history_learned_one": {
+      "learnable_order": true,
+      "initial_alpha": 1.0,
+      "final_alpha": 2.0976626873016357,
+      "final_log_alpha": 0.7408236861228943,
+      "min_alpha": 1.0,
+      "max_alpha": 2.0976626873016357,
+      "nonzero_order_gradient_steps": 511
+    },
+    "43:history_fixed_two": {
+      "learnable_order": false,
+      "initial_alpha": 2.0,
+      "final_alpha": 2.0,
+      "final_log_alpha": 0.6931471824645996,
+      "min_alpha": 2.0,
+      "max_alpha": 2.0,
+      "nonzero_order_gradient_steps": 0
+    },
+    "43:history_learned_two": {
+      "learnable_order": true,
+      "initial_alpha": 2.0,
+      "final_alpha": 3.7574100494384766,
+      "final_log_alpha": 1.3237298727035522,
+      "min_alpha": 1.9985134601593018,
+      "max_alpha": 3.7574100494384766,
+      "nonzero_order_gradient_steps": 511
+    },
+    "43:history_learned_one": {
+      "learnable_order": true,
+      "initial_alpha": 1.0,
+      "final_alpha": 1.9491060972213745,
+      "final_log_alpha": 0.6673708558082581,
+      "min_alpha": 1.0,
+      "max_alpha": 1.9491060972213745,
+      "nonzero_order_gradient_steps": 511
+    },
+    "47:history_fixed_two": {
+      "learnable_order": false,
+      "initial_alpha": 2.0,
+      "final_alpha": 2.0,
+      "final_log_alpha": 0.6931471824645996,
+      "min_alpha": 2.0,
+      "max_alpha": 2.0,
+      "nonzero_order_gradient_steps": 0
+    },
+    "47:history_learned_two": {
+      "learnable_order": true,
+      "initial_alpha": 2.0,
+      "final_alpha": 3.9513843059539795,
+      "final_log_alpha": 1.3740659952163696,
+      "min_alpha": 1.9985260963439941,
+      "max_alpha": 3.9513843059539795,
+      "nonzero_order_gradient_steps": 511
+    },
+    "47:history_learned_one": {
+      "learnable_order": true,
+      "initial_alpha": 1.0,
+      "final_alpha": 2.002378225326538,
+      "final_log_alpha": 0.6943355798721313,
+      "min_alpha": 1.0,
+      "max_alpha": 2.002378225326538,
+      "nonzero_order_gradient_steps": 511
+    }
+  },
+  "same_math_receipt_parity": {
+    "41": {
+      "update_receipts_equal": true,
+      "development_equal": true,
+      "endpoint_block_losses_equal": {
+        "pride_unused_tail": true,
+        "alice_transfer": true
+      }
+    },
+    "43": {
+      "update_receipts_equal": true,
+      "development_equal": true,
+      "endpoint_block_losses_equal": {
+        "pride_unused_tail": true,
+        "alice_transfer": true
+      }
+    },
+    "47": {
+      "update_receipts_equal": true,
+      "development_equal": true,
+      "endpoint_block_losses_equal": {
+        "pride_unused_tail": true,
+        "alice_transfer": true
+      }
+    }
+  },
+  "same_math_state_parity": {
+    "41": {
+      "status": "unverified",
+      "saved_gates_equal": null,
+      "saved_named_adam_equal": null
+    },
+    "43": {
+      "status": "unverified",
+      "saved_gates_equal": null,
+      "saved_named_adam_equal": null
+    },
+    "47": {
+      "status": "unverified",
+      "saved_gates_equal": null,
+      "saved_named_adam_equal": null
+    }
+  },
+  "same_math_parity_status": "unverified",
+  "input_sha256": {
+    "plan": "bf418233415131764cc8148920d2c5172fcfc8e4700f4656c5d0738baf51da43",
+    "results": "5aa9df87bf7678043967bfbed06b0f6a3ea430da121432dc0750613738c89b72",
+    "journal": "fe8f28f894be56836919e610f7ff3cd37633f0d6416fa91380ac1ffc30ee67f7"
+  }
+}

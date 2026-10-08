@@ -3,15 +3,17 @@
 
 use super::*;
 use st_kernel_contracts::pointwise::{PointwiseChain, PointwiseError, PointwiseExecution};
+use st_kernel_contracts::topos_resonator::ToposResonatorKernel;
 use std::fmt::Write;
 
 mod inputs;
+mod topos;
 pub mod vjp;
 pub use inputs::PointwiseInputs;
 
 #[derive(Debug)]
 pub struct PointwisePlan {
-    chain: PointwiseChain,
+    program: Program,
     layouts: Vec<NdLayout>,
     device: TensorDevice,
     binding_layout: Shared<wgpu::BindGroupLayout>,
@@ -19,6 +21,43 @@ pub struct PointwisePlan {
     metadata: wgpu::Buffer,
     grid: [u32; 3],
     flag_slot: u32,
+}
+
+#[derive(Clone, Debug)]
+enum Program {
+    Chain(PointwiseChain),
+    Topos(ToposResonatorKernel),
+    ToposResidualGuard(ToposResonatorKernel),
+}
+
+impl Program {
+    fn input_count(&self) -> usize {
+        match self {
+            Self::Chain(chain) => chain.input_count(),
+            Self::Topos(_) | Self::ToposResidualGuard(_) => 2,
+        }
+    }
+
+    fn validate_layouts(&self, layouts: &[NdLayout]) -> Result<(), PointwiseError> {
+        match self {
+            Self::Chain(chain) => chain.validate_layouts(layouts),
+            Self::Topos(_) | Self::ToposResidualGuard(_) => {
+                if layouts.len() != 2 {
+                    return Err(PointwiseError::Operands);
+                }
+                let shape = layouts[0].shape();
+                let Some(&cols) = shape.last().filter(|&&cols| cols > 0) else {
+                    return Err(PointwiseError::LayoutMismatch);
+                };
+                let gate = layouts[1].shape();
+                if gate != shape && gate != [cols] && gate != [1, cols] {
+                    return Err(PointwiseError::LayoutMismatch);
+                }
+                layouts[1].broadcast_to(shape)?;
+                Ok(())
+            }
+        }
+    }
 }
 
 fn layout_metadata(
@@ -57,12 +96,38 @@ fn layout_metadata(
     ))
 }
 
+#[cfg(test)]
 fn fused_source(chain: &PointwiseChain) -> String {
-    generated_source(chain, false)
+    generated_source(&Program::Chain(chain.clone()), false)
 }
 
-fn generated_source(chain: &PointwiseChain, vjp: bool) -> String {
-    let count = chain.input_count();
+fn generated_source(program: &Program, vjp: bool) -> String {
+    generated_source_for(
+        program,
+        if vjp {
+            Evaluation::RecomputedVjp
+        } else {
+            Evaluation::Forward
+        },
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Evaluation {
+    Forward,
+    RecomputedVjp,
+    Capture,
+    CapturedVjp,
+}
+
+fn generated_source_for(program: &Program, evaluation: Evaluation) -> String {
+    let vjp = matches!(
+        evaluation,
+        Evaluation::RecomputedVjp | Evaluation::CapturedVjp
+    );
+    let captured = matches!(evaluation, Evaluation::Capture | Evaluation::CapturedVjp);
+    assert!(!captured || !matches!(program, Program::Chain(_)));
+    let count = program.input_count();
     let mut code = String::new();
     for i in 0..count {
         writeln!(
@@ -97,6 +162,15 @@ fn generated_source(chain: &PointwiseChain, vjp: bool) -> String {
         .unwrap();
         code.push_str(crate::shader_sources::GELU_DERIVATIVE_WGSL);
     }
+    if captured {
+        writeln!(
+            code,
+            "@group(0) @binding({}) var<storage, {}> saved_sensitivity: array<f32>;",
+            count + if vjp { 5 } else { 4 },
+            if vjp { "read" } else { "read_write" },
+        )
+        .unwrap();
+    }
     // params: length, rank, grid-x, group-count, shape,
     // (offset, strides)*inputs, output flag slot.
     code.push_str(
@@ -129,6 +203,20 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     for i in 0..count {
         writeln!(code, "    let value{i} = input{i}[address(i, {i}u)];").unwrap();
     }
+    if let Program::Topos(kernel) | Program::ToposResidualGuard(kernel) = program {
+        topos::write_body(
+            &mut code,
+            *kernel,
+            evaluation,
+            matches!(program, Program::ToposResidualGuard(_)),
+        );
+        return substitute_ops(
+            code.replace("CHECKED_FLAG_INDEX", "params[arrayLength(&params) - 1u]"),
+        );
+    }
+    let Program::Chain(chain) = program else {
+        unreachable!()
+    };
     code.push_str("    var current = value0;\n");
     for (i, step) in chain.steps().iter().enumerate() {
         if vjp {
@@ -265,10 +353,48 @@ impl PointwisePlan {
         layouts: Vec<NdLayout>,
         flag_slot: u32,
     ) -> Result<Self, TensorError> {
-        chain.validate_layouts(&layouts)?;
+        Self::new_program(device, Program::Chain(chain), layouts, flag_slot)
+    }
+
+    /// One finite Picard operation over N-D resident input and either an
+    /// elementwise gate or a shared last-axis gate. All execution modes use one
+    /// dispatch because this is one indivisible operation, not a chain.
+    /// This low-level kernel does not substitute for open-topos volume/depth
+    /// admission or the st-core semantic audit.
+    pub fn topos_resonator(
+        device: TensorDevice,
+        kernel: ToposResonatorKernel,
+        layouts: Vec<NdLayout>,
+    ) -> Result<Self, TensorError> {
+        Self::new_program(device, Program::Topos(kernel), layouts, 0)
+    }
+
+    /// Module graphs also check the next drive used by the host's fixed-point
+    /// residual audit. This is not a readback or the complete semantic audit.
+    pub(crate) fn topos_graph(
+        device: TensorDevice,
+        kernel: ToposResonatorKernel,
+        layouts: Vec<NdLayout>,
+        flag_slot: u32,
+    ) -> Result<Self, TensorError> {
+        Self::new_program(
+            device,
+            Program::ToposResidualGuard(kernel),
+            layouts,
+            flag_slot,
+        )
+    }
+
+    fn new_program(
+        device: TensorDevice,
+        program: Program,
+        layouts: Vec<NdLayout>,
+        flag_slot: u32,
+    ) -> Result<Self, TensorError> {
+        program.validate_layouts(&layouts)?;
         let gpu = device.runtime().context().device();
         let limits = gpu.limits();
-        let bindings = chain.input_count() as u32 + 4;
+        let bindings = program.input_count() as u32 + 4;
         if bindings > limits.max_storage_buffers_per_shader_stage
             || bindings > limits.max_bindings_per_bind_group
         {
@@ -300,7 +426,7 @@ impl PointwisePlan {
         });
         let module = gpu.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pointwise.shader"),
-            source: wgpu::ShaderSource::Wgsl(fused_source(&chain).into()),
+            source: wgpu::ShaderSource::Wgsl(generated_source(&program, false).into()),
         });
         let pipeline = gpu.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("pointwise.fused"),
@@ -310,7 +436,7 @@ impl PointwisePlan {
             compilation_options: Default::default(),
         });
         Ok(Self {
-            chain,
+            program,
             layouts,
             device,
             binding_layout: Shared::new(binding_layout),
@@ -330,14 +456,14 @@ impl PointwisePlan {
         }
         let mut layouts = self.layouts.clone();
         layouts[0] = input.clone();
-        self.chain.validate_layouts(&layouts)?;
+        self.program.validate_layouts(&layouts)?;
         let (metadata, grid) = layout_metadata(
             self.device.runtime().context().device(),
             &layouts,
             self.flag_slot,
         )?;
         Ok(Self {
-            chain: self.chain.clone(),
+            program: self.program.clone(),
             layouts,
             device: self.device.clone(),
             binding_layout: self.binding_layout.clone(),
@@ -399,9 +525,10 @@ impl PointwisePlan {
         inputs: &[&ResidentTensor],
         execution: PointwiseExecution,
     ) -> Result<ResidentTensor, TensorError> {
-        if execution == PointwiseExecution::Sequential {
+        if let (PointwiseExecution::Sequential, Program::Chain(chain)) = (execution, &self.program)
+        {
             let mut current = inputs[0].clone();
-            for step in self.chain.steps() {
+            for step in chain.steps() {
                 current = current.apply(step.op, step.rhs.map(|i| inputs[i]))?;
             }
             return Ok(current);
@@ -409,9 +536,11 @@ impl PointwisePlan {
         let context = self.device.runtime().context();
         let gpu = context.device();
         let mut encoder = gpu.create_command_encoder(&Default::default());
-        let output = if execution == PointwiseExecution::Batched {
+        let output = if let (PointwiseExecution::Batched, Program::Chain(chain)) =
+            (execution, &self.program)
+        {
             let mut current = inputs[0].clone();
-            for step in self.chain.steps() {
+            for step in chain.steps() {
                 let rhs = step.rhs.map_or(&current, |i| inputs[i]);
                 let rhs_layout = rhs.layout.broadcast_to(self.layouts[0].shape())?;
                 current = self.device.encode(

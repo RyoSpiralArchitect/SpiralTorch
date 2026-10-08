@@ -1,0 +1,117 @@
+{
+  "schema": "spiraltorch.topos_nn_shared_capture_validation.v1",
+  "status": "validated_with_lint_limitation",
+  "implementation_commit": "2fb849edd6143672da412f1af814992e05e9977b",
+  "base_commit": "d004bd627d7121b7b7951119acaf6b4ac98e1f18",
+  "source_sha256": {
+    "crates/st-core/src/dynamics/topos_resonator.rs": "326bb639b8861d5f8a6be13d8179ca16ddd26e4ad614677be759f750c78db1d7",
+    "crates/st-core/src/dynamics/topos_resonator_shared_tests.rs": "6c5cbcff5224c9c76ead2b6547c34125d27e29fad9f5cf11663ff697f19f353c",
+    "crates/st-nn/src/layers/topos_resonator.rs": "21225693d2ebb8b0a484d80579ea1c6276c6e3bd4bdcbfc49c6162f46b19377b",
+    "crates/st-nn/src/layers/topos_resonator_shared_capture_tests.rs": "60c82b0cf595de60e99c4521bd2a9fc75cb8c155b34bca8613c6c72ea1eb58b8",
+    "docs/topos_learning.md": "791ac0e1a94b49c8d042d60042acbcc9b50dbddd3f9434a6ee30fc0cc6888fa2",
+    "crates/st-nn/examples/topos_shared_gate_probe.rs": "7a86a9ac49b647ea495fecd20d7ce8421f29b31403118a4cf8d8300b175fe6aa",
+    "tools/check_topos_shared_gate_learning.py": "912295dbde11331133cd51c30cb666c7ba440cc55909c738114e2dc926ab9c4b",
+    "tools/benchmark_topos_module_reference.py": "580427fc50ef4aa61be8bdbec3f1c2b6a8e54f225a9c41bfe0d7d234ce0881d9",
+    "bindings/st-wasm/tests/topos_shared_transport.html": "21ce1250fa949391f57bf6c4cdc015d979703a93e067b4061247de99ca595536",
+    "bindings/st-wasm/tests/topos_shared_transport.mjs": "9783c5e97a88847ac1a657af50841679155c9406f1b21cf82017302e1a9f7f0c",
+    "tools/probe_topos_shared_transport.mjs": "e844cc4db89e9cae712d2a3a9702151cda4b87618ade07cb0e7a4c22d2ff3fd4",
+    "tools/probe_topos_capture_wasm.mjs": "e85cc54489369ce613fd824040d526eae7c7256566ccebcc756b03c3d9ec2ec5",
+    "tools/test_resident_browser.cjs": "d21507a834de0405ab0ed3c1af00cb0558eab61f31fe7d19090cedbc94ac6ff5",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "784ff550e7f0da38b2c3069ae3cb033d6a6db2d699b285a4207d11c8944caace"
+  },
+  "artifacts": {
+    "native_extension": {
+      "sha256": "7dda409a98d30150e2f7fb7dd362ecc3e620e200d771882ec2a8080e5f5ba33c",
+      "bytes": 29886208
+    },
+    "native_learning_probe": {
+      "sha256": "0864c0c33f4c48f402b0e0b33cb9db15002046c737aaa12ac7a7a5003bad1ad8",
+      "bytes": 1051776
+    },
+    "node_wasm": {
+      "sha256": "750ab6539e8dbf36c0c5f5d8745070c6798698eec0d42666775f31347009862f",
+      "bytes": 10124288
+    },
+    "node_wrapper": {
+      "sha256": "49006718ec25ae3a838545bc017d899a09f817325dd618cc6da7e2de215abfd7",
+      "bytes": 476215
+    },
+    "web_wasm": {
+      "sha256": "12b0d8a42a65503bfa72d781fb7864fe58c1bafd04e0a6394512ce6c9311cf60",
+      "bytes": 10118617
+    },
+    "web_wrapper": {
+      "sha256": "9fc10bee78eb719b081cd47652afd5cd5b850ec79bc68b7be6b812365ecca0be",
+      "bytes": 480514
+    }
+  },
+  "local_log_sha256": {
+    "bindgen-node.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bindgen-web.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "browser-shared.log": "4eb88ad538356a09dc140cb8d598130c7f38b1e22d67e6ca244f5b98693bd55d",
+    "core-clippy.log": "dabe8d40cf288d687be3e851abf609fa60d245e4df0b6a53d63dfdbdfc8c2eb3",
+    "core-nn-clippy.log": "f16800b09a9b1721cd387bfe11c408c0e38e2e7bef57b4b0da115cbc7b71bbc8",
+    "core-tests.log": "e862ca86df8564892d79263b9ca7e3e90b733f7ddd16a57fc66cd39b0f4b73ab",
+    "native-learning.log": "4f1a1db2fd29cdc86c4c6a5b0d985fe7d4a4c582ee58362be06f420e77c095f0",
+    "nn-cpu-tests-fixed.log": "e56165559ed998b02339da982a0719983bbe5411ece0efa2152bf72b31ff9850",
+    "nn-cpu-tests.log": "85f2913f703417bb507483e06cbd4879c75e884f259f7ea7e47f741569d2addf",
+    "nn-wgpu-tests.log": "ea5f8a411d6d3965637cf2f2fbce1084dcb424e676ae75d191a87e5dc8104874",
+    "node-legacy.log": "7fd2af3c8afcf73503bbd7e238fe004b5d27facc1c45127727fe2a01fb77e4c5",
+    "node-shared.log": "57f186d785f366890e7b35edcdaa640c75026eac531d0ffe1cd75a8377f647e5",
+    "python-build.log": "3dd61f13026ce0084bc0aadf2d87b924a9a851dfe25780f65cc0f3e8c1cb86a6",
+    "python-clients.log": "1ad4183dcfa22fe7aa2b4eda23c7e7cd41f3711065a2fd011648a4b029eccd06",
+    "torch-learning.log": "a7f6634cf0d3a63f60027ac68099606bec2446fe4de95f037dc57eb0f4c8be53",
+    "wasm-build.log": "4eb09e418e62a5b0bf70a0b8ec59ec2b97236855f139ad0bb018a44de24a3cd7"
+  },
+  "tests": {
+    "core": 22,
+    "nn_cpu": 25,
+    "nn_wgpu": 29,
+    "python": 123,
+    "wgpu_route_combinations": 12,
+    "same_capture_gpu_then_cpu": true,
+    "wgpu_tests_skipped": false
+  },
+  "clippy": {
+    "core": "passed_strict",
+    "nn": "failed_on_unchanged_files",
+    "lib_diagnostics": 23,
+    "test_diagnostics": 34,
+    "diagnostics_in_modified_files": 0,
+    "source_suppressions_added": false
+  },
+  "learning_json_sha256": "38aa97d91ca23697aa36d6ef23a3372f6001d581f546323b970a4673c5152b57",
+  "torch_learning": {
+    "schema": "spiraltorch.topos_shared_gate_torch_check.v1",
+    "status": "passed",
+    "source_backend": "cpu",
+    "torch": "2.12.1",
+    "threads": 2,
+    "updates": 200,
+    "rtol": 0.0005,
+    "atol": 0.00003,
+    "max_abs_error": {
+      "output": 1.1920928955078125e-7,
+      "grad_input": 5.960464477539063e-8,
+      "grad_gate": 1.1920928955078125e-7,
+      "gate_after": 2.9802322387695312e-8,
+      "loss": 1.1688770540363436e-7
+    },
+    "scope": "Native f32 closed-loop shared-gate trajectories compared with CPU Torch, independent broadcast/autograd/reduction. Numeric agreement is not proof of device residency, timing or model quality.",
+    "receipt_sha256": "38aa97d91ca23697aa36d6ef23a3372f6001d581f546323b970a4673c5152b57",
+    "client_sha256": "912295dbde11331133cd51c30cb666c7ba440cc55909c738114e2dc926ab9c4b",
+    "torch_reference_sha256": "580427fc50ef4aa61be8bdbec3f1c2b6a8e54f225a9c41bfe0d7d234ce0881d9"
+  },
+  "storage_contract": {
+    "elementwise_tape_f32_values": "4*N",
+    "shared_tape_f32_values": "3*N+F",
+    "shared_returned_gate_vjp_f32_values": "F",
+    "shared_row_accumulator_f64_values": "F",
+    "scope": "Core tape payload only. Excludes capacity, NN output, snapshots and temporary buffers; not measured peak memory."
+  },
+  "scope": "Native host NN compact CPU capture and streaming pre-reduction audit; actual host WGPU route-switch checks; 200 synthetic native SGD updates versus independent CPU Torch. Python/scalar-WASM regressions. No timing, pretrained FT, GPU-resident HF or model-quality claim.",
+  "retained_failures": [
+    "Initial CPU-only test compile referenced a WGPU-only test helper; corrected before implementation commit.",
+    "Strict NN-wide Clippy failed on existing unchanged files; not suppressed or called clean."
+  ]
+}

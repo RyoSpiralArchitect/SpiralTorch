@@ -1,0 +1,131 @@
+{
+  "schema": "spiraltorch.fractional_multi_adapter_replay_summary.v1",
+  "status": "bitwise_exact",
+  "execution_source_revision": "98912742624bbdb192a87aeeb0578c8436328fd2",
+  "client_sha256": {
+    "hf_fractional_dual_replay.json": "35ec7887d90eff199c7e42501cfd15b4e74326358c25a242cd271d715dd99236",
+    "probe_fractional_multi_adapter.py": "90b93b47f36bd4fafa3933e843076deb9a1a27352bf4c8447a27c2630673b976",
+    "verify_fractional_history_factorial.py": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f"
+  },
+  "completed_processes": 6,
+  "auxiliary_updates": 20,
+  "unique_auxiliary_trajectory_updates": 8,
+  "replay_only_updates": 12,
+  "primary_study_updates": 0,
+  "model": "local GPT-2",
+  "device": "CPU",
+  "dtype": "float32",
+  "threads": 2,
+  "blocks": [
+    "transformer.h.0.mlp",
+    "transformer.h.1.mlp"
+  ],
+  "shape": [
+    2,
+    128,
+    768
+  ],
+  "trainable_parameters": 3076,
+  "kernel_len": 32,
+  "windows": {
+    "full": [
+      1,
+      32
+    ],
+    "short": [
+      1,
+      3
+    ]
+  },
+  "base_unchanged": true,
+  "heldout_scoring": false,
+  "timing_evidence": false,
+  "all_model_losses_gradients_adapter_parameters_and_named_adam_bitwise_equal": true,
+  "runs": {
+    "full-before-v2": {
+      "start_cursor": 0,
+      "updates": 4,
+      "state": {
+        "file": "state.pt",
+        "sha256": "cb954aafb0aedbcc9d88069c40a15102da14365113d7fb865d326a177830c679"
+      },
+      "midpoint": {
+        "file": "midpoint.pt",
+        "sha256": "1fd23c3d679860684cf28c70d66dfec30c67f05bb8be5dbb43ec2b249acdee42"
+      },
+      "resume_source_sha256": null,
+      "native_sha256": "18f4c1c2bb4b76fa0e8beeca59f7fbfa0dffbc85efd72b96c45c119a63befa58",
+      "report_sha256": "7adba1843e226aa7f7470e4d2729f440323bcb7f9d255a576e2757c649364434"
+    },
+    "full-after": {
+      "start_cursor": 0,
+      "updates": 4,
+      "state": {
+        "file": "state.pt",
+        "sha256": "4ad16ec80a32a9d3c39c61fb2a8143da6c840e17887f9229e6c380e50d62fc80"
+      },
+      "midpoint": {
+        "file": "midpoint.pt",
+        "sha256": "5467b42cefb166f71abdbc1186b28596992d27a822e818aad5fe0176a0e3a6e4"
+      },
+      "resume_source_sha256": null,
+      "native_sha256": "810384d0db64aa4e9154addfea0050d5258d9a6e2381f50a10de4270d24419b9",
+      "report_sha256": "27c293ac0c393b3b7c3803f70cfa352cd4ee276331465c2472c35271118a4c0c"
+    },
+    "full-resumed": {
+      "start_cursor": 2,
+      "updates": 2,
+      "state": {
+        "file": "state.pt",
+        "sha256": "dfab4312b10d315ae385a6948095a14992f01a3428a2e2d10fca5a47b73da9cf"
+      },
+      "midpoint": null,
+      "resume_source_sha256": "1fd23c3d679860684cf28c70d66dfec30c67f05bb8be5dbb43ec2b249acdee42",
+      "native_sha256": "810384d0db64aa4e9154addfea0050d5258d9a6e2381f50a10de4270d24419b9",
+      "report_sha256": "2100b41ebe3cbd1d1815a80e44d408560d2c60c327439c7a546771a909a82657"
+    },
+    "short-before": {
+      "start_cursor": 0,
+      "updates": 4,
+      "state": {
+        "file": "state.pt",
+        "sha256": "069badc395eacf6e1ec89c9be9289b16a36fb3a888708d093b6e5d549e578d9e"
+      },
+      "midpoint": {
+        "file": "midpoint.pt",
+        "sha256": "e263b4e9b06951d84448f7b217ad85421d048023489704212db9e3b697104c97"
+      },
+      "resume_source_sha256": null,
+      "native_sha256": "18f4c1c2bb4b76fa0e8beeca59f7fbfa0dffbc85efd72b96c45c119a63befa58",
+      "report_sha256": "fb4b5ad1de5b944cc87d10b3f229e8d1e163e2ddf345481853465cfd1ea67317"
+    },
+    "short-after": {
+      "start_cursor": 0,
+      "updates": 4,
+      "state": {
+        "file": "state.pt",
+        "sha256": "592485c338553fb52b9f55e55e1a057d42c4af7b566987afaf561cd6dcd977a7"
+      },
+      "midpoint": {
+        "file": "midpoint.pt",
+        "sha256": "0f75164319984b2a8c378702238b3d78ea0bb0051c778a20c6519f8239878e3b"
+      },
+      "resume_source_sha256": null,
+      "native_sha256": "810384d0db64aa4e9154addfea0050d5258d9a6e2381f50a10de4270d24419b9",
+      "report_sha256": "7f599b958a1571096d3a0410ddb7996a29872ab22a4746b07f140d104f9eef52"
+    },
+    "short-resumed": {
+      "start_cursor": 2,
+      "updates": 2,
+      "state": {
+        "file": "state.pt",
+        "sha256": "40509999af7776284e99cc7446adafcae9721b3bf5887acbddc4f8774a266480"
+      },
+      "midpoint": null,
+      "resume_source_sha256": "e263b4e9b06951d84448f7b217ad85421d048023489704212db9e3b697104c97",
+      "native_sha256": "810384d0db64aa4e9154addfea0050d5258d9a6e2381f50a10de4270d24419b9",
+      "report_sha256": "bbd5d5282e974703bcc824b89f49602b1287b02b950740c427f6fb5d18937385"
+    }
+  },
+  "scope": "Two four-update auxiliary trajectories and their exact replays. No general convergence, model quality, GPU, WASM integration or end-to-end speed claim."
+}

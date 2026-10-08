@@ -9,6 +9,127 @@
  * camelCase when explicitly configured with `js_name`).
  */
 declare module "spiraltorch-wasm" {
+    /** Causal zero-padded GL, Rust f32 host execution; no WebGPU claim. */
+    export class FractionalGlAngleChart {
+        constructor(angle: number);
+        readonly angle: number;
+        readonly alpha: number;
+        readonly alpha_derivative: number;
+        vjp(alpha_upstream: number): number;
+        jvp(angle_tangent: number): number;
+        free(): void;
+    }
+
+    export class FractionalGlKernel {
+        static gain_from_log_gain(log_gain: number): number;
+        constructor(kernel_len: number, step: number, max_values: number, max_products: number);
+        forward(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
+        forward_history(input: Float32Array, shape: Uint32Array, axis: number, alpha: number): FractionalGlLearningBatch;
+        forward_history_l2(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, gain: number): FractionalGlLearningBatch;
+        forward_history_log_gain(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, log_gain: number): FractionalGlGainLearningBatch;
+        validate_history_window(lag_start: number, lag_end: number): void;
+        forward_history_log_gain_window(input: Float32Array, shape: Uint32Array, axis: number, alpha: number, log_gain: number, lag_start: number, lag_end: number): FractionalGlGainLearningBatch;
+        free(): void;
+    }
+    export class FractionalGlGainLearningBatch {
+        private constructor();
+        readonly output: Float32Array;
+        readonly gain: number;
+        vjp(upstream: Float32Array): FractionalGlGainGradients;
+        vjp_input(upstream: Float32Array): Float32Array;
+        vjp_alpha(upstream: Float32Array): number;
+        vjp_log_gain(upstream: Float32Array): number;
+        /** [alpha, log_gain], with no input adjoint allocation. */
+        vjp_parameters(upstream: Float32Array): Float32Array;
+        jvp(input_tangent: Float32Array, alpha_tangent: number, log_gain_tangent: number): Float32Array;
+        free(): void;
+    }
+    export class FractionalGlGainGradients {
+        private constructor();
+        readonly input: Float32Array;
+        readonly alpha: number;
+        readonly log_gain: number;
+        free(): void;
+    }
+    export class FractionalGlLearningBatch {
+        private constructor();
+        readonly output: Float32Array;
+        vjp(upstream: Float32Array): FractionalGlGradients;
+        vjp_input(upstream: Float32Array): Float32Array;
+        vjp_alpha(upstream: Float32Array): number;
+        jvp(input_tangent: Float32Array, alpha_tangent: number): Float32Array;
+        free(): void;
+    }
+    export class FractionalGlGradients {
+        private constructor();
+        readonly input: Float32Array;
+        readonly alpha: number;
+        free(): void;
+    }
+    /** Rust f32 CPU feature map and first-order snapshots; not resident WebGPU. */
+    export class EllipticWarpKernel {
+        constructor(radius: number, sheets: number, harmonics: number, max_rows: number);
+        forward(orientations: Float32Array): EllipticLearningBatch;
+        /** Full unpadded [batch, sequence, 3]; max_pairs bounds batch*sequence^2. */
+        forwardCausal(orientations: Float32Array, batch: number, sequence: number, max_pairs: number): EllipticCausalLearningBatch;
+        /** Signed ambient correction; raw_mix is shared, finite and narrowed to f32. */
+        forwardGatedCausal(orientations: Float32Array, batch: number, sequence: number, raw_mix: number, max_pairs: number): EllipticGatedCausalLearningBatch;
+        forwardAnchored(orientations: Float32Array, raw_mix: number): EllipticAnchoredLearningBatch;
+        free(): void;
+    }
+    export class EllipticLearningBatch {
+        chartStep(proposal: Float32Array, relativeDamping: number): EllipticChartStep;
+        private constructor();
+        readonly features: Float32Array;
+        vjp(upstream: Float32Array): Float32Array;
+        jvp(tangent: Float32Array): Float32Array;
+        free(): void;
+    }
+    export class EllipticChartStep {
+        private constructor();
+        readonly values: Float32Array;
+        readonly metric: Float64Array;
+        readonly dampedCondition: number;
+        readonly proposalL2: number;
+        readonly stepL2: number;
+        readonly cosine: number | undefined;
+        free(): void;
+    }
+    /** Immutable causal snapshot with all tied query/key/value derivatives. */
+    export class EllipticCausalLearningBatch {
+        private constructor();
+        readonly features: Float32Array;
+        vjp(upstream: Float32Array): Float32Array;
+        free(): void;
+    }
+    export class EllipticAnchoredLearningBatch {
+        private constructor();
+        readonly features: Float32Array;
+        readonly mix: number;
+        vjp(upstream: Float32Array): EllipticAnchoredGradients;
+        jvp(orientations: Float32Array, rawMix: number): Float32Array;
+        free(): void;
+    }
+    export class EllipticAnchoredGradients {
+        private constructor();
+        readonly orientations: Float32Array;
+        readonly rawMix: number;
+        free(): void;
+    }
+    export class EllipticGatedCausalLearningBatch {
+        private constructor();
+        readonly features: Float32Array;
+        readonly mix: number;
+        vjp(upstream: Float32Array): EllipticGatedCausalGradients;
+        free(): void;
+    }
+    export class EllipticGatedCausalGradients {
+        private constructor();
+        readonly orientations: Float32Array;
+        /** Sum over all batch/token/feature contributions, not a mean. */
+        readonly rawMix: number;
+        free(): void;
+    }
     /** Original Rust NN Module. Requires webgpu; inputs/outputs stay resident. */
     export class Sequential {
         constructor();
@@ -1173,6 +1294,43 @@ declare module "spiraltorch-wasm" {
     };
 
     /** Plan in Rust within shared work/output budgets and bounded browser ingress. */
+    export type ZSpaceRepetitionObjectiveConfig = {
+        normalization: "active_positions" | "eligible_targets";
+        schedule: { kind: "constant" } | {
+            kind: "linear_decay";
+            start_update: number;
+            end_update: number;
+            final_scale: number;
+        };
+    };
+    export type ZSpaceRepetitionObjectiveRequest = {
+        config: ZSpaceRepetitionObjectiveConfig;
+        base_strength: number;
+        completed_update_slots: number;
+        active_position_count: number;
+        eligible_target_count: number;
+    };
+    export type ZSpaceRepetitionObjectiveControl = {
+        policy: {
+            contract_version: "spiraltorch.zspace_repetition_objective.v1";
+            semantic_owner: "st-core::runtime::zspace_repetition_objective";
+            clock_rule: string;
+            objective_rule: string;
+            config: ZSpaceRepetitionObjectiveConfig;
+            base_strength: number;
+            policy_id: string;
+        };
+        completed_update_slots: number;
+        active_position_count: number;
+        eligible_target_count: number;
+        schedule_scale: number;
+        normalization_scale: number;
+        effective_strength: number;
+    };
+    /** Per-microbatch scaling of the active-position mean; not a global token mean. */
+    export function zspaceRepetitionObjectiveControlObject(request: ZSpaceRepetitionObjectiveRequest): ZSpaceRepetitionObjectiveControl;
+    export function zspaceRepetitionObjectiveControlJson(requestJson: string): string;
+
     export function zspaceRepetitionUnlikelihoodPlanJson(requestJson: string): string;
     export function zspaceRepetitionUnlikelihoodPlanObject(
         request: ZSpaceRepetitionUnlikelihoodRequest,
@@ -3877,6 +4035,8 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ZSpaceOptimizerFeedbackConfigInput = {
+        /** Equal-weight observations per comparison window; omitted means one. */
+        loss_window_observations?: number;
         loss_ema_alpha?: number;
         relative_delta_ema_alpha?: number;
         loss_floor?: number;
@@ -3893,7 +4053,17 @@ declare module "spiraltorch-wasm" {
     };
 
     export type ZSpaceOptimizerFeedbackConfig =
-        Required<ZSpaceOptimizerFeedbackConfigInput>;
+        Required<Omit<ZSpaceOptimizerFeedbackConfigInput, "loss_window_observations">> & {
+            loss_window_observations?: number;
+        };
+
+    export type ZSpaceOptimizerFeedbackLossWindow = {
+        observations_per_window: number;
+        observations: number;
+        completed_windows: number;
+        mean: number | null;
+        previous_mean: number | null;
+    };
 
     export type ZSpaceOptimizerFeedbackState = {
         control_step: number;
@@ -3906,6 +4076,7 @@ declare module "spiraltorch-wasm" {
         regression_streak: number;
         improvement_streak: number;
         halted: boolean;
+        loss_window?: ZSpaceOptimizerFeedbackLossWindow;
     };
 
     export type ZSpaceOptimizerFeedbackObservation = {
@@ -3993,6 +4164,7 @@ declare module "spiraltorch-wasm" {
         relative_loss_delta_ema: number | null;
         action:
             | "initialize"
+            | "await_window"
             | "warmup"
             | "hold"
             | "recover"

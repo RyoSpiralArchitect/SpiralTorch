@@ -1,0 +1,42 @@
+{
+  "schema": "spiraltorch.fractional_forward_timing_plan.v1",
+  "status": "planned_not_measured",
+  "parent_revision": "98027f0177a2ae60f90d52c2a4622d7ddb229601",
+  "shapes": [
+    [
+      2,
+      128,
+      768
+    ],
+    [
+      1,
+      256,
+      768
+    ]
+  ],
+  "maps": [
+    "full",
+    "history"
+  ],
+  "repetitions": 3,
+  "rounds": 12,
+  "warmup_per_route": 2,
+  "seed": 239,
+  "kernel_len": 32,
+  "alpha": 0.9,
+  "step": 1,
+  "threads": 2,
+  "native_profile": "release",
+  "baseline_native_sha256": "03688b35493309801bcd1c269fcd09442d0b9af572c043a97e7fdeee3dd76d0b",
+  "paired_native_sha256": "fc4bd21dbd8c79a95104e464f4b83860b5c891fc7a29cf5daaddcd25bd7f9eee",
+  "bridge_sha256": "c0e9e68e31d6ded0540cd2c5f431d69a18e578e218c9e66cc7cb2b8f5c046447",
+  "benchmark_sha256": "ceb0822fdb9e0f0698c48465924b4cf87352824cc91a39eddfd62d2d952e9b4c",
+  "core_sha256": "1a9b4882bc36e85e6b265c77c194ecc4f01b49d087474bf3f8527fd86b405b99",
+  "package_order": "baseline then paired for odd repetitions; paired then baseline for even repetitions",
+  "scope": "Same finite GL operator and requested order VJP. Fresh processes, alternating binary order; ambient load recorded, no model/GPU or isolated-host claim.",
+  "attempt": "matched-rerun-1",
+  "planned_at": "2026-10-03T12:39:33.872Z",
+  "supersedes_interrupted_matrix": true,
+  "interrupted_matrix_disposition": "Kept under original timings/. Excluded from this complete matrix; no overwrite or pooling.",
+  "sampling_scope": "Ambient host load, no own build/test work concurrently. Fresh processes with both binaries at matched settings."
+}

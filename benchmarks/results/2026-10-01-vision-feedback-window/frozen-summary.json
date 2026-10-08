@@ -1,0 +1,782 @@
+{
+  "schema": "spiraltorch.vision.feedback_window_comparison.v1",
+  "status": "passed",
+  "boundary": "Retained frozen losses replayed through a new Rust binary, plus synthetic regression latency. No new inference, parameter updates, learning-quality or throughput claim.",
+  "source": {
+    "file": "summary.json",
+    "bytes": 18251,
+    "sha256": "f46646c666c311d6e0ea75eb3fdd5e474f0212148c277a4f05ccd31cba2e5dc2"
+  },
+  "source_verification": {
+    "file": "probe-v1-verification.json",
+    "bytes": 1475,
+    "sha256": "c36e44f667375c43447471bf6294d0482729443c66d17a66e0f3cf9f40585796"
+  },
+  "source_binary_sha256": {
+    "spiraltorch.abi3.so": "b136ea2f4002fd4098c4e90846b31c8accbfb32e5ced7d07e57e9672d0c39661"
+  },
+  "native_binary_sha256": {
+    "spiraltorch.abi3.so": "5af2f2a94c269f74d492dfac4b2474623efc38b3a4565b756d0e321c8c0f68f2"
+  },
+  "implementation_ref": "dc957fdbea85181cf0058da3ce6a2bad9bc9f13a",
+  "comparator_sha256": "cf33b129fa9e57af0c10690542fd257b0a35b2a8d0f62bf966c37903fa574183",
+  "recipe": {
+    "window_observations": 80,
+    "derivation": "one complete recorded input pass",
+    "restart_at": 37
+  },
+  "cases": [
+    {
+      "seed": 17,
+      "checkpoint": "initial",
+      "source_raw": {
+        "file": "seed-17-initial.json",
+        "bytes": 985179,
+        "sha256": "0ffea29ed3ce1021e4c25e1ca09bfff4e9d06ed8bb1e8a29cb7b8c5d7631d393"
+      },
+      "default_trajectory_exact": true,
+      "all_partial_restarts_exact": true,
+      "raw": {
+        "file": "seed-17-initial.json",
+        "bytes": 1769782,
+        "sha256": "87be76bd0d6ac427cfb635f0cc9e301093f152e0c0d2e91f85d5317f6b1f27f2"
+      },
+      "comparisons": {
+        "recorded_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 55,
+              "halt": 67,
+              "hold": 29,
+              "hold_halted": 142,
+              "initialize": 1,
+              "recover": 105,
+              "warmup": 1
+            },
+            "halted_observations": 209,
+            "nonidentity_controls": 133,
+            "maximum_gate": 0.5,
+            "adjacent_loss_increases": 205
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 205
+          }
+        },
+        "reversed_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 69,
+              "halt": 53,
+              "hold": 37,
+              "hold_halted": 125,
+              "initialize": 1,
+              "recover": 114,
+              "warmup": 1
+            },
+            "halted_observations": 178,
+            "nonidentity_controls": 139,
+            "maximum_gate": 0.5,
+            "adjacent_loss_increases": 194
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 194
+          }
+        },
+        "constant_loss": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "hold": 398,
+              "initialize": 1,
+              "warmup": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          }
+        }
+      }
+    },
+    {
+      "seed": 17,
+      "checkpoint": "final",
+      "source_raw": {
+        "file": "seed-17-final.json",
+        "bytes": 982598,
+        "sha256": "ad2aed151a6dcf9220fac830402668ecf00eb4e2713c7820302b470137490b14"
+      },
+      "default_trajectory_exact": true,
+      "all_partial_restarts_exact": true,
+      "raw": {
+        "file": "seed-17-final.json",
+        "bytes": 1763055,
+        "sha256": "214ee20bf26589b553e91599c5d62e14fe95653f145c8a8f55481f153db6e813"
+      },
+      "comparisons": {
+        "recorded_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 46,
+              "halt": 77,
+              "hold": 27,
+              "hold_halted": 163,
+              "initialize": 1,
+              "recover": 85,
+              "warmup": 1
+            },
+            "halted_observations": 240,
+            "nonidentity_controls": 108,
+            "maximum_gate": 0.625,
+            "adjacent_loss_increases": 198
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 198
+          }
+        },
+        "reversed_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 58,
+              "halt": 72,
+              "hold": 32,
+              "hold_halted": 149,
+              "initialize": 1,
+              "recover": 87,
+              "warmup": 1
+            },
+            "halted_observations": 221,
+            "nonidentity_controls": 110,
+            "maximum_gate": 0.625,
+            "adjacent_loss_increases": 201
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 201
+          }
+        },
+        "constant_loss": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "hold": 398,
+              "initialize": 1,
+              "warmup": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          }
+        }
+      }
+    },
+    {
+      "seed": 29,
+      "checkpoint": "initial",
+      "source_raw": {
+        "file": "seed-29-initial.json",
+        "bytes": 982623,
+        "sha256": "c10a057cdd9aa74774e6dbc25150f83589e7a206b3de0abb0de4c49e69d890bd"
+      },
+      "default_trajectory_exact": true,
+      "all_partial_restarts_exact": true,
+      "raw": {
+        "file": "seed-29-initial.json",
+        "bytes": 1766683,
+        "sha256": "3aa8d2edc7aa923e8220ee329a58dfccd933396435aca7d2af4812e5e4b1d3e0"
+      },
+      "comparisons": {
+        "recorded_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 40,
+              "halt": 83,
+              "hold": 17,
+              "hold_halted": 176,
+              "initialize": 1,
+              "recover": 82,
+              "warmup": 1
+            },
+            "halted_observations": 259,
+            "nonidentity_controls": 99,
+            "maximum_gate": 0.5,
+            "adjacent_loss_increases": 208
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 208
+          }
+        },
+        "reversed_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 55,
+              "halt": 74,
+              "hold": 27,
+              "hold_halted": 134,
+              "initialize": 1,
+              "recover": 108,
+              "warmup": 1
+            },
+            "halted_observations": 208,
+            "nonidentity_controls": 128,
+            "maximum_gate": 1.0,
+            "adjacent_loss_increases": 191
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 191
+          }
+        },
+        "constant_loss": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "hold": 398,
+              "initialize": 1,
+              "warmup": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          }
+        }
+      }
+    },
+    {
+      "seed": 29,
+      "checkpoint": "final",
+      "source_raw": {
+        "file": "seed-29-final.json",
+        "bytes": 983919,
+        "sha256": "e896e005d14eb385118411dd8285796d50736f4a0e77b48abda44032499b4a44"
+      },
+      "default_trajectory_exact": true,
+      "all_partial_restarts_exact": true,
+      "raw": {
+        "file": "seed-29-final.json",
+        "bytes": 1766671,
+        "sha256": "0843ab6343c1b824e026967825ccc092db52efcaca3c264d50d029f6f36cdcfa"
+      },
+      "comparisons": {
+        "recorded_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 40,
+              "halt": 92,
+              "hold": 22,
+              "hold_halted": 168,
+              "initialize": 1,
+              "recover": 76,
+              "warmup": 1
+            },
+            "halted_observations": 260,
+            "nonidentity_controls": 93,
+            "maximum_gate": 0.5,
+            "adjacent_loss_increases": 199
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 199
+          }
+        },
+        "reversed_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 29,
+              "halt": 90,
+              "hold": 13,
+              "hold_halted": 180,
+              "initialize": 1,
+              "recover": 86,
+              "warmup": 1
+            },
+            "halted_observations": 270,
+            "nonidentity_controls": 101,
+            "maximum_gate": 0.625,
+            "adjacent_loss_increases": 200
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 200
+          }
+        },
+        "constant_loss": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "hold": 398,
+              "initialize": 1,
+              "warmup": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          }
+        }
+      }
+    },
+    {
+      "seed": 43,
+      "checkpoint": "initial",
+      "source_raw": {
+        "file": "seed-43-initial.json",
+        "bytes": 983313,
+        "sha256": "7617b7eaac0895942e9ba6b3daf1686d16e80c9312b95f1955be16eaf7b3a102"
+      },
+      "default_trajectory_exact": true,
+      "all_partial_restarts_exact": true,
+      "raw": {
+        "file": "seed-43-initial.json",
+        "bytes": 1765932,
+        "sha256": "f95bed55398e81e60906e775e0de2d990c7b159777b7726ae542ee69a28518a3"
+      },
+      "comparisons": {
+        "recorded_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 40,
+              "halt": 71,
+              "hold": 23,
+              "hold_halted": 185,
+              "initialize": 1,
+              "recover": 79,
+              "warmup": 1
+            },
+            "halted_observations": 256,
+            "nonidentity_controls": 97,
+            "maximum_gate": 0.625,
+            "adjacent_loss_increases": 200
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 200
+          }
+        },
+        "reversed_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 41,
+              "halt": 78,
+              "hold": 26,
+              "hold_halted": 154,
+              "initialize": 1,
+              "recover": 99,
+              "warmup": 1
+            },
+            "halted_observations": 232,
+            "nonidentity_controls": 122,
+            "maximum_gate": 0.5,
+            "adjacent_loss_increases": 199
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 199
+          }
+        },
+        "constant_loss": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "hold": 398,
+              "initialize": 1,
+              "warmup": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          }
+        }
+      }
+    },
+    {
+      "seed": 43,
+      "checkpoint": "final",
+      "source_raw": {
+        "file": "seed-43-final.json",
+        "bytes": 984866,
+        "sha256": "50fc563a320a413644cc653b5da4ed40ddfbf098ee1ca9601e2f87548dd51b86"
+      },
+      "default_trajectory_exact": true,
+      "all_partial_restarts_exact": true,
+      "raw": {
+        "file": "seed-43-final.json",
+        "bytes": 1766430,
+        "sha256": "99aed679ae05817612304d84d4f08371c93aa58a69c6ae768a92289ea258e67b"
+      },
+      "comparisons": {
+        "recorded_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 32,
+              "halt": 113,
+              "hold": 15,
+              "hold_halted": 149,
+              "initialize": 1,
+              "recover": 89,
+              "warmup": 1
+            },
+            "halted_observations": 262,
+            "nonidentity_controls": 104,
+            "maximum_gate": 0.625,
+            "adjacent_loss_increases": 203
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 203
+          }
+        },
+        "reversed_order": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "attenuate": 33,
+              "halt": 110,
+              "hold": 14,
+              "hold_halted": 149,
+              "initialize": 1,
+              "recover": 92,
+              "warmup": 1
+            },
+            "halted_observations": 259,
+            "nonidentity_controls": 109,
+            "maximum_gate": 0.625,
+            "adjacent_loss_increases": 196
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 196
+          }
+        },
+        "constant_loss": {
+          "default": {
+            "observations": 400,
+            "actions": {
+              "hold": 398,
+              "initialize": 1,
+              "warmup": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          },
+          "windowed": {
+            "observations": 400,
+            "actions": {
+              "await_window": 395,
+              "hold": 4,
+              "initialize": 1
+            },
+            "halted_observations": 0,
+            "nonidentity_controls": 0,
+            "maximum_gate": 0.0,
+            "adjacent_loss_increases": 0
+          }
+        }
+      }
+    }
+  ],
+  "latency": [
+    {
+      "regression_step": 161,
+      "offset_inside_window": 0,
+      "arms": {
+        "default": {
+          "first_halted_step": 161,
+          "additional_observations": 0,
+          "summary": {
+            "observations": 320,
+            "actions": {
+              "halt": 8,
+              "hold": 151,
+              "hold_halted": 152,
+              "initialize": 1,
+              "recover": 7,
+              "warmup": 1
+            },
+            "halted_observations": 160,
+            "nonidentity_controls": 80,
+            "maximum_gate": 0.875,
+            "adjacent_loss_increases": 1
+          }
+        },
+        "windowed": {
+          "first_halted_step": 240,
+          "additional_observations": 79,
+          "summary": {
+            "observations": 320,
+            "actions": {
+              "await_window": 316,
+              "halt": 2,
+              "initialize": 1,
+              "recover": 1
+            },
+            "halted_observations": 81,
+            "nonidentity_controls": 80,
+            "maximum_gate": 0.125,
+            "adjacent_loss_increases": 1
+          }
+        }
+      }
+    },
+    {
+      "regression_step": 201,
+      "offset_inside_window": 40,
+      "arms": {
+        "default": {
+          "first_halted_step": 201,
+          "additional_observations": 0,
+          "summary": {
+            "observations": 360,
+            "actions": {
+              "halt": 8,
+              "hold": 191,
+              "hold_halted": 152,
+              "initialize": 1,
+              "recover": 7,
+              "warmup": 1
+            },
+            "halted_observations": 160,
+            "nonidentity_controls": 120,
+            "maximum_gate": 0.875,
+            "adjacent_loss_increases": 1
+          }
+        },
+        "windowed": {
+          "first_halted_step": 240,
+          "additional_observations": 39,
+          "summary": {
+            "observations": 360,
+            "actions": {
+              "await_window": 356,
+              "halt": 2,
+              "initialize": 1,
+              "recover": 1
+            },
+            "halted_observations": 121,
+            "nonidentity_controls": 80,
+            "maximum_gate": 0.125,
+            "adjacent_loss_increases": 1
+          }
+        }
+      }
+    },
+    {
+      "regression_step": 240,
+      "offset_inside_window": 79,
+      "arms": {
+        "default": {
+          "first_halted_step": 240,
+          "additional_observations": 0,
+          "summary": {
+            "observations": 399,
+            "actions": {
+              "halt": 8,
+              "hold": 230,
+              "hold_halted": 152,
+              "initialize": 1,
+              "recover": 7,
+              "warmup": 1
+            },
+            "halted_observations": 160,
+            "nonidentity_controls": 159,
+            "maximum_gate": 0.875,
+            "adjacent_loss_increases": 1
+          }
+        },
+        "windowed": {
+          "first_halted_step": 320,
+          "additional_observations": 80,
+          "summary": {
+            "observations": 399,
+            "actions": {
+              "await_window": 395,
+              "halt": 1,
+              "initialize": 1,
+              "recover": 2
+            },
+            "halted_observations": 80,
+            "nonidentity_controls": 160,
+            "maximum_gate": 0.25,
+            "adjacent_loss_increases": 1
+          }
+        }
+      }
+    }
+  ]
+}

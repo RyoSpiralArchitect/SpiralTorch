@@ -1,0 +1,34 @@
+{
+  "schema": "spiraltorch.geometry_adapter_stack_validation.v1",
+  "status": "passed",
+  "source_revision": "daf5d8068e90572f6b1c526f42a6824884fa6b30",
+  "native_reused_from_source": "381a8a10bc7cb6744696fa7e561b69066e9bd584",
+  "runtime_difference_from_parent": [
+    "spiraltorch/__init__.py",
+    "spiraltorch/__init__.pyi",
+    "spiraltorch/geometry_adapters.py"
+  ],
+  "client_sha256": {
+    "hf_geometry_adapter_stack.json": "1202311a57bee367be44bd725f055462a45967c68d8831823b50353e3214c6e6",
+    "hf_geometry_adapter_stack.py": "1639f7a2e1d173e8c1b0e36fda2f90394587cc829adacb34ef80daf37a3657b1",
+    "probe_fractional_multi_adapter.py": "90b93b47f36bd4fafa3933e843076deb9a1a27352bf4c8447a27c2630673b976",
+    "verify_fractional_history_factorial.py": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f"
+  },
+  "targeted_tests_passed": 156,
+  "regression_log_sha256": "2b320f84ff43f759bc4f677754861d18773b1e8850e7cced664c0152e14b98bc",
+  "pretrained_log_sha256": "36f049cfcdd9ab4d52a444129b06a779f34d20f8fca905553d23719f07b8a513",
+  "failure_preserved": {
+    "before_training": true,
+    "stage": "validation package preparation",
+    "reason": "The copied package directory retained read-only permissions; adding the new module failed and the first test invocation could not import it.",
+    "resolution": "Made only the new copy writable, copied the module, ran the tests, and froze the new package before the pretrained run.",
+    "log_sha256": "e3889f04ffdd31d458bcf277321302be5c724c59b1a9df1bd6a6004bff234f80"
+  },
+  "private_states_and_logs_retained": true,
+  "no_cleanup_performed": true,
+  "pretrained_processes": 1,
+  "checkpoint_continuation": "serialized reload into fresh adapter and Adam objects in the same process",
+  "final_tests_passed": 159,
+  "public_only_tests_included": 3,
+  "final_test_log_sha256": "59ad394a197f931659a450ecc7a0a896952953012144243dba5c4cf944fbecfe"
+}

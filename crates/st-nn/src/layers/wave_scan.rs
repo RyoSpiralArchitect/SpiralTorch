@@ -251,15 +251,26 @@ impl WaveScan {
 
     pub(crate) fn backward_with_output_scale(
         &mut self,
+        input: &Tensor,
+        grad_output: &Tensor,
+        output_scale: f32,
+    ) -> PureResult<Tensor> {
+        validate_finite_value("wave_scan_output_gradient_scale", output_scale)?;
+        let result = self.backward_with_output_scale_retained(input, grad_output, output_scale);
+        self.cache.get_mut().take();
+        result
+    }
+
+    fn backward_with_output_scale_retained(
+        &mut self,
         _input: &Tensor,
         grad_output: &Tensor,
         output_scale: f32,
     ) -> PureResult<Tensor> {
         validate_finite_value("wave_scan_output_gradient_scale", output_scale)?;
-        let cache = self
-            .cache
-            .borrow_mut()
-            .take()
+        let cache = self.cache.borrow();
+        let cache = cache
+            .as_ref()
             .ok_or(TensorError::EmptyInput("wave_scan_cache"))?;
         if grad_output.shape() != (cache.batch, cache.features) {
             return Err(TensorError::ShapeMismatch {
@@ -528,6 +539,10 @@ impl Module for WaveScan {
         self.backward_with_output_scale(input, grad_output, 1.0)
     }
 
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward_with_output_scale_retained(input, grad_output, 1.0)
+    }
+
     fn visit_parameters(
         &self,
         visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
@@ -584,6 +599,47 @@ impl WaveScanStack {
     pub fn scans_mut(&mut self) -> &mut [WaveScan] {
         &mut self.scans
     }
+
+    fn backward_impl(
+        &mut self,
+        input: &Tensor,
+        grad_output: &Tensor,
+        retain: bool,
+    ) -> PureResult<Tensor> {
+        if self.scans.is_empty() {
+            return Ok(grad_output.clone());
+        }
+        let inv = 1.0 / (self.scans.len() as f32).max(1.0);
+        let (batch, cols) = input.shape();
+        let pullback = |scan: &mut WaveScan| {
+            if retain {
+                scan.backward_with_output_scale_retained(input, grad_output, inv)
+            } else {
+                scan.backward_with_output_scale(input, grad_output, inv)
+            }
+        };
+        let (first, rest) = self
+            .scans
+            .split_first_mut()
+            .ok_or(TensorError::EmptyInput("wave_scan_stack"))?;
+        let mut total = pullback(first)?;
+        let accum_backend = current_tensor_util_backend_for_values(total.data().len());
+        for scan in rest {
+            let grad_in = pullback(scan)?;
+            total.add_scaled_with_backend(&grad_in, 1.0, accum_backend)?;
+        }
+        emit_wave_scan_stack_meta(
+            "wave_scan_stack_backward",
+            "wave_scan_stack_grad_average",
+            batch,
+            cols,
+            self.features,
+            self.scans.len(),
+            accum_backend,
+            true,
+        );
+        Ok(total)
+    }
 }
 
 impl Module for WaveScanStack {
@@ -614,32 +670,11 @@ impl Module for WaveScanStack {
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        if self.scans.is_empty() {
-            return Ok(grad_output.clone());
-        }
-        let inv = 1.0 / (self.scans.len() as f32).max(1.0);
-        let (batch, cols) = input.shape();
-        let (first, rest) = self
-            .scans
-            .split_first_mut()
-            .ok_or(TensorError::EmptyInput("wave_scan_stack"))?;
-        let mut total = first.backward_with_output_scale(input, grad_output, inv)?;
-        let accum_backend = current_tensor_util_backend_for_values(total.data().len());
-        for scan in rest {
-            let grad_in = scan.backward_with_output_scale(input, grad_output, inv)?;
-            total.add_scaled_with_backend(&grad_in, 1.0, accum_backend)?;
-        }
-        emit_wave_scan_stack_meta(
-            "wave_scan_stack_backward",
-            "wave_scan_stack_grad_average",
-            batch,
-            cols,
-            self.features,
-            self.scans.len(),
-            accum_backend,
-            true,
-        );
-        Ok(total)
+        self.backward_impl(input, grad_output, false)
+    }
+
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward_impl(input, grad_output, true)
     }
 
     fn visit_parameters(

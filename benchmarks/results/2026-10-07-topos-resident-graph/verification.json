@@ -1,0 +1,289 @@
+{
+  "schema": "spiraltorch.topos_resident_graph_verification.v1",
+  "source_revision": "d4c61e03a664f0dc15fc9c02eebca55374db8008",
+  "immediate_parent": "7f43b48f4b511ed34d61a2acf22f0f6e6ddfaae8",
+  "comparison_base": "74248e46e2f26826dcaa389220a60d2e132bd83b",
+  "scope": "Synthetic correctness only. Hashes and saved labels are not independent execution attestation.",
+  "configuration": {
+    "coupling": 0.2,
+    "iterations": 5,
+    "saturation": 1,
+    "porosities": [
+      0,
+      0.3
+    ],
+    "policies": [
+      "exact",
+      "module_compatible"
+    ],
+    "browser_shape": [
+      2,
+      2,
+      3
+    ],
+    "initial_gate": [
+      0.800000011920929,
+      -0.4000000059604645,
+      1.100000023841858
+    ],
+    "learning_rate": 0.029999999329447746,
+    "steps_per_case": 25,
+    "loss": "mean_mse",
+    "gate_reduction": "sum"
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "13d3f956817940b7363b3e32a2cd25b2301632d42666f0e3f51874c7fd782de8",
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "bindings/st-py/spiraltorch/__init__.pyi": "477c66bc79b2ad2c01249b2fdd107cd1b29b72a76e8e02af3afcd7e397b66a90",
+    "bindings/st-py/src/nn.rs": "34d91e967440a0c79ba36333b369b3286e873d6b50f48178a325804bf07724db",
+    "bindings/st-py/src/topos_resonator.rs": "d4f9d61613d860612cbd402c5d431bc758cb199e6d5d34cba951a12a4d9fe423",
+    "bindings/st-py/tests/test_nn_resident_topos.py": "08ae419da7397dd5301e20e5eed4c050b3e9ba6dbf85dde1a871f262493c00b3",
+    "bindings/st-wasm/src/nn_resident/graph.rs": "3823126a500e25ffa13e8f716217cbdf4fd15fc9176b6f583543cfd0a25cbd2a",
+    "bindings/st-wasm/src/nn_resident/module.rs": "937f4beb15355b7608581309278f2c21704f37ff9f22b530f26d81cd11c627ea",
+    "bindings/st-wasm/src/topos_resonator.rs": "4f85788855bac4dd9b0521f96db8a1038a96352ad0628341af642fda87b5af23",
+    "bindings/st-wasm/tests/resident_topos_graph.html": "bb82fa96f241e0e5158dbc8b081eff3cd1c2eb0779f76b89d03007eda6ca47b3",
+    "bindings/st-wasm/tests/topos_graph_contract.cjs": "782d5c721aa1d720f87fcaa6604dbd153e247c84f11d3766e18d1437ce838608",
+    "crates/st-backend-wgpu/src/resident_graph.rs": "f59d692adf9c482008e58af9fd8108781590f633bcef76e64ab20d3a624e0534",
+    "crates/st-backend-wgpu/src/resident_graph/pointwise_input.rs": "71ed1278e17b4a1fd515c38360d91347a5aa8880de26c530783e940351168d9a",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise.rs": "b86fe5bd88b3db5f76ba342842e683c9a952e575493f1c28ad29ef1a6ed1dad1",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/topos.rs": "57da75919c8da1cb67f9bdd8d0172c1d64776d25d84c84c1aefe5154212777a4",
+    "crates/st-backend-wgpu/src/resident_training/graph.rs": "5ddf44d1045753841a2795eba40d1002a6b60523f85c1e14b3ba2bb5e60601f3",
+    "crates/st-backend-wgpu/src/resident_training/graph/autograd/outputs.rs": "93504882f6d3ae6e37c670093df926475031680040389158831936819a940c88",
+    "crates/st-backend-wgpu/src/resident_training/graph/autograd/prediction.rs": "2945697b32a81939e87a08e5406bd0fddf9aaf21f258d3d3e8e2dcf2bd4ee60a",
+    "crates/st-kernel-contracts/src/graph.rs": "385a06a816ed4ac3b6f3e0d84da099856cce6afd74b1130be5a9d88ddf9640f6",
+    "crates/st-kernel-contracts/src/topos_resonator.rs": "0d1fd8dd83a4ea314867b5774bee7b21d8686a4b0f24d3413b103c0e474a4702",
+    "crates/st-nn/src/layers/topos_resonator.rs": "18f277667ac196f72052b5a12cfd3d7460345caf79b6ee9944fd6599c42c9e4a",
+    "crates/st-nn/src/resident.rs": "1c89174de83ec0b7f713caf2c8b3c17d61a4ac35ed5608c79c111044d3f3dc6e",
+    "crates/st-nn/src/resident/graph.rs": "2ce15680334aa353004694124123aa5ca71c0bbc255680fa0e16a9c13ec8ee5d",
+    "crates/st-nn/src/resident/graph/topos_tests.rs": "b683d8a54c0cff50710b09fab122afa5e364c19ca0457a889cdf73aff43775c5",
+    "crates/st-nn/src/resident/module_forward.rs": "5bb41cd8f95da3ce152ea10dad23bcbcef6eceb56216b43f31a8b1a9630ba41c",
+    "crates/st-nn/src/resident/module_update.rs": "4ce88e46cdff31133480e390d5724b488c800553d9418ca0519ed4cf49e26f90",
+    "crates/st-nn/src/resident/portable.rs": "30e17b0d3ac51011aeef61ecde48a4f0789237966e94a890f9203f04cf9c590b",
+    "crates/st-nn/src/resident/portable/graph.rs": "ed66329595106a9b59fbb6433ce889bfe8901e6baed3beb8552cba1d602c1b6f",
+    "docs/topos_learning.md": "61a1c921cc24ed12d4d2b0d6c7bffd476655a5bf38e6de0824d978228037235f",
+    "tools/benchmark_topos_learning.py": "e62da98cea2e730454f89331cb5d86a5d4ca2d28e6a8922ae7a88b949cfa6e7f",
+    "tools/test_resident_browser.cjs": "97c4a9071cd86eb7a194f019978a3ea7c144490880afe13851d0b4157f982db3"
+  },
+  "native_sha256": "42579ac70587c7abd46460d1794dfe501f717a941f5ed8c2400114618c5c6e84",
+  "wasm_sha256": "fc72e890b9d381fd2f78ab5a1480ff841baba1fb1d2c570afce04d59e36cf5dc",
+  "browser_raw_sha256": "753e09bd6559c5c1ba433af44f4ffc293f28ed76ff658416bb403301611572ea",
+  "browser_gzip_sha256": "ecfcc9493b38fe6236d5880db3199b2afa306e995c49648916b9562c4d024772",
+  "python_check_sha256": "51d4d5cacb1e273febcd27df9b9b2115f2cfbb42a7580d4afd96cbf222cd29e1",
+  "local_log_sha256": {
+    "backend-graph-forward-regression.log": "131e0b04db05ae60ccefc3abf2b63c784b0aecc3cbb110fe646a883ed71873d8",
+    "backend-graph-training-regression.log": "0bb585f184838c4dd9c2b9cf79713e9d85af9d2b8a1e6f5cda00a02b48a68f6c",
+    "browser-topos-hardware-probe.log": "afb40ba991a58e0849b7b5fdd7d31033dc7269213aa309f9a9f48e71e1ab6980",
+    "browser-topos.log": "86ae477583da19401b4c7419c406106e2886d0ef0ba9892bf934fc89209b8326",
+    "contracts-final.log": "9d311db0cc26da0b7ad033e24b9d55919cbb4bf5a80ac913f4fc48c01e5b602b",
+    "corrected-bindgen-node.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "corrected-bindgen-web.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "corrected-nn-autograd-clients.log": "257087d6cc8562f3073134cb7458f74179a62a30f701fe7d2eab5f51507f5202",
+    "corrected-nn-graph-layer-norm.log": "a23aff11fabf0c39d2fd382c8604a592950b5ba91d5bed4f9421082690341b74",
+    "corrected-nn-learner-clients.log": "d25b5bc4fcb187a89b5a4ecbdd3f85be215e848424adc6e6d5d0e1f9afc6244c",
+    "corrected-nn-module-forward.log": "e5ab8825c3ac7a814b0def03413d512548813687ccef8ecab91348ccd7a5207c",
+    "corrected-node-contract.log": "2eb6d7a5aac27f1d44cc282258bec7c77839c653708de29883d6dd63aaf268e6",
+    "corrected-python-regression.log": "9242d0a58ea596e05faa47775baf05f0111b6086a17f10971ead7e9976eda564",
+    "corrected-python-topos.log": "e467ef584001371e4931ba1b7bbbc587fa238ffe27d264d66a22b7c196aec11f",
+    "corrected-runtime-identity.log": "ce85012fa15a4c1ed010a4946f32fb9948fab3f9c356dbf72e8ca91584a33d39",
+    "corrected-rustfmt-check.log": "512fb43830445b9c0abfb00187b2f856ddd72e3838ea294b633a8da611aefaf5",
+    "corrected-topos-resident-graph.log": "16998fa5c3adea49b32fb19fdb4c39139472cedaef4c7b2ae2f32335a1ac5eb1",
+    "final-nn-autograd-clients.log": "aca5d6749bb1b5f43cfa81059221a3746d3f9b8e2b593fc5ebd0648ebd6fa550",
+    "final-nn-graph-layer-norm.log": "88632fc77d6e6dac356dc1041af1d13ff92bfb71aec1bf4aa9b5e888e4c474af",
+    "final-nn-learner-clients.log": "06f72f585512b5db44e4c87704f95c11f988a79f67afcc6a56d78917086d10d8",
+    "final-nn-module-forward.log": "5f3db328c77497389994f344ca26f3f4e1f940953a2cfb8d30f5797947006f14",
+    "final-topos-resident-graph.log": "abc6f5144cf6eefbddcb6c25705b2fee58981a65f7daf2d1f3f229c95c24ea8e",
+    "graph-check.log": "7d9986f05ca78730d981e9a6ef77ea8306ccaf10b2317625f808b63f21cdc434",
+    "kernel-lint-exact-build.log": "0439eac274d8c80f141a5155fda4e8fe7a248ffad9f154a73e19fdc0f87f8957",
+    "kernel-lint-exact.log": "5c07c7d25c49c6887347317a76744fae7693e8be74afc07441edd112562d74e2",
+    "kernel-lint-probe-build.log": "03e7412ba54dff1e8de1b913221e9bba87a5c72df6b9d15cb192f213dc1fa285",
+    "kernel-lint-probe.log": "5c07c7d25c49c6887347317a76744fae7693e8be74afc07441edd112562d74e2",
+    "nn-clippy-final.log": "de75ab738427d9fa6948acc13a93e2122a13a5f7ea840374f99348d05a72a96c",
+    "nn-default-regression.log": "2e95da308e98b92ceee9f01544b4f021b6798f691bf4b3e0b81e485dc4964deb",
+    "nn-resident-final.log": "da552dfecf3cb16dc0cab187e203022f1b8191c16f45201b41879eda62f3fbb4",
+    "python-build-final.log": "069dc768a2ece16c870a38303a47ebcf00a32c82f059f58e8dfe47a0fcfe474e",
+    "python-build.log": "5d181c1dc735783f586ff782af92a00d0796c9810f341b197ae2e757de683988",
+    "python-graph-final.log": "f7219dcaac2b577fdeabcd4f29905fc51c374525ae293613b3dbd6cea91ba6a6",
+    "python-graph-regression.log": "930bf3478d6dbed5d220389e115a958d7953c35234bf965fc0b49788f5e9225d",
+    "python-topos-final.log": "71f1b9e3c53d4392a82051879b3e33088fc184f50a6d5618a15992a63d2e42a4",
+    "python-topos-tests-rerun.log": "168b6a10181249220a25968dd74628a6a6360cdc7b58882a1c12b8412f266cc2",
+    "python-topos-tests.log": "a5bedc3664ad5ec6d888ceb2258f72a900144a325db424c8da07b1baa8a9a260",
+    "review-corrected-nn-default.log": "35f4742a6dacaa365d5b057a36a79e0d05f23eeb5b3cae4004348461b9fbf641",
+    "review-corrected-nn-resident.log": "d26c946d6ac8ba8fb7466ae5799b5ab2786fb37a22c9ad5347bbd821f3762339",
+    "review-corrected-python-build.log": "2aba8a9bddfc51335aad6b913a4ba14eb11ab6ea5f08aa56e0cef813b80a3a61",
+    "review-corrected-wasm-build.log": "ef0afd8d27e4e83ad6b72a14a52d8406cbf51bf2c0e64120195fa67998c3fa5c",
+    "review-fmt.log": "d09627dc189b85e3ceea5c720276c200462b67f9cf57e5fe20db28f3540863a9",
+    "review-reproductions-before.log": "912201e71c598dc0475f68c396e78a8f1b9502e754a715dba594fc8058eda3f4",
+    "runtime-identity.log": "7664aebc142304a44d1109b1d8247db7a65d84d03a701549887ad7d113540727",
+    "rustfmt-final-check.log": "512fb43830445b9c0abfb00187b2f856ddd72e3838ea294b633a8da611aefaf5",
+    "rustfmt.log": "512fb43830445b9c0abfb00187b2f856ddd72e3838ea294b633a8da611aefaf5",
+    "topos-graph-tests.log": "24b503da7b3c8b6c2323ebbba7283adc6be440c5aab689b504230d15594fe227",
+    "wasm-bindgen-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wasm-bindgen-node-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wasm-bindgen-node.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wasm-bindgen-web.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wasm-build-final.log": "1bf793f42b0c65d4ded49af0f3c17b7e7a7f1f24ffba91a0dc3fa2b71a960245",
+    "wasm-node-contract-final.log": "2eb6d7a5aac27f1d44cc282258bec7c77839c653708de29883d6dd63aaf268e6",
+    "wasm-node-contract-rerun.log": "2eb6d7a5aac27f1d44cc282258bec7c77839c653708de29883d6dd63aaf268e6",
+    "wasm-node-contract.log": "470b38a4f06bfbb61537ff06291c1ccf50d69f92c071415b31e288dd98db3902",
+    "wasm-webgpu-build.log": "5022852110fd90cde88749ac6b1e1cfa88a8d740c5bf7e72d608b2b86df75ba6"
+  },
+  "toolchain": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "0.2.104",
+    "chrome": "154.0.8037.98",
+    "python": "3.12.6",
+    "torch": "2.12.1"
+  },
+  "validation": {
+    "source_revision": "d4c61e03a664f0dc15fc9c02eebca55374db8008",
+    "nn_default": {
+      "passed": 781,
+      "ignored": 0
+    },
+    "nn_resident": {
+      "passed": 53,
+      "ignored": 0,
+      "updates": 300,
+      "policies": 2,
+      "porosities": 2,
+      "ranks": 3,
+      "steps_per_case": 25
+    },
+    "python_regression": {
+      "passed": 45,
+      "subtests_passed": 32
+    },
+    "python_topos": {
+      "passed": 4,
+      "updates": 100,
+      "comparison": "CPU Torch"
+    },
+    "native_python_build": "passed",
+    "webgpu_wasm_build": "passed",
+    "node_wasm_contract": "passed_no_gpu",
+    "touched_rustfmt": "passed_with_nightly_option_warnings",
+    "browser_topos": {
+      "status": "passed",
+      "checks": 4119,
+      "updates": 100,
+      "cases": 4,
+      "reference": "scalar Rust/WASM",
+      "readbacks": "explicit every step"
+    },
+    "browser_regression": [
+      {
+        "fixture": "nn-graph-layer-norm",
+        "status": "passed",
+        "wasm_sha256": "fc72e890b9d381fd2f78ab5a1480ff841baba1fb1d2c570afce04d59e36cf5dc",
+        "receipt_sha256": "092613bc5d39fc17ba7b7cf5813cdea31bbe2456a23feadcb25ab67f7444d7d1",
+        "page_errors": [],
+        "console_messages": []
+      },
+      {
+        "fixture": "nn-autograd-clients",
+        "status": "passed",
+        "wasm_sha256": "fc72e890b9d381fd2f78ab5a1480ff841baba1fb1d2c570afce04d59e36cf5dc",
+        "receipt_sha256": "61d07754ccf31bf93fbeffdcb3bb1f26edf17b043ba4859fd7845274ac874bbc",
+        "page_errors": [],
+        "console_messages": []
+      },
+      {
+        "fixture": "nn-learner-clients",
+        "status": "passed",
+        "wasm_sha256": "fc72e890b9d381fd2f78ab5a1480ff841baba1fb1d2c570afce04d59e36cf5dc",
+        "receipt_sha256": "896093192abcc0932d2c8f6d90edc2ee00e24f5095f9df35c20d1bea820965f4",
+        "page_errors": [],
+        "console_messages": []
+      },
+      {
+        "fixture": "nn-module-forward",
+        "status": "passed",
+        "wasm_sha256": "fc72e890b9d381fd2f78ab5a1480ff841baba1fb1d2c570afce04d59e36cf5dc",
+        "receipt_sha256": "b4f8034dd8087105a78bb9897b966b41e9153e90b5fbc2611cd0e776cbc8bd95",
+        "page_errors": [],
+        "console_messages": []
+      }
+    ]
+  },
+  "earlier_validation": {
+    "source_revision": "d769b25ed55659cad7146ef59d4f2a059243ed43",
+    "kernel_contracts_passed": 49,
+    "backend_graph_training_passed": 32,
+    "backend_graph_forward_passed": 26,
+    "scope": "Before review correction; not relabeled as corrected-source reruns."
+  },
+  "review": {
+    "initial_source": "d769b25ed55659cad7146ef59d4f2a059243ed43",
+    "followup_source": "d4c61e03a664f0dc15fc9c02eebca55374db8008",
+    "reproduced_findings": 2,
+    "fixed": [
+      "preserve Topos capture on rejected optimizer-state handoff",
+      "validate optimizer/topos alignment at graph lowering including cache hits"
+    ],
+    "followup_actionable_findings": 0,
+    "mode": "independent read-only local agents; static review, not independent runtime execution"
+  },
+  "strict_nn_clippy": {
+    "status": "failed_unchanged_files",
+    "run_source": "d769b25ed55659cad7146ef59d4f2a059243ed43",
+    "command": "cargo clippy --locked --offline --release -p st-nn --features wgpu --all-targets --no-deps -- -D warnings",
+    "diagnostics": 39,
+    "unchanged_files": [
+      "crates/st-nn/src/language/automation.rs",
+      "crates/st-nn/src/language/gw.rs",
+      "crates/st-nn/src/layers/activation.rs",
+      "crates/st-nn/src/layers/continuous_wavelet.rs",
+      "crates/st-nn/src/layers/conv.rs",
+      "crates/st-nn/src/layers/dropout.rs",
+      "crates/st-nn/src/layers/embedding.rs",
+      "crates/st-nn/src/layers/lstm.rs",
+      "crates/st-nn/src/layers/non_liner.rs",
+      "crates/st-nn/src/layers/normalization.rs",
+      "crates/st-nn/src/layers/zspace_projector.rs",
+      "crates/st-nn/src/z_rba/cov_head.rs",
+      "crates/st-nn/src/zspace_coherence/sequencer.rs",
+      "crates/st-nn/src/zspace_coherence/vae.rs",
+      "crates/st-nn/src/gnn/layer.rs",
+      "crates/st-nn/src/layers/linear.rs",
+      "crates/st-nn/src/layers/spiral_rnn.rs",
+      "crates/st-nn/src/layers/wave_gate/learning/radius.rs",
+      "crates/st-nn/src/layers/wave_gate.rs",
+      "crates/st-nn/src/layers/wave_rnn.rs",
+      "crates/st-nn/src/trainer.rs",
+      "crates/st-nn/src/z_rba/attention.rs"
+    ],
+    "identity_comparison": [
+      "74248e46e2f26826dcaa389220a60d2e132bd83b",
+      "d4c61e03a664f0dc15fc9c02eebca55374db8008"
+    ],
+    "scope": "Exact Git blob equality for diagnostic files; no strict clean-lint claim or suppression."
+  },
+  "retained_failures": [
+    {
+      "log": "python-topos-tests.log",
+      "scope": "Initial test harness called nonexistent device accessor and expected too narrow an exception class; tests corrected before source commit."
+    },
+    {
+      "log": "wasm-node-contract.log",
+      "scope": "Initial f64 comparison of serialized f32 values; reference normalized with Math.fround before source commit."
+    },
+    {
+      "log": "review-reproductions-before.log",
+      "scope": "Both independent P2 regressions failed before correction."
+    },
+    {
+      "log": "nn-clippy-final.log",
+      "scope": "39 diagnostics in unchanged NN files remain."
+    }
+  ],
+  "limits": [
+    "One deterministic synthetic family, not multi-seed or pretrained-model quality.",
+    "No throughput, CUDA or speedup claim.",
+    "Browser reference shares Rust semantics; independent Torch comparison is Python/native only.",
+    "The complete core semantic audit is not resident.",
+    "VJP recomputes the recurrence; allocations and owning copies remain.",
+    "Elementwise Topos modules remain host-only.",
+    "Private logs/binaries remain local; public hashes do not attest execution.",
+    "Vendor WGPU warnings and block future-incompatibility remain."
+  ]
+}

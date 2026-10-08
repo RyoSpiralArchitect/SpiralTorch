@@ -1,0 +1,10 @@
+{
+  "hf_fractional_angle_study.py": "ed634786346e90bdb4149ac631cee6c759f1e90820b047ff5ac068e62b4f49ba",
+  "hf_fractional_gain_study.py": "43a2656c6fc011c8c5a875ac104100798c307763e6627608e7da2828a3a2eac5",
+  "hf_fractional_lag_study.py": "e08cb15676e73dfa14f866624c0fe9ee46ca435c0eff427aa6556bd9850d46f6",
+  "hf_wave_gate_long_horizon.py": "e863f36cabd5518f34103ff99fd7f426d91bfdc7db28cc5c3fd73604fbe51d8a",
+  "hf_wave_gate_conditioning.py": "982dbc4b73f76dfcb904d71749725137113dc1a5db868f09dcf3f4622eb83df0",
+  "hf_fractional_pride_angle.json": "6afdb207919242a6f4b1f5e56cf2dd602d5dcf39c298f7de115f49d38511fe1c",
+  "preflight_fractional_gain_study.py": "859c2fc6772041b451967e558c0eb17f3e480c1087dfc55543d2f3196afeb77e",
+  "summarize_wave_gate_long_horizon.py": "a9d35eea5ea4a3e07fd3081b193982ba4fedf022717b3eae7c24114f919e27c7"
+}

@@ -765,6 +765,8 @@ from .semantic_review import (
     zspace_semantic_review_map_id,
     zspace_semantic_review_map_id_trusted_legacy_replay,
 )
+from .repetition_objective import zspace_repetition_objective_control
+from .hf_causal_labels import HfCausalLabelAlignmentCollator
 from .hf_repetition_unlikelihood import (
     HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY,
     HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA,
@@ -8812,8 +8814,10 @@ _EXTRAS.extend(
         "HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA",
         "HfRepetitionUnlikelihoodBatchPlan",
         "HfRepetitionUnlikelihoodCollator",
+        "HfCausalLabelAlignmentCollator",
         "hf_repetition_unlikelihood_recipe_contract",
         "hf_repetition_unlikelihood_trainer_class",
+        "zspace_repetition_objective_control",
         "ZSPACE_REPETITION_UNLIKELIHOOD_CANDIDATE_RULE",
         "ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION",
         "ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER",
@@ -9546,6 +9550,29 @@ def __getattr__(name: str) -> _Any:
 
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    if name == "GeometryAdapterStack":
+        module = import_module("spiraltorch.geometry_adapters")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in {"FractionalMemoryAdapter", "fractional_gl_autograd",
+                "FractionalHistoryAdapter", "fractional_gl_history_autograd",
+                "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd",
+                "FractionalGainHistoryAdapter", "fractional_gl_history_log_gain_autograd",
+                "FractionalAngleGainHistoryAdapter", "fractional_gl_angle_autograd"}:
+        module = import_module("spiraltorch.fractional_autograd")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in {"ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter",
+                "EllipticCausalResidualAdapter", "elliptic_causal_autograd",
+                "EllipticGatedCausalResidualAdapter", "elliptic_gated_causal_autograd",
+                "EllipticAnchoredResidualAdapter", "elliptic_anchored_autograd",
+                "WaveGateAdapter", "wave_gate_autograd"}:
+        module = import_module("spiraltorch.geometry_autograd")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     if name == "model_zoo":
         module = import_module("spiraltorch.model_zoo")
         globals()["model_zoo"] = module
@@ -9615,7 +9642,22 @@ for _name in [
     if _name in globals() or _resolve_rs_attr(_name) is not None:
         _EXPORTED.add(_name)
 
-_EXPORTED.update(["hg", "rg", "z", "__version__", "model_zoo"])
+_EXPORTED.update(
+    ["hg", "rg", "z", "__version__", "model_zoo", "GeometryAdapterStack",
+     "FractionalMemoryAdapter", "fractional_gl_autograd",
+     "FractionalHistoryAdapter", "fractional_gl_history_autograd",
+     "FractionalL2HistoryAdapter", "fractional_gl_history_l2_autograd",
+     "FractionalGainHistoryAdapter", "fractional_gl_history_log_gain_autograd",
+     "FractionalAngleGainHistoryAdapter", "fractional_gl_angle_autograd",
+     "ToposResonatorAdapter", "topos_resonator_autograd", "EllipticResidualAdapter",
+     "EllipticCausalResidualAdapter", "elliptic_causal_autograd",
+     "EllipticGatedCausalResidualAdapter", "elliptic_gated_causal_autograd",
+     "EllipticAnchoredResidualAdapter", "elliptic_anchored_autograd",
+     "WaveGateAdapter", "wave_gate_autograd"]
+)
+for _name in ("ToposResonatorKernel", "ToposResonatorLearningBatch"):
+    if _resolve_rs_attr(_name) is not None:
+        _EXPORTED.add(_name)
 _EXPORTED.update(
     _RENAMED_EXPORTS.get(n, n)
     for n in _safe_getattr(_rs, "__all__", ())

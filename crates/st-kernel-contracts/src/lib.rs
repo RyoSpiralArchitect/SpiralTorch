@@ -8,6 +8,7 @@
 //! deliberately contains no runtime routing, device discovery, telemetry,
 //! allocation, or foreign-function interfaces.
 
+pub mod attention;
 pub mod classification;
 pub mod compaction;
 pub mod elementwise;
@@ -19,3 +20,4 @@ pub mod normalization;
 pub mod pointwise;
 pub mod rank;
 pub mod sgd;
+pub mod topos_resonator;

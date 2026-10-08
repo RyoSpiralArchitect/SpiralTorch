@@ -1,0 +1,547 @@
+{
+  "schema": "spiraltorch.wave_gate_conditioning_study.v1",
+  "status": "running",
+  "config": {
+    "schema": "spiraltorch.wave_gate_conditioning_protocol.v1",
+    "scope": "paired 32-update diagnostic pilot; not full-corpus FT or a speed benchmark",
+    "model_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "corpus_sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+    "corpus_end_marker": "*** END OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***",
+    "block": "transformer.h.0.mlp",
+    "features": 768,
+    "seeds": [
+      41,
+      43,
+      47
+    ],
+    "arms": [
+      "off",
+      "tangent",
+      "wave_gate",
+      "wave_gate_wide_saturation"
+    ],
+    "steps": 32,
+    "batch_size": 2,
+    "block_size": 128,
+    "development_blocks": 16,
+    "train_probe_blocks": 8,
+    "evaluate_every": 8,
+    "learning_rate": 0.001,
+    "strength": 0.1,
+    "threads": 2,
+    "interpretation": "Fixed deterministic model and initialization, paired seed-specific minibatch schedules; descriptive differences only. Tangent may win. Development is a fixed sparse probe of the separate final 10% text, not an unseen test corpus. No outcome-driven arm removal or checkpoint selection."
+  },
+  "config_sha256": "488e729f41a1daeec209533b905c962449f044afa57f143e63c2830ebaabbec4",
+  "source_revision": "10764de454315e03fd69ba9e9c620b64d4688c7d",
+  "native_sha256": "325899f799afbc9022b887c4f735406071e2d33728cebe0d5895175c582e7018",
+  "script_sha256": "2338b59a1ebbe844a6435f24a5de909fbd9bb816f1b36f049544be7ef63b14cc",
+  "corpus": {
+    "sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+    "bytes": 709597,
+    "body_sha256": "ec4d09ab2918fe713208d363667c81222932a0867e3f8040a574d4d7a65f755a",
+    "body_end_character_offset": 690916,
+    "split_character_offset": 621684,
+    "train_text_sha256": "950cd7e8526e06bf779b8e15fc93bd55f5eaac3712e9d446f1281ce6f59c7401",
+    "development_text_sha256": "794eb7c360c7d1b37b10768aa1b7640f5c00a3678433aa77ae704975c98057d2",
+    "train_blocks": 1204,
+    "development_blocks": 136,
+    "train_probe_indices": [
+      0,
+      171,
+      343,
+      515,
+      687,
+      859,
+      1031,
+      1203
+    ],
+    "development_probe_indices": [
+      0,
+      9,
+      18,
+      27,
+      36,
+      45,
+      54,
+      63,
+      72,
+      81,
+      90,
+      99,
+      108,
+      117,
+      126,
+      135
+    ],
+    "train_tokens_sha256": "9561a8044d5c7ff9e597c6e9f8826da22fae5e44bd059e8b8e49e2ce792ae138",
+    "development_tokens_sha256": "539dfdecc247e2a9935b050cfaee7e929fcf82889532100db7cc8fbe98f81a7a",
+    "token_dtype": "int64_little_endian",
+    "targets_per_training_arm": 8128
+  },
+  "batch_schedules": {
+    "41": [
+      [
+        206,
+        1046
+      ],
+      [
+        27,
+        105
+      ],
+      [
+        377,
+        342
+      ],
+      [
+        182,
+        620
+      ],
+      [
+        419,
+        935
+      ],
+      [
+        947,
+        434
+      ],
+      [
+        482,
+        679
+      ],
+      [
+        8,
+        173
+      ],
+      [
+        423,
+        1103
+      ],
+      [
+        430,
+        1093
+      ],
+      [
+        1196,
+        858
+      ],
+      [
+        571,
+        502
+      ],
+      [
+        76,
+        1045
+      ],
+      [
+        28,
+        904
+      ],
+      [
+        118,
+        689
+      ],
+      [
+        1085,
+        646
+      ],
+      [
+        599,
+        980
+      ],
+      [
+        1064,
+        675
+      ],
+      [
+        170,
+        733
+      ],
+      [
+        981,
+        432
+      ],
+      [
+        766,
+        531
+      ],
+      [
+        694,
+        409
+      ],
+      [
+        201,
+        731
+      ],
+      [
+        540,
+        215
+      ],
+      [
+        637,
+        575
+      ],
+      [
+        834,
+        422
+      ],
+      [
+        1081,
+        866
+      ],
+      [
+        951,
+        129
+      ],
+      [
+        244,
+        357
+      ],
+      [
+        799,
+        896
+      ],
+      [
+        35,
+        1179
+      ],
+      [
+        392,
+        661
+      ],
+      [
+        852,
+        609
+      ]
+    ],
+    "43": [
+      [
+        1034,
+        1139
+      ],
+      [
+        323,
+        439
+      ],
+      [
+        1029,
+        494
+      ],
+      [
+        718,
+        357
+      ],
+      [
+        1061,
+        827
+      ],
+      [
+        204,
+        288
+      ],
+      [
+        948,
+        970
+      ],
+      [
+        168,
+        952
+      ],
+      [
+        1054,
+        441
+      ],
+      [
+        1053,
+        347
+      ],
+      [
+        86,
+        540
+      ],
+      [
+        572,
+        95
+      ],
+      [
+        1147,
+        561
+      ],
+      [
+        1155,
+        318
+      ],
+      [
+        744,
+        119
+      ],
+      [
+        774,
+        251
+      ],
+      [
+        64,
+        692
+      ],
+      [
+        1107,
+        621
+      ],
+      [
+        1173,
+        137
+      ],
+      [
+        701,
+        518
+      ],
+      [
+        949,
+        349
+      ],
+      [
+        483,
+        667
+      ],
+      [
+        959,
+        91
+      ],
+      [
+        748,
+        389
+      ],
+      [
+        648,
+        595
+      ],
+      [
+        512,
+        581
+      ],
+      [
+        467,
+        665
+      ],
+      [
+        287,
+        509
+      ],
+      [
+        526,
+        618
+      ],
+      [
+        92,
+        501
+      ],
+      [
+        1010,
+        1198
+      ],
+      [
+        877,
+        241
+      ],
+      [
+        632,
+        766
+      ]
+    ],
+    "47": [
+      [
+        178,
+        950
+      ],
+      [
+        534,
+        901
+      ],
+      [
+        241,
+        119
+      ],
+      [
+        948,
+        673
+      ],
+      [
+        477,
+        231
+      ],
+      [
+        932,
+        278
+      ],
+      [
+        245,
+        2
+      ],
+      [
+        143,
+        213
+      ],
+      [
+        463,
+        930
+      ],
+      [
+        1008,
+        538
+      ],
+      [
+        921,
+        9
+      ],
+      [
+        770,
+        641
+      ],
+      [
+        422,
+        636
+      ],
+      [
+        251,
+        831
+      ],
+      [
+        1048,
+        595
+      ],
+      [
+        1194,
+        503
+      ],
+      [
+        500,
+        669
+      ],
+      [
+        256,
+        580
+      ],
+      [
+        147,
+        400
+      ],
+      [
+        99,
+        1004
+      ],
+      [
+        429,
+        1007
+      ],
+      [
+        322,
+        898
+      ],
+      [
+        1036,
+        858
+      ],
+      [
+        1042,
+        662
+      ],
+      [
+        687,
+        878
+      ],
+      [
+        153,
+        186
+      ],
+      [
+        89,
+        513
+      ],
+      [
+        1027,
+        238
+      ],
+      [
+        16,
+        877
+      ],
+      [
+        983,
+        177
+      ],
+      [
+        1175,
+        162
+      ],
+      [
+        339,
+        557
+      ],
+      [
+        807,
+        1060
+      ]
+    ]
+  },
+  "native_fixture": {
+    "input": [
+      0.2,
+      -0.3,
+      1.5,
+      0.5
+    ],
+    "gate": [
+      1.4,
+      -1.1
+    ],
+    "bias": [
+      0.15,
+      -0.05
+    ],
+    "upstream": [
+      0.35,
+      -0.2,
+      -0.1,
+      0.3
+    ],
+    "output": [
+      0.38341012597084045,
+      0.27438849210739136,
+      0.7642251253128052,
+      -0.4245447814464569
+    ],
+    "grad_input": [
+      0.35881391167640686,
+      0.23633305728435516,
+      -0.00032593964715488255,
+      -0.17597678303718567
+    ],
+    "grad_gate": [
+      -0.0012477920390665531,
+      -0.003611508058384061
+    ],
+    "grad_bias": [
+      0.36150047183036804,
+      -0.06050032377243042
+    ],
+    "conditioning": {
+      "schema": "spiraltorch.wave_gate_conditioning.v1",
+      "rows": 2,
+      "features": 2,
+      "gate_outside_values": 2,
+      "affine_outside_values": 1,
+      "affine_nonfinite_values": 0,
+      "affine_abs_slope_mean": 0.753593809902668,
+      "dimensionless_norm_mean": 0.9313599849112237,
+      "dimensionless_norm_max": 1.350749693023236,
+      "relative_radial_gain_mean": 0.5067146598510208,
+      "relative_radial_gain_min": 0.23572169263470544,
+      "relative_tangential_gain_mean": 0.7840645896485601,
+      "relative_tangential_gain_min": 0.647218450002261
+    }
+  },
+  "runs": [],
+  "versions": {
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  }
+}

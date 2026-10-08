@@ -1,0 +1,621 @@
+{
+  "schema": "spiraltorch.elliptic_chart_step_summary.v1",
+  "study_id": "0a1066fd9a2ccad1e004de37d6d55849d8a15d75eb6e048ae95587717c8d12bb",
+  "steps_per_run": 512,
+  "runs": 12,
+  "primary_updates": 6144,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "adam_tangent": {
+          "mean_ce": 3.5634887417157493,
+          "mean_delta_vs_baseline": -0.5102245271205903,
+          "mean_delta_vs_adam_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_adam_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.565271204710007,
+              "delta_vs_adam_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.5646956006685895,
+              "delta_vs_adam_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.5604994197686515,
+              "delta_vs_adam_tangent": 0.0
+            }
+          ]
+        },
+        "adam_elliptic": {
+          "mean_ce": 3.6796525127357906,
+          "mean_delta_vs_baseline": -0.3940607561005489,
+          "mean_delta_vs_adam_tangent": 0.11616377102004138,
+          "paired_delta_sample_sd": 0.0037095001123884966,
+          "seeds_better_than_adam_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.685430004199346,
+              "delta_vs_adam_tangent": 0.12015879948933916
+            },
+            {
+              "seed": 43,
+              "ce": 3.6775238732496898,
+              "delta_vs_adam_tangent": 0.11282827258110029
+            },
+            {
+              "seed": 47,
+              "ce": 3.676003660758336,
+              "delta_vs_adam_tangent": 0.1155042409896847
+            }
+          ]
+        },
+        "chart_tangent": {
+          "mean_ce": 3.564010625415378,
+          "mean_delta_vs_baseline": -0.5097026434209617,
+          "mean_delta_vs_adam_tangent": 0.0005218836996288742,
+          "paired_delta_sample_sd": 0.000181465785544389,
+          "seeds_better_than_adam_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.5655960937341056,
+              "delta_vs_adam_tangent": 0.0003248890240987734
+            },
+            {
+              "seed": 43,
+              "ce": 3.565377825498581,
+              "delta_vs_adam_tangent": 0.0006822248299913625
+            },
+            {
+              "seed": 47,
+              "ce": 3.561057957013448,
+              "delta_vs_adam_tangent": 0.0005585372447964865
+            }
+          ]
+        },
+        "chart_elliptic": {
+          "mean_ce": 3.680922208229701,
+          "mean_delta_vs_baseline": -0.3927910606066387,
+          "mean_delta_vs_adam_tangent": 0.11743346651395144,
+          "paired_delta_sample_sd": 0.007221528791679821,
+          "seeds_better_than_adam_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.690514983733495,
+              "delta_vs_adam_tangent": 0.12524377902348816
+            },
+            {
+              "seed": 43,
+              "ce": 3.675694139798482,
+              "delta_vs_adam_tangent": 0.11099853912989266
+            },
+            {
+              "seed": 47,
+              "ce": 3.676557501157125,
+              "delta_vs_adam_tangent": 0.11605808138847351
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "adam_tangent": {
+          "mean_ce": 3.673358661433061,
+          "mean_delta_vs_baseline": -0.33844882498184825,
+          "mean_delta_vs_adam_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_adam_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.698008216917515,
+              "delta_vs_adam_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.66829015314579,
+              "delta_vs_adam_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.653777614235878,
+              "delta_vs_adam_tangent": 0.0
+            }
+          ]
+        },
+        "adam_elliptic": {
+          "mean_ce": 3.7383148645361266,
+          "mean_delta_vs_baseline": -0.27349262187878276,
+          "mean_delta_vs_adam_tangent": 0.06495620310306549,
+          "paired_delta_sample_sd": 0.028295466299796505,
+          "seeds_better_than_adam_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7340790927410126,
+              "delta_vs_adam_tangent": 0.03607087582349777
+            },
+            {
+              "seed": 43,
+              "ce": 3.7344654873013496,
+              "delta_vs_adam_tangent": 0.06617533415555954
+            },
+            {
+              "seed": 47,
+              "ce": 3.746400013566017,
+              "delta_vs_adam_tangent": 0.09262239933013916
+            }
+          ]
+        },
+        "chart_tangent": {
+          "mean_ce": 3.672017256418864,
+          "mean_delta_vs_baseline": -0.3397902299960456,
+          "mean_delta_vs_adam_tangent": -0.0013414050141970317,
+          "paired_delta_sample_sd": 0.0009193366660396944,
+          "seeds_better_than_adam_tangent": 3,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.6977064684033394,
+              "delta_vs_adam_tangent": -0.00030174851417541504
+            },
+            {
+              "seed": 43,
+              "ce": 3.6662431359291077,
+              "delta_vs_adam_tangent": -0.002047017216682434
+            },
+            {
+              "seed": 47,
+              "ce": 3.6521021649241447,
+              "delta_vs_adam_tangent": -0.0016754493117332458
+            }
+          ]
+        },
+        "chart_elliptic": {
+          "mean_ce": 3.735024370253086,
+          "mean_delta_vs_baseline": -0.2767831161618233,
+          "mean_delta_vs_adam_tangent": 0.061665708820025124,
+          "paired_delta_sample_sd": 0.01748282791515651,
+          "seeds_better_than_adam_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7401500418782234,
+              "delta_vs_adam_tangent": 0.04214182496070862
+            },
+            {
+              "seed": 43,
+              "ce": 3.7352722734212875,
+              "delta_vs_adam_tangent": 0.06698212027549744
+            },
+            {
+              "seed": 47,
+              "ce": 3.7296507954597473,
+              "delta_vs_adam_tangent": 0.07587318122386932
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "Four arms have 8451 parameters, identical initialization and paired minibatches. All start at identity; no historical endpoint initializes a run.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "All arms use anchored features. Adam consumes true gradients and keeps ordinary moments; chart arms precondition only the orientation projection proposal, preserving its current Adam proposal L2 norm up to f32 rounding. This does not match cumulative norms across diverging runs.",
+    "Rust owns the mean two-coordinate feature pullback, relative damping and normalized solve. The ordinary tangent control uses the same operator on its constant anchor Jacobian.",
+    "This separable chart metric omits hidden-input covariance, readout and loss curvature. It is neither full natural gradient nor a loss Hessian. No optimizer is silently inserted into production autograd.",
+    "Relative damping is fixed at 0.1 before training. No development-based model or hyperparameter selection. Complete all twelve runs and exact next-update checks before endpoint evaluation.",
+    "Primary contrast: chart_elliptic minus adam_elliptic. Also report chart effects on tangent, geometry with each optimizer, the interaction and every losing seed. Ordinary adam_tangent remains the practical reference.",
+    "Pride and Alice are reused exploratory endpoints, not untouched confirmation. Historical Adam control reproduction is reproducibility evidence, not independent replication.",
+    "CPU float32, frozen local GPT-2, full unpadded contexts, no KV cache. Extra geometry computation and host copies are not a speed comparison or a matched-compute claim.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "reference_arm": "adam_tangent",
+  "paired_factorial_contrasts": {
+    "pride_unused_tail": {
+      "chart_elliptic": {
+        "weights": {
+          "chart_elliptic": 1,
+          "adam_elliptic": -1
+        },
+        "mean_ce_difference": 0.0012696954939100575,
+        "paired_sample_sd": 0.0035124991537896708,
+        "negative_seeds": 1,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.005084979534148992
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0018297334512076269
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.0005538403987888074
+          }
+        ]
+      },
+      "chart_tangent": {
+        "weights": {
+          "chart_tangent": 1,
+          "adam_tangent": -1
+        },
+        "mean_ce_difference": 0.0005218836996288742,
+        "paired_sample_sd": 0.000181465785544389,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.0003248890240987734
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.0006822248299913625
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.0005585372447964865
+          }
+        ]
+      },
+      "geometry_adam": {
+        "weights": {
+          "adam_elliptic": 1,
+          "adam_tangent": -1
+        },
+        "mean_ce_difference": 0.11616377102004138,
+        "paired_sample_sd": 0.0037095001123884966,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.12015879948933916
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.11282827258110029
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.1155042409896847
+          }
+        ]
+      },
+      "geometry_chart": {
+        "weights": {
+          "chart_elliptic": 1,
+          "chart_tangent": -1
+        },
+        "mean_ce_difference": 0.11691158281432257,
+        "paired_sample_sd": 0.0074029854903524435,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.12491888999938938
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.1103163142999013
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.11549954414367702
+          }
+        ]
+      },
+      "interaction": {
+        "weights": {
+          "chart_elliptic": 1,
+          "adam_elliptic": -1,
+          "chart_tangent": -1,
+          "adam_tangent": 1
+        },
+        "mean_ce_difference": 0.0007478117942811835,
+        "paired_sample_sd": 0.0036939647190869745,
+        "negative_seeds": 2,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.004760090510050219
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.0025119582811989893
+          },
+          {
+            "seed": 47,
+            "ce_difference": -4.696846007679056e-06
+          }
+        ]
+      }
+    },
+    "alice_transfer": {
+      "chart_elliptic": {
+        "weights": {
+          "chart_elliptic": 1,
+          "adam_elliptic": -1
+        },
+        "mean_ce_difference": -0.0032904942830403647,
+        "paired_sample_sd": 0.011949091525324402,
+        "negative_seeds": 1,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.006070949137210846
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.0008067861199378967
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.016749218106269836
+          }
+        ]
+      },
+      "chart_tangent": {
+        "weights": {
+          "chart_tangent": 1,
+          "adam_tangent": -1
+        },
+        "mean_ce_difference": -0.0013414050141970317,
+        "paired_sample_sd": 0.0009193366660396944,
+        "negative_seeds": 3,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": -0.00030174851417541504
+          },
+          {
+            "seed": 43,
+            "ce_difference": -0.002047017216682434
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.0016754493117332458
+          }
+        ]
+      },
+      "geometry_adam": {
+        "weights": {
+          "adam_elliptic": 1,
+          "adam_tangent": -1
+        },
+        "mean_ce_difference": 0.06495620310306549,
+        "paired_sample_sd": 0.028295466299796505,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.03607087582349777
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.06617533415555954
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.09262239933013916
+          }
+        ]
+      },
+      "geometry_chart": {
+        "weights": {
+          "chart_elliptic": 1,
+          "chart_tangent": -1
+        },
+        "mean_ce_difference": 0.06300711383422215,
+        "paired_sample_sd": 0.018310921181410506,
+        "negative_seeds": 0,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.04244357347488403
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.06902913749217987
+          },
+          {
+            "seed": 47,
+            "ce_difference": 0.07754863053560257
+          }
+        ]
+      },
+      "interaction": {
+        "weights": {
+          "chart_elliptic": 1,
+          "adam_elliptic": -1,
+          "chart_tangent": -1,
+          "adam_tangent": 1
+        },
+        "mean_ce_difference": -0.001949089268843333,
+        "paired_sample_sd": 0.01150167656425518,
+        "negative_seeds": 1,
+        "per_seed": [
+          {
+            "seed": 41,
+            "ce_difference": 0.006372697651386261
+          },
+          {
+            "seed": 43,
+            "ce_difference": 0.002853803336620331
+          },
+          {
+            "seed": 47,
+            "ce_difference": -0.01507376879453659
+          }
+        ]
+      }
+    }
+  },
+  "chart_step_trajectories": {
+    "41:chart_tangent": {
+      "nonzero_proposals": 511,
+      "mean_direction_cosine": 0.9967934773541155,
+      "mean_damped_condition": 1.1762070297355924,
+      "max_applied_norm_relative_error": 1.0422777867447053e-06,
+      "positive_gradient_dot_proposal_steps": 38,
+      "positive_gradient_dot_applied_steps": 39
+    },
+    "41:chart_elliptic": {
+      "nonzero_proposals": 511,
+      "mean_direction_cosine": 0.5306762656668977,
+      "mean_damped_condition": 20.03130064370578,
+      "max_applied_norm_relative_error": 1.7852891460723441e-06,
+      "positive_gradient_dot_proposal_steps": 4,
+      "positive_gradient_dot_applied_steps": 3
+    },
+    "43:chart_tangent": {
+      "nonzero_proposals": 511,
+      "mean_direction_cosine": 0.9968451835273363,
+      "mean_damped_condition": 1.1762070297355924,
+      "max_applied_norm_relative_error": 9.745153489726377e-07,
+      "positive_gradient_dot_proposal_steps": 23,
+      "positive_gradient_dot_applied_steps": 24
+    },
+    "43:chart_elliptic": {
+      "nonzero_proposals": 511,
+      "mean_direction_cosine": 0.5437444050014014,
+      "mean_damped_condition": 19.533441451944785,
+      "max_applied_norm_relative_error": 1.5038130354305679e-06,
+      "positive_gradient_dot_proposal_steps": 21,
+      "positive_gradient_dot_applied_steps": 17
+    },
+    "47:chart_tangent": {
+      "nonzero_proposals": 511,
+      "mean_direction_cosine": 0.9968324199827986,
+      "mean_damped_condition": 1.1762070297355924,
+      "max_applied_norm_relative_error": 7.828604312587473e-07,
+      "positive_gradient_dot_proposal_steps": 28,
+      "positive_gradient_dot_applied_steps": 28
+    },
+    "47:chart_elliptic": {
+      "nonzero_proposals": 511,
+      "mean_direction_cosine": 0.5611979971560236,
+      "mean_damped_condition": 20.171334748447915,
+      "max_applied_norm_relative_error": 1.941172707353722e-06,
+      "positive_gradient_dot_proposal_steps": 18,
+      "positive_gradient_dot_applied_steps": 15
+    }
+  },
+  "gate_trajectories": {
+    "41:adam_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.165524423122406,
+      "final_mix": -0.164029110768,
+      "min_raw_mix": -0.165524423122406,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "41:adam_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.511658787727356,
+      "final_mix": -0.471236637984,
+      "min_raw_mix": -0.511658787727356,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "41:chart_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.16745558381080627,
+      "final_mix": -0.165907715104,
+      "min_raw_mix": -0.16745558381080627,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "41:chart_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.5214582681655884,
+      "final_mix": -0.478824723186,
+      "min_raw_mix": -0.5214582681655884,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "43:adam_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.17940306663513184,
+      "final_mix": -0.177502803797,
+      "min_raw_mix": -0.18031232059001923,
+      "max_raw_mix": 0.0007416801527142525,
+      "nonzero_gradient_steps": 511
+    },
+    "43:adam_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.46257343888282776,
+      "final_mix": -0.432179311572,
+      "min_raw_mix": -0.46257343888282776,
+      "max_raw_mix": 0.0014697987353429198,
+      "nonzero_gradient_steps": 511
+    },
+    "43:chart_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.18021740019321442,
+      "final_mix": -0.17829136579,
+      "min_raw_mix": -0.18123376369476318,
+      "max_raw_mix": 0.0007416801527142525,
+      "nonzero_gradient_steps": 511
+    },
+    "43:chart_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.46413978934288025,
+      "final_mix": -0.433452237985,
+      "min_raw_mix": -0.46413978934288025,
+      "max_raw_mix": 0.0014827004633843899,
+      "nonzero_gradient_steps": 511
+    },
+    "47:adam_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.18117603659629822,
+      "final_mix": -0.179219370344,
+      "min_raw_mix": -0.18118523061275482,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "47:adam_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.4541603624820709,
+      "final_mix": -0.425312816527,
+      "min_raw_mix": -0.45423534512519836,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "47:chart_tangent": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.18259179592132568,
+      "final_mix": -0.180589307559,
+      "min_raw_mix": -0.1825989931821823,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    },
+    "47:chart_elliptic": {
+      "initial_raw_mix": 0.0,
+      "final_raw_mix": -0.4862504005432129,
+      "final_mix": -0.451235359534,
+      "min_raw_mix": -0.4866240620613098,
+      "max_raw_mix": 0.0,
+      "nonzero_gradient_steps": 511
+    }
+  },
+  "input_sha256": {
+    "plan": "8e9b5e2781b7b04854e87195f6eba2eac301dec7f47dac1d0f8f0fdc73b2ed8e",
+    "results": "45502457d0fc20ee93b2569d2538ecf5b8a98be8cccb6c7555ff834a6b4c497b",
+    "journal": "8f97c5f5f683d440a077119823dffde6865143ce5748b2acbd1bb59fde8c3d8e"
+  }
+}

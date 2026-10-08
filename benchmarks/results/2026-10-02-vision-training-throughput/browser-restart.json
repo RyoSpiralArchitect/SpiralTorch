@@ -1,0 +1,305 @@
+{
+  "schema": "spiraltorch.vision.scalar_receipt_browser_regression.v1",
+  "source_ref": "a8dcac827d570ea27b3075561354a3c25dbd6cf6",
+  "browser": "Codex In-app Browser",
+  "scope": "Synthetic feedback trainer regression; not real-image learning, throughput or hardware attestation.",
+  "cases": [
+    {
+      "schedule": "constant",
+      "mode": "control",
+      "passed": true,
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": null,
+      "cross_runtime": null,
+      "initial_checkpoint_sha256": "7efa2f563e106061028b143ce480a0952f7d9eca9f9ae700928b68aed3d2c81f",
+      "final_checkpoint_sha256": "0bd6de6b032cd3e5a316e6463cd328e8a1dacaab08a23cacc64df25483ac5508",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/constant-control.json",
+      "receipt": {
+        "bytes": 194528,
+        "sha256": "b047469c3dbca7e4876d6fe18797e2e74763fd2c1fe2b9559798b2a62e581f27"
+      }
+    },
+    {
+      "schedule": "constant",
+      "mode": "prefix",
+      "passed": true,
+      "attempts": 37,
+      "accepted": 33,
+      "rejected": 4,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": null,
+      "cross_runtime": null,
+      "initial_checkpoint_sha256": "7efa2f563e106061028b143ce480a0952f7d9eca9f9ae700928b68aed3d2c81f",
+      "final_checkpoint_sha256": "43419cbe39e63c6e3e07f3b0dc5a658d1395ac0e4bb0952c812a8ea49870658f",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/constant-prefix.json",
+      "receipt": {
+        "bytes": 84980,
+        "sha256": "839fab5662775d9f4535c1392fc810fc10c444d66979ec3059a738501950f71c"
+      }
+    },
+    {
+      "schedule": "constant",
+      "mode": "resume",
+      "passed": true,
+      "attempts": 63,
+      "accepted": 57,
+      "rejected": 6,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": true,
+      "cross_runtime": null,
+      "initial_checkpoint_sha256": "43419cbe39e63c6e3e07f3b0dc5a658d1395ac0e4bb0952c812a8ea49870658f",
+      "final_checkpoint_sha256": "0bd6de6b032cd3e5a316e6463cd328e8a1dacaab08a23cacc64df25483ac5508",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/constant-resume.json",
+      "receipt": {
+        "bytes": 130873,
+        "sha256": "e0e2059bbb8dd62f48618eb11b35e7e413c87bb2ab000c37b30ddccba34b2cde"
+      }
+    },
+    {
+      "schedule": "constant",
+      "mode": "python",
+      "passed": true,
+      "attempts": 63,
+      "accepted": 57,
+      "rejected": 6,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": null,
+      "cross_runtime": {
+        "parameter_tensors": 24,
+        "parameter_values": 456,
+        "max_scaled_error": 0,
+        "bound": 0.0002
+      },
+      "initial_checkpoint_sha256": "43419cbe39e63c6e3e07f3b0dc5a658d1395ac0e4bb0952c812a8ea49870658f",
+      "final_checkpoint_sha256": "0bd6de6b032cd3e5a316e6463cd328e8a1dacaab08a23cacc64df25483ac5508",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/constant-python.json",
+      "receipt": {
+        "bytes": 130951,
+        "sha256": "6a1650475f8b3b62d63db7b6f69e40d14d6984cc460ec88c29fbc798b574461b"
+      }
+    },
+    {
+      "schedule": "cosine",
+      "mode": "control",
+      "passed": true,
+      "attempts": 100,
+      "accepted": 90,
+      "rejected": 10,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": null,
+      "cross_runtime": null,
+      "initial_checkpoint_sha256": "d488edebe19e2b829321da0e0bf1d2cbf0685ab74a013842105df58a004c4ea8",
+      "final_checkpoint_sha256": "ff0f87ebac35bd8f5008b46c1455465557ecf1c5e5c12b2e25da3a0b40acaba8",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/cosine-control.json",
+      "receipt": {
+        "bytes": 194792,
+        "sha256": "6286b274ed58950664fac20d5b3a3844394194cae1e3a48226798981a2875b31"
+      }
+    },
+    {
+      "schedule": "cosine",
+      "mode": "prefix",
+      "passed": true,
+      "attempts": 37,
+      "accepted": 33,
+      "rejected": 4,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": null,
+      "cross_runtime": null,
+      "initial_checkpoint_sha256": "d488edebe19e2b829321da0e0bf1d2cbf0685ab74a013842105df58a004c4ea8",
+      "final_checkpoint_sha256": "78bb21ebb6fa07ecbd5314a6272534f106d5a184a4f29ef5ee42cbd3ae214a6e",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/cosine-prefix.json",
+      "receipt": {
+        "bytes": 85217,
+        "sha256": "3e0a08e6899c80aca459a6a9cb679b9f0b5682e3f28660388a854466947678a9"
+      }
+    },
+    {
+      "schedule": "cosine",
+      "mode": "resume",
+      "passed": true,
+      "attempts": 63,
+      "accepted": 57,
+      "rejected": 6,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": true,
+      "cross_runtime": null,
+      "initial_checkpoint_sha256": "78bb21ebb6fa07ecbd5314a6272534f106d5a184a4f29ef5ee42cbd3ae214a6e",
+      "final_checkpoint_sha256": "ff0f87ebac35bd8f5008b46c1455465557ecf1c5e5c12b2e25da3a0b40acaba8",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/cosine-resume.json",
+      "receipt": {
+        "bytes": 131114,
+        "sha256": "c79e9f7f93a0305eb2b6af13931ac855c3d183895aecec4c15d2f5672b448a30"
+      }
+    },
+    {
+      "schedule": "cosine",
+      "mode": "python",
+      "passed": true,
+      "attempts": 63,
+      "accepted": 57,
+      "rejected": 6,
+      "adapter": {
+        "backend": "BrowserWebGpu",
+        "device_type": "Other",
+        "name": ""
+      },
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "bitwise_resume": null,
+      "cross_runtime": {
+        "parameter_tensors": 24,
+        "parameter_values": 456,
+        "max_scaled_error": 0,
+        "bound": 0.0002
+      },
+      "initial_checkpoint_sha256": "78bb21ebb6fa07ecbd5314a6272534f106d5a184a4f29ef5ee42cbd3ae214a6e",
+      "final_checkpoint_sha256": "ff0f87ebac35bd8f5008b46c1455465557ecf1c5e5c12b2e25da3a0b40acaba8",
+      "assets": {
+        "/": "ba69abafb5a64487953e99b5604d32b095a0795dd9226e03371617c390d2e5db",
+        "/python.json": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313",
+        "/module/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd",
+        "/module/spiraltorch_wasm.js": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd",
+        "/module/spiraltorch_wasm_bg.wasm": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+      },
+      "retained_file": "feedback-browser/cosine-python.json",
+      "receipt": {
+        "bytes": 131192,
+        "sha256": "eadacdaf45df9e43ba696248ae00b7071e9481b8e8dd33e3d537d4344c8895e1"
+      }
+    }
+  ],
+  "native_replay": {
+    "passed": 5,
+    "skipped": 1,
+    "skipped_scope": "Previous external feedback fixture not supplied"
+  },
+  "retained_files": {
+    "trainer-wasm-build.log": {
+      "bytes": 112082,
+      "sha256": "e00090c3f938736f46b4dbc594dbe6a33dae3ea04043c9c7d89974b2f4e2b61d"
+    },
+    "feedback-native.json": {
+      "bytes": 487503,
+      "sha256": "03f54511a1f227798f52e2a4ffbbfcac5dc7f3dd198dbcb32b6796c7090a0313"
+    },
+    "feedback-native-tests.log": {
+      "bytes": 992,
+      "sha256": "d8c032c52f3226b3e0a7e58c1d543b6113cc8632d5e81188c6da4b4deffdb4c1"
+    },
+    "feedback-browser-replay-tests.log": {
+      "bytes": 937,
+      "sha256": "6ffb1ea4766e437bb250436dfe4477bc97ff39cda334b41531d772f0e943010f"
+    },
+    "trainer-web/snippets/spiraltorch-wasm-2db06a8f9d36fd62/inline0.js": {
+      "bytes": 4526,
+      "sha256": "57aa5860930daaae484cfd5ceab1916104283509e6c71e9892cd38ed6226fddd"
+    },
+    "trainer-web/spiraltorch_wasm.d.ts": {
+      "bytes": 145393,
+      "sha256": "02365af6f1e63c26e9abf3a853a3ea4cd2d5a7898f09140099a6e23e7ba75fa9"
+    },
+    "trainer-web/spiraltorch_wasm.js": {
+      "bytes": 424462,
+      "sha256": "e34c8c07b6735595978b7088c04f9aca0b92d0a3edd2631bcd8a457f24b157bd"
+    },
+    "trainer-web/spiraltorch_wasm_bg.wasm": {
+      "bytes": 9852636,
+      "sha256": "c5cb3ae8e122134396c94124e264d698cdc341ba76bba41a4b0df4e0dcff03d8"
+    },
+    "trainer-web/spiraltorch_wasm_bg.wasm.d.ts": {
+      "bytes": 81955,
+      "sha256": "af27a2de1523b362f0570f9b83176b40b5b2f66dbd9002a128b63214eb588997"
+    }
+  },
+  "publication_helper": {
+    "bytes": 3142,
+    "sha256": "359a2079f46019c71a68d923851c251e24e5718713c40422f8a4a7068c01a82f"
+  }
+}

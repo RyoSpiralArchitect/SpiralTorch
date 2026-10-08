@@ -2375,6 +2375,23 @@ impl PyWaveGate {
         Ok(PyTensor::from_tensor(grad))
     }
 
+    /// Returns input, gate and bias VJPs without averaging or accumulation.
+    pub fn vjp(
+        &self,
+        input: &PyTensor,
+        grad_output: &PyTensor,
+    ) -> PyResult<(PyTensor, PyTensor, PyTensor)> {
+        let gradients = self
+            .inner()?
+            .vjp(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok((
+            PyTensor::from_tensor(gradients.grad_input),
+            PyTensor::from_tensor(gradients.grad_gate),
+            PyTensor::from_tensor(gradients.grad_bias),
+        ))
+    }
+
     pub fn infuse_text(&mut self, text: &str) -> PyResult<()> {
         self.inner_mut()?
             .infuse_text(text)
@@ -3871,6 +3888,26 @@ impl PySequential {
         crate::nn_resident::plan_for(&self.inner, input_shape)
     }
 
+    /// Add a Rust-owned shared last-axis gate using an existing kernel's configuration.
+    /// Host forward/backward and resident plans use the same finite-unroll rule.
+    pub fn add_topos_resonator(
+        &mut self,
+        name: String,
+        gate: &PyTensor,
+        kernel: &crate::topos_resonator::PyToposResonatorKernel,
+    ) -> PyResult<()> {
+        let operator = &kernel.operator;
+        let layer = st_nn::ToposResonator::from_shared_gate(
+            name,
+            gate.inner.clone(),
+            operator.config(),
+            operator.topos().clone(),
+        )
+        .map_err(tensor_err_to_py)?;
+        self.inner.push(layer);
+        Ok(())
+    }
+
     pub fn add(&mut self, layer: &Bound<PyAny>) -> PyResult<()> {
         let py = layer.py();
 
@@ -4086,6 +4123,14 @@ impl PySequential {
 
     pub fn forward(&self, input: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         crate::nn_resident::forward_argument(&self.inner, input)
+    }
+
+    /// Host forward without retaining Sequential backward activations.
+    pub fn forward_untracked(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        self.inner
+            .forward_untracked(&input.inner)
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
     }
 
     /// Submit forward, then capture its output; read the snapshot explicitly.

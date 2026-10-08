@@ -1,0 +1,85 @@
+{
+  "schema": "spiraltorch.elliptic_anchored_learning_validation.v1",
+  "source_revision": "f5c43e1911073dc3c754ae3bd953141b5baae5dc",
+  "status": "passed",
+  "scope": "Forward/VJP and learning-path verification, not pretrained quality or throughput evidence",
+  "environment": {
+    "platform": "Apple Silicon macOS",
+    "rust": "1.98.0",
+    "rustfmt": "nightly-2026-04-15",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6"
+  },
+  "rust": {
+    "passed": 12,
+    "skipped": 0,
+    "clippy": "passed with -D warnings",
+    "workspace_fmt": "passed"
+  },
+  "python": {
+    "passed": 149,
+    "skipped": 0,
+    "training_shape": [
+      2,
+      128,
+      3
+    ],
+    "hf": "tiny random GPT-2 loss reaches orientation/readout/gate, base frozen",
+    "continuation": "next adapter parameters and complete Adam state exactly equal",
+    "cached_inference": "tiny HF cached token logits match full-context after training (atol=2e-6, rtol=2e-5)",
+    "mps": "exact forward/VJP host-transport parity; not resident execution"
+  },
+  "wasm": {
+    "build": "passed",
+    "browser": "passed",
+    "typescript": "strict passed",
+    "finite_difference_max_orientation": 0.0002043302592655838,
+    "finite_difference_max_gate": 0.00010070353106917534,
+    "synthetic_updates": 150,
+    "initial_mse": 0.02221029609488432,
+    "final_mse": 0.0000030783554602080582,
+    "final_raw_mix": -0.5911567211151123
+  },
+  "artifacts": {
+    "native_sha256": "d4cd553f402cd8c248072017fd5c23725a6439ab275aeb6bed338cc2ed42808b",
+    "python_bridge_sha256": "8484b0b95168502bec19212c00d6c93bbd98b8582391a561adc6c5e1647dd260",
+    "wasm_raw_build_sha256": "e212ed2c7bde5752d5cdfa0e790c5f10dd4ea4a2888f26f6f7e2c51a14a3a5f7",
+    "wasm_web_sha256": "337012981fb6dd1ab1b744dc906f0da217b9664157141feb983a6cb2e6cb0ce7",
+    "wasm_js_sha256": "bac803f927617173cd4da30032465c503fb26f31e144a243ffe80115ee0c882b"
+  },
+  "source_sha256": {
+    "crates/st-core/src/theory/microlocal.rs": "2da71f31ed3f2fd39cc3bd044df0fee50101880b7b9c8ce5a1960e22fcbf0ae1",
+    "crates/st-core/src/theory/microlocal/elliptic_anchored.rs": "f6ac172a24ca8aa6f32dc369a084de7d1ec721bdf0877c56475d5c13673ce2b6",
+    "crates/st-core/tests/elliptic_anchored.rs": "3615fda045f273e60e20d080d6349114925bedc60b082d5de296b1b4e1ce8a6c",
+    "bindings/st-py/src/elliptic.rs": "b2950d13ad5f0aa79970490715be6e2298fd54427089b4627be360558ad41243",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "8484b0b95168502bec19212c00d6c93bbd98b8582391a561adc6c5e1647dd260",
+    "bindings/st-py/spiraltorch/__init__.py": "848437c8cd5a076b598dcf3cc2c1f3a4d2fa3386070864a8f6e29b4098b82014",
+    "bindings/st-py/spiraltorch/__init__.pyi": "4b1d8b9528426d974eef571ccc49cf3670f548324b72fbdf535c6b748aafad75",
+    "bindings/st-py/tests/test_elliptic_anchored.py": "92627ce69d17be48ebb9b031119251d0803722d17d5f418fd6f58880b5d5d85a",
+    "bindings/st-py/tests/test_geometry_optional_dependency.py": "b754620a8d55c75d9784e4d235e211e8b2c8dde8839d5a2ad65f645c29b758ee",
+    "bindings/st-wasm/src/elliptic_learning.rs": "35d55310f9a080c378d5821b65880ae170d847c1dd2ebc2382c74677e5f9f309",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "5cb5d3004fed04361165d4429b5722c4d0e6a635d2966f3ff44b3c7816674e76",
+    "bindings/st-wasm/tests/elliptic_anchored_learning.html": "19a1f75ee429c53455d5ead8288cf36dea223b245387a19a769d98231b90c3a8",
+    "bindings/st-wasm/tests/elliptic_anchored_types.ts": "f0a432ba9a64482234a2f416a153d23cb457b7c8b89f84ae2503764cbdb5b947"
+  },
+  "local_log_sha256": {
+    "native-build.log": "ae0ee6cd94e6355a52650127deb726ba1eb61885968e0bf044669959f1b5e60c",
+    "wasm-build.log": "cc139dc8a40509b7d0cb2c94f3ee082a2897e30838d1dee8631dd34902eb706e",
+    "rust-tests.log": "ff5abad0c9b5283d9a76da5a9f8770e8d940096cd54ac6dac0476cd08a018639",
+    "clippy.log": "27137bcbb30619460f85e1276d1e54bee3489b9286f7eb3df93cba2dabde6c18",
+    "focused-tests.log": "59db9f7b8e0cb2467323e0526715bcf9e23a476c18717c838d906ec92aad4d45",
+    "full-tests.log": "50d39ed80a1304fb8370432860751799faa142dd67382f4fed3eb8b047ad5b1b"
+  },
+  "storage_recovery": {
+    "removed": "Four obsolete st-core incremental-build directories from earlier September/October builds",
+    "preserved": "Frozen packages, weights, corpora, checkpoints and experimental records"
+  },
+  "limitations": [
+    "Fixed chart-anchor affine correction, not a new geodesic or manifold",
+    "Some scaling is absorbable by the linear readout; optimization is not expressivity evidence",
+    "No pretrained-model quality comparison for anchored training yet",
+    "Float32 first-order CPU transport; no resident accelerator, AMP or higher-order claim",
+    "Cached inference verified only on a tiny local GPT-2, not every HF architecture"
+  ]
+}

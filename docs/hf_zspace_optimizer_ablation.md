@@ -1,5 +1,9 @@
 # HF Z-Space Optimizer Ablations
 
+For the separate Rust-owned repetition loss normalization and update-slot
+schedule, see [HF repetition objective control](hf_repetition_objective_control.md).
+That coefficient controls an auxiliary loss, not the optimizer learning rate.
+
 This workflow asks a narrow question: when Z-Space changes a Hugging Face
 Trainer learning-rate trajectory, is an observed loss difference caused by the
 integrated learning-rate dose, by the time-varying shape, or by both?

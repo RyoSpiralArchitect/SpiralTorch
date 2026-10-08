@@ -1815,6 +1815,16 @@ impl crate::context::Context for ContextWebGpu {
             downcast_ref(desc.module.data.as_ref());
         let mut mapped_compute_stage = webgpu_sys::GpuProgrammableStage::new(&shader_module.0);
         mapped_compute_stage.entry_point(desc.entry_point);
+        // The pinned generated dictionary predates pipeline override constants.
+        if !desc.compilation_options.constants.is_empty() {
+            let constants = js_sys::Object::new();
+            for (name, value) in desc.compilation_options.constants {
+                js_sys::Reflect::set(&constants, &JsValue::from(name.as_str()), &JsValue::from(*value))
+                    .expect("Setting Object properties should never fail.");
+            }
+            js_sys::Reflect::set(&mapped_compute_stage, &JsValue::from("constants"), &constants)
+                .expect("Setting Object properties should never fail.");
+        }
         let auto_layout = wasm_bindgen::JsValue::from(webgpu_sys::GpuAutoLayoutMode::Auto);
         let mut mapped_desc = webgpu_sys::GpuComputePipelineDescriptor::new(
             &match desc.layout {

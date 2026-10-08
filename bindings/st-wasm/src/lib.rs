@@ -5,7 +5,10 @@ mod autograd;
 mod cobol;
 mod concept_diffusion;
 mod cosmology;
+mod elliptic_learning;
 mod fractal_field;
+#[cfg(target_arch = "wasm32")]
+mod fractional_learning;
 mod free_energy;
 mod generation_control;
 mod generation_evidence;
@@ -26,6 +29,7 @@ mod tensor_execution_receipt;
 mod tensor_mean;
 mod topos_control;
 mod topos_policy;
+mod topos_resonator;
 mod topos_route;
 mod trainer_checkpoint;
 mod trainer_external;
@@ -52,7 +56,11 @@ mod nn_resident;
 mod tuner;
 mod utils;
 #[cfg(all(target_arch = "wasm32", feature = "nn"))]
+mod wave_gate_learning;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
 pub use nn_resident::*;
+#[cfg(all(target_arch = "wasm32", feature = "nn"))]
+pub use wave_gate_learning::*;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
 mod wgpu_resident;
 #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
@@ -84,8 +92,12 @@ pub use cobol_bridge::*;
 pub use concept_diffusion::*;
 pub use cosmology::*;
 #[cfg(target_arch = "wasm32")]
+pub use elliptic_learning::*;
+#[cfg(target_arch = "wasm32")]
 pub use fft::*;
 pub use fractal_field::*;
+#[cfg(target_arch = "wasm32")]
+pub use fractional_learning::*;
 pub use free_energy::*;
 pub use generation_control::*;
 pub use generation_evidence::*;
@@ -110,6 +122,8 @@ pub use tensor_execution_receipt::*;
 pub use tensor_mean::*;
 pub use topos_control::*;
 pub use topos_policy::*;
+#[cfg(target_arch = "wasm32")]
+pub use topos_resonator::*;
 pub use topos_route::*;
 pub use trainer_checkpoint::*;
 pub use trainer_external::*;

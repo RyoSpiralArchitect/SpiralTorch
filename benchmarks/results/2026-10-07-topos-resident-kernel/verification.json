@@ -1,0 +1,144 @@
+{
+  "schema": "spiraltorch.topos_resident_kernel_verification.v1",
+  "source_revision": "20686ce788052fef3767fd64549a32e23552d53b",
+  "comparison_base_revision": "4bdcfe757cd88fc4c4409cf2d0e081049d172d35",
+  "immediate_parent_revision": "4bdcfe757cd88fc4c4409cf2d0e081049d172d35",
+  "source_sha256": {
+    "crates/st-backend-wgpu/examples/topos_resident_learning.rs": "5e53d1fa9108ae643b12869599a5f8531ea1c6fa53c35fd042b5b2c61af266aa",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise.rs": "70bb0cbc4a2b4bfcf1a02b28fe7ef32ab362136b324e05757f10fc7cb53619d6",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/topos.rs": "5319d3abecd6a43a07dff707e9b2f137da9ce07b820778a875d16ca2619fe990",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/topos/tests.rs": "246f3869129162e7e7bbcc2f7a0d467a20b60052748b292168b89d6af1d482ab",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/vjp.rs": "f754dc77c55aadf66fa164bcc59c2f1291a23d73adcbae199c518985a732ed8e",
+    "crates/st-core/src/dynamics/topos_resonator.rs": "1a990c7592d462bdcd777bce87ef5fdf270fca4d18afc6c5a3d5497f11008fb8",
+    "crates/st-kernel-contracts/src/lib.rs": "9bd11155f6e8ee70ae1cb80ff43273471cc36e59428288b7a4130aa2592c921d",
+    "crates/st-kernel-contracts/src/topos_resonator.rs": "06c8d6a064fed5ac587bb8752eedde62f079bb40b3129d1dcb2f0cb48ae25735",
+    "crates/st-tensor/src/pure/topos.rs": "cccbaf035e1c1675b601d8c0e6ce1167c7a6fb30e57e38bd71adf58ea04644a2",
+    "docs/topos_learning.md": "88b747eec31d17f04030cec6ade01d0adcaf8e7325821e909da82c4c94104add",
+    "tools/check_topos_shared_gate_learning.py": "912295dbde11331133cd51c30cb666c7ba440cc55909c738114e2dc926ab9c4b",
+    "tools/test_topos_shared_gate_learning.py": "dd7c65b926653ae7519c4c08cca12ba1d93fe9e45853bdc761a267dbf7a157e7"
+  },
+  "native_raw_sha256": "1ab4d573898166d0170f95e8e7129ce2830fcc5c7d880d6cf650752aaafa7aa6",
+  "native_gzip_sha256": "cbfa9bb16c1d707a41dceb841d5f9be8d1834fabaec6672474a9758040f594e1",
+  "torch_check_sha256": "56304d8a5cbff88fcb68cb24455f586b9a994aa34523da99a2005c77f7490cea",
+  "retained_binary_sha256": "d173d0897343808af4f7a9b75bffc78c8f81994a5d7677ec976308db2626bf7d",
+  "local_log_sha256": {
+    "checker-tests.log": "592d4a2e666e978401fce3808891059490d8c9e76c26ca7636e9abae5c9e8712",
+    "clippy-native.log": "aa4b6f44576e290b3f2a1f33a30fc136f1e6910d40c80afb0845b78fd137ee29",
+    "contracts-rerun.log": "37d990243f1d565e59a5526e2f959a8b0f4727f656ff76e470cd619973aaf61b",
+    "contracts.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "core-topos.log": "e631cf4e15b5ca914865e5298bb814e8ced63c908de3fc99baa9d28f8de2b75b",
+    "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-learning-pinned.log": "5c07c7d25c49c6887347317a76744fae7693e8be74afc07441edd112562d74e2",
+    "native-learning.log": "5c07c7d25c49c6887347317a76744fae7693e8be74afc07441edd112562d74e2",
+    "nn.log": "5fc863ed2967022843c45e8e9a12b1e20b99882210ca6a56bfa72615c587ec7a",
+    "probe-build-pinned.log": "92c0b002c5f27cbcbff8ac3c22f9e8e0d126660cecdc2f95214d71e58cd4dafb",
+    "probe-build.log": "e7740aef8df0e402e16ea2573c674d375706330e11c1d1b63dfa44690ce87fd2",
+    "tensor-topos.log": "52a1e111d6e9cdb353b6c7b8a704818fe250c241ae170f1b4fb227ddf6aee10b",
+    "torch-check-isolated.log": "758b565e477ed1950d0c783a6ad25a1b92499654f97e1916f6391b155a9e700f",
+    "torch-check-pinned.log": "758b565e477ed1950d0c783a6ad25a1b92499654f97e1916f6391b155a9e700f",
+    "torch-check.log": "e4f998b1c937a87b7bd237e8af8cd16c271d0a469d992078c75968e7d65fa2fc",
+    "wasm-backend.log": "90d2b8fadf603ff8bf9d4018d38cfd4d3e88f85f095c2ee2f682bb06f66c9182",
+    "wgpu-pointwise-final.log": "9806eeb9aa2c2402f10b831418339c020b9d39bbb6bf9f120aecdf44ac202f55",
+    "wgpu-pointwise-formatted.log": "2cf125ae76a1ac460585ca54143500bb6875893059f5660577e8bb7db6641a64",
+    "wgpu-pointwise.log": "79d39c8b15b50f7c45e7c8f4cd1f1294043c89cea2e2d2c4547af534891c3596",
+    "wgpu-topos-fixed.log": "0a00d3f9b9eb82f2991713320524fb96ade74947ab6454923fb62da7e0921bb8",
+    "wgpu-topos-rerun.log": "89a927010500e99f082a8df5e14de3cbe740f8f7c0325208ea9a7505cd41f283",
+    "wgpu-topos.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "hardware": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "toolchain": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "target": "aarch64-apple-darwin",
+    "torch": "2.12.1",
+    "python": "3.12.6"
+  },
+  "validation": {
+    "kernel_contract_tests": 49,
+    "core_topos_tests": 34,
+    "tensor_topos_tests": 88,
+    "default_nn_tests": 776,
+    "pointwise_tests": 9,
+    "topos_gpu_cases": 24,
+    "topos_gpu_execution_policies": 3,
+    "vjps_per_case": 2,
+    "extra_gpu_guards": [
+      "permuted input and cotangent",
+      "3-D shared last-axis gate",
+      "saturation boundary convention",
+      "drive and recurrence overflow with zero seed",
+      "shared gradient reduction overflow taints every gradient",
+      "inherited failure flags",
+      "clean retry after failure"
+    ],
+    "checker_tests": 31,
+    "wasm_backend_all_targets": "cargo check passed; not browser execution",
+    "formatter": "nightly-2026-04-15 fmt --all -- --check passed",
+    "strict_native_clippy": {
+      "status": "failed_existing_unknown_lints",
+      "count": 7,
+      "lint": "clippy::chunks_exact_to_as_chunks",
+      "files": [
+        "crates/st-backend-wgpu/src/resident_dense.rs",
+        "crates/st-backend-wgpu/src/resident_graph.rs",
+        "crates/st-backend-wgpu/src/resident_matmul.rs",
+        "crates/st-backend-wgpu/src/resident_tensor.rs",
+        "crates/st-backend-wgpu/src/resident_training/readback.rs",
+        "crates/st-backend-wgpu/src/runtime/readback_batch.rs",
+        "crates/st-backend-wgpu/src/runtime.rs"
+      ],
+      "suppressed": false
+    }
+  },
+  "learning": {
+    "cases": 2,
+    "updates": 200,
+    "rows": [
+      1,
+      3,
+      8,
+      2
+    ],
+    "features": 5,
+    "porosity": [
+      0,
+      0.3
+    ],
+    "gate_updates": "GPU immutable subtract(lr * reduced gradient)",
+    "observations": "one batched snapshot after each 100-update trajectory",
+    "intermediate_host_readback": false,
+    "host_input_target_uploads": true,
+    "per_step_gpu_allocation": true,
+    "rtol": 0.0005,
+    "atol": 0.00003,
+    "max_abs_error": {
+      "output": 1.1920928955078125e-7,
+      "grad_input": 5.960464477539063e-8,
+      "grad_gate": 1.1920928955078125e-7,
+      "gate_after": 2.9802322387695312e-8,
+      "loss": 1.1920928955078125e-7
+    },
+    "scope": "Single deterministic synthetic case family. Numeric consistency, not throughput, pretrained-model quality, graph integration, or independent proof of residency."
+  },
+  "reproducibility": {
+    "repeated_native_raw_sha256": "1ab4d573898166d0170f95e8e7129ce2830fcc5c7d880d6cf650752aaafa7aa6",
+    "identical_rerun_bytes": true,
+    "comparison_python": "-I -S -B; explicit site-packages and tools import paths without .pth processing; CPU tensors explicit",
+    "startup_interference": "Initial non-isolated Torch attempt was patched to MPS and failed on float64. Failed log retained; passing comparison used isolation.",
+    "other_initial_failures": [
+      "Cargo spawn ENOENT due to env/PATH (no tests executed)",
+      "one test-only generated_source argument mismatch, corrected before source commit"
+    ],
+    "logs_are_receipts_not_independent_provenance": true
+  },
+  "boundaries": [
+    "No graph Topos stage or Sequential/ModuleTrainer resident integration yet",
+    "No Python/WASM resident constructor exposed yet",
+    "No browser or CUDA execution",
+    "No benchmark timing, heldout evaluation or model quality claims",
+    "No cleanup, model/corpus access, or historical fixture rewriting",
+    "Core owns admission and audit; kernel alone does not enforce geometry/depth/volume policy"
+  ],
+  "review": {
+    "source": "independent read-only review requested on exact source revision; outcome tracked separately"
+  }
+}

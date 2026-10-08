@@ -7797,7 +7797,7 @@ pub fn project_to_poincare(
     cols: usize,
     curvature: f32,
 ) -> Result<Vec<f32>, String> {
-    if curvature >= 0.0 {
+    if !curvature.is_finite() || curvature >= 0.0 {
         return Err("project_to_poincare curvature must be negative".into());
     }
     let (volume, rows_u32, _cols_u32, _volume_u32) =
@@ -7831,7 +7831,7 @@ pub fn wave_gate_project(
     saturation: f32,
     porosity: f32,
 ) -> Result<Vec<f32>, String> {
-    if curvature >= 0.0 {
+    if !curvature.is_finite() || curvature >= 0.0 {
         return Err("wave_gate_project curvature must be negative".into());
     }
     if gate.len() != cols {
@@ -7881,7 +7881,7 @@ pub fn wave_gate_backward(
     saturation: f32,
     porosity: f32,
 ) -> Result<(Vec<f32>, Vec<f32>), String> {
-    if curvature >= 0.0 {
+    if !curvature.is_finite() || curvature >= 0.0 {
         return Err("wave_gate_backward curvature must be negative".into());
     }
     if gate.len() != cols {

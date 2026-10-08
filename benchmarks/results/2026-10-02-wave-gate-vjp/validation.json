@@ -1,0 +1,195 @@
+{
+  "schema": "spiraltorch.wave_gate_vjp_validation.v1",
+  "date": "2026-10-02",
+  "source_commit": "351f27192b2280a780315ca336e2c2d5269d229d",
+  "parent_commit": "72323d8d718fd67e43ff9353428539e9e314aaea",
+  "environment": {
+    "os": "macOS",
+    "arch": "aarch64",
+    "rust": "1.98.0",
+    "formatter": "nightly-2026-04-15",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "profile": "debug",
+    "ambient_patching": false
+  },
+  "source_sha256": {
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "bindings/st-py/spiraltorch/__init__.pyi": "2661466a8dbab8dedc08d6e1f11a39156a014742f1764ae03a571f72ebcc8862",
+    "bindings/st-py/src/nn.rs": "3e67fdc58f26c797b8b549ea226447a3a603cf9728e495b08f0b91558badc38b",
+    "bindings/st-py/tests/test_wave_gate_vjp.py": "c289a440b0b6ab5d36d5fadacf79224424be1f39a33f50b24d660faa97769f38",
+    "crates/st-nn/src/layers/wave_gate.rs": "309313325c00fbeb1ced5347517e0fcce8aa808e06c7b9776b1e72a6fcbde0e0",
+    "crates/st-nn/src/lib.rs": "7d8c28a062f8a912a2a2b07d8641b75266e0f13de07b27cbe16169c2b2c5995b",
+    "crates/st-tensor/src/backend/wgpu_dense.rs": "9b15f318a9b55c6a6f6b0c76b070ce8bfc34dd978f4b5877fcaa54df8e1e00ea",
+    "crates/st-tensor/src/pure.rs": "624668bc766278e17d014b488511f76098cf235f37226d9a21ba14875a11a1af",
+    "crates/st-tensor/src/pure/topos.rs": "8b1fe13fe8b02f9edc65c8249d35aa063d0348e7d1a3c3b015c3942ad357d4f3",
+    "crates/st-tensor/src/wgpu_shaders/tensor_utils.wgsl": "91001e04e6dab5088be67b978281214619c0d77565a71e285c70d67918b1f802"
+  },
+  "native_extension_sha256": "2c52e01d7bc0761a8d2ba4b8318885c6c56cde3cd384de8fac503d2b95e46a89",
+  "local_log_sha256": {
+    "before": "f02b66f0a9015be6d0c8e89d49406ea334ce1caf0d2cb931d8cc6b86d7936b9e",
+    "wgpu-tests": "00475f5dcde16792dca7de1fc764f0417899be3ef953ed78d370c53cf8254ed6",
+    "projection-tests": "90f19c26b5eadc5e370c5b13d97461b31c935d7d51f4b41efa294bde2e50faec",
+    "projection-diagnostic": "707c3260181dbcf41d60ea846da3320f45780372700291c4f450a06f54a1e197",
+    "projection-fixed": "85fc1081a419f7958ee225f57679dc283a553420c793af978394eabe6c8b30be",
+    "nn-full-final": "b142e648df8bdcf822fa6c70b1e47a017b28c6048fe6618632c4d5730deea25f",
+    "wgpu-final": "9ab261b6d5c92ed02c6980bfeb48536d8f81688190a390e1d8e57a2db549cb57",
+    "tensor-full": "b47e2c524c1cece6a13e5a0fde5bd6f084ddc969e5665f703470743838e0bb40",
+    "topos-core": "b1b02a05fec9802fc9414aae43175370d192bbb70d7ec758942f80b1f5e45d72",
+    "saturation-tests": "3e3610745038c87b0ea7ba466491ca8e07d52255c5deec2b7f898d1772902934",
+    "native-build-final": "347e0cce34b37002c7ff8f28f8f1d60a325847cb26dd9bb308e5edc238e9a3d3",
+    "python-final": "f00616cbf103be9cdb7133adf6986bb9f937338643bb23360338199f5d1e04ba",
+    "import-final": "2018995eced8ba9db37b66b3360d4593b01fe45b0b013033c1a02f1d7c3dbf3a",
+    "wasm-final": "ccdfd3c872353aa17a38e183f9d34befe1784a0ab64838286370e1904de39587",
+    "fmt-check": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ruff-final": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "clippy-final": "a75fb731bcca280af03675cb05693d3e0d0a0c8aadf6aa87212dd000e485731b"
+  },
+  "validation": {
+    "nn_full": {
+      "passed": 753,
+      "failed": 0,
+      "ignored": 0
+    },
+    "tensor_full": {
+      "passed": 515,
+      "failed": 0,
+      "ignored": 1,
+      "ignored_test": "backend::wgpu_frac::tests::frac_gl_wgpu_matches_the_cpu_semantic_core_when_available"
+    },
+    "wgpu_wave_gate": {
+      "passed": 19,
+      "failed": 0,
+      "execution_marker": "WGPU WaveGate VJP exercised successfully",
+      "new_parity_test_fallback": "forbidden"
+    },
+    "extreme_projection": {
+      "passed": 2,
+      "failed": 0,
+      "execution_marker": "WGPU extreme-scale projection exercised successfully"
+    },
+    "core_topos_regression": {
+      "passed": 8
+    },
+    "saturation_scale_test": {
+      "passed": 1,
+      "scales": [
+        1e-30,
+        1e-10,
+        1,
+        100000000000000000000,
+        1e+37
+      ]
+    },
+    "python": {
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "wave_gate_tests": 3
+    },
+    "public_import_unittests": {
+      "passed": 22
+    },
+    "native_build": "passed",
+    "wasm32_nn": "check passed; not a browser execution",
+    "format": "passed",
+    "new_python_ruff": "passed",
+    "strict_nn_clippy": {
+      "status": "failed",
+      "findings": 23,
+      "files_unchanged_from_parent": true,
+      "files": [
+        "crates/st-nn/src/language/automation.rs",
+        "crates/st-nn/src/language/gw.rs",
+        "crates/st-nn/src/layers/activation.rs",
+        "crates/st-nn/src/layers/continuous_wavelet.rs",
+        "crates/st-nn/src/layers/conv.rs",
+        "crates/st-nn/src/layers/dropout.rs",
+        "crates/st-nn/src/layers/embedding.rs",
+        "crates/st-nn/src/layers/lstm.rs",
+        "crates/st-nn/src/layers/non_liner.rs",
+        "crates/st-nn/src/layers/normalization.rs",
+        "crates/st-nn/src/layers/zspace_projector.rs",
+        "crates/st-nn/src/z_rba/cov_head.rs",
+        "crates/st-nn/src/zspace_coherence/sequencer.rs",
+        "crates/st-nn/src/zspace_coherence/vae.rs"
+      ]
+    }
+  },
+  "observations": {
+    "gate_derivative_before": {
+      "analytic": 0.023985479,
+      "finite_difference": -0.0006646662987080942
+    },
+    "gate_derivatives_final": [
+      {
+        "coordinate": 0,
+        "analytic": -0.0006644177,
+        "finite_difference": -0.0006641447580640891
+      },
+      {
+        "coordinate": 1,
+        "analytic": -0.0012089143,
+        "finite_difference": -0.0012084096421421942
+      }
+    ],
+    "saturated_gate_fit": {
+      "updates": 200,
+      "bias_frozen": true,
+      "learning_rate": 50,
+      "parameter_gradient_scale": 1,
+      "initial_mse": 0.000058431753,
+      "final_mse": 2.1914082e-9,
+      "target": "same operator; synthetic trainability only"
+    },
+    "projection": {
+      "input": [
+        1e-30,
+        2e-30,
+        100000000000000000000,
+        -200000000000000000000,
+        0,
+        0
+      ],
+      "shape": [
+        3,
+        2
+      ],
+      "curvature": -1e-30,
+      "cpu": [
+        1e-15,
+        2e-15,
+        0.4472136,
+        -0.8944272,
+        0,
+        0
+      ],
+      "wgpu": [
+        1e-15,
+        2e-15,
+        0.4472136,
+        -0.8944272,
+        0,
+        0
+      ],
+      "note": "Displayed f32 values from the regression log"
+    }
+  },
+  "scope": {
+    "new_pretrained_ft": false,
+    "language_quality_claim": false,
+    "speed_claim": false,
+    "resident_gpu": false,
+    "torch_autograd_wave_gate_adapter": false,
+    "wasm_learning_client": false,
+    "higher_order_gradients": false,
+    "raw_vjp_reads_current_parameters": true
+  },
+  "failed_intermediate_checks": [
+    "Missing gate saturation slope failed finite difference with opposite sign.",
+    "First scale-stable shader candidate failed tiny-curvature parity.",
+    "Intermediate direct shader projection returned zero for a representable tiny output.",
+    "Whole NN strict Clippy remains red in unchanged files."
+  ]
+}

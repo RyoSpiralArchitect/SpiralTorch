@@ -1,0 +1,11 @@
+{
+  "schema": "spiraltorch.wave_gate_radius_browser.v1",
+  "status": "passed",
+  "forward_max_error": 0,
+  "vjp_max_error": 0,
+  "conditioning_max_error": 0,
+  "initial_loss": 0.02344445419977559,
+  "final_loss": 8.881784197001252e-16,
+  "learned_log_radius": 0.6999998092651367,
+  "resume_next_update_equal": true
+}

@@ -1,0 +1,1670 @@
+{
+  "schema": "spiraltorch.geometry_adapter_stack_example.v1",
+  "status": "bitwise_exact",
+  "config": {
+    "schema": "spiraltorch.geometry_adapter_stack_example.v1",
+    "model_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "corpus_sha256": "df06eafcd4c1793dc0bf12211401f4cfb0477ef6d68fe278642fd434a6f56f9c",
+    "corpus_end_marker": "*** END OF THE PROJECT GUTENBERG EBOOK PRIDE AND PREJUDICE ***",
+    "features": 768,
+    "steps": 3,
+    "checkpoint_after": 2,
+    "batch_size": 2,
+    "block_size": 128,
+    "seed": 41,
+    "threads": 2,
+    "learning_rate": 0.001,
+    "placements": [
+      {
+        "path": "transformer.h.0.mlp",
+        "adapter": "WaveGateAdapter",
+        "options": {
+          "strength": 0.1,
+          "log_radius": 0.0,
+          "learnable_radius": true
+        }
+      },
+      {
+        "path": "transformer.h.1.mlp",
+        "adapter": "ToposResonatorAdapter",
+        "options": {
+          "strength": 0.1
+        }
+      },
+      {
+        "path": "transformer.h.2.mlp",
+        "adapter": "EllipticAnchoredResidualAdapter",
+        "options": {
+          "strength": 0.1
+        }
+      },
+      {
+        "path": "transformer.h.3.mlp",
+        "adapter": "FractionalAngleGainHistoryAdapter",
+        "options": {
+          "strength": 0.1,
+          "initial_angle": 0.2,
+          "initial_gain": 1.0,
+          "kernel_len": 32,
+          "max_values": 262144,
+          "max_products": 8388608
+        }
+      }
+    ]
+  },
+  "source_sha256": {
+    "geometry_adapters.py": "5b844dae3d268a81cf4332bf7bd8b94746437340c6749aac87e4b844ee28cfa9",
+    "probe_fractional_multi_adapter.py": "90b93b47f36bd4fafa3933e843076deb9a1a27352bf4c8447a27c2630673b976",
+    "verify_fractional_history_factorial.py": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f"
+  },
+  "example_sha256": "1639f7a2e1d173e8c1b0e36fda2f90394587cc829adacb34ef80daf37a3657b1",
+  "native_sha256": "810384d0db64aa4e9154addfea0050d5258d9a6e2381f50a10de4270d24419b9",
+  "runtime_manifest_sha256": "dbb95970c57a233eacc88d2bdff323d977d7094210a9f50b5e6eba9441778b8a",
+  "torch": "2.12.1",
+  "transformers": "4.57.6",
+  "training_tokens": {
+    "shape": [
+      1204,
+      128
+    ],
+    "dtype": "torch.int64",
+    "sha256": "9561a8044d5c7ff9e597c6e9f8826da22fae5e44bd059e8b8e49e2ce792ae138",
+    "l2": 3477033.2673336617,
+    "nonzero": 153847
+  },
+  "training_split_character_offset": 621684,
+  "shape": [
+    2,
+    128,
+    768
+  ],
+  "auxiliary_updates": 7,
+  "unique_trajectory_updates": 3,
+  "reference_records": [
+    {
+      "step": 1,
+      "batch_indices": [
+        206,
+        1046
+      ],
+      "loss": {
+        "shape": [],
+        "dtype": "torch.float32",
+        "sha256": "92a91915d167fb910f7961dbcdb0b68af6c90fb8c55a7154e17d85fb7d096199",
+        "l2": 3.896650791168213,
+        "nonzero": 1
+      },
+      "loss_value": 3.896650791168213,
+      "gradients": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b555ce5153ff71b80a0393a92af903b8ca20f7f34d024b4500da5bc6dd78c101",
+          "l2": 0.0044319962256311055,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "5dba8c9fac6fc1e2dde9b381b438f9c178c479dd1e11c4ae22a1623b9d490bac",
+          "l2": 0.008484771676583226,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "fa959acc56a09074890acafcaa8dfd0d8b631c693ec6b0df1591ce76d5c09ed7",
+          "l2": 0.004936305768016134,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "fd9243e1ba57263ed469c3bdbd7ade6ec5254e7ed924a9f5737fa44749933cc0",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b944d7974d1d635db1f6693f116aed6bc7c16811f164125e9a24ac558d1a4a51",
+          "l2": 0.02398340802396062,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "50b6bcda4b3350b5b94e053029c3bc9b863c78c0928b691c09aae095da3ac508",
+          "l2": 0.003342448734774742,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "eed08a5f50ea648f04ff7254f4613a300d3c71287e5d1e51f94406888e1ce696",
+          "l2": 0.004528503491138368,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        }
+      },
+      "parameters": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "33c7883402fa9b7d99c01e2fa4450a907bab6894ec3094b83bac4ecb480c1cdd",
+          "l2": 0.02770036209699264,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "15315667929d31e66778b14c24299ce5503f526ba884be22c577efe352bd4c74",
+          "l2": 0.027707102673492967,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7ff59f955a3975917b55492d35f3db30bdcf0f133a330a6e0328114762b327c6",
+          "l2": 0.02770408273512359,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "93be59bb42306fd6a3f74a1bcadc3fe5a5ec0c64ab7e0b622d7f67f3153be925",
+          "l2": 0.8143010168139753,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "252e6614bdc750e800fbe7e051375081628b3420fae27bc413213620d185a42f",
+          "l2": 0.03245772093586564,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "10d2d785ae623d10fd521c6c47029939f6d1b879802fb1baf2362e6f61c6421b",
+          "l2": 0.07832435130989039,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "dcff89eaa85cd5daae3bd19a59a22c3fe20834db18d2d380422f5c12e6dd6d67",
+          "l2": 0.02767919705630854,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bb5b2d8b9bd36c10a3ace19288a3dfbeba73756a49f6e15e431c1065a3cf396f",
+          "l2": 0.027702605375805385,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "5d96a77c55b4ac1eea2d77815396c4349292b85e3b07beaca6aff933e7ef8752",
+          "l2": 0.20000000298023224,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        }
+      }
+    },
+    {
+      "step": 2,
+      "batch_indices": [
+        27,
+        105
+      ],
+      "loss": {
+        "shape": [],
+        "dtype": "torch.float32",
+        "sha256": "0322abf204df429473a0fb062432623fde2c61d2db4d2e5fa9a3d033e0a532d7",
+        "l2": 4.056065559387207,
+        "nonzero": 1
+      },
+      "loss_value": 4.056065559387207,
+      "gradients": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "19e9bfe0067e69f618cf75187addad296e4eada49855321700c27d9c7ccf8e44",
+          "l2": 0.006004370051531068,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "95bbc006129f7eaa69e1b205f6f77e7afdc8a98f52c0ff418a7a690574b38edf",
+          "l2": 0.01028921998013588,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "987a2c4f13318970a2f4fc29e82528dbfb07935a97d7f96224f7adad35e8bef5",
+          "l2": 4.683009890982248e-08,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "a450a8aa222884292e50a01fa57752c26517a0087dba2a172e5793eb694babe7",
+          "l2": 0.007383418429229106,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "a05df2028279459e35c2c06c625009fe732f0c1d32ea1a3c6b8cd9aa41904111",
+          "l2": 0.00017391782603226602,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "640776cd1c44a878d50cdbc9d72fdcbfe153fb5af1860434d0f0576565c7db1f",
+          "l2": 0.003166752189896574,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "e88bff85d83ceed025cf62b7d29494b750e1eb8ea0648323e1c5ccea0a0fcd96",
+          "l2": 0.0003551257634301677,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "2d196d2a20ab88b9952b5a9cc44e4e19f714cd867a92e203b0d69d714fe03eae",
+          "l2": 0.03732929079053879,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "f95bef4b5b77167ccd75bc36b9706d04a48517f6f4e1a049ee5941351c363196",
+          "l2": 0.021288789550729655,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "c8f1f73ddb8c4398388106963802e5b7e49f0854dd204fa83abf985c7e78080c",
+          "l2": 0.008706477164609148,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "364673c409016746647b4b082f7d32dc13b55096b51670b09943f776499482dc",
+          "l2": 7.319685664697317e-06,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "494081ba526d61d81bb93eecbbf3950962ad04c3e6ba3150a34547def853d517",
+          "l2": 3.883516001224052e-06,
+          "nonzero": 1
+        }
+      },
+      "parameters": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "aa8ed36c3793994ce9c4c9565c6c876bd3a965ca48a02f52ce17937f55c9511d",
+          "l2": 0.04231716823967165,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "e9d2c098a21ccb352c8c5b30379264a92e608197584f593f927b968b7b13a817",
+          "l2": 0.04275251016602821,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "a39de1a2b799f8c7e9ce1cec140fc6ab6c38de98bdd7587547de31e85b08e1f8",
+          "l2": 0.0005715719889849424,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "f86ba4b44c2d59c7ada4f262b800e2e9ece9cab66207f690b9fff95426ae410c",
+          "l2": 0.044493540795638685,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "62202b95a6311ff61adb45ee63bec96e710528e18cfe887248214f2e96c60c39",
+          "l2": 0.0007440763292834163,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "ad1e386432cb779b2b173cb14ee783698d87b562f882e59c7b48899ce78d5083",
+          "l2": 0.8161319145198048,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "0ceb2776e1109d638a1d70c1e736dfee3b6d83a5cc475060c9c6277c6ac913fb",
+          "l2": 0.03350256780212953,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bbebc122c1cd0be74079c335477f353b24727ae4ba5c9cde414621758d6de212",
+          "l2": 0.1246375699386737,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "24945f525d507df7dd5869254aba15de3bc7b156c9f505f9f73bf28638770372",
+          "l2": 0.04367065687999768,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "4c67b0f035229c8feee121906da39a2d1685d5077685f303b75df68d57d2e492",
+          "l2": 0.04400142816329631,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "d4ad46ecd71782f74a085bcf7fbb2f29a67531e012ceee67d5cd8dc791f92e12",
+          "l2": 0.19925729930400848,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "0a932efa9ff7e98b3ffb97772e4bdcb65b318887d2ca2d04cb7aa4e871368fac",
+          "l2": 0.0007414375431835651,
+          "nonzero": 1
+        }
+      }
+    },
+    {
+      "step": 3,
+      "batch_indices": [
+        377,
+        342
+      ],
+      "loss": {
+        "shape": [],
+        "dtype": "torch.float32",
+        "sha256": "e0973c8c2553cb9aa11335c4a4b45438faab376b41442fd2d6b015899e4c9f66",
+        "l2": 4.093510150909424,
+        "nonzero": 1
+      },
+      "loss_value": 4.093510150909424,
+      "gradients": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b82c35b98431030c7fc07352101cbe79200cbed85e17218d6ce22127d2a53154",
+          "l2": 0.0040728113007904646,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b3c23d6a97be485c4dcdb95a4f34e0c6507994f3170e21665b46affbd990b422",
+          "l2": 0.007860998887018663,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "348daf35a6878362d3dbe8815d3fd0c0672177a92fd002c9372e549c5dbaf94d",
+          "l2": 5.421458695309411e-07,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b98e9667333440db53ca83d709916d41ca188977d7f5b09e963a4bcf525a945a",
+          "l2": 0.004861337131498136,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "e5ae4e14db9b5f59e184e7c6a60e975087f51f5c63b358f740e749624ed7b9e8",
+          "l2": 0.0002793160965666175,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "af6c40b24ed17e9b32592486a5cc752770c8d3c83e75e0d0e45d8d06ea4d1540",
+          "l2": 0.004380009556315777,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bc7af7e4c2b7c82cefe4a71fc74fbe8979f8221b99a7549e7137e5c991a2da4d",
+          "l2": 0.00048243166118864487,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7dc20abd15eaab814daeeddaa48bc1f7a0354c007904399b20be7af65bc20c60",
+          "l2": 0.02445595805405061,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "2a2d8582fa21260adaa76ca9e901b09d7a0a0d75aa16b566e80024673a07ccb0",
+          "l2": 0.002662826496565259,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "a6f3dbe8710d30bdf5fc003c42a60f6e63bb618d457254b55662a44b49491c83",
+          "l2": 0.004106472360955618,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "97353b2c9c8ac13e58a303046291041f36efd3973ad4651e935df7d5da2de9cf",
+          "l2": 7.672097126487643e-06,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "3c217ff3f60a67dbd2ca88bba1eaa47bb30f3f57d888644e8fe758c304c8b046",
+          "l2": 1.2788588719558902e-05,
+          "nonzero": 1
+        }
+      },
+      "parameters": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "5aef8f3379107c043c29fa9a172945d3deec396a7fd3cf96eb97ce7116684564",
+          "l2": 0.05542870723725165,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "f4c2f378b382068372b203f11c671b105767c4f57a1dd0779ac0a7be0e5d9777",
+          "l2": 0.058475810705200144,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "20ddb08c4e865ffb591aa44a0478ba2600a3db48590f56e4f3fb28875811a924",
+          "l2": 0.0012363472487777472,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7eccb39b0a43d9270e180d0d9343b09f7ab7ae669defeba48e2368b21af15035",
+          "l2": 0.059598499574104666,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "62fcf32012e50c9e7c037903fffe383b571cd346a18a429d530ab40dd7e5e699",
+          "l2": 0.001590323867276311,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "ec8ade732d709916e054195d63f922db5ebfa297781599333a6250e2043207e8",
+          "l2": 0.8186094377931776,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "c0c88cc530e2e13d14d8d0b86859a36c0747b82e9851a7c16102dd1c4d588804",
+          "l2": 0.03470493619610929,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "1eca79a1b750c1f111c4f9cbf460d0988ba0246e7d8022fd10a55e217f588deb",
+          "l2": 0.1708694562916593,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bd2e3f3024dfbb913a1957a5fdc589a07ab5f065e0701ba1e51e8b71efac4910",
+          "l2": 0.05754339477948319,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b71ec43eebf74216c0b15f0615ef770825b76a1a72aa6b60ec0a52a064051b97",
+          "l2": 0.05946117803173606,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "e3aad1d11d6a507ad592f863acb9b619d28e219bc3c3033c8ad6c91ab6789b16",
+          "l2": 0.19839942455291748,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "1a4bcd041667f1de30877e9a4f4b9f95802f636baeaec68172115f0d318dbe2d",
+          "l2": 0.0002977990370709449,
+          "nonzero": 1
+        }
+      }
+    }
+  ],
+  "public_records": [
+    {
+      "step": 1,
+      "batch_indices": [
+        206,
+        1046
+      ],
+      "loss": {
+        "shape": [],
+        "dtype": "torch.float32",
+        "sha256": "92a91915d167fb910f7961dbcdb0b68af6c90fb8c55a7154e17d85fb7d096199",
+        "l2": 3.896650791168213,
+        "nonzero": 1
+      },
+      "loss_value": 3.896650791168213,
+      "gradients": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b555ce5153ff71b80a0393a92af903b8ca20f7f34d024b4500da5bc6dd78c101",
+          "l2": 0.0044319962256311055,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "5dba8c9fac6fc1e2dde9b381b438f9c178c479dd1e11c4ae22a1623b9d490bac",
+          "l2": 0.008484771676583226,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "fa959acc56a09074890acafcaa8dfd0d8b631c693ec6b0df1591ce76d5c09ed7",
+          "l2": 0.004936305768016134,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "fd9243e1ba57263ed469c3bdbd7ade6ec5254e7ed924a9f5737fa44749933cc0",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b944d7974d1d635db1f6693f116aed6bc7c16811f164125e9a24ac558d1a4a51",
+          "l2": 0.02398340802396062,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "50b6bcda4b3350b5b94e053029c3bc9b863c78c0928b691c09aae095da3ac508",
+          "l2": 0.003342448734774742,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "eed08a5f50ea648f04ff7254f4613a300d3c71287e5d1e51f94406888e1ce696",
+          "l2": 0.004528503491138368,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        }
+      },
+      "parameters": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "33c7883402fa9b7d99c01e2fa4450a907bab6894ec3094b83bac4ecb480c1cdd",
+          "l2": 0.02770036209699264,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "15315667929d31e66778b14c24299ce5503f526ba884be22c577efe352bd4c74",
+          "l2": 0.027707102673492967,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7ff59f955a3975917b55492d35f3db30bdcf0f133a330a6e0328114762b327c6",
+          "l2": 0.02770408273512359,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "93be59bb42306fd6a3f74a1bcadc3fe5a5ec0c64ab7e0b622d7f67f3153be925",
+          "l2": 0.8143010168139753,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "252e6614bdc750e800fbe7e051375081628b3420fae27bc413213620d185a42f",
+          "l2": 0.03245772093586564,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "10d2d785ae623d10fd521c6c47029939f6d1b879802fb1baf2362e6f61c6421b",
+          "l2": 0.07832435130989039,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "dcff89eaa85cd5daae3bd19a59a22c3fe20834db18d2d380422f5c12e6dd6d67",
+          "l2": 0.02767919705630854,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bb5b2d8b9bd36c10a3ace19288a3dfbeba73756a49f6e15e431c1065a3cf396f",
+          "l2": 0.027702605375805385,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "5d96a77c55b4ac1eea2d77815396c4349292b85e3b07beaca6aff933e7ef8752",
+          "l2": 0.20000000298023224,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119",
+          "l2": 0.0,
+          "nonzero": 0
+        }
+      }
+    },
+    {
+      "step": 2,
+      "batch_indices": [
+        27,
+        105
+      ],
+      "loss": {
+        "shape": [],
+        "dtype": "torch.float32",
+        "sha256": "0322abf204df429473a0fb062432623fde2c61d2db4d2e5fa9a3d033e0a532d7",
+        "l2": 4.056065559387207,
+        "nonzero": 1
+      },
+      "loss_value": 4.056065559387207,
+      "gradients": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "19e9bfe0067e69f618cf75187addad296e4eada49855321700c27d9c7ccf8e44",
+          "l2": 0.006004370051531068,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "95bbc006129f7eaa69e1b205f6f77e7afdc8a98f52c0ff418a7a690574b38edf",
+          "l2": 0.01028921998013588,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "987a2c4f13318970a2f4fc29e82528dbfb07935a97d7f96224f7adad35e8bef5",
+          "l2": 4.683009890982248e-08,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "a450a8aa222884292e50a01fa57752c26517a0087dba2a172e5793eb694babe7",
+          "l2": 0.007383418429229106,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "a05df2028279459e35c2c06c625009fe732f0c1d32ea1a3c6b8cd9aa41904111",
+          "l2": 0.00017391782603226602,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "640776cd1c44a878d50cdbc9d72fdcbfe153fb5af1860434d0f0576565c7db1f",
+          "l2": 0.003166752189896574,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "e88bff85d83ceed025cf62b7d29494b750e1eb8ea0648323e1c5ccea0a0fcd96",
+          "l2": 0.0003551257634301677,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "2d196d2a20ab88b9952b5a9cc44e4e19f714cd867a92e203b0d69d714fe03eae",
+          "l2": 0.03732929079053879,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "f95bef4b5b77167ccd75bc36b9706d04a48517f6f4e1a049ee5941351c363196",
+          "l2": 0.021288789550729655,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "c8f1f73ddb8c4398388106963802e5b7e49f0854dd204fa83abf985c7e78080c",
+          "l2": 0.008706477164609148,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "364673c409016746647b4b082f7d32dc13b55096b51670b09943f776499482dc",
+          "l2": 7.319685664697317e-06,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "494081ba526d61d81bb93eecbbf3950962ad04c3e6ba3150a34547def853d517",
+          "l2": 3.883516001224052e-06,
+          "nonzero": 1
+        }
+      },
+      "parameters": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "aa8ed36c3793994ce9c4c9565c6c876bd3a965ca48a02f52ce17937f55c9511d",
+          "l2": 0.04231716823967165,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "e9d2c098a21ccb352c8c5b30379264a92e608197584f593f927b968b7b13a817",
+          "l2": 0.04275251016602821,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "a39de1a2b799f8c7e9ce1cec140fc6ab6c38de98bdd7587547de31e85b08e1f8",
+          "l2": 0.0005715719889849424,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "f86ba4b44c2d59c7ada4f262b800e2e9ece9cab66207f690b9fff95426ae410c",
+          "l2": 0.044493540795638685,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "62202b95a6311ff61adb45ee63bec96e710528e18cfe887248214f2e96c60c39",
+          "l2": 0.0007440763292834163,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "ad1e386432cb779b2b173cb14ee783698d87b562f882e59c7b48899ce78d5083",
+          "l2": 0.8161319145198048,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "0ceb2776e1109d638a1d70c1e736dfee3b6d83a5cc475060c9c6277c6ac913fb",
+          "l2": 0.03350256780212953,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bbebc122c1cd0be74079c335477f353b24727ae4ba5c9cde414621758d6de212",
+          "l2": 0.1246375699386737,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "24945f525d507df7dd5869254aba15de3bc7b156c9f505f9f73bf28638770372",
+          "l2": 0.04367065687999768,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "4c67b0f035229c8feee121906da39a2d1685d5077685f303b75df68d57d2e492",
+          "l2": 0.04400142816329631,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "d4ad46ecd71782f74a085bcf7fbb2f29a67531e012ceee67d5cd8dc791f92e12",
+          "l2": 0.19925729930400848,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "0a932efa9ff7e98b3ffb97772e4bdcb65b318887d2ca2d04cb7aa4e871368fac",
+          "l2": 0.0007414375431835651,
+          "nonzero": 1
+        }
+      }
+    },
+    {
+      "step": 3,
+      "batch_indices": [
+        377,
+        342
+      ],
+      "loss": {
+        "shape": [],
+        "dtype": "torch.float32",
+        "sha256": "e0973c8c2553cb9aa11335c4a4b45438faab376b41442fd2d6b015899e4c9f66",
+        "l2": 4.093510150909424,
+        "nonzero": 1
+      },
+      "loss_value": 4.093510150909424,
+      "gradients": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b82c35b98431030c7fc07352101cbe79200cbed85e17218d6ce22127d2a53154",
+          "l2": 0.0040728113007904646,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b3c23d6a97be485c4dcdb95a4f34e0c6507994f3170e21665b46affbd990b422",
+          "l2": 0.007860998887018663,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "348daf35a6878362d3dbe8815d3fd0c0672177a92fd002c9372e549c5dbaf94d",
+          "l2": 5.421458695309411e-07,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b98e9667333440db53ca83d709916d41ca188977d7f5b09e963a4bcf525a945a",
+          "l2": 0.004861337131498136,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "e5ae4e14db9b5f59e184e7c6a60e975087f51f5c63b358f740e749624ed7b9e8",
+          "l2": 0.0002793160965666175,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "af6c40b24ed17e9b32592486a5cc752770c8d3c83e75e0d0e45d8d06ea4d1540",
+          "l2": 0.004380009556315777,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bc7af7e4c2b7c82cefe4a71fc74fbe8979f8221b99a7549e7137e5c991a2da4d",
+          "l2": 0.00048243166118864487,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7dc20abd15eaab814daeeddaa48bc1f7a0354c007904399b20be7af65bc20c60",
+          "l2": 0.02445595805405061,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "2a2d8582fa21260adaa76ca9e901b09d7a0a0d75aa16b566e80024673a07ccb0",
+          "l2": 0.002662826496565259,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "a6f3dbe8710d30bdf5fc003c42a60f6e63bb618d457254b55662a44b49491c83",
+          "l2": 0.004106472360955618,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "97353b2c9c8ac13e58a303046291041f36efd3973ad4651e935df7d5da2de9cf",
+          "l2": 7.672097126487643e-06,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "3c217ff3f60a67dbd2ca88bba1eaa47bb30f3f57d888644e8fe758c304c8b046",
+          "l2": 1.2788588719558902e-05,
+          "nonzero": 1
+        }
+      },
+      "parameters": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "5aef8f3379107c043c29fa9a172945d3deec396a7fd3cf96eb97ce7116684564",
+          "l2": 0.05542870723725165,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "f4c2f378b382068372b203f11c671b105767c4f57a1dd0779ac0a7be0e5d9777",
+          "l2": 0.058475810705200144,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "20ddb08c4e865ffb591aa44a0478ba2600a3db48590f56e4f3fb28875811a924",
+          "l2": 0.0012363472487777472,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7eccb39b0a43d9270e180d0d9343b09f7ab7ae669defeba48e2368b21af15035",
+          "l2": 0.059598499574104666,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "62fcf32012e50c9e7c037903fffe383b571cd346a18a429d530ab40dd7e5e699",
+          "l2": 0.001590323867276311,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "ec8ade732d709916e054195d63f922db5ebfa297781599333a6250e2043207e8",
+          "l2": 0.8186094377931776,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "c0c88cc530e2e13d14d8d0b86859a36c0747b82e9851a7c16102dd1c4d588804",
+          "l2": 0.03470493619610929,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "1eca79a1b750c1f111c4f9cbf460d0988ba0246e7d8022fd10a55e217f588deb",
+          "l2": 0.1708694562916593,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bd2e3f3024dfbb913a1957a5fdc589a07ab5f065e0701ba1e51e8b71efac4910",
+          "l2": 0.05754339477948319,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b71ec43eebf74216c0b15f0615ef770825b76a1a72aa6b60ec0a52a064051b97",
+          "l2": 0.05946117803173606,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "e3aad1d11d6a507ad592f863acb9b619d28e219bc3c3033c8ad6c91ab6789b16",
+          "l2": 0.19839942455291748,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "1a4bcd041667f1de30877e9a4f4b9f95802f636baeaec68172115f0d318dbe2d",
+          "l2": 0.0002977990370709449,
+          "nonzero": 1
+        }
+      }
+    }
+  ],
+  "resumed_records": [
+    {
+      "step": 3,
+      "batch_indices": [
+        377,
+        342
+      ],
+      "loss": {
+        "shape": [],
+        "dtype": "torch.float32",
+        "sha256": "e0973c8c2553cb9aa11335c4a4b45438faab376b41442fd2d6b015899e4c9f66",
+        "l2": 4.093510150909424,
+        "nonzero": 1
+      },
+      "loss_value": 4.093510150909424,
+      "gradients": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b82c35b98431030c7fc07352101cbe79200cbed85e17218d6ce22127d2a53154",
+          "l2": 0.0040728113007904646,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b3c23d6a97be485c4dcdb95a4f34e0c6507994f3170e21665b46affbd990b422",
+          "l2": 0.007860998887018663,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "348daf35a6878362d3dbe8815d3fd0c0672177a92fd002c9372e549c5dbaf94d",
+          "l2": 5.421458695309411e-07,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b98e9667333440db53ca83d709916d41ca188977d7f5b09e963a4bcf525a945a",
+          "l2": 0.004861337131498136,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "e5ae4e14db9b5f59e184e7c6a60e975087f51f5c63b358f740e749624ed7b9e8",
+          "l2": 0.0002793160965666175,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "af6c40b24ed17e9b32592486a5cc752770c8d3c83e75e0d0e45d8d06ea4d1540",
+          "l2": 0.004380009556315777,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bc7af7e4c2b7c82cefe4a71fc74fbe8979f8221b99a7549e7137e5c991a2da4d",
+          "l2": 0.00048243166118864487,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7dc20abd15eaab814daeeddaa48bc1f7a0354c007904399b20be7af65bc20c60",
+          "l2": 0.02445595805405061,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "2a2d8582fa21260adaa76ca9e901b09d7a0a0d75aa16b566e80024673a07ccb0",
+          "l2": 0.002662826496565259,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "a6f3dbe8710d30bdf5fc003c42a60f6e63bb618d457254b55662a44b49491c83",
+          "l2": 0.004106472360955618,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "97353b2c9c8ac13e58a303046291041f36efd3973ad4651e935df7d5da2de9cf",
+          "l2": 7.672097126487643e-06,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "3c217ff3f60a67dbd2ca88bba1eaa47bb30f3f57d888644e8fe758c304c8b046",
+          "l2": 1.2788588719558902e-05,
+          "nonzero": 1
+        }
+      },
+      "parameters": {
+        "adapters.0.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "5aef8f3379107c043c29fa9a172945d3deec396a7fd3cf96eb97ce7116684564",
+          "l2": 0.05542870723725165,
+          "nonzero": 768
+        },
+        "adapters.0.bias": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "f4c2f378b382068372b203f11c671b105767c4f57a1dd0779ac0a7be0e5d9777",
+          "l2": 0.058475810705200144,
+          "nonzero": 768
+        },
+        "adapters.0.log_radius": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "20ddb08c4e865ffb591aa44a0478ba2600a3db48590f56e4f3fb28875811a924",
+          "l2": 0.0012363472487777472,
+          "nonzero": 1
+        },
+        "adapters.1.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "7eccb39b0a43d9270e180d0d9343b09f7ab7ae669defeba48e2368b21af15035",
+          "l2": 0.059598499574104666,
+          "nonzero": 768
+        },
+        "adapters.2.raw_mix": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "62fcf32012e50c9e7c037903fffe383b571cd346a18a429d530ab40dd7e5e699",
+          "l2": 0.001590323867276311,
+          "nonzero": 1
+        },
+        "adapters.2.orientation.weight": {
+          "shape": [
+            2,
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "ec8ade732d709916e054195d63f922db5ebfa297781599333a6250e2043207e8",
+          "l2": 0.8186094377931776,
+          "nonzero": 1536
+        },
+        "adapters.2.orientation.bias": {
+          "shape": [
+            2
+          ],
+          "dtype": "torch.float32",
+          "sha256": "c0c88cc530e2e13d14d8d0b86859a36c0747b82e9851a7c16102dd1c4d588804",
+          "l2": 0.03470493619610929,
+          "nonzero": 2
+        },
+        "adapters.2.readout.weight": {
+          "shape": [
+            768,
+            9
+          ],
+          "dtype": "torch.float32",
+          "sha256": "1eca79a1b750c1f111c4f9cbf460d0988ba0246e7d8022fd10a55e217f588deb",
+          "l2": 0.1708694562916593,
+          "nonzero": 6144
+        },
+        "adapters.3.gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "bd2e3f3024dfbb913a1957a5fdc589a07ab5f065e0701ba1e51e8b71efac4910",
+          "l2": 0.05754339477948319,
+          "nonzero": 768
+        },
+        "adapters.3.local_gate": {
+          "shape": [
+            768
+          ],
+          "dtype": "torch.float32",
+          "sha256": "b71ec43eebf74216c0b15f0615ef770825b76a1a72aa6b60ec0a52a064051b97",
+          "l2": 0.05946117803173606,
+          "nonzero": 768
+        },
+        "adapters.3.history_angle": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "e3aad1d11d6a507ad592f863acb9b619d28e219bc3c3033c8ad6c91ab6789b16",
+          "l2": 0.19839942455291748,
+          "nonzero": 1
+        },
+        "adapters.3.log_gain": {
+          "shape": [],
+          "dtype": "torch.float32",
+          "sha256": "1a4bcd041667f1de30877e9a4f4b9f95802f636baeaec68172115f0d318dbe2d",
+          "l2": 0.0002977990370709449,
+          "nonzero": 1
+        }
+      }
+    }
+  ],
+  "backends": [
+    "rust_f32_cpu",
+    "rust_f32_cpu",
+    "rust_f32_cpu",
+    "rust_f32_cpu"
+  ],
+  "parameter_count": 12294,
+  "base_sha256": "d183550849c311a0c9a04120fc3c9b10449024a64f4585f95fe9d6121acd5235",
+  "base_unchanged": true,
+  "state": {
+    "file": "states.pt",
+    "sha256": "823ec0ffba676815c480ee3e97281417d2aba2c6d4108ed8813c250eaabd1432"
+  },
+  "midpoint": {
+    "file": "midpoint.pt",
+    "sha256": "35936d19f7cda80060b4f0a191375e2af8c4cb2f59c2e58cd91baf4ca6df2c25"
+  },
+  "heldout_scoring": false,
+  "timing_evidence": false,
+  "scope": "Public multi-site placement and mixed-family learning connection, not a quality result."
+}

@@ -1,0 +1,126 @@
+{
+  "schema": "spiraltorch.elliptic_learning_provenance.v1",
+  "date": "2026-10-02",
+  "source_commit": "83745e04a9fbb0344f1bb7f867279698db68f95c",
+  "baseline_source_commit": "fd50a207da6250805953833bb21d1c3ebd7e9eaf",
+  "environment": {
+    "os": "macOS",
+    "arch": "aarch64",
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "rust": "1.98.0",
+    "formatter": "nightly-2026-04-15",
+    "wasm_bindgen": "0.2.104",
+    "native_build_profile": "debug",
+    "native_features": "default",
+    "wasm_build_profile": "debug",
+    "torch_threads": 2,
+    "ambient_patching": false,
+    "offline": true
+  },
+  "model": {
+    "cache_snapshot": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "type": "GPT-2",
+    "model_safetensors_sha256": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707",
+    "config_sha256": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4",
+    "tokenizer_json_sha256": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6",
+    "base_parameter_sha256": "e563ffe10e2eefeaf9d9a869d4cb43369cdddbe6875789caec4e1abd7c6adfd9"
+  },
+  "source_sha256": {
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "crates/st-core/src/theory/microlocal.rs": "a7b24ffbc9a9893424006b81063bf8ef097919105a30ee91a2533a26c1a2f57b",
+    "crates/st-core/src/theory/microlocal/elliptic.rs": "19d0cddfa2954c998b33958c68fe7ef74760971af3de26ee4d14d60ce2b62f6e",
+    "crates/st-core/src/theory/microlocal/elliptic_learning.rs": "55320c314cded7d16f7300dba6cee372e309633a73f756f8b29f70ff0a20a8d4",
+    "crates/st-core/tests/elliptic_learning.rs": "c981699522aa3f84c3c7b3593ac22d93721a915a2e7c481fe7ffc707fa36e775",
+    "bindings/st-py/src/elliptic.rs": "68e945ec6e06bb9db23d4d33a6aa174264fe81d03d682d57ab7f0ce7b5ee2f51",
+    "bindings/st-py/spiraltorch/__init__.py": "5453790d8d99452c92308072971430b04fd346b342c696921d23742538c91489",
+    "bindings/st-py/spiraltorch/__init__.pyi": "cefc53335a25e5466e8804382c6cdf3f75cc36988a8cd062397dc87aec47c8d7",
+    "bindings/st-py/spiraltorch/elliptic.py": "6fefa5d5d6ec26a2391d18628d5bc7f85f121d668b954e1e8ff2c008b833c9c2",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "629bd3a873fcd99d8fd6369987aeb10fe54dc6200ed05dd979b90746d702145c",
+    "bindings/st-py/tests/test_elliptic_learning.py": "ad24915a5c322e14e2dfd204e3c9d968e0bb5d9814670962cc96a46db28c88e1",
+    "bindings/st-py/examples/hf_elliptic_learning.py": "fce501eef840b4b6c932c0e7bd07ab68ab7b58246ff61df764ed1e5ef44d4d5a",
+    "bindings/st-wasm/src/lib.rs": "57edf18c108499d408289f0499a1a1c9bed2fada9cbcc826b8444df3a2f8ffdd",
+    "bindings/st-wasm/src/elliptic_learning.rs": "6e4f1bc53dccf847109cb4a9fb7913b27b2fa5f0a5ccc6f18fce8f644576de1f",
+    "bindings/st-wasm/tests/elliptic_learning.html": "a00b02874d0f376bc7a658313a8f0b17f3644ff690391858fb4acf3216e15758"
+  },
+  "binary_sha256": {
+    "native": "cb0f733e7ffd512f65530a1da96817c7e2e40eadb8cda67f4a5523e5e44ca909",
+    "wasm": "a3e312645b65b4a813d17e9147a7d1d7954bc633635023bb6750cc2ecc2d3b1d",
+    "wasm_js": "657f94d3f24889944a5d9536117516f963f8ea1d3b9c2ff286d49b5b11104cb8",
+    "baseline_native": "c0e64cae6c63ce9e277162af5ee4a69103c424203bb2fc58f461b8d3f3d6d4f8"
+  },
+  "local_log_sha256": {
+    "core-tests-final": "45f9b38f9f51be645b9399c26454b3bafe3aba80d2e7b9e9e812735a6561c8e8",
+    "microlocal-tests-final": "750f2e4e967de0ebc9d80ad0cb6d068f0e74f7cebcb72d829e8a7abae484e8bb",
+    "native-build-final": "8260a6b0d7d0fe9d14b6342d8abf9da777f2490a20fd488406ee93cd924c1da4",
+    "wasm-build-final": "55bb7d935446107104d82c20e4b6a963bab52a1c7ce5e5fdb8887dd3e73628ff",
+    "pytest-final": "6969920e4e0f1c9fe672e8503a85187a431c3cd606edef0048a3a51e3df304d0",
+    "import-tests-final": "f36d2be0992cc417b8d0814192a6ca1404e494bf09eae84a5b48c979d0cb89f0",
+    "import-tests-final-corrected": "cc35d9cfd807e9f6556ce70fa6ed8124fd34c099be96e76811ce8a2ca03cba45",
+    "import-unittest-final": "55c285a4b2d2a2b29d7a12ed4d444a1d83a5c9aea49a0a48dfeca462227b6896",
+    "clippy-final": "faa301cc0e0fe49451f06d3ded13710bc560bc78dd8857c2c5255ab4279f6642",
+    "fmt-final": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ruff-final": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pretrained-final": "3ee99f7d7710c7ef72d01c59f98dedf9de2fa2092f330cd581819d75a5896aa5",
+    "checkpoint-load": "80df61f4ad8945ddce23bab7e994d103e1a335c0d80bfd2c88f74b3114ee71cf",
+    "baseline": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local_initial_report_sha256": "7773fa5aab22344edf416c96e66b6d67234b5505192cbc8d7da3c40ee51e515a",
+  "validation": {
+    "core_learning_tests": {
+      "passed": 3
+    },
+    "existing_microlocal_tests": {
+      "passed": 16
+    },
+    "python_tests": {
+      "passed": 18,
+      "skipped": 0,
+      "accelerator_transport": "MPS; Rust geometry executes on CPU"
+    },
+    "import_unittests": {
+      "passed": 22
+    },
+    "native_build": "passed",
+    "wasm_build": "passed",
+    "browser": "passed",
+    "core_strict_clippy": "passed",
+    "whole_wasm_strict_clippy": "not rerun; preceding Topos report has 19 failures in unchanged files",
+    "workspace_format": "passed",
+    "changed_python_ruff": "passed",
+    "pretrained_repeat": "every numerical observation identical; checkpoint metadata excluded",
+    "browser_repeat": "identical",
+    "safe_checkpoint_loading": {
+      "passed": 9,
+      "total_bytes": 751932,
+      "binaries": "local only"
+    },
+    "invocation_issues": [
+      {
+        "log": "import-tests-final",
+        "reason": "wrong test path; no tests collected"
+      },
+      {
+        "log": "import-tests-final-corrected",
+        "reason": "pytest loaded unrelated parent package; 22 collection errors; direct unittest rerun passed"
+      }
+    ]
+  },
+  "scope": {
+    "pretrained": true,
+    "base_frozen": true,
+    "real_model_wiring": true,
+    "large_corpus_ft": false,
+    "corpus": "four authored sentences: two train and two development",
+    "matched_parameters_and_updates": true,
+    "matched_compute_cost": false,
+    "quality_advantage": false,
+    "speed_comparison": false,
+    "cuda_tested": false,
+    "resident_geometry": false,
+    "higher_order_gradients": false,
+    "amp_tested": false
+  },
+  "conclusion": "Both active controls train through the selected frozen-model block. Tangent control has lower final train and development CE in all three seeds. This establishes wiring, not an elliptic advantage."
+}

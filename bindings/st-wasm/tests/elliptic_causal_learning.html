@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust causal elliptic learning</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {EllipticWarpKernel} from "/module/spiraltorch_wasm.js";
+const out = document.querySelector("#result");
+const report = {schema: "spiraltorch.elliptic_causal_browser.v1", status: "running"};
+function assert(ok, message) { if (!ok) throw Error(message); }
+function reject(fn) {
+  let rejected = false;
+  try { const value = fn(); value?.free(); } catch { rejected = true; }
+  assert(rejected, "expected rejection");
+}
+let kernel, snapshot;
+try {
+  await init();
+  kernel = new EllipticWarpKernel(1, 3, 2, 64);
+  const input = new Float32Array([1,.2,.3, 1,-.4,.2, 1,.5,-.6, 1,-.3,-.2]);
+  const seed = Float32Array.from({length:36}, (_,i) => Math.cos(i*.3));
+  snapshot = kernel.forwardCausal(input, 2, 2, 8);
+  const features = snapshot.features;
+  const gradient = snapshot.vjp(seed);
+  function loss(x) {
+    const batch = kernel.forwardCausal(x, 2, 2, 8);
+    try { return batch.features.reduce((sum,v,i) => sum+v*seed[i],0); }
+    finally { batch.free(); }
+  }
+  let error = 0;
+  for (let i=0; i<input.length; i++) {
+    const plus=input.slice(), minus=input.slice();
+    plus[i]+=.001; minus[i]-=.001;
+    const numeric=(loss(plus)-loss(minus))/(plus[i]-minus[i]);
+    error=Math.max(error,Math.abs(numeric-gradient[i]));
+  }
+  assert(error<.002,"causal VJP finite difference");
+  report.vjp_finite_difference_max_error=error;
+  const prefixSeed = new Float32Array(36); prefixSeed.fill(1,0,9);
+  assert(snapshot.vjp(prefixSeed).slice(3).every(v=>v===0),"future or batch gradient leak");
+  const changed=input.slice(); changed[4]+=2; changed[7]-=2;
+  const other=kernel.forwardCausal(changed,2,2,8);
+  try { assert(other.features.slice(0,9).every((v,i)=>v===features[i]),"future forward leak"); }
+  finally { other.free(); }
+  features.fill(NaN);
+  assert(snapshot.features.every(Number.isFinite),"mutable snapshot alias");
+  for (const bad of [0,-1,.5,NaN,Infinity,4294967296,"2",null,true]) {
+    reject(()=>kernel.forwardCausal(input,bad,2,8));
+    reject(()=>kernel.forwardCausal(input,2,bad,8));
+    reject(()=>kernel.forwardCausal(input,2,2,bad));
+  }
+  reject(()=>kernel.forwardCausal(input,2,2,7));
+  reject(()=>snapshot.vjp(new Float32Array(36).fill(NaN)));
+  const targetBatch=kernel.forwardCausal(new Float32Array([1,.4,.6,1,-.2,.3]),1,2,4);
+  const target=targetBatch.features; targetBatch.free();
+  const learned=new Float32Array([1,.1,.2,1,-.1,.1]);
+  const losses=[];
+  for(let step=0;step<=100;step++) {
+    const batch=kernel.forwardCausal(learned,1,2,4);
+    try {
+      const values=batch.features;
+      losses.push(values.reduce((sum,v,i)=>sum+(v-target[i])**2/18,0));
+      if(step===100)break;
+      const g=batch.vjp(Float32Array.from(values,(v,i)=>2*(v-target[i])/18));
+      for(let i=0;i<learned.length;i++)if(i%3!==0)learned[i]-=.2*g[i];
+    } finally { batch.free(); }
+  }
+  assert(losses.at(-1)<losses[0]*.2,"causal features did not learn");
+  report.learning_losses=losses;
+  kernel.free(); kernel=null;
+  assert(snapshot.vjp(seed).every((v,i)=>v===gradient[i]),"snapshot lifetime");
+  report.status="passed";
+} catch(error) { report.status="error"; report.error=String(error.stack||error); }
+finally { snapshot?.free(); kernel?.free(); }
+out.textContent=JSON.stringify(report,null,2);
+out.dataset.status=report.status;
+</script>

@@ -65,6 +65,7 @@ def apply_report(report):
             raise ValueError("host parameters differ from the received plan")
         trainer = st.nn.ModuleTrainer(backend="cpu")
         trainer.prepare(host)
+        host.forward(x)
         host.backward(x, st.Tensor(4, 2, [0.25] * 8))
         trainer.step(host)
         continued = host.inference_plan(SHAPE).to_json()

@@ -1,0 +1,78 @@
+{
+  "schema": "spiraltorch.attention_strided_inputs_study.v1",
+  "source_revisions": {
+    "before": "34cd278d46d2ac014df2730a2b7b0526ec52e802",
+    "after": "e70f7cc80d39e9faec7648782ebba9d0dffb9613"
+  },
+  "benchmark_and_generator_unchanged": true,
+  "binary_sha256": {
+    "before": "bb95aecb3e2ea947b823e5422b3bcd0a2152d2f33b102dc34894a322e38e0b7d",
+    "after": "3e17e518090d0b0c4694af49489db26efd5a67e1ab2ea42407eb3ec5884580bb"
+  },
+  "source_sha256": {
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "ed54d46e82c7072f7d0c7357f758aef34231d1c91bfd92a9041a868985d01f91",
+    "crates/st-backend-wgpu/src/resident_tensor/attention.rs": "3f9828e1c02c7acedd80961a5732788092d5d710e599b15aa5e34a53040d72df",
+    "crates/st-backend-wgpu/src/resident_tensor/attention/tests.rs": "06ac58413d1a6d12c90dc0cdb04b2f95a684054fc44d83aa307e86c6781759e8",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention.wgsl": "690fbdb732c6d7bb068361e96184677f076697c01546c351222872a881c24c0d",
+    "crates/st-backend-wgpu/examples/resident_attention_browser.rs": "f091d9b03285264ccc926393d85d56ec094fef8d5664cf67c01d9804b16f5669",
+    "crates/st-backend-wgpu/tests/attention_browser.html": "95bbd05aa2025d59c24a8e8db23af8ae52da50ebdfe08e756708b9abee2394bc",
+    "crates/st-nn/src/resident/attention.rs": "ad44dde46c6b786c8546e42ebc7f208c1bd1c06d5ca8cd0b03856c9e5e62f478",
+    "crates/st-nn/examples/resident_attention_chain_bench.rs": "d57c392af1a2162d3c7b4d9369f0b0f842f561375f425c4189db5a264f709eb1",
+    "crates/st-nn/examples/resident_attention_chain_browser.rs": "5743d2cdb8725d21dc711819ef16e9dd402c639d4dc2e884a027b8a478d051f6",
+    "crates/st-nn/examples/support/attention_chain.rs": "5e8d4df729ee5e0c22930d0c10f65b679b34ed4fdfa40b665ceb4f2269232871",
+    "crates/st-nn/examples/support/attention_projection.rs": "ad935342fd7fece1baae3177994c1b70e5c5ce8e3d4b98edc9502627c0c209c7",
+    "tools/bench_attention_chain_vs_torch.py": "2415956654808aeb0721e85269fb171e346b42a325d72d711665f6143f55f29f",
+    "tools/generate_attention_chain_torch_fixture.py": "78f48581ac5f7953eaf8abd3c73fa6f1d5b13b6eb8a26af64fa634501217dbfe"
+  },
+  "fixture_sha256": {
+    "main": "988a61d591a15fcf3baec7ea648a49040bc3008fc4661aa528c9bb22c8dc244d",
+    "wide_diagnostic": "16ae52df76c727f4ae43ab652df146481679f8ba1c7d27f349cc07d0ee7ec4be",
+    "standalone": "e6f674f955c16058c1fe49ccd1540dce35180e0729a15c19bdaedcbddc3565b7",
+    "chain": "e7de80de892eb729cba79043d843658ff7354a523f9f4a9b01f7da195f4b09c3"
+  },
+  "wasm_bundles_sha256": {
+    "core/resident_attention_browser.js": "b5ff852dec158a415c9da86921eb65b0f8bfca4b2025d693f9bfbf1fe5ae24da",
+    "core/resident_attention_browser_bg.wasm": "d6e4c6647ab1f2c0efaaf1be30dee7963f916b769d1dfaa96e488c241476a4b5",
+    "chain/resident_attention_chain_browser.js": "6e4960a69a5f52e5f7b3bbf6f5666b5dc327bc9416e2a77f68f0b4d507a6a3fd",
+    "chain/resident_attention_chain_browser_bg.wasm": "dc27ce2655afe9e746cce7e42571ccb6d22ab6811380bd1435412d0401a90d9f"
+  },
+  "local_validation_log_sha256": {
+    "strided-attention-tests.log": "30b6c2b595936e0e27eef3ae9dcbea41f91dd9c1f99b0e91b942ecc6b7a41a21",
+    "strided-tensor-tests.log": "9a84d8bcfd1e46df365cac69674656270f597e81665a288739f3b2134493e05b",
+    "strided-descriptor-tests.log": "7a428ab97e05f1796f0458b0379d798f8d5af597ed0a98363a4f743b0f940e89",
+    "strided-chain-tests.log": "db3faf127ce45fc66bb74e969b2c59dd86e766a740498af4362cca8fdd1e630e",
+    "strided-nn-tests.log": "aa6944cb62126802aca3e90ecc215f647889df965adb8d0b4c40d27cf65dd967",
+    "strided-clippy.log": "d5c9f51eb33e6dfb2131c1adf4fe51a492df05f4f7a4a8d3d77ee04277cb2f3a",
+    "strided-browser-build.log": "712c97b736bc82301e21513edb8faadfcab5897d1dd63567cdefb09088270e91",
+    "strided-chain-browser-build.log": "5e0a56cd46e41592734cf434d3298201096098145edf4ca653ec4c31a93cc154",
+    "strided-final-bench-build.log": "20129dc1dd58728d3b504b02658a046fa9fb039ae4b71e2104889754ad88cb38",
+    "strided-comparison.log": "733c8aa99b5df7851c292a85092596f585364de037737e507ff0d6f98483df82",
+    "strided-diagnostic.log": "2479b01dd801a70368f5ae41b803db09aa182956606508ba1d8817f45037e849",
+    "strided-test-clippy.log": "9201427ac2c6b0678a437e930722609b83949dbe0810948da416efef5c9fff0d"
+  },
+  "toolchains": {
+    "rust": "1.98.0",
+    "formatter": "nightly-2026-04-15",
+    "wasm_bindgen": "0.2.104",
+    "torch": "2.12.1",
+    "python": "3.12.6"
+  },
+  "validation": {
+    "resident_tensor_tests": 71,
+    "included_attention_tests": 14,
+    "nn_attention_tests": 15,
+    "chain_integration_test_functions": 4,
+    "native_chain_output_checks": 36,
+    "browser_standalone_output_checks": 40,
+    "browser_chain_output_checks": 90,
+    "browser_geometry_checks": 15,
+    "max_browser_standalone_error": 8.940696716308594e-8,
+    "max_browser_chain_error": 1.7881393432617188e-7,
+    "format": "passed",
+    "backend_library_clippy": "passed with -D warnings; existing vendored WGPU warnings remain",
+    "backend_test_clippy": "passed with --lib --tests -- -D warnings; existing vendored WGPU warnings remain"
+  },
+  "scope": "Direct immutable input-view reads, not zero-copy decoder or fewer queue submissions. Mean-only frozen inference; no backward, learning, CUDA or browser throughput claim. Single M4 with no clock isolation.",
+  "performance_interpretation": "Short-input gains; mixed wide-input main observations and modest/noisy diagnostic results. The post-hoc diagnostic changes several factors and does not supersede the main endpoint or establish a cause."
+}

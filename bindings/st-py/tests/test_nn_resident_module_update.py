@@ -75,7 +75,9 @@ class Surface(unittest.TestCase):
     def test_pending_zero_gradients_and_duplicate_names_are_rejected(self):
         host = model()
         base = host.inference_plan(SHAPE)
-        host.backward(st.Tensor(4,2,INPUT), st.Tensor(4,2,[0.]*8))
+        x = st.Tensor(4,2,INPUT)
+        host.forward(x)
+        host.backward(x, st.Tensor(4,2,[0.]*8))
         with self.assertRaisesRegex(ValueError, "optimizer state"):
             base.apply_parameters_to(host, changed(base))
         duplicate = st.nn.Sequential()
@@ -110,6 +112,9 @@ class Gpu(unittest.TestCase):
         trainer = st.nn.ModuleTrainer(backend="cpu")
         trainer.prepare(host)
         before = host.inference_plan(SHAPE).to_json()
+        with self.assertRaisesRegex(ValueError, "sequential_forward_missing"):
+            host.backward(x, st.Tensor(4,2,[0.25]*8))
+        host.forward(x)
         host.backward(x, st.Tensor(4,2,[0.25]*8))
         trainer.step(host)
         self.assertNotEqual(before,host.inference_plan(SHAPE).to_json())

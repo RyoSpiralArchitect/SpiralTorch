@@ -5,12 +5,77 @@
 
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
+use st_tensor::{Layout, TensorContentStamp};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+struct SavedParameter {
+    name: String,
+    stamp: Option<TensorContentStamp>,
+    exact: Option<Tensor>,
+}
+
+impl SavedParameter {
+    fn new(parameter: &Parameter) -> PureResult<Self> {
+        let value = parameter.value();
+        let stamp = value.content_stamp();
+        // Foreign aliases need isolated values. Non-row-major parameters may
+        // be normalized by gradient accumulation without changing their value.
+        let exact = if stamp.is_none() || value.layout() != Layout::RowMajor {
+            Some(value.to_layout(Layout::RowMajor)?.into_snapshot())
+        } else {
+            None
+        };
+        Ok(Self {
+            name: parameter.name().to_owned(),
+            stamp,
+            exact,
+        })
+    }
+
+    fn matches(&self, parameter: &Parameter) -> PureResult<bool> {
+        if self.name != parameter.name() {
+            return Ok(false);
+        }
+        if self
+            .stamp
+            .as_ref()
+            .is_some_and(|s| s.matches(parameter.value()))
+        {
+            return Ok(true);
+        }
+        match &self.exact {
+            Some(value) => same_values(value, parameter.value()),
+            None => Ok(false),
+        }
+    }
+}
+
+fn same_values(left: &Tensor, right: &Tensor) -> PureResult<bool> {
+    if left.shape() != right.shape() {
+        return Ok(false);
+    }
+    let left = left.to_layout(Layout::RowMajor)?;
+    let right = right.to_layout(Layout::RowMajor)?;
+    Ok(left
+        .data()
+        .iter()
+        .zip(right.data())
+        .all(|(a, b)| a.to_bits() == b.to_bits()))
+}
+
+struct SavedForward {
+    inputs: Vec<Tensor>,
+    input_stamp: Option<TensorContentStamp>,
+    output_shape: (usize, usize),
+    parameters: Vec<SavedParameter>,
+}
 
 /// Sequential container that mirrors `nn.Sequential`.
-#[derive(Default)]
 pub struct Sequential {
     layers: Vec<Box<dyn Module>>,
+    last_forward: RefCell<Option<Arc<SavedForward>>>,
     #[cfg(feature = "wgpu")]
     resident: crate::resident::ResidentForwardCache,
 }
@@ -26,6 +91,7 @@ impl Sequential {
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
+            last_forward: RefCell::new(None),
             #[cfg(feature = "wgpu")]
             resident: Default::default(),
         }
@@ -36,6 +102,7 @@ impl Sequential {
     where
         M: Module + 'static,
     {
+        self.last_forward.get_mut().take();
         self.layers.push(Box::new(layer));
     }
 
@@ -50,12 +117,14 @@ impl Sequential {
                 cols: self.layers.len(),
             });
         }
+        self.last_forward.get_mut().take();
         self.layers.insert(index, Box::new(layer));
         Ok(())
     }
 
     /// Appends a pre-boxed module to the sequence.
     pub fn push_boxed(&mut self, layer: Box<dyn Module>) {
+        self.last_forward.get_mut().take();
         self.layers.push(layer);
     }
 
@@ -68,6 +137,28 @@ impl Sequential {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
+
+    /// Forward without retaining host backward inputs. This does not change
+    /// training/evaluation mode and invalidates any previous host forward tape.
+    pub fn forward_untracked(&self, input: &Tensor) -> PureResult<Tensor> {
+        self.forward_untracked_owned(input.clone())
+    }
+
+    /// Untracked forward with ownership transfer and no container activation
+    /// retention, including nested sequences. Per-layer caches may remain.
+    pub fn forward_untracked_owned(&self, mut input: Tensor) -> PureResult<Tensor> {
+        self.last_forward.borrow_mut().take();
+        for layer in &self.layers {
+            input = layer.forward_untracked_owned(input)?;
+        }
+        Ok(input)
+    }
+}
+
+impl Default for Sequential {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Module for Sequential {
@@ -77,6 +168,7 @@ impl Module for Sequential {
         input: &st_backend_wgpu::resident_tensor::ResidentTensor,
     ) -> Result<st_backend_wgpu::resident_tensor::ResidentTensor, crate::resident::InferenceError>
     {
+        self.last_forward.borrow_mut().take();
         self.resident.forward(self.inference_ops()?, input)
     }
     #[cfg(feature = "wgpu")]
@@ -85,6 +177,7 @@ impl Module for Sequential {
         input: &st_backend_wgpu::resident_tensor::ResidentTensor,
     ) -> Result<st_backend_wgpu::resident_tensor::TensorReadback, crate::resident::InferenceError>
     {
+        self.last_forward.borrow_mut().take();
         self.resident.snapshot(self.inference_ops()?, input)
     }
     #[cfg(feature = "wgpu")]
@@ -131,34 +224,104 @@ impl Module for Sequential {
         self.forward_owned(input.clone())
     }
 
+    fn forward_untracked_owned(&self, input: Tensor) -> PureResult<Tensor> {
+        Sequential::forward_untracked_owned(self, input)
+    }
+
     fn forward_owned(&self, mut activ: Tensor) -> PureResult<Tensor> {
-        for layer in &self.layers {
-            activ = layer.forward_owned(activ)?;
+        // Even a failed new forward can replace a child's stochastic state.
+        self.last_forward.borrow_mut().take();
+        if self.layers.is_empty() {
+            return Ok(activ);
         }
+        let input_stamp = activ.content_stamp();
+        let mut parameters = Vec::new();
+        self.visit_parameters(&mut |parameter| {
+            parameters.push(SavedParameter::new(parameter)?);
+            Ok(())
+        })?;
+        let mut inputs = Vec::with_capacity(self.layers.len());
+        for layer in &self.layers {
+            // Snapshot before transferring ownership; an in-place-capable child
+            // must not overwrite the input required by this forward's pullback.
+            let saved = activ.into_snapshot();
+            activ = layer.forward_owned(saved.clone())?;
+            inputs.push(saved);
+        }
+        self.last_forward
+            .borrow_mut()
+            .replace(Arc::new(SavedForward {
+                inputs,
+                input_stamp,
+                output_shape: activ.shape(),
+                parameters,
+            }));
         Ok(activ)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         if self.layers.is_empty() {
+            if input.shape() != grad_output.shape() {
+                return Err(TensorError::ShapeMismatch {
+                    left: input.shape(),
+                    right: grad_output.shape(),
+                });
+            }
             return Ok(grad_output.clone());
         }
-        let mut activations = Vec::with_capacity(self.layers.len());
-        let mut current = input.clone();
-        for layer in &self.layers {
-            let next = layer.forward(&current)?;
-            activations.push(next.clone());
-            current = next;
+        let saved =
+            self.last_forward
+                .borrow()
+                .as_ref()
+                .cloned()
+                .ok_or(TensorError::InvalidValue {
+                    label: "sequential_forward_missing",
+                })?;
+        if grad_output.shape() != saved.output_shape {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: saved.output_shape,
+            });
         }
-        let mut grad = grad_output.clone();
-        for (idx, layer) in self.layers.iter_mut().enumerate().rev() {
-            let layer_input = if idx == 0 {
-                input
-            } else {
-                &activations[idx - 1]
+        if !saved.input_stamp.as_ref().is_some_and(|s| s.matches(input))
+            && !same_values(&saved.inputs[0], input)?
+        {
+            return Err(TensorError::InvalidValue {
+                label: "sequential_forward_input_mismatch",
+            });
+        }
+        let mut index = 0;
+        self.visit_parameters(&mut |parameter| {
+            let Some(expected) = saved.parameters.get(index) else {
+                return Err(TensorError::InvalidValue {
+                    label: "sequential_forward_parameters_changed",
+                });
             };
-            grad = layer.backward(layer_input, &grad)?;
+            if !expected.matches(parameter)? {
+                return Err(TensorError::InvalidValue {
+                    label: "sequential_forward_parameters_changed",
+                });
+            }
+            index += 1;
+            Ok(())
+        })?;
+        if index != saved.parameters.len() {
+            return Err(TensorError::InvalidValue {
+                label: "sequential_forward_parameters_changed",
+            });
         }
-        Ok(grad)
+        let result = (|| {
+            let mut grad = grad_output.clone();
+            for (idx, layer) in self.layers.iter_mut().enumerate().rev() {
+                grad = layer.backward_retained(&saved.inputs[idx], &grad)?;
+            }
+            Ok(grad)
+        })();
+        if result.is_err() {
+            // A child may have consumed state or accumulated partial gradients.
+            self.last_forward.get_mut().take();
+        }
+        result
     }
 
     fn visit_parameters(
@@ -171,10 +334,26 @@ impl Module for Sequential {
         Ok(())
     }
 
+    fn zero_accumulators(&mut self) -> PureResult<()> {
+        for layer in &mut self.layers {
+            layer.zero_accumulators()?;
+        }
+        Ok(())
+    }
+
+    fn scale_learning_rates(&mut self, factor: f32) -> PureResult<()> {
+        crate::optim::validate_module_learning_rate_scale(self, factor)?;
+        for layer in &mut self.layers {
+            layer.scale_learning_rates(factor)?;
+        }
+        Ok(())
+    }
+
     fn visit_parameters_mut(
         &mut self,
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
+        self.last_forward.get_mut().take();
         for layer in &mut self.layers {
             layer.visit_parameters_mut(visitor)?;
         }
@@ -192,6 +371,7 @@ impl Module for Sequential {
     }
 
     fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
+        self.last_forward.get_mut().take();
         for layer in &mut self.layers {
             layer.load_state_dict(state)?;
         }
@@ -199,6 +379,7 @@ impl Module for Sequential {
     }
 
     fn infuse_text(&mut self, text: &str) -> PureResult<()> {
+        self.last_forward.get_mut().take();
         for layer in &mut self.layers {
             layer.infuse_text(text)?;
         }
@@ -206,12 +387,17 @@ impl Module for Sequential {
     }
 
     fn set_training(&mut self, training: bool) -> PureResult<()> {
+        self.last_forward.get_mut().take();
         for layer in &mut self.layers {
             layer.set_training(training)?;
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "sequential_capture_tests.rs"]
+mod capture_tests;
 
 #[cfg(test)]
 mod tests {

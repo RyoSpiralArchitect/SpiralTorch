@@ -1,0 +1,166 @@
+{
+  "schema": "spiraltorch.fractional_buffer_processes.v1",
+  "python": [
+    {
+      "key": "full-2x128x768-repeat1",
+      "map": "full",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "repeat": 1,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:31:51.259Z"
+    },
+    {
+      "key": "history-2x128x768-repeat1",
+      "map": "history",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "repeat": 1,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:31:54.577Z"
+    },
+    {
+      "key": "full-1x256x768-repeat1",
+      "map": "full",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "repeat": 1,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:31:57.940Z"
+    },
+    {
+      "key": "history-1x256x768-repeat1",
+      "map": "history",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "repeat": 1,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:01.321Z"
+    },
+    {
+      "key": "full-2x128x768-repeat2",
+      "map": "full",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "repeat": 2,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:04.670Z"
+    },
+    {
+      "key": "history-2x128x768-repeat2",
+      "map": "history",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "repeat": 2,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:08.082Z"
+    },
+    {
+      "key": "full-1x256x768-repeat2",
+      "map": "full",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "repeat": 2,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:11.384Z"
+    },
+    {
+      "key": "history-1x256x768-repeat2",
+      "map": "history",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "repeat": 2,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:14.779Z"
+    },
+    {
+      "key": "full-2x128x768-repeat3",
+      "map": "full",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "repeat": 3,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:18.125Z"
+    },
+    {
+      "key": "history-2x128x768-repeat3",
+      "map": "history",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "repeat": 3,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:21.545Z"
+    },
+    {
+      "key": "full-1x256x768-repeat3",
+      "map": "full",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "repeat": 3,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:24.941Z"
+    },
+    {
+      "key": "history-1x256x768-repeat3",
+      "map": "history",
+      "shape": [
+        1,
+        256,
+        768
+      ],
+      "repeat": 3,
+      "exit_code": 0,
+      "completed_at": "2026-10-03T15:32:28.335Z"
+    }
+  ],
+  "pretrained": [
+    {
+      "label": "baseline",
+      "expected_transport": "list",
+      "exit_code": 0
+    },
+    {
+      "label": "paired",
+      "expected_transport": "buffer",
+      "exit_code": 0
+    },
+    {
+      "label": "comparison",
+      "exit_code": 0
+    }
+  ],
+  "scope": "Completed processes only; no interrupted or excluded timing attempts."
+}

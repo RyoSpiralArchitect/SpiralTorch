@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust WaveGate learning snapshots</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {WaveGateKernel} from "/module/spiraltorch_wasm.js";
+const out = document.querySelector("#result");
+const report = {schema: "spiraltorch.wave_gate_browser_learning.v1", status: "running"};
+function assert(ok, text) { if (!ok) throw Error(text); }
+function reject(fn) {
+  let rejected = false;
+  try { const result = fn(); result?.free(); } catch { rejected = true; }
+  assert(rejected, "expected rejection");
+}
+function compare(actual, expected) {
+  assert(actual.length === expected.length, "shape mismatch");
+  let error = 0;
+  for (let i = 0; i < actual.length; i++) {
+    const delta = Math.abs(actual[i] - expected[i]);
+    assert(Number.isFinite(actual[i]) && delta <= 1e-6 + 2e-5 * Math.abs(expected[i]), `value ${i}`);
+    error = Math.max(error, delta);
+  }
+  return error;
+}
+let kernel, snapshot;
+try {
+  await init();
+  const response = await fetch("/pretrained.json");
+  assert(response.ok, "native fixture response");
+  const fixture = (await response.json()).native_fixture;
+  kernel = new WaveGateKernel(-0.7, 1, 0.2, 64);
+  const x = new Float32Array(fixture.input);
+  const gate = new Float32Array(fixture.gate), bias = new Float32Array(fixture.bias);
+  const upstream = new Float32Array(fixture.upstream);
+  snapshot = kernel.forward(x, gate, bias, 2, 2);
+  report.forward_max_error = compare(snapshot.output, fixture.output);
+  const conditioning = JSON.parse(snapshot.conditioning_json());
+  assert(Object.keys(conditioning).length === Object.keys(fixture.conditioning).length, "conditioning fields");
+  report.conditioning_max_error = 0;
+  for (const [key, expected] of Object.entries(fixture.conditioning)) {
+    if (typeof expected === "number")
+      report.conditioning_max_error = Math.max(report.conditioning_max_error, compare([conditioning[key]], [expected]));
+    else assert(conditioning[key] === expected, `conditioning ${key}`);
+  }
+  let gradient = snapshot.vjp(upstream);
+  try {
+    report.vjp_max_error = Math.max(...["grad_input", "grad_gate", "grad_bias"].map(
+      key => compare(gradient[key], fixture[key])));
+  } finally { gradient.free(); }
+  x.fill(NaN); gate.fill(NaN); bias.fill(NaN);
+  snapshot.output.fill(NaN);
+  compare(snapshot.output, fixture.output);
+  reject(() => snapshot.vjp(new Float32Array([1])));
+  reject(() => snapshot.vjp(new Float32Array(4).fill(NaN)));
+  const trainX = new Float32Array([0.2, -0.3, 0.4, 0.5]);
+  const targetBatch = kernel.forward(trainX, new Float32Array([0.5, -0.4]), new Float32Array([0.1, -0.05]), 2, 2);
+  const target = targetBatch.output;
+  targetBatch.free();
+  const parameters = {gate: new Float32Array(2), bias: new Float32Array(2)};
+  function step(parameters, update = true) {
+    const batch = kernel.forward(trainX, parameters.gate, parameters.bias, 2, 2);
+    try {
+      const output = batch.output;
+      const loss = output.reduce((sum, value, i) => sum + (value - target[i]) ** 2 / 4, 0);
+      if (update) {
+        const vjp = batch.vjp(Float32Array.from(output, (value, i) => 2 * (value - target[i]) / 4));
+        try {
+          const dg = vjp.grad_gate, db = vjp.grad_bias;
+          for (let i = 0; i < 2; i++) {
+            parameters.gate[i] -= 0.5 * dg[i];
+            parameters.bias[i] -= 0.5 * db[i];
+          }
+        } finally { vjp.free(); }
+      }
+      return loss;
+    } finally { batch.free(); }
+  }
+  report.learning_losses = [];
+  for (let i = 0; i <= 200; i++) report.learning_losses.push(step(parameters, i < 200));
+  assert(report.learning_losses.at(-1) < report.learning_losses[0] * 0.01, "gate/bias did not learn");
+  const saved = JSON.parse(JSON.stringify({gate: Array.from(parameters.gate), bias: Array.from(parameters.bias)}));
+  const resumed = {gate: new Float32Array(saved.gate), bias: new Float32Array(saved.bias)};
+  step(parameters); step(resumed);
+  compare(parameters.gate, resumed.gate); compare(parameters.bias, resumed.bias);
+  report.resume_next_update_equal = Array.from(parameters.gate).every((v, i) => v === resumed.gate[i])
+    && Array.from(parameters.bias).every((v, i) => v === resumed.bias[i]);
+  assert(report.resume_next_update_equal, "resume differs");
+  for (const bad of [-1, 0.5, NaN, Infinity, 4294967296, "1", null, true])
+    reject(() => kernel.forward(new Float32Array(), new Float32Array(2), new Float32Array(2), bad, 2));
+  reject(() => kernel.forward(new Float32Array(), new Float32Array(), new Float32Array(), 0, 0));
+  const empty = kernel.forward(new Float32Array(), new Float32Array(2), new Float32Array(2), 0, 2);
+  const zero = empty.vjp(new Float32Array());
+  assert(empty.output.length === 0 && zero.grad_input.length === 0, "empty rows");
+  compare(zero.grad_gate, [0, 0]); compare(zero.grad_bias, [0, 0]);
+  zero.free(); empty.free();
+  kernel.free(); kernel = null;
+  gradient = snapshot.vjp(upstream);
+  try { compare(gradient.grad_gate, fixture.grad_gate); } finally { gradient.free(); }
+  report.status = "passed";
+} catch(error) { report.status = "error"; report.error = String(error.stack || error); }
+finally { snapshot?.free(); kernel?.free(); }
+out.textContent = JSON.stringify(report, null, 2);
+out.dataset.status = report.status;
+</script>

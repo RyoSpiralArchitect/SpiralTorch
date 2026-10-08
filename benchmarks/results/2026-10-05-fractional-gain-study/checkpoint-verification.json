@@ -1,0 +1,1108 @@
+{
+  "schema": "spiraltorch.fractional_gain_checkpoint_verification.v1",
+  "status": "passed",
+  "study_id": "8fbdbb0749158909659fa61b834c1da4f5fea45d7e56041c260819a4ae247b58",
+  "training_source_revision": "f12c50a7ef0cf9bb6b7d26833716d4081860c024",
+  "planned_runs_verified": 9,
+  "primary_updates": 4608,
+  "continuation_only_updates": 18,
+  "artifacts": {
+    "plan": "b3a3d6e0b260be7b458266b084cdbca3feabf759f7671760744a0bb360b86422",
+    "results": "033e91e40afc741730812c1c3f08089eb173702ed69700a03df785a2898be58a",
+    "journal": "67989ef22e7596f064e598a5d676dc0d042ededf82fcbd9f732984ec8e6a9d76"
+  },
+  "summary_artifact_sha256": "c2d27a3c91c5aaef9419a4f7f3d9d81cbaae41f443750cd68d5c0e80a87f0472",
+  "summary_source_sha256": "e12c33cb2ab91d140654e621e39e11a5bc4fd1bd2069fb2a0fee98abdc36a0ce",
+  "verifier_sha256": "af7a39426d0570eb791bb1e2d8158a0732f97d9feb45c69aba70cb0291808314",
+  "verifier_helper_sha256": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f",
+  "summary_rebuilt_byte_identical": true,
+  "runs": {
+    "41:ordinary_gain_short": {
+      "checkpoint": {
+        "filename": "checkpoint-t1vcdd0i.pt",
+        "sha256": "1df17bb7ce5831cc45a828f74beb15802c59ece17375ce7ec20318180a4f6fd7"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "cc1ae0303377fa3961d2a27e5642db1b03356ae4647a44797bfb843f9227aaac",
+      "final_coordinates": {
+        "log_gain": 1.6490446329116821,
+        "gain": 5.20200777053833,
+        "effective_history_gate_l2": 2.175660165931466,
+        "history_angle": -0.2484588772058487
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "826aeef9cb0216e06b973b539e96fb641b52efbb235aefe69b6d8a8d7e086acc"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "50247678f485188fa38fc2e9305c3cbf488f6ae3fde7e4ccf469cfefbb98363f"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "9c2b7e3d54d122a7c0d7724e2584057c4ed086ca3aac6a725479b6d825f032b2"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "dfeade4f41bc6772a10f33e4da22248a4d462203ee210d08d36eb9e554bea0de"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "fb1bc857704f19c15401afd37755da0f1baf20b2078d8da3dba5b33d2559c31a"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "b2310e606d125d8afd0dc9dd1bbac6418c58efed19af6e690a9dc5c1f8609fc0"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "aae6ba167e7c4f2fbf14b585f45456c2f02bc1c1b7ad7e392d58b0db20e0107d"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "c4c957f77d7e8ba3c6606b7ffd36712fb4d74a2c621f82565e326c5e3323f597"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "e5185e2237faab09d48058b0172e2d5a892c249a920a9f2950b15cfe228ad1ae"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "84459d51b80e30aa4ffa11b66e613e8139fb942b7646cf6451359e1b83be699f"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "b33c1d4c805b02122bc0553afad8665c27613105716f2b0088f867c63479de6b"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "84b873b68b24e225ed1c2c6a0ee9e3faf7a6075e3061b960ebe5e4a9242c2ec1"
+          }
+        }
+      }
+    },
+    "41:history_gain_short": {
+      "checkpoint": {
+        "filename": "checkpoint-do15dko6.pt",
+        "sha256": "dea8a531c1ef70af90967a2b496f180389e86b28bfe55a4bea41ed116f8635a3"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "8f90bf9e5d472dd7a559d9e264388456dd94fe17164e07af6d3c407e1c519526",
+      "final_coordinates": {
+        "log_gain": 1.642422080039978,
+        "gain": 5.167670726776123,
+        "effective_history_gate_l2": 2.092859390426601,
+        "log_alpha": -0.020028095692396164,
+        "alpha": 0.9801711440086365
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "5ce7e9b5dbef5dae8de476c29e3d78771ed176373893e873178542063559424d"
+        },
+        "log_alpha": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "251f6acdfd283dcd5246a00979c0f60e8d222d2b51a1f189630178e136e15b1e"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "38741e5d5dbfb6183bc58a3d198cb9a1607175af502e30f5be9a4816601fc1f6"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "9a10780a3354cd372850e2ad6f2d67aac3c20cb96d3bc3203bde89df1b123f1c"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d7de0c5a2bf04a920260de487c94d1b040abb01f5880b8d3e9cde5df497dd4eb"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "8bdb0fd67691cdf11811e87d346f9c57fb2c1706b57faa9556521e2008758120"
+          }
+        },
+        "log_alpha": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "aed921a530f1e7c558ca24f3ca51dd7c50458604a7a02ff4c79e5f0c5d3f79d3"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "d3d7bc788fbd67842b63c96bf5f502bf2fbcdd8493d513911415171646b9a54b"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "e922139e2da34c7b4891cd41cab738b420fd781378fce67833f86e7cb66a5caf"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "f21c7ec343d66afd7625a658c9918b0654e8448247ecbef91acb7b63b2311527"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "7c5b4fa484400cfb8a464252c6ce5b3681cef59950a89169d0b65d8e23a1830c"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "4954f75638460bd4e6df05c28bc6d53f08dfec17950e25bc3ec55a86c96e04e2"
+          }
+        }
+      }
+    },
+    "41:history_gain_full": {
+      "checkpoint": {
+        "filename": "checkpoint-_woe3dds.pt",
+        "sha256": "b0ffeb5028cb5e4df279ff322ea9388c2fefdbc75650cd71ff006808135d3009"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "38abe0d5017f703a9e2c1a2abdb654182c82ef026bcaeb7a18ac0c8a9cf2a6f1",
+      "final_coordinates": {
+        "log_gain": 1.6499896049499512,
+        "gain": 5.206925868988037,
+        "effective_history_gate_l2": 2.0963444556782993,
+        "log_alpha": -0.1025569885969162,
+        "alpha": 0.9025267362594604
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "baadc702f45fdfd1fee0f70d8f06a513f1596f72f408bb853d30619351ffd13c"
+        },
+        "log_alpha": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "bf4704bc1465e4dc9a0d223a30c7109d35c807d8e7a3ff739a5a04fe813df41d"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "4510ff13e8f63b8f7c8092afd1f13b265f2aa811f37a55369e656cff36365b7c"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "f63607c4df1da423f2b28b960127513b588d230e2c1f2d184244767b4679338e"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "1ad92ca6c2b550c9ab44ced0c59ff8ef537cfa5a9860c131b8e170d15e745cbf"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "7cb2e3966f950b29e36c5c71e5554a4085232e658baf4a0f2eaf1574ba2a99a5"
+          }
+        },
+        "log_alpha": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "8990b2659b14b747492236b24d54616f41f8d3a61e8b22d47292ac76c2dd91cb"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "93474e01dbdbad896ec35da933ab60cde16696fcc5a0358c7e174cee3eebcaaa"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "5fbb7231605b6d011697c579dc9d524a64dec6fcab292e96a1e7f73e12b6eede"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "ae043edd379d351e5a0505f9e825a7de56dc85861bfa6ad7ea7619166215852c"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "6f4303edeb65c9e697909cee10d856ad2b3348de22c6a182f97e6902cfede958"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "b3f92490830d6cc835f3632b4ff1d045591834b825bde218f2e9f3d43968bd4d"
+          }
+        }
+      }
+    },
+    "43:ordinary_gain_short": {
+      "checkpoint": {
+        "filename": "checkpoint-kxse3h6m.pt",
+        "sha256": "1f278f5614ce47bf85f3d170aa6213d019982a9595e366a35f1631ecc8372a69"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "09ccb7f846bc11f08b59fc5e7fd49ca8b1ad39cc11fa58de07c6d2d48d51cbfb",
+      "final_coordinates": {
+        "log_gain": 1.6130138635635376,
+        "gain": 5.017911911010742,
+        "effective_history_gate_l2": 2.0851648093372335,
+        "history_angle": -0.23631715774536133
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "3b0fb1249ef0f501bc005fa1e78a7154096da349706225e8dd25bf7f28d75030"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "bde04b09bb61f86ff4157c72e5d5286a1907853499baf77fe24499c43a8fa4b5"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "f11f359a4e2696792465a3210c8476fca8aea41833c00773fb44d77a909e26e1"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "c44c5ce642fce5815620304f5df7eea2a35595662b79da9b20ebe910f8b7fd34"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "0faaff647edf0ec3175f5a21a0383f768e78740dacb503363067fc92c3560404"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "08da1999d9ff64015bb8184d92ba0e8b2d3e800fa0636a7898737b4a3d6c7ac2"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "26803852802cc82315daebc78134d4ab62700d225d4da3c18869fae162d9ecb0"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "c60d7785facd6cca545bf483330d865b4900a144c0557aab70662e051b51ac85"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "59c80e996408532f7e04ca8b4afc65348121af7d3f1a054f816e9c1c771a4d94"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "b0f923d66a20a94ee4b3cecaf70b6e77f7a0d760346bccbac4f9aa49c3dc26f5"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "9bd35c136efc850d9d187997f55514a5b47bbcc4662261fd458efdc69a8b9530"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "1a7bfb20bd4886d4fffac05303d7d3c02240ede88637c7ef78552ff9c49ecaeb"
+          }
+        }
+      }
+    },
+    "43:history_gain_short": {
+      "checkpoint": {
+        "filename": "checkpoint-gbg10shd.pt",
+        "sha256": "a5e83888b71e8b189703d09715aa1df8ec86083c8de47dc4e276eaa3ede8025a"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "af3dd06ccbffdbc5a4c7db247414ae37e5bde35d6ad7a68481ac868464e95db9",
+      "final_coordinates": {
+        "log_gain": 1.6036908626556396,
+        "gain": 4.971347332000732,
+        "effective_history_gate_l2": 2.0004033039864533,
+        "log_alpha": -0.006106292828917503,
+        "alpha": 0.9939123392105103
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "7a969d0636287bb30084726f1ab2f5171d11849bf8927423f62fabd2e17fcea9"
+        },
+        "log_alpha": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "70b2df0d0e4f0a18912c2e92b17eca1c1d5dcb2266f87c51bac419534101c21a"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "40ef5b46c13ff7679a9c4cd1d91254a9ace7e67e0ab384b8bc86b17b2d2bf469"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "17c5225df0d4ce3de200e2d1fbbac83543a49a21d57f461a809dbeb80d16b0b3"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "6a4525fc4af32e51c53a19664186d116863552f71c1a63b37115a1b784ac367f"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "099e2e438431bcdb17e1d950df2dcf279bd188c48ae187e68e92ac0885771034"
+          }
+        },
+        "log_alpha": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "a8fe30b6b931357456b140e39601115bf6911062e56f939536e60f233e47c926"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "846c996259b86f8388d4d635ea5ee614331a5c4fda115f1bfac3496823fe3e0f"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "64becc906e27bf792e0eb256c19d86831480043135d824a1a6038ded1831b790"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "9bb0d36371ea093f31167b20f465d3c6d61eca92106d63eb3a506f76a1913c1d"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "a76c4bb712ce6d2dde70e36e4212a59602206e1a0040d87122946a619f991378"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "5371a5011e5caf86abea233e58826d9e723f6ac1c56b557280d0809a733d2f39"
+          }
+        }
+      }
+    },
+    "43:history_gain_full": {
+      "checkpoint": {
+        "filename": "checkpoint-gy0wgkur.pt",
+        "sha256": "a02a08b0db78ef85448cc2e70034af1635a5ad27843705a2679d8620c0121b45"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "0ecc5ed04707a868bba3d2fa1969ec1d2cd668b60545a1e98783c5fc51b49cc4",
+      "final_coordinates": {
+        "log_gain": 1.609359860420227,
+        "gain": 4.99960994720459,
+        "effective_history_gate_l2": 1.9980568251881088,
+        "log_alpha": -0.08801239728927612,
+        "alpha": 0.9157495498657227
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "c26bb66724fb2c6ad8946684c0f14b0b37cc3cc7048abc03343fa4a1bf73a624"
+        },
+        "log_alpha": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "be9ba7172861b8db3aeb235d732806c5786acc098b12e68e63aef667e364bebf"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "1a33a05e8ed927a7b03ddecdfc00b2299dbe65fbac3cd6f86359590d2e0e96ad"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "42f8c13e071681cce3a37ed8251b0c03debd891bf93091588c72f199e933c805"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d1b7450e89438122ec998ab94bb5bc9f8326f12e75f60474422a84ed2f104ad8"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "87dfe390eab8dc0a6f14aeadc664b1ed9674e8b3498abdc6c1109477fbb0df94"
+          }
+        },
+        "log_alpha": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "fa47c4879d217ce84248c144c0725e654fa160198929946d86b823508aa9fee8"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "518ea7984f8e63c2dd5b930c2fd25a44bdee4bdb52f1b1b6bfb11c6a0f74b97e"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "cf69ff0108ba05ac3e6c1440b25840479e3893cc816bd3262276193ea0e7722b"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d5d56a870e56a6ee7a4b6532784d0b8d0e7cb8703768a70f885088b8efe985b9"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "d49e7c55c9ad02dd6348f894e593e76c76f5fb49a7bb3173749604412e58c612"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "66839170778adfdff3be950fa48cc7d6f0a8cebb61249e601689d900febcf209"
+          }
+        }
+      }
+    },
+    "47:ordinary_gain_short": {
+      "checkpoint": {
+        "filename": "checkpoint-fe4v3a7e.pt",
+        "sha256": "5bcd0a4a80ed6b9312938873c5c7321a6baf0cc1c179d35dd84ef668c11aa746"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "aeeb9d71ab7db8e073336abc3711fd5d5241eff288383284e6e3c47071df7373",
+      "final_coordinates": {
+        "log_gain": 1.6354988813400269,
+        "gain": 5.132017612457275,
+        "effective_history_gate_l2": 2.1401976502576914,
+        "history_angle": -0.2443860024213791
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "00ff45dd7a8163fda8686ddab7aea66afe859196dd94638a69ae807a8f02d185"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "440603f9dfd474328101c40c4daaa96f2b7f1eb8052472dde0edfa0b09f055ef"
+        },
+        "history_angle": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "b039c863dea74c24a952059b96657f8d2c3722e0c1253f965e600f608d7c5064"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "46dad35978838d86430376cc66f6099be511f108612fb4a60254a9097ca82b11"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "72668df63aecd5391201eacba41c87b0a4cdce1836090c326c3aa60b9dd97c81"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "3c9f4766c8eda3c5da0387c56acd5a94fa24373ccd5daa5a9f78eb34cd5fe6f9"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "e3befa09a3b01cd6d4f4af4c23197c3bf404791c6d4e58edd0c305e506911076"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d24be443a945ac1ec762abc1f50e2093393eb36f54370c1c5b5b0436fd091048"
+          }
+        },
+        "history_angle": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "ca96bde57362573ec84869e0a4d318cde425d1c42e52a74da051b850ee0d9d3f"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "0870762d006511f6dcc1febbdfb3cc7aca8cc41ac2beb8ba8384b279290dd8e5"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "0fb0e8909f145720da8a8cf0f8ecc9b69b578adea77651e006b43d888a2e69e7"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "d7b1e02eb2885653984a413da3730919e22465735273a5f0b6507cff4cc6bc1f"
+          }
+        }
+      }
+    },
+    "47:history_gain_short": {
+      "checkpoint": {
+        "filename": "checkpoint-uys5_jmq.pt",
+        "sha256": "5b29551851aeb1f689d38fd54144391372190c79cb717b815380859dfc8b70c5"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "bd97931f027d3f065a8af58ca009f8efcf0c9feb0473d98f2248278e0bc78718",
+      "final_coordinates": {
+        "log_gain": 1.6266770362854004,
+        "gain": 5.086942672729492,
+        "effective_history_gate_l2": 2.0547626269938357,
+        "log_alpha": -0.014940997585654259,
+        "alpha": 0.9851700663566589
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "051133c88f7b1f62a06e6d4a06546b8da0d683fc66987015d23d80ba4546cfe6"
+        },
+        "log_alpha": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "5ac1fa08fb97f36d42f2d5e6924e7047f983c495f1c60aa801ee129321770681"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "03e55c663fe117622b943f4fd69a48b8536a9a952f5740bd88cf3a70e6a03a36"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "9b229c6900c113a1a7390d3dcec1440c7389b6948ad1e2a270db7f853748a8f7"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "e26c35aa5d9d6acb7eb024b4b0ecef4be230736fdef43d61f6c4261273f3e682"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "71a6bc082edd52d745fa8fb8bf5d90cafa9cdd7e3a8636eeb86ee9b0def58e97"
+          }
+        },
+        "log_alpha": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "ba3f4df2a6e980958b1cef8eaec09665fa203f78d3eaa9b4684fc7ce47582df9"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "1007cafff299336e1043f336bed385fdfb7769215ebe980db9c3cd0410b4fcaf"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "53556ce11bbc2cf7e4766fdb1caac49ceadc2914d58a58444834601a9fd93e95"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "3a68611e6f1e7866d45f1035b8e4da6eedd5a56999eeb15ad9134c1aa7c1d1ef"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "34a51154b520c984668a15d0267ac46c8e0ec9b8a6f22b61f2ca020dbcd3fd94"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "fe2f2028c6fb74dc0dde9a0b3c0f31a2a3b7b0e78c769dc4323c554bdfd48d71"
+          }
+        }
+      }
+    },
+    "47:history_gain_full": {
+      "checkpoint": {
+        "filename": "checkpoint-dpbwahoz.pt",
+        "sha256": "d52869b002fb4096b404082ea41f1a5ae140847b5f81e0bd569b5c8d2d4ccb60"
+      },
+      "cursor": 512,
+      "restored_adapter_and_adam_equal": true,
+      "final_parameter_sha256": "8964e1a6711fada67a0b11398c747a0da1b5028ef283994224d23964e59cf850",
+      "final_coordinates": {
+        "log_gain": 1.6324448585510254,
+        "gain": 5.116368293762207,
+        "effective_history_gate_l2": 2.0521184324421333,
+        "log_alpha": -0.09629202634096146,
+        "alpha": 0.9081987738609314
+      },
+      "parameters": {
+        "gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "b2ab4931aa1b60e18e0a1dfc12704401befbc3114390e5877f7ae1130b05a0c0"
+        },
+        "log_alpha": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "8d804eec4ca00c0c351ea1037f89c08b82f8711836c806ab842970be6966f688"
+        },
+        "local_gate": {
+          "dtype": "float32",
+          "shape": [
+            768
+          ],
+          "sha256": "91b09bf9cdc3ae5cd248115f7ebff5a082320442944a5b253332ab0e4ecb33aa"
+        },
+        "log_gain": {
+          "dtype": "float32",
+          "shape": [],
+          "sha256": "b34ac2076677c7719af1f7a21607efb019837f8ea2caf71776436e943fe26d1b"
+        }
+      },
+      "named_adam": {
+        "gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d6ebf109e8605caa672dce909b7fe5a4c723ef652de34b11c044b8544e9829ea"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "d7cbc7fa8138f81e8567e19754488a6bd07809e3e2ebe53ebe0df39a4d3e0bd1"
+          }
+        },
+        "log_alpha": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "05a6314a6c6f0cf42db4592eedfac9819cf5be393b485b0bc8987868274f7a55"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "bba91a0349a839fc26d9866c3f94545ec054154a9169b2cf0d0ae6c96bef8c7f"
+          }
+        },
+        "local_gate": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "336abf49d4342f17d59301fee164dd34193c81b14f88385027ab91079aef40f7"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [
+              768
+            ],
+            "sha256": "103db95557cbe456dd1a8830c8ef17ceca8aa942b49dd1f79faa2a689c1a7dd1"
+          }
+        },
+        "log_gain": {
+          "step": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "03a88c8867b3fbcfeefc3270af46afbeb74a27e12cad758e188154cb4aa923dc"
+          },
+          "exp_avg": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "566d396ca6cca8ebfb3aac65a7cb6b2e2ef1d29616dc78efd2468e1cddeac1d6"
+          },
+          "exp_avg_sq": {
+            "dtype": "float32",
+            "shape": [],
+            "sha256": "3c589dea8cd366061baf94f94bebf96377a31612b7952cf50ca9986fb0042638"
+          }
+        }
+      }
+    }
+  },
+  "scope": "Saved tensors, recipes, named Adam and sealed receipts; not reexecution of continuation or model scoring. No historical replay or cross-arm state parity is claimed.",
+  "frozen_files_verified": {
+    "client": 7,
+    "runtime": 71
+  },
+  "runtime_build_source_revision": "ab9f4ea35c9089cf57c7a11fb593555c2d57b668",
+  "manifest_sha256": {
+    "client": "552230478f8a3987c0defd201e5ec69b1e7c68624ce45c62e8b8eeec7230f0b4",
+    "runtime": "2632a2318180031cfed7381636af22af35c8ed655790b12959821d0a5a4bdd7c"
+  }
+}

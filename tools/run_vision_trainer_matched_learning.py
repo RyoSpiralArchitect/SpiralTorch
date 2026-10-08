@@ -212,7 +212,9 @@ def trainer_config(recipe, total):
         dict(kind="warmup_cosine", state=dict(base_lr=recipe["rate"], min_lr=recipe["rate"] / 10,
                                                warmup_steps=min(10, total), total_steps=total, step=0)))
     if recipe.get("optimizer_feedback", False):
-        config["optimizer_feedback"] = st.zspace_optimizer_feedback_init({})["config"]
+        config["optimizer_feedback"] = st.zspace_optimizer_feedback_init({
+            "loss_window_observations": recipe.get("feedback_window_observations", 1),
+        })["config"]
     return config
 
 
@@ -402,11 +404,16 @@ def main():
     parser.add_argument("--horizontal-flip", action="store_true")
     parser.add_argument("--restart-at", type=int, default=37)
     parser.add_argument("--control-scale", type=float, help="one prescribed Rust rate proposal, in (0, 1)")
-    parser.add_argument("--optimizer-feedback", action="store_true", help="gate the proposal using Rust defaults")
+    parser.add_argument("--optimizer-feedback", action="store_true", help="gate the proposal using Rust")
+    parser.add_argument("--feedback-window-observations", type=int, default=1,
+                        help="accepted losses per Rust comparison window; requires feedback when greater than one")
     args = parser.parse_args()
     if (args.control_scale is not None and not 0 < args.control_scale < 1
             or args.optimizer_feedback and args.control_scale is None):
         parser.error("feedback needs a prescribed control scale strictly between zero and one")
+    if (not 1 <= args.feedback_window_observations < 2 ** 53
+            or args.feedback_window_observations != 1 and not args.optimizer_feedback):
+        parser.error("a positive exact window count and enabled feedback are required")
     try:
         rate = unbits(bits(args.rate))
     except (OverflowError, ValueError):

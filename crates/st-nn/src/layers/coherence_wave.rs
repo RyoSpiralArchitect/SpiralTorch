@@ -259,6 +259,45 @@ impl ZSpaceCoherenceWaveBlock {
         }
         Ok(())
     }
+
+    fn backward_impl(
+        &mut self,
+        input: &Tensor,
+        grad_output: &Tensor,
+        retain: bool,
+    ) -> PureResult<Tensor> {
+        let cache = if retain {
+            self.cache.borrow().clone()
+        } else {
+            self.cache.get_mut().take()
+        }
+        .ok_or(TensorError::EmptyInput("coherence_wave_cache"))?;
+        let pullback = |module: &mut dyn Module, input: &Tensor, grad: &Tensor| {
+            if retain {
+                module.backward_retained(input, grad)
+            } else {
+                module.backward(input, grad)
+            }
+        };
+        let grad_fused = pullback(&mut self.resonator, &cache.fused_pre_gate, grad_output)?;
+        let grad_scan = pullback(&mut self.scan, input, &grad_fused)?;
+        let grad_wave = pullback(&mut self.wave, input, &grad_fused)?;
+        let merge_backend = current_tensor_util_backend_for_values(grad_scan.data().len());
+        let grad_input = grad_scan.add_with_backend(&grad_wave, merge_backend)?;
+        let (batch, _) = input.shape();
+        emit_coherence_wave_meta(
+            "coherence_wave_backward",
+            "coherence_wave_backward_composite",
+            batch,
+            self.dim,
+            self.steps,
+            self.memory,
+            self.wave.scans().len(),
+            merge_backend,
+            true,
+        );
+        Ok(grad_input)
+    }
 }
 
 impl Module for ZSpaceCoherenceWaveBlock {
@@ -295,31 +334,11 @@ impl Module for ZSpaceCoherenceWaveBlock {
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        let cache = self
-            .cache
-            .borrow_mut()
-            .take()
-            .ok_or(TensorError::EmptyInput("coherence_wave_cache"))?;
-        let grad_fused = self
-            .resonator
-            .backward(&cache.fused_pre_gate, grad_output)?;
-        let grad_scan = self.scan.backward(input, &grad_fused)?;
-        let grad_wave = self.wave.backward(input, &grad_fused)?;
-        let merge_backend = current_tensor_util_backend_for_values(grad_scan.data().len());
-        let grad_input = grad_scan.add_with_backend(&grad_wave, merge_backend)?;
-        let (batch, _) = input.shape();
-        emit_coherence_wave_meta(
-            "coherence_wave_backward",
-            "coherence_wave_backward_composite",
-            batch,
-            self.dim,
-            self.steps,
-            self.memory,
-            self.wave.scans().len(),
-            merge_backend,
-            true,
-        );
-        Ok(grad_input)
+        self.backward_impl(input, grad_output, false)
+    }
+
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward_impl(input, grad_output, true)
     }
 
     fn visit_parameters(

@@ -1,0 +1,421 @@
+{
+  "schema": "spiraltorch.elliptic_gated_study_validation.v1",
+  "status": "completed",
+  "study_id": "24ab0ab87cfeecd63371faf27f8ce5876f571d80902cc88659795251b3fe1cb1",
+  "executed_source_revision": "d83d6029e761e6588a5af74f8ea0f01b9953bede",
+  "source_sha256": {
+    "hf_elliptic_gated_study.py": "2be932d2fbcfebf23770895d9d8382a9f98670af7a9aa27f85a4267f505b3d54",
+    "hf_elliptic_pride_gated.json": "bee9c487094c7cd189c509763feafcecc1fc1e2c3c3ff493f2eed591d845ac0f",
+    "hf_elliptic_causal_study.py": "39456844f9e59169cc4fd901853c78bc4f2b0dfdfb53f4c870808699ad807813",
+    "hf_elliptic_nonlinear_study.py": "0dd710021bedb0d7de823314eaae3f168d6c32b14435a7c7b4a3de16752fe064",
+    "hf_wave_gate_long_horizon.py": "91b3175f5b72a35c27e31acf09d0edf4ab87d462cd6bd012f9c99acbb34b1d31",
+    "hf_wave_gate_conditioning.py": "752009289edeb9748dcf8fa8f544f7f8ffe5039793a791247522ca037f2c736f",
+    "summarize_wave_gate_long_horizon.py": "ea2ad2d16e1668024bfc175aca275d67e4474e1427d303590e951ed28d7faca0"
+  },
+  "native_sha256": "08dde1be2a9225fce10b8a807c1574cebb64c7eb15987357e0210484002392e3",
+  "bridge_sha256": "c303a7a6988e4ce7781b46932e2390a8eb6cd3c653c496a7644dc8136dbff239",
+  "input_sha256": {
+    "plan": "971c7951254c8db9e5658aa153a62435c7d10a5a030a8b0e124b4328a134061e",
+    "results": "872607e20dc52105837ae82963ec35cfde4dc52d51fd25d08ea1d03295780a3d",
+    "journal": "e930b2f20f3700e8a765199c1d89a2db03ced6d7d5d13558953536bebd72bf33"
+  },
+  "preflight": {
+    "passed": 121,
+    "skipped": 0,
+    "log_sha256": "3c2beaddd1d008e822cd04e2c5b9267fab23c35896c78b437c94763afb7ea986"
+  },
+  "process": {
+    "original_exit_code": null,
+    "original_stop_cause": "unknown; handle missing and no matching process observed",
+    "resumed_training_and_evaluation_exit_code": 0,
+    "checkpoint_verifier_exit_code": 0,
+    "completed_resume_exit_code": 0,
+    "completed_resume_preserved_result_and_journal_bytes": true,
+    "committed_primary_updates": 6144,
+    "continuation_only_validation_updates": 24,
+    "uncommitted_updates_before_interruption": "unknown; not included in committed counts",
+    "prior_completed_checkpoint_receipts_unchanged": true
+  },
+  "checkpoint_verification": {
+    "schema": "spiraltorch.gated_checkpoint_verification.v1",
+    "study_id": "24ab0ab87cfeecd63371faf27f8ce5876f571d80902cc88659795251b3fe1cb1",
+    "verified_runs": 12,
+    "committed_primary_updates": 6144,
+    "verified_continuation_updates": 24,
+    "runs": [
+      {
+        "run_key": "41:tangent",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8450,
+        "initial_parameter_sha256": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+        "initial_projection_sha256": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+        "final_parameter_sha256": "9cc0f321bd28da561a581937d85d9675d59c7d2f10e27893605609bb2515d169",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": null,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "41:elliptic",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8450,
+        "initial_parameter_sha256": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+        "initial_projection_sha256": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+        "final_parameter_sha256": "32812ea71071017b49fcf02ffc02cd98838e2a39504ad1c8714e2283dbbef8c7",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": null,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "41:gated_tangent",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8451,
+        "initial_parameter_sha256": "e38e1cc8decde71423163f0f35fd4743b55ee73b968fda480b3912abffb850b2",
+        "initial_projection_sha256": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+        "final_parameter_sha256": "47e1bf10162f8475550f3785b39c9230abbf5dfc9be79e7b58498b75dd513309",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "raw_mix": 511,
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": 0.047157686203718185,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "41:gated_elliptic",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8451,
+        "initial_parameter_sha256": "e38e1cc8decde71423163f0f35fd4743b55ee73b968fda480b3912abffb850b2",
+        "initial_projection_sha256": "5bc2f46918ad6e10685a4218c277571638d0fc11e1bb772c35b4bf76b694b887",
+        "final_parameter_sha256": "20a3f3901dbd73b93a915cfd50e421d298555b9f9dddc87735ed1a8c8fb94193",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "raw_mix": 511,
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": -0.575985848903656,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "43:tangent",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8450,
+        "initial_parameter_sha256": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+        "initial_projection_sha256": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+        "final_parameter_sha256": "bab85c2922b74d6c7329bedcaf9a17853b0f9940ee1d4b81b378910ea891493c",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": null,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "43:elliptic",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8450,
+        "initial_parameter_sha256": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+        "initial_projection_sha256": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+        "final_parameter_sha256": "ea354c63cd2c94e5026c673e43e46a8d0f9823c74db42966ed5920e12320d6eb",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": null,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "43:gated_tangent",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8451,
+        "initial_parameter_sha256": "b1c97b953a88b2730d9dedb0a81a3740cef7b33bcd810430584ae1a8021760a6",
+        "initial_projection_sha256": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+        "final_parameter_sha256": "f4b19264a5753b78ae92510e4dcc7ad6d359b19e4cc388957c969864377d0a9a",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "raw_mix": 511,
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": 0.09179260581731796,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "43:gated_elliptic",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8451,
+        "initial_parameter_sha256": "b1c97b953a88b2730d9dedb0a81a3740cef7b33bcd810430584ae1a8021760a6",
+        "initial_projection_sha256": "7c2a24a7956427eeab4354e342a56b85c01e0dac8ef0b0231bfd7c72f395f8c9",
+        "final_parameter_sha256": "bc662ea5f9b7f08fcea6c41fb4ab70cbca36860f223c6c60bfa4036bd88c0847",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "raw_mix": 511,
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": -0.4858208894729614,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "47:tangent",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8450,
+        "initial_parameter_sha256": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+        "initial_projection_sha256": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+        "final_parameter_sha256": "640c6de3e1a09bbfa77f494f723f525528943e00a2bea09d3ddae6cc6cb0c58a",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": null,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "47:elliptic",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8450,
+        "initial_parameter_sha256": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+        "initial_projection_sha256": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+        "final_parameter_sha256": "6bc41040b87dc6f72ff1209a93f903f7ccd5984708c2c794f12e9a4de1db67b7",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": null,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "47:gated_tangent",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8451,
+        "initial_parameter_sha256": "f67bc8e4f1b2f75323ba578287a7683b6bad14621ad94459ccbe369bb1e5a5ca",
+        "initial_projection_sha256": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+        "final_parameter_sha256": "fd1316fa21f7375d49f9c197adb8a12404482836b534f878cabf85ed9efb5592",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "raw_mix": 511,
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": 0.09268250316381454,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      },
+      {
+        "run_key": "47:gated_elliptic",
+        "cursor": 512,
+        "checkpoint_sha256_verified": true,
+        "parameter_count": 8451,
+        "initial_parameter_sha256": "f67bc8e4f1b2f75323ba578287a7683b6bad14621ad94459ccbe369bb1e5a5ca",
+        "initial_projection_sha256": "c88bc224a5668cc6abe3670e10330aa0236938e07fe2a57cac7641ce0d8a3e88",
+        "final_parameter_sha256": "3e3fb378012a50ba60edbcf02d62b99b93ff72e05b27abd6b194fae0bb132ddd",
+        "finite_parameters_and_adam": true,
+        "finite_loss_and_gradients": true,
+        "nonzero_gradient_steps": {
+          "raw_mix": 511,
+          "orientation.weight": 511,
+          "orientation.bias": 511,
+          "readout.weight": 512
+        },
+        "final_raw_mix": -0.46712788939476013,
+        "driver_exact_next_parameters_and_adam": true,
+        "driver_frozen_base_verified": true
+      }
+    ]
+  },
+  "exact_historical_replays": {
+    "source": "2026-10-02-elliptic-causal-factorial",
+    "frozen_baseline": true,
+    "pointwise": [
+      {
+        "run_key": "41:tangent",
+        "exact_fields": [
+          "scores",
+          "records",
+          "development",
+          "initial_parameter_sha256",
+          "parameter_count"
+        ]
+      },
+      {
+        "run_key": "41:elliptic",
+        "exact_fields": [
+          "scores",
+          "records",
+          "development",
+          "initial_parameter_sha256",
+          "parameter_count"
+        ]
+      },
+      {
+        "run_key": "43:tangent",
+        "exact_fields": [
+          "scores",
+          "records",
+          "development",
+          "initial_parameter_sha256",
+          "parameter_count"
+        ]
+      },
+      {
+        "run_key": "43:elliptic",
+        "exact_fields": [
+          "scores",
+          "records",
+          "development",
+          "initial_parameter_sha256",
+          "parameter_count"
+        ]
+      },
+      {
+        "run_key": "47:tangent",
+        "exact_fields": [
+          "scores",
+          "records",
+          "development",
+          "initial_parameter_sha256",
+          "parameter_count"
+        ]
+      },
+      {
+        "run_key": "47:elliptic",
+        "exact_fields": [
+          "scores",
+          "records",
+          "development",
+          "initial_parameter_sha256",
+          "parameter_count"
+        ]
+      }
+    ],
+    "interpretation": "same trajectories, not independent confirmations"
+  },
+  "local_log_sha256": {
+    "training.log": "66962a9bd8ba5423effb557cd6347df24ed4989c410e22c5a08ece26fcc01c40",
+    "resume-1.log": "4aab09a1fa12d9d157d07b077a11205987a39a988baf71f653481d86cc8e512b",
+    "completed-resume.log": "d7daa78c308a58488be734ec3edd4067193f61a04b1480952c2a16c9f1f2b748",
+    "checkpoint-verification.log": "33b02be4ed6f1639b27af13f9c6b9c4666b4e96419dd8edbbc70469a14bd20e0",
+    "preflight-tests.log": "3c2beaddd1d008e822cd04e2c5b9267fab23c35896c78b437c94763afb7ea986"
+  },
+  "limitations": [
+    "Reused exploratory endpoints after a prior negative study; three seeds do not establish significance",
+    "Gated arms have one more trainable scalar than pointwise arms",
+    "Mean elliptic improvement does not beat paired ordinary gated controls",
+    "Negative gate movement does not isolate contextual benefit from local gain/centering",
+    "No speed, resident GPU, padding or KV-cache claim"
+  ],
+  "postrun_tests": {
+    "passed": 121,
+    "skipped": 0,
+    "exit_code": 0,
+    "log_sha256": "0c45d6185bf09c36cd7ea58e953a80be7f260abe8294d54e8857ee31fc142e82"
+  },
+  "offline_summary_reproduction": {
+    "byte_identical": true,
+    "output_sha256": "141ebba07f471806a9213564408ce676e47e11fd224100e1a2b135487c144783",
+    "tool_sha256": "ea2ad2d16e1668024bfc175aca275d67e4474e1427d303590e951ed28d7faca0"
+  },
+  "summary_canonicalization": {
+    "method": "Decimal precision 50, ROUND_HALF_EVEN, 12 decimal places; no platform libm",
+    "original_summary_sha256": "141ebba07f471806a9213564408ce676e47e11fd224100e1a2b135487c144783",
+    "canonical_summary_sha256": "e07f38704bc4da8390f91651b0bb602c93e6ac6cdf12ecaf6d061c1c34153987",
+    "tool_sha256": "d433c4ab456b5772c46cba9768513309d128014069627096c9698efc9e19f419",
+    "changed_fields": [
+      {
+        "path": ".gate_trajectories.41:gated_tangent.final_mix",
+        "before": 0.047122760106063595,
+        "after": 0.047122760106
+      },
+      {
+        "path": ".gate_trajectories.41:gated_elliptic.final_mix",
+        "before": -0.5197417426179626,
+        "after": -0.519741742618
+      },
+      {
+        "path": ".gate_trajectories.43:gated_tangent.final_mix",
+        "before": 0.09153566054239391,
+        "after": 0.091535660542
+      },
+      {
+        "path": ".gate_trajectories.43:gated_elliptic.final_mix",
+        "before": -0.4508932363653563,
+        "after": -0.450893236365
+      },
+      {
+        "path": ".gate_trajectories.47:gated_tangent.final_mix",
+        "before": 0.09241802952898412,
+        "after": 0.092418029529
+      },
+      {
+        "path": ".gate_trajectories.47:gated_elliptic.final_mix",
+        "before": -0.43587578509305575,
+        "after": -0.435875785093
+      }
+    ],
+    "raw_study_files_unchanged": true,
+    "tests": {
+      "passed": 28,
+      "skipped": 0,
+      "exit_code": 0,
+      "log_sha256": "d44b16e9653157d7fff6edca0f37c6795ba2d0f318b56a4702076df189ebc846"
+    },
+    "summary_command_exit_code": 0,
+    "committed_summary_cli_byte_identical": true
+  }
+}

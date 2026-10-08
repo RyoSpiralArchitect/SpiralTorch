@@ -1,0 +1,21 @@
+{
+  "schema": "spiraltorch.topos_shared_gate_torch_check.v1",
+  "status": "passed",
+  "source_backend": "wgpu",
+  "torch": "2.12.1",
+  "threads": 2,
+  "updates": 200,
+  "rtol": 0.0005,
+  "atol": 3e-05,
+  "max_abs_error": {
+    "output": 1.1920928955078125e-07,
+    "grad_input": 5.960464477539063e-08,
+    "grad_gate": 1.1920928955078125e-07,
+    "gate_after": 2.9802322387695312e-08,
+    "loss": 1.1920928955078125e-07
+  },
+  "scope": "Native f32 closed-loop shared-gate trajectories compared with CPU Torch, independent broadcast/autograd/reduction. Numeric agreement is not proof of device residency, timing or model quality.",
+  "receipt_sha256": "1ab4d573898166d0170f95e8e7129ce2830fcc5c7d880d6cf650752aaafa7aa6",
+  "client_sha256": "912295dbde11331133cd51c30cb666c7ba440cc55909c738114e2dc926ab9c4b",
+  "torch_reference_sha256": "580427fc50ef4aa61be8bdbec3f1c2b6a8e54f225a9c41bfe0d7d234ce0881d9"
+}

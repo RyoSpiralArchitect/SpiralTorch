@@ -33,7 +33,7 @@ use st_core::runtime::trainer_optimizer::TrainerParameterOptimizerState;
 use st_core::telemetry::psychoid::PsychoidSample;
 use st_tensor::{
     topos::OpenCartesianTopos, AmegaHypergrad, AmegaRealgrad, ComplexTensor, LanguageWaveEncoder,
-    PackedB, PureResult, Tensor, TensorContentStamp, TensorError, Tile,
+    Layout, PackedB, PureResult, Tensor, TensorContentStamp, TensorError, Tile,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -353,6 +353,35 @@ impl Parameter {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Accumulates logical row-major derivatives and aligns optimizer storage.
+    pub(crate) fn accumulate_euclidean_row_major(&mut self, update: &Tensor) -> PureResult<()> {
+        let update = update.to_layout(Layout::RowMajor)?;
+        if self.value.layout() == Layout::RowMajor
+            && self
+                .gradient
+                .as_ref()
+                .is_none_or(|g| g.layout() == Layout::RowMajor)
+        {
+            return self.accumulate_euclidean(&update);
+        }
+        let value = self.value.to_layout(Layout::RowMajor)?;
+        let gradient = self
+            .gradient
+            .as_ref()
+            .map(|g| g.to_layout(Layout::RowMajor))
+            .transpose()?;
+        // Tape accumulators use logical row-major coordinates. Stage the
+        // Tensor-backed accumulator too, restoring it if accumulation fails.
+        let previous_gradient = std::mem::replace(&mut self.gradient, gradient);
+        if let Err(error) = self.accumulate_euclidean(&update) {
+            self.gradient = previous_gradient;
+            return Err(error);
+        }
+        self.value = value;
+        self.invalidate_value_caches();
         Ok(())
     }
 
@@ -856,10 +885,26 @@ pub trait Module {
         self.forward(&input)
     }
 
+    /// Forward without retaining a container's backward activations. This is
+    /// not evaluation mode; individual layers may still retain their own state.
+    /// Containers override this to propagate the request to nested children.
+    fn forward_untracked_owned(&self, input: Tensor) -> PureResult<Tensor> {
+        self.forward_owned(input)
+    }
+
     /// Propagates a gradient backwards. Implementations should populate the
     /// relevant parameter accumulators before returning the gradient with
     /// respect to `input`.
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor>;
+
+    /// Pull back without consuming the latest forward state. Containers and
+    /// band schedules use this for multiple cotangents of the same prediction.
+    /// The caller must keep input, parameters and layer state unchanged.
+    /// Modules whose ordinary backward consumes a cache must override this;
+    /// the default is suitable for stateless or already reusable pullbacks.
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward(input, grad_output)
+    }
 
     /// Visits immutable parameters.
     fn visit_parameters(
@@ -888,7 +933,7 @@ pub trait Module {
                 continue;
             }
             self.begin_backward_band_pass(band, grad)?;
-            let result = self.backward(input, grad);
+            let result = self.backward_retained(input, grad);
             self.end_backward_band_pass(band)?;
             let contribution = result?;
             let backend = current_tensor_util_backend_for_values(total.data().len());
@@ -998,7 +1043,17 @@ pub trait Module {
         }
     }
 
-    /// Clears accumulators across every parameter.
+    /// Scales optimizer rates without changing parameter values. Cache-owning
+    /// modules whose mutable visitor invalidates forward state should override
+    /// this optimizer-only operation, prevalidating every rate before mutation.
+    fn scale_learning_rates(&mut self, factor: f32) -> PureResult<()> {
+        crate::optim::validate_module_learning_rate_scale(self, factor)?;
+        self.visit_parameters_mut(&mut |parameter| parameter.try_scale_learning_rate(factor))
+    }
+
+    /// Clears accumulators without changing parameter values or forward state.
+    /// Containers with cache-owning children should delegate to their children
+    /// rather than use a mutable parameter visitor that invalidates captures.
     fn zero_accumulators(&mut self) -> PureResult<()> {
         self.visit_parameters_mut(&mut |param| {
             param.zero_gradient();
@@ -1242,6 +1297,54 @@ mod tests {
 
         assert_eq!(buffers, 1);
         assert_eq!(param.gradient().unwrap().data(), &[1.0, -0.5]);
+    }
+
+    #[test]
+    fn row_major_accumulation_aligns_existing_gradient_and_parameter() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        let values = Tensor::from_vec(2, 2, vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+        let gradient = Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let mut parameter = Parameter::new("gate", values.to_layout(Layout::ColMajor).unwrap());
+        parameter
+            .accumulate_euclidean(&gradient.to_layout(Layout::ColMajor).unwrap())
+            .unwrap();
+        parameter.accumulate_euclidean_row_major(&gradient).unwrap();
+        assert_eq!(parameter.value().layout(), Layout::RowMajor);
+        assert_eq!(parameter.gradient().unwrap().layout(), Layout::RowMajor);
+        assert_eq!(parameter.gradient().unwrap().data(), &[2.0, 4.0, 6.0, 8.0]);
+        parameter.apply_step(0.01).unwrap();
+        for (actual, expected) in parameter
+            .value()
+            .data()
+            .iter()
+            .zip([0.08_f32, 0.16, 0.24, 0.32])
+        {
+            assert!((actual - expected).abs() < 1e-7);
+        }
+    }
+
+    #[test]
+    fn row_major_accumulation_failure_preserves_existing_storage() {
+        let _policy = crate::execution::push_backend_policy(
+            crate::execution::BackendPolicy::from_device_caps(DeviceCaps::cpu()),
+        );
+        let value = Tensor::from_vec(2, 2, vec![0.1, 0.2, 0.3, 0.4])
+            .unwrap()
+            .to_layout(Layout::ColMajor)
+            .unwrap();
+        let gradient = Tensor::from_fn(2, 2, |_, _| f32::MAX)
+            .unwrap()
+            .to_layout(Layout::ColMajor)
+            .unwrap();
+        let mut parameter = Parameter::new("gate", value.clone());
+        parameter.accumulate_euclidean(&gradient).unwrap();
+        assert!(parameter.accumulate_euclidean_row_major(&gradient).is_err());
+        assert_eq!(parameter.value().layout(), Layout::ColMajor);
+        assert_eq!(parameter.value().data(), value.data());
+        assert_eq!(parameter.gradient().unwrap().layout(), Layout::ColMajor);
+        assert_eq!(parameter.gradient().unwrap().data(), gradient.data());
     }
 
     #[test]

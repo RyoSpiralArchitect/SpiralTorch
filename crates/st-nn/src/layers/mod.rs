@@ -60,8 +60,8 @@ pub use normalization::{
 pub use scaler::Scaler;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::{
-    ToposResonator, ToposResonatorAudit, ToposResonatorBackwardAudit, ToposResonatorConfig,
-    ToposResonatorTensorBackward, ToposResonatorTensorStep,
+    ToposGateLayout, ToposResonator, ToposResonatorAudit, ToposResonatorBackwardAudit,
+    ToposResonatorConfig, ToposResonatorTensorBackward, ToposResonatorTensorStep,
 };
 pub use zrelativity::ZRelativityModule;
 pub use zspace_mixer::ZSpaceMixer;

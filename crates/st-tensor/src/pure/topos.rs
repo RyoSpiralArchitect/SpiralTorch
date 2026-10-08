@@ -166,46 +166,8 @@ fn permeable_clamp(value: f32, limit: f32, permeability: f32) -> f32 {
     sign * (limit + headroom * softened.min(1.0))
 }
 
-pub(crate) fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
-    if !value.is_finite() {
-        return 0.0;
-    }
-    if saturation <= 0.0 {
-        return 0.0;
-    }
-    let limit = saturation.abs();
-    let magnitude = value.abs();
-    if magnitude <= limit {
-        return value;
-    }
-    if porosity <= f32::EPSILON {
-        return value.signum() * limit;
-    }
-    let bleed = (magnitude - limit) / (magnitude + limit);
-    let absorb = (porosity * 0.25).min(1.0);
-    let softened = limit * (1.0 - absorb * bleed.min(1.0)).max(0.0);
-    value.signum() * softened
-}
-
-fn porous_mix_slope(value: f32, saturation: f32, porosity: f32) -> f32 {
-    if !value.is_finite() || saturation <= 0.0 {
-        return 0.0;
-    }
-    let limit = saturation.abs();
-    let magnitude = value.abs();
-    if magnitude <= limit {
-        return 1.0;
-    }
-    if porosity <= f32::EPSILON {
-        return 0.0;
-    }
-    let absorb = (porosity * 0.25).min(1.0);
-    let denominator = magnitude + limit;
-    if denominator <= f32::EPSILON {
-        return 0.0;
-    }
-    -2.0 * limit * limit * absorb / (denominator * denominator)
-}
+pub(crate) use st_kernel_contracts::topos_resonator::porous_mix;
+use st_kernel_contracts::topos_resonator::porous_mix_slope;
 
 fn finite_or(value: f32, default: f32) -> f32 {
     if value.is_finite() {
@@ -3505,6 +3467,7 @@ impl OpenCartesianTopos {
     }
 
     /// Saturates a scalar into the finite window enforced by the topos.
+    #[inline]
     pub fn saturate(&self, value: f32) -> f32 {
         porous_mix(value, self.saturation, self.porosity)
     }
@@ -3513,6 +3476,7 @@ impl OpenCartesianTopos {
     ///
     /// The slope is the canonical reverse-mode rule for every Rust adapter that
     /// differentiates through the open-topos saturation boundary.
+    #[inline]
     pub fn saturate_with_slope(&self, value: f32) -> (f32, f32) {
         (
             porous_mix(value, self.saturation, self.porosity),
@@ -5732,6 +5696,22 @@ mod tests {
         assert!(outside.abs() <= topos.saturation());
         assert!((outside_slope - numeric).abs() < 1e-4);
         assert!(outside_slope < 0.0);
+    }
+
+    #[test]
+    fn porous_saturation_slope_is_scale_invariant() {
+        for scale in [1e-30, 1e-10, 1.0, 1e20, 1e37] {
+            let topos = OpenCartesianTopos::new(-1.0, 1e-6, scale, 64, 1024)
+                .unwrap()
+                .with_porosity(0.8)
+                .unwrap();
+            let (value, slope) = topos.saturate_with_slope(2.0 * scale);
+            assert!((value / scale - 14.0 / 15.0).abs() < 2e-6);
+            assert!(
+                (slope + 0.4 / 9.0).abs() < 2e-6,
+                "scale={scale} slope={slope}"
+            );
+        }
     }
 
     #[test]

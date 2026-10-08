@@ -1,0 +1,33 @@
+{
+  "schema": "spiraltorch.fractional_history_ordinary_control_repro.v1",
+  "status": "passed",
+  "study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+  "prior_study_id": "c39201d211bbb94c5ee6b52c852cb4bb1047a6771d9ab188ce430232f0150960",
+  "same_frozen_base": true,
+  "same_data_and_batch_schedules": true,
+  "same_baseline_scores": true,
+  "checks": {
+    "41:pointwise": {
+      "adapter": true,
+      "optimizer": true,
+      "records": true,
+      "development": true,
+      "endpoint_scores": true
+    },
+    "43:pointwise": {
+      "adapter": true,
+      "optimizer": true,
+      "records": true,
+      "development": true,
+      "endpoint_scores": true
+    },
+    "47:pointwise": {
+      "adapter": true,
+      "optimizer": true,
+      "records": true,
+      "development": true,
+      "endpoint_scores": true
+    }
+  },
+  "scope": "Read-only saved state and endpoint comparison. Ordinary controls were rerun, not borrowed. Historical full-GL arms are not pooled into this study."
+}

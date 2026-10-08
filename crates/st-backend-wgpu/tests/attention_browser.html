@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident Z-space Attention vs PyTorch</title>
+<pre id="result" data-status="running">Checking resident WebGPU attention...</pre>
+<script type="module">
+import init, {run_resident_attention_checks} from "../../../target/resident-attention-web/resident_attention_browser.js";
+const result = document.querySelector("#result");
+try {
+  await init();
+  const report = JSON.parse(await run_resident_attention_checks());
+  if (report.schema !== "spiraltorch.resident_attention.browser.v1" ||
+      !report.passed || report.checks.length !== 80 || report.constant_checks.length !== 3 ||
+      ["canonical", "strided"].some(layout =>
+        ["head_major", "merged_heads"].some(order =>
+          report.checks.filter(c => c.layout === layout && c.output_order === order).length !== 20))) throw Error("Incomplete attention fixture");
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+} catch (error) {
+  result.textContent = JSON.stringify({passed: false, error: String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>

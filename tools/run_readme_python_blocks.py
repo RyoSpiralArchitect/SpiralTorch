@@ -84,8 +84,9 @@ def _run_block(
     index: int,
     total: int,
     allow_stub_skips: bool,
+    source: Path = Path("README.md"),
 ) -> None:
-    header = f"[README python] block {index}/{total} (starts at README.md:{block.start_line})"
+    header = f"[README python] block {index}/{total} (starts at {source}:{block.start_line})"
     print(header, flush=True)
     if _should_skip(block.code):
         print(f"{header} -> skipped", flush=True)
@@ -133,13 +134,13 @@ def _prepend_pythonpath(env: dict[str, str], path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Execute all ```python fenced blocks in README.md (each in a fresh process)."
+        description="Execute Python fences from READMEs or guides, each in a fresh process."
     )
     parser.add_argument(
         "--readme",
         type=Path,
-        default=Path("README.md"),
-        help="Path to README.md",
+        action="append",
+        help="Markdown path; repeat for multiple guides (default: README.md)",
     )
     parser.add_argument(
         "--python",
@@ -159,16 +160,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    readme_path: Path = args.readme
-    if not readme_path.exists():
-        print(f"README not found: {readme_path}", file=sys.stderr)
-        return 2
-
-    markdown = readme_path.read_text(encoding="utf-8")
-    blocks = _parse_python_blocks(markdown)
-    if not blocks:
-        print("No python blocks found.", file=sys.stderr)
-        return 1
+    # Validate the full selection before executing any examples. A missing or
+    # accidentally emptied guide must not silently shrink the smoke surface.
+    selected: list[tuple[Path, PythonBlock]] = []
+    for readme_path in args.readme or [Path("README.md")]:
+        if not readme_path.is_file():
+            print(f"Markdown not found: {readme_path}", file=sys.stderr)
+            return 2
+        blocks = _parse_python_blocks(readme_path.read_text(encoding="utf-8"))
+        if not blocks:
+            print(f"No python blocks found: {readme_path}", file=sys.stderr)
+            return 1
+        selected.extend((readme_path, block) for block in blocks)
 
     env = os.environ.copy()
     env.setdefault("PYTHONNOUSERSITE", "1")
@@ -176,18 +179,19 @@ def main() -> int:
     cwd = args.cwd.resolve()
     if (cwd / "spiraltorch" / "__init__.py").exists():
         _prepend_pythonpath(env, cwd)
-    for idx, block in enumerate(blocks, start=1):
+    for idx, (source, block) in enumerate(selected, start=1):
         _run_block(
             block,
             python=args.python,
             cwd=cwd,
             env=env,
             index=idx,
-            total=len(blocks),
+            total=len(selected),
             allow_stub_skips=args.allow_stub_skips,
+            source=source,
         )
 
-    print(f"[README python] OK ({len(blocks)} blocks)", flush=True)
+    print(f"[README python] OK ({len(selected)} blocks)", flush=True)
     return 0
 
 

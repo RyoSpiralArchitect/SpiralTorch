@@ -1,0 +1,97 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_one_replay_verification.v1",
+  "status": "exact_replay",
+  "current_study_id": "a9783461426f2d4fad9498a3ca610eb087dd2a8a1654cee8fe7c5b20ac12f758",
+  "prior_study_id": "b5264d2ea676d408f407f702b302b002f1bb6ea72b64a9660848c6d7e982d0a4",
+  "current_input_sha256": {
+    "plan.json": "bf418233415131764cc8148920d2c5172fcfc8e4700f4656c5d0738baf51da43",
+    "journal.json": "fe8f28f894be56836919e610f7ff3cd37633f0d6416fa91380ac1ffc30ee67f7",
+    "results.json": "5aa9df87bf7678043967bfbed06b0f6a3ea430da121432dc0750613738c89b72"
+  },
+  "prior_input_sha256": {
+    "plan.json": "2dd8ba664014c9ba8a8f2afde80603782747b6522e0c6c42a9a380e64cccf179",
+    "journal.json": "930df83d9b920a3a2f39721b918e75182552cf6ccf246a7fe39adc959c58e24f",
+    "results.json": "2c6aa8cd689d1a1013fcc13eb70eeb7a049b989709caf8012fa30a81dff43bb7"
+  },
+  "current_native_sha256": "5caece088b275f15f83a1bfb8e7216613c9470faf3f01f46ddf4b0f95f05f8f4",
+  "prior_native_sha256": "841680660aae22f5244c05c50a43d59cdca896037be2d38f484644ec6a13a1a5",
+  "same_model_data_schedule_and_recipe": true,
+  "sealed_inputs_unchanged": true,
+  "runs": {
+    "41": {
+      "current_checkpoint": {
+        "filename": "checkpoint-74j9ledy.pt",
+        "sha256": "b2e9c51ee4fc39c611e5905dd02afeee8001ed4639d7756d0ef54c7ae4c89ca8"
+      },
+      "prior_checkpoint": {
+        "filename": "checkpoint-exq86npd.pt",
+        "sha256": "f9dd0be2dccf94837b32a763d7fd49ec8a2faebbf919e96eb9b0d65484b74d93"
+      },
+      "parity": {
+        "initial_parameter_sha256_equal": true,
+        "all_training_records_equal": true,
+        "development_equal": true,
+        "adapter_tensor_contents_equal": true,
+        "optimizer_state_equal": true,
+        "all_endpoint_block_losses_equal": true,
+        "final_order_equal": true
+      },
+      "parameter_tensors_equal": {
+        "gate": true,
+        "local_gate": true,
+        "log_alpha": true
+      }
+    },
+    "43": {
+      "current_checkpoint": {
+        "filename": "checkpoint-iqjb9ho1.pt",
+        "sha256": "c744ef9fd414a54ff63bbe0b16e9674d3b6d520750c3248ba4d0b7d26904056d"
+      },
+      "prior_checkpoint": {
+        "filename": "checkpoint-cqje6fia.pt",
+        "sha256": "a0c76f728fc5049c078e68e67293479fafe6ee236fa061320e6c36a5b09f2548"
+      },
+      "parity": {
+        "initial_parameter_sha256_equal": true,
+        "all_training_records_equal": true,
+        "development_equal": true,
+        "adapter_tensor_contents_equal": true,
+        "optimizer_state_equal": true,
+        "all_endpoint_block_losses_equal": true,
+        "final_order_equal": true
+      },
+      "parameter_tensors_equal": {
+        "gate": true,
+        "local_gate": true,
+        "log_alpha": true
+      }
+    },
+    "47": {
+      "current_checkpoint": {
+        "filename": "checkpoint-u8g5r19c.pt",
+        "sha256": "6c7d5e90b6cbf0422bc348c51d293a344f8b2c0de57e5af7a9ca023997654ee8"
+      },
+      "prior_checkpoint": {
+        "filename": "checkpoint-4_mnvmr7.pt",
+        "sha256": "351452bef592c3557332e2509e9eaf42aa0ec77d70541d4aaee2f9f24e668e3e"
+      },
+      "parity": {
+        "initial_parameter_sha256_equal": true,
+        "all_training_records_equal": true,
+        "development_equal": true,
+        "adapter_tensor_contents_equal": true,
+        "optimizer_state_equal": true,
+        "all_endpoint_block_losses_equal": true,
+        "final_order_equal": true
+      },
+      "parameter_tensors_equal": {
+        "gate": true,
+        "local_gate": true,
+        "log_alpha": true
+      }
+    }
+  },
+  "verifier_sha256": "d9cf48f9408fa62c6f195c08d69743ba4fe62dc287e10b30e10454e2526e0e93",
+  "state_helper_sha256": "c7b1c545cf74079b53b4cf4df1f428e7c986f5531ee9aaa44c47c8cdc6a9ac13",
+  "scope": "Repeated one-initialized arms only; no training, scoring or independent-seed pooling. Study metadata and binary identities are distinct; compare tensor contents and matched receipts, not entire checkpoint bytes."
+}

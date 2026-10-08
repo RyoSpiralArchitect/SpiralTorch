@@ -1,0 +1,27 @@
+{
+  "schema": "spiraltorch.fractional_history_factorial_publication_validation.v1",
+  "status": "passed",
+  "study_id": "d133d43f6bc4f281b8717d513e3c7c5ab4374c401ce3d98db43d38799e9cc75b",
+  "exact_public_copies": 12,
+  "lossless_compressed_inputs": 2,
+  "primary_files_still_unchanged": 100,
+  "tests": {
+    "geometry_and_publication": 556,
+    "benchmark_correctness": 34,
+    "skipped": 0
+  },
+  "negative_test": {
+    "optimized_python": true,
+    "modified_summary_rejected": true,
+    "exit_code": 1,
+    "success_output_created": false,
+    "original_summary_sha256": "04e2eb2d816bbe7ef93371c5b5512693b082bfd726e472ddae4b0a178592a5fd",
+    "modified_summary_sha256": "b203afb0224fbdd2ed3058fe6347f0d4715572fd40e642c36b3cf0a8b4446711"
+  },
+  "summary_artifact_sha256": "04e2eb2d816bbe7ef93371c5b5512693b082bfd726e472ddae4b0a178592a5fd",
+  "summary_source_sha256": "25af45fd5a45830332e3792f3f805ba0d9e59b1ae54db15506f11d8d01527e67",
+  "checkpoint_verification_sha256": "d23eec776ce1477126d3245e04c22c1d94d1c8a3f5788fc179f518a3988763e9",
+  "published_private_weights": false,
+  "published_corpus_text": false,
+  "scope": "Public consistency and tamper checks. Numerical results and local saved-state verification records are distinct from readers rerunning private checkpoints."
+}

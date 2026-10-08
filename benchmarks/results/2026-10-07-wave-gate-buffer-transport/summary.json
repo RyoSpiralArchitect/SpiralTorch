@@ -1,0 +1,87 @@
+{
+  "schema": "spiraltorch.wave_gate_transport_summary.v1",
+  "status": "validated",
+  "rows": [
+    {
+      "mode": "legacy",
+      "size": "small",
+      "shape": [
+        2,
+        16,
+        64
+      ],
+      "log_radius": null,
+      "before_ms": 0.31085450000000003,
+      "after_ms": 0.087708,
+      "torch_after_ms": 0.21202100000000002,
+      "new_list_ms": 0.301771,
+      "all_output_gradient_hashes_equal": true,
+      "independent_processes_per_version": 3
+    },
+    {
+      "mode": "legacy",
+      "size": "large",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "log_radius": null,
+      "before_ms": 24.868958,
+      "after_ms": 2.9895205000000002,
+      "torch_after_ms": 2.283979,
+      "new_list_ms": 24.871271,
+      "all_output_gradient_hashes_equal": true,
+      "independent_processes_per_version": 3
+    },
+    {
+      "mode": "radius",
+      "size": "small",
+      "shape": [
+        2,
+        16,
+        64
+      ],
+      "log_radius": 1.38629436112,
+      "before_ms": 0.31756249999999997,
+      "after_ms": 0.0935835,
+      "torch_after_ms": 0.22566599999999998,
+      "new_list_ms": 0.3085,
+      "all_output_gradient_hashes_equal": true,
+      "independent_processes_per_version": 3
+    },
+    {
+      "mode": "radius",
+      "size": "large",
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "log_radius": 1.38629436112,
+      "before_ms": 23.692729,
+      "after_ms": 2.9645205,
+      "torch_after_ms": 2.287979,
+      "new_list_ms": 24.8425,
+      "all_output_gradient_hashes_equal": true,
+      "independent_processes_per_version": 3
+    }
+  ],
+  "process_reports": 24,
+  "rounds_per_route_per_process": 12,
+  "within_process_routes_rotated": true,
+  "binary_versions_interleaved": false,
+  "exact_native_output_and_all_gradients": true,
+  "wasm": {
+    "cases_per_version": 16,
+    "old_new_hashes_equal": true,
+    "scalar_sgd_updates_per_version": 400,
+    "continuation_exact": true,
+    "node_hosted": true,
+    "browser_or_webgpu_evidence": false
+  },
+  "auxiliary_pretrained_updates": 1,
+  "model_quality_claim": false,
+  "model_throughput_claim": false,
+  "gpu_speed_claim": false
+}

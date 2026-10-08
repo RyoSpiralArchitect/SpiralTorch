@@ -469,6 +469,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "without applying it; apply temporarily scales each optimizer update."
         ),
     )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-normalization",
+        choices=("active-positions", "eligible-targets"),
+        default=None,
+        help="Opt into Rust objective control; eligibility normalization is per microbatch.",
+    )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-decay-start-update", type=int, default=0
+    )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-decay-end-update", type=int, default=None
+    )
+    parser.add_argument(
+        "--zspace-repetition-unlikelihood-decay-final-scale", type=float, default=0.0
+    )
     parser.add_argument("--zspace-optimizer-control-gain", type=float, default=1.0)
     parser.add_argument("--zspace-optimizer-z-dim", type=int, default=6)
     parser.add_argument("--zspace-optimizer-curvature", type=float, default=-0.04)
@@ -899,6 +914,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--per-device-train-batch-size", type=int, default=2)
     parser.add_argument("--per-device-eval-batch-size", type=int, default=2)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
+    parser.add_argument(
+        "--causal-lm-mask-first-label",
+        action="store_true",
+        help=(
+            "Ignore the unpredicted first causal label before Trainer counts tokens. "
+            "Use for matched causal-LM accumulation; unequal masks still require "
+            "an explicit choice of microbatch versus global token normalization."
+        ),
+    )
     parser.add_argument("--logging-steps", type=int, default=25)
     parser.add_argument("--save-steps", type=int, default=250)
     parser.add_argument(
@@ -1464,6 +1488,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     except Exception as exc:
         parser.error(f"invalid Z-space optimizer control recipe: {exc}")
+    objective_control = None
+    if args.zspace_repetition_unlikelihood_decay_end_update is None and (
+        args.zspace_repetition_unlikelihood_decay_start_update != 0
+        or args.zspace_repetition_unlikelihood_decay_final_scale != 0.0
+    ):
+        parser.error(
+            "repetition decay start/final scale requires an explicit decay end update"
+        )
+    if (
+        args.zspace_repetition_unlikelihood_normalization is not None
+        or args.zspace_repetition_unlikelihood_decay_end_update is not None
+    ):
+        schedule = {"kind": "constant"}
+        if args.zspace_repetition_unlikelihood_decay_end_update is not None:
+            schedule = {
+                "kind": "linear_decay",
+                "start_update": args.zspace_repetition_unlikelihood_decay_start_update,
+                "end_update": args.zspace_repetition_unlikelihood_decay_end_update,
+                "final_scale": args.zspace_repetition_unlikelihood_decay_final_scale,
+            }
+        objective_control = {
+            "normalization": (
+                args.zspace_repetition_unlikelihood_normalization or "active-positions"
+            ).replace("-", "_"),
+            "schedule": schedule,
+        }
     try:
         args._hf_repetition_unlikelihood_recipe = (
             st.hf_repetition_unlikelihood_recipe_contract(
@@ -1474,13 +1524,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         "-", "_"
                     )
                 ),
-                proposal_top_k=(
-                    args.zspace_repetition_unlikelihood_proposal_top_k
-                ),
+                proposal_top_k=(args.zspace_repetition_unlikelihood_proposal_top_k),
                 context_window=args.zspace_repetition_unlikelihood_context_window,
                 max_candidates_per_position=(
                     args.zspace_repetition_unlikelihood_max_candidates
                 ),
+                objective_control=objective_control,
             )
         )
     except Exception as exc:
@@ -3347,6 +3396,17 @@ def _training_recipe_trainer_contract(args: argparse.Namespace) -> dict[str, obj
     trace_enabled = not bool(args.no_trainer_trace)
     repetition_recipe = dict(args._hf_repetition_unlikelihood_recipe)
     repetition_enabled = repetition_recipe.get("enabled") is True
+    base_class = "transformers.DataCollatorForLanguageModeling"
+    alignment = {}
+    if getattr(args, "causal_lm_mask_first_label", False):
+        base_class = "spiraltorch.HfCausalLabelAlignmentCollator"
+        alignment = {
+            "causal_label_alignment": {
+                "rule": "mask_unpredicted_first_label",
+                "ignore_index": -100,
+                "base_class": "transformers.DataCollatorForLanguageModeling",
+            },
+        }
     return {
         "trainer": (
             "spiraltorch.HfRepetitionUnlikelihoodTrainer"
@@ -3357,10 +3417,11 @@ def _training_recipe_trainer_contract(args: argparse.Namespace) -> dict[str, obj
             "class": (
                 "spiraltorch.HfRepetitionUnlikelihoodCollator"
                 if repetition_enabled
-                else "transformers.DataCollatorForLanguageModeling"
+                else base_class
             ),
-            "base_class": "transformers.DataCollatorForLanguageModeling",
+            "base_class": base_class,
             "mlm": False,
+            **alignment,
         },
         "trainer_train": {
             "resume_from_checkpoint": args.resume_from_checkpoint is not None,
@@ -5583,6 +5644,8 @@ def _main_with_runtime_access(
         tokenizer=tokenizer,
         mlm=False,
     )
+    if args.causal_lm_mask_first_label:
+        base_collator = st.HfCausalLabelAlignmentCollator(base_collator)
     repetition_recipe = dict(args._hf_repetition_unlikelihood_recipe)
     repetition_enabled = repetition_recipe.get("enabled") is True
     collator = base_collator

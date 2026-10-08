@@ -1,0 +1,332 @@
+use super::*;
+
+fn operator(coupling: f32, iterations: usize, porosity: f32) -> ToposResonatorOperator {
+    ToposResonatorOperator::new(
+        ToposResonatorConfig::new(coupling, iterations).unwrap(),
+        OpenCartesianTopos::new(-1.0, 1e-6, 1.0, 4097, 8192)
+            .unwrap()
+            .with_porosity(porosity)
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+fn bits(values: &[f32]) -> Vec<u32> {
+    values.iter().map(|v| v.to_bits()).collect()
+}
+
+// Frozen pre-row-walk implementation, including error and reduction order.
+fn legacy_vjp<const ELEMENTWISE_RMS: bool>(
+    batch: &ToposResonatorLearningBatch,
+    upstream: &[f32],
+) -> Result<(ToposResonatorBackward, f64), ToposResonatorError> {
+    validate_length("grad_output", upstream, batch.input.len())?;
+    let mut dx = Vec::with_capacity(batch.input.len());
+    let mut dg = Vec::with_capacity(batch.gate.len());
+    let mut squares = 0.0_f64;
+    let mut sums = match batch.gate_layout {
+        ToposResonatorGateLayout::Elementwise => Vec::new(),
+        ToposResonatorGateLayout::SharedRows => vec![0.0_f64; batch.gate.len()],
+    };
+    for (i, &upstream) in upstream.iter().enumerate() {
+        let gate_index = match batch.gate_layout {
+            ToposResonatorGateLayout::Elementwise => i,
+            ToposResonatorGateLayout::SharedRows => i % batch.gate.len(),
+        };
+        let drive = require_derived_finite("grad_drive", upstream * batch.drive_sensitivity[i])?;
+        dx.push(require_derived_finite(
+            "grad_input",
+            drive * batch.gate[gate_index],
+        )?);
+        let contribution = require_derived_finite("grad_gate", drive * batch.input[i])?;
+        if ELEMENTWISE_RMS {
+            let value = f64::from(contribution);
+            squares += value * value;
+        }
+        match batch.gate_layout {
+            ToposResonatorGateLayout::Elementwise => dg.push(contribution),
+            ToposResonatorGateLayout::SharedRows => sums[gate_index] += f64::from(contribution),
+        }
+    }
+    for sum in sums {
+        dg.push(require_derived_finite("grad_gate_sum", sum as f32)?);
+    }
+    Ok((
+        ToposResonatorBackward {
+            grad_input: dx,
+            grad_gate: dg,
+        },
+        squares,
+    ))
+}
+
+fn compare_legacy<const ELEMENTWISE_RMS: bool>(batch: &ToposResonatorLearningBatch, dy: &[f32]) {
+    let actual = batch.vjp_with_gate_statistics::<ELEMENTWISE_RMS>(dy);
+    let expected = legacy_vjp::<ELEMENTWISE_RMS>(batch, dy);
+    match (actual, expected) {
+        (Ok((actual, squares)), Ok((expected, expected_squares))) => {
+            assert_eq!(bits(&actual.grad_input), bits(&expected.grad_input));
+            assert_eq!(bits(&actual.grad_gate), bits(&expected.grad_gate));
+            assert_eq!(squares.to_bits(), expected_squares.to_bits());
+        }
+        (Err(actual), Err(expected)) => assert_eq!(format!("{actual:?}"), format!("{expected:?}")),
+        result => panic!("legacy pullback disagreement: {result:?}"),
+    }
+}
+
+#[test]
+fn row_walk_preserves_legacy_bits_statistics_and_error_priority() {
+    let values = [0.0, -0.0, f32::from_bits(1), -0.3, 0.7, 1.3, -2.0];
+    for rows in [0, 1, 2, 7, 257] {
+        for features in [1, 3, 17, 31] {
+            let input: Vec<_> = (0..rows * features)
+                .map(|i| values[i % values.len()])
+                .collect();
+            let gate: Vec<_> = (0..features)
+                .map(|i| values[(i + 4) % values.len()])
+                .collect();
+            let op = operator(0.5, 5, 0.3);
+            for batch in [
+                op.capture_shared_rows(&input, &gate, rows, features)
+                    .unwrap(),
+                op.capture(&input, &gate.repeat(rows), rows, features)
+                    .unwrap(),
+            ] {
+                let ordinary: Vec<_> = (0..input.len())
+                    .map(|i| values[(i + 2) % values.len()])
+                    .collect();
+                for dy in [
+                    ordinary,
+                    vec![f32::MAX; input.len()],
+                    vec![f32::NAN; input.len()],
+                    vec![f32::INFINITY; input.len()],
+                    vec![0.0; input.len() + 1],
+                ] {
+                    compare_legacy::<false>(&batch, &dy);
+                    compare_legacy::<true>(&batch, &dy);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn row_walk_keeps_per_contribution_guards_before_final_shared_sum() {
+    for (coupling, input, gate, upstream) in [
+        (0.5, vec![0.0; 6], vec![1.0; 3], vec![f32::MAX; 6]),
+        (0.0, vec![0.0; 6], vec![f32::MAX; 3], vec![2.0; 6]),
+        (0.0, vec![f32::MAX; 6], vec![0.0; 3], vec![2.0; 6]),
+        (0.0, vec![f32::MAX; 6], vec![0.0; 3], vec![1.0; 6]),
+        (
+            0.0,
+            vec![f32::MAX, f32::MAX, -f32::MAX, -f32::MAX, 1.0],
+            vec![0.0],
+            vec![1.0; 5],
+        ),
+    ] {
+        let batch = operator(coupling, 5, 0.0)
+            .capture_shared_rows(&input, &gate, input.len() / gate.len(), gate.len())
+            .unwrap();
+        compare_legacy::<false>(&batch, &upstream);
+        compare_legacy::<true>(&batch, &upstream);
+        compare_legacy::<true>(&batch, &vec![0.0; input.len()]);
+    }
+}
+
+#[test]
+fn shared_capture_matches_expanded_recurrence_and_tensor_reduction() {
+    let pattern = [0.0, -0.0, f32::from_bits(1), -0.3, 0.5, 1.3, -2.0];
+    for rows in [0, 1, 7, 257] {
+        for features in [1, 3, 17] {
+            for (coupling, iterations) in [(0.0, 1), (0.25, 5), (0.75, 64)] {
+                for porosity in [0.0, f32::EPSILON, 0.3, 1.0] {
+                    let op = operator(coupling, iterations, porosity);
+                    let input: Vec<_> = (0..rows * features)
+                        .map(|i| pattern[i % pattern.len()])
+                        .collect();
+                    let gate: Vec<_> = (0..features).map(|i| (i % 5) as f32 - 1.5).collect();
+                    let expanded = gate.repeat(rows);
+                    let expected = op.capture(&input, &expanded, rows, features).unwrap();
+                    let batch = op
+                        .capture_shared_rows(&input, &gate, rows, features)
+                        .unwrap();
+                    assert_eq!(batch.gate_layout(), ToposResonatorGateLayout::SharedRows);
+                    assert_eq!(batch.gate().len(), features);
+                    assert_eq!(bits(batch.output()), bits(expected.output()));
+                    assert_eq!(
+                        serde_json::to_string(batch.step()).unwrap(),
+                        serde_json::to_string(expected.step()).unwrap()
+                    );
+                    assert_eq!(
+                        op.forward_shared_rows(&input, &gate, rows, features)
+                            .unwrap(),
+                        *batch.step()
+                    );
+                    for sign in [1.0, -0.5] {
+                        let dy: Vec<_> = (0..input.len())
+                            .map(|i| sign * ((i % 11) as f32 / 7.0 - 0.5))
+                            .collect();
+                        let expected_vjp = expected.vjp(&dy).unwrap();
+                        let (actual, audit) = batch.vjp_audited(&dy).unwrap();
+                        let (elementwise_audited, elementwise_audit) =
+                            batch.vjp_audited_elementwise(&dy).unwrap();
+                        assert_eq!(elementwise_audited, actual);
+                        assert_eq!(elementwise_audit, expected.vjp_audited(&dy).unwrap().1);
+                        let tensor =
+                            st_tensor::Tensor::from_vec(rows, features, expected_vjp.grad_gate)
+                                .unwrap();
+                        assert_eq!(bits(&actual.grad_input), bits(&expected_vjp.grad_input));
+                        assert_eq!(
+                            bits(&actual.grad_gate),
+                            bits(&tensor.try_sum_axis0().unwrap())
+                        );
+                        assert_eq!(audit.grad_gate_rms, root_mean_square(&actual.grad_gate));
+                        assert_eq!(audit.rows, rows);
+                        assert_eq!(audit.features, features);
+                    }
+                }
+            }
+        }
+    }
+    let op = operator(0.99, 4096, 0.3);
+    let shared = op.capture_shared_rows(&[0.1; 6], &[0.2; 3], 2, 3).unwrap();
+    let expanded = op.capture(&[0.1; 6], &[0.2; 6], 2, 3).unwrap();
+    assert_eq!(bits(shared.output()), bits(expanded.output()));
+    assert_eq!(
+        shared.vjp(&[0.1; 6]).unwrap().grad_input,
+        expanded.vjp(&[0.1; 6]).unwrap().grad_input
+    );
+}
+
+#[test]
+fn shared_capture_owns_only_feature_gate_and_survives_source_mutation() {
+    let (borrowed, owned, retained, snapshot) = {
+        let op = operator(0.25, 5, 0.3);
+        let mut input = vec![0.2; 6];
+        let mut gate = vec![0.5; 3];
+        let borrowed = op.capture_shared_rows(&input, &gate, 2, 3).unwrap();
+        let allocations = (
+            input.as_ptr(),
+            input.capacity(),
+            gate.as_ptr(),
+            gate.capacity(),
+        );
+        let owned = op
+            .capture_shared_rows_owned(input.clone(), gate.clone(), 2, 3)
+            .unwrap();
+        let retained = op.capture_shared_rows_owned(input, gate, 2, 3).unwrap();
+        assert_eq!(
+            (
+                retained.input.as_ptr(),
+                retained.input.capacity(),
+                retained.gate.as_ptr(),
+                retained.gate.capacity()
+            ),
+            allocations
+        );
+        input = vec![0.2; 6];
+        gate = vec![0.5; 3];
+        let snapshot = op.capture_shared_rows(&input, &gate, 2, 3).unwrap();
+        input.fill(f32::NAN);
+        gate.fill(f32::NAN);
+        (borrowed, owned, retained, snapshot)
+    };
+    for batch in [borrowed, owned, retained, snapshot.clone()] {
+        assert_eq!(batch.step(), snapshot.step());
+        assert_eq!(
+            batch.vjp(&[0.3; 6]).unwrap(),
+            snapshot.vjp(&[0.3; 6]).unwrap()
+        );
+    }
+}
+
+#[test]
+fn shared_sum_preserves_finite_cancellation_and_rejects_final_overflow() {
+    let op = operator(0.0, 1, 0.0);
+    let batch = op
+        .capture_shared_rows(
+            &[f32::MAX, f32::MAX, -f32::MAX, -f32::MAX, 1.0],
+            &[0.0],
+            5,
+            1,
+        )
+        .unwrap();
+    assert_eq!(batch.vjp(&[1.0; 5]).unwrap().grad_gate, [1.0]);
+    assert!(matches!(
+        batch.vjp(&[1.0, 1.0, 0.0, 0.0, 0.0]),
+        Err(ToposResonatorError::NonFiniteDerived {
+            field: "grad_gate_sum",
+            ..
+        })
+    ));
+    assert_eq!(batch.vjp(&[1.0; 5]).unwrap().grad_gate, [1.0]);
+    // A wide sum cannot hide a nonfinite individual f32 contribution.
+    assert!(batch.vjp(&[2.0, -2.0, 0.0, 0.0, 0.0]).is_err());
+    let empty = op.capture_shared_rows(&[], &[0.3, -0.0], 0, 2).unwrap();
+    assert_eq!(
+        empty.vjp(&[]).unwrap(),
+        ToposResonatorBackward {
+            grad_input: vec![],
+            grad_gate: vec![0.0; 2]
+        }
+    );
+}
+
+#[test]
+fn shared_shape_finite_and_budget_guards_preserve_reusability() {
+    let op = operator(0.25, 5, 0.3);
+    for (input, gate, rows, features) in [
+        (vec![], vec![], 0, 0),
+        (vec![], vec![1.0], usize::MAX, 2),
+        (vec![1.0; 2], vec![1.0; 2], 2, 1),
+        (vec![], vec![1.0; 8193], 0, 8193),
+        (vec![1.0; 8193], vec![1.0], 8193, 1),
+        (vec![], vec![f32::NAN], 0, 1),
+        (vec![f32::INFINITY], vec![1.0], 1, 1),
+        (vec![f32::MAX], vec![2.0], 1, 1),
+    ] {
+        let expected = op
+            .capture_shared_rows(&input, &gate, rows, features)
+            .unwrap_err();
+        let forward = op
+            .forward_shared_rows(&input, &gate, rows, features)
+            .unwrap_err();
+        let validation = validate_topos_resonator_state_with_layout(
+            op.request(&input, &gate, rows, features),
+            ToposResonatorGateLayout::SharedRows,
+        )
+        .unwrap_err();
+        let owned = op
+            .capture_shared_rows_owned(input, gate, rows, features)
+            .unwrap_err();
+        assert_eq!(format!("{expected:?}"), format!("{forward:?}"));
+        assert_eq!(format!("{expected:?}"), format!("{owned:?}"));
+        assert_eq!(format!("{expected:?}"), format!("{validation:?}"));
+    }
+    let batch = op.capture_shared_rows(&[0.2; 6], &[0.5; 3], 2, 3).unwrap();
+    for dy in [vec![], vec![f32::NAN; 6], vec![f32::INFINITY; 6]] {
+        assert!(batch.vjp(&dy).is_err());
+    }
+    assert_eq!(batch.vjp(&[0.1; 6]).unwrap().grad_gate.len(), 3);
+}
+
+#[test]
+fn elementwise_audit_preserves_finite_contributions_before_shared_cancellation() {
+    let op = operator(0.0, 1, 0.0);
+    let batch = op
+        .capture_shared_rows(&[f32::MAX, -f32::MAX], &[0.0], 2, 1)
+        .unwrap();
+    let (reduced, reduced_audit) = batch.vjp_audited(&[1.0; 2]).unwrap();
+    let (elementwise, elementwise_audit) = batch.vjp_audited_elementwise(&[1.0; 2]).unwrap();
+    assert_eq!(reduced, elementwise);
+    assert_eq!(reduced.grad_gate, [0.0]);
+    assert_eq!(reduced_audit.grad_gate_rms, 0.0);
+    assert_eq!(elementwise_audit.grad_gate_rms, f64::from(f32::MAX));
+    assert!(batch.vjp_audited_elementwise(&[2.0; 2]).is_err());
+    assert!(batch.vjp_audited_elementwise(&[f32::NAN; 2]).is_err());
+    assert!(batch.vjp_audited_elementwise(&[]).is_err());
+    assert_eq!(
+        batch.vjp_audited_elementwise(&[1.0; 2]).unwrap().1,
+        elementwise_audit
+    );
+}

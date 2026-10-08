@@ -108,9 +108,24 @@ fn summarize_backend_labels(labels: &[&'static str]) -> String {
     "mixed".to_string()
 }
 
-fn elapsed_us_since(start: Instant) -> u64 {
-    let micros = start.elapsed().as_micros().min(u64::MAX as u128) as u64;
-    micros.max(1)
+fn native_clock_start() -> Option<Instant> {
+    // The scalar wasm32 target has no std::time clock. Telemetry must not
+    // prevent an otherwise portable pullback from executing.
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Some(Instant::now())
+    }
+}
+
+fn elapsed_us_since(start: Option<Instant>) -> Option<u64> {
+    start.map(|start| {
+        let micros = start.elapsed().as_micros().min(u64::MAX as u128) as u64;
+        micros.max(1)
+    })
 }
 
 fn emit_lstm_meta(
@@ -735,7 +750,7 @@ struct LstmBackwardScanRoute {
     shape_supported: bool,
     runtime_requested: bool,
     runtime_available: bool,
-    elapsed_us: u64,
+    elapsed_us: Option<u64>,
     workgroup_size: usize,
     parallel_lanes: usize,
     parallel_axis: &'static str,
@@ -753,7 +768,7 @@ fn lstm_backward_scan_cpu(
     weight_hh_t: &Tensor,
     matmul_backend: MatmulBackend,
 ) -> PureResult<LstmBackwardScanResult> {
-    let scan_start = Instant::now();
+    let scan_start = native_clock_start();
     let timesteps = cache.timesteps;
     let hidden_dim = cache.hidden_dim;
     let gate_width = 4 * hidden_dim;
@@ -843,7 +858,7 @@ fn lstm_backward_scan(
                     Some("lstm_backward_scan shape unsupported by WGPU helper".to_string());
                 return Ok(scan);
             }
-            let scan_start = Instant::now();
+            let scan_start = native_clock_start();
             match st_tensor::wgpu_dense::lstm_backward_scan(
                 &cache.gates_i,
                 &cache.gates_f,
@@ -1094,6 +1109,14 @@ impl Module for Lstm {
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let result = self.backward_retained(input, grad_output);
+        if result.is_ok() {
+            self.cache.get_mut().take();
+        }
+        result
+    }
+
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
         if grad_output.shape().0 != input.shape().0 || grad_output.shape().1 != self.hidden_dim {
             return Err(TensorError::ShapeMismatch {
@@ -1192,7 +1215,6 @@ impl Module for Lstm {
         self.weight_hh.accumulate_euclidean(&grad_w_hh)?;
         self.bias_ih.accumulate_euclidean(&grad_b_ih)?;
         self.bias_hh.accumulate_euclidean(&grad_b_hh)?;
-        self.cache.borrow_mut().take();
         emit_lstm_meta(
             "lstm_backward",
             timesteps,
@@ -1218,7 +1240,7 @@ impl Module for Lstm {
             Some(scan.route.shape_supported),
             Some(scan.route.runtime_requested),
             Some(scan.route.runtime_available),
-            Some(scan.route.elapsed_us),
+            scan.route.elapsed_us,
             Some(scan.route.workgroup_size),
             Some(scan.route.parallel_lanes),
             Some(scan.route.parallel_axis),
@@ -1635,7 +1657,7 @@ mod tests {
         assert!(scan.route.shape_supported);
         assert!(!scan.route.runtime_requested);
         assert!(!scan.route.runtime_available);
-        assert!(scan.route.elapsed_us > 0);
+        assert!(scan.route.elapsed_us.is_some_and(|value| value > 0));
         assert_eq!(scan.gate_gradients.len(), expected.len());
         for (idx, (&actual, &expected)) in
             scan.gate_gradients.iter().zip(expected.iter()).enumerate()

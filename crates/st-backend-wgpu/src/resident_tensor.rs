@@ -8,6 +8,7 @@ use st_kernel_contracts::{
 };
 use thiserror::Error;
 
+pub mod attention;
 pub(crate) mod capture;
 mod checked_import;
 pub mod classification;
@@ -16,12 +17,15 @@ pub(crate) mod guard_capture;
 pub mod loss;
 pub mod normalization;
 pub mod pointwise;
+pub mod profile;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
 pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    Attention(#[from] st_kernel_contracts::attention::AttentionError),
     #[error(transparent)]
     LayerNorm(#[from] st_kernel_contracts::normalization::LayerNormError),
     #[error(transparent)]
@@ -59,6 +63,7 @@ struct Kernels {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
     runtime: WgpuRuntime,
+    attention: std::sync::OnceLock<attention::AttentionKernels>,
     mse: std::sync::OnceLock<loss::MseKernels>,
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
@@ -214,6 +219,7 @@ impl TensorDevice {
             layout,
             pipeline,
             runtime,
+            attention: std::sync::OnceLock::new(),
             mse: std::sync::OnceLock::new(),
             classification: std::sync::OnceLock::new(),
             normalization: std::sync::OnceLock::new(),
@@ -613,6 +619,10 @@ impl ResidentTensor {
     }
     pub fn narrow(&self, axis: usize, start: usize, length: usize) -> Result<Self, TensorError> {
         self.view(self.layout.narrow(axis, start, length)?)
+    }
+    /// Remove a selected axis as an immutable view, without packing or copying.
+    pub fn select(&self, axis: usize, index: usize) -> Result<Self, TensorError> {
+        self.view(self.layout.select(axis, index)?)
     }
     pub fn broadcast_to(&self, shape: &[usize]) -> Result<Self, TensorError> {
         self.view(self.layout.broadcast_to(shape)?)

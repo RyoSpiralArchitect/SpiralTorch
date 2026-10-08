@@ -1,0 +1,90 @@
+{
+  "schema": "spiraltorch.fractional_diagnostic_disposition.v1",
+  "interrupted_attempt": {
+    "observed_result_files": 12,
+    "planned_processes": 24,
+    "reason": "Goal paused; runner terminated, no partial/fresh result pooling. All local artifacts retained. Complete rerun planned independently of observed values.",
+    "files": [
+      {
+        "file": "baseline-full-1x256x768-repeat1.json",
+        "sha256": "8a602b0bac01555b08c3cd69f09a0d3165a063ba534ead4bb551e3f95cb5def8"
+      },
+      {
+        "file": "baseline-full-2x128x768-repeat1.json",
+        "sha256": "c52fd88762a51241893ed7296f7eee57217c222f26b3f86dbb2b51655bf49502"
+      },
+      {
+        "file": "baseline-full-2x128x768-repeat2.json",
+        "sha256": "f4c1b888ac98f336dd77c67bb59b9a1778212d148b14d875053bdffab17d7637"
+      },
+      {
+        "file": "baseline-history-1x256x768-repeat1.json",
+        "sha256": "7d085d106807d94f917e3cb4fcc5e9c7c6962431a11fff55f5bbb2f8b877d6f6"
+      },
+      {
+        "file": "baseline-history-2x128x768-repeat1.json",
+        "sha256": "856a5fbc57db917f2e4362fba01663496209d45175149b69f149f85c2de414a2"
+      },
+      {
+        "file": "baseline-history-2x128x768-repeat2.json",
+        "sha256": "ff60379760fd241160ba0f227f97445543d66eb396989d3c888b80ee746fdaf5"
+      },
+      {
+        "file": "paired-full-1x256x768-repeat1.json",
+        "sha256": "a28fdd7fa70820487136dcca3a86f4170f55ee91957e0979ee7909067ed3a02e"
+      },
+      {
+        "file": "paired-full-2x128x768-repeat1.json",
+        "sha256": "71bff731ceda265e76cd4ac1c2e9e471d066c8d75a5d362791ce5dcac56328e2"
+      },
+      {
+        "file": "paired-full-2x128x768-repeat2.json",
+        "sha256": "1d4b6a12ec404a9fe0940baec3a846d6e4036872cef8896da86aeaf6d74a6ee1"
+      },
+      {
+        "file": "paired-history-1x256x768-repeat1.json",
+        "sha256": "777265463e6d31daab017b1cff4870c3f3b56304e4f84e9641c32f699dafb7f0"
+      },
+      {
+        "file": "paired-history-2x128x768-repeat1.json",
+        "sha256": "5e8b9ba4ad21d89c9e0ae9fd0bfdf1eabb4ff1b96ff1af92403120f715469aed"
+      },
+      {
+        "file": "paired-history-2x128x768-repeat2.json",
+        "sha256": "1a2cb8dd615476cd2c9ae57f8200c10ec3617f5b8623432fdff3da857fbf70b3"
+      }
+    ]
+  },
+  "exploratory_diagnostics": [
+    {
+      "file": "baseline-full-stages.json",
+      "sha256": "cfde7ce26a78e90d32f03838684c2be2fed0bf7f8a00cba802b1897226d71e13",
+      "disposition": "Excluded: list/Tensor reconstruction omitted explicit dtype/device, unlike the production bridge."
+    },
+    {
+      "file": "baseline-history-stages.json",
+      "sha256": "cdbde222a020fe66e38a7d0bf34f5ec2381c7c7efb5179005308e903ff49f53a",
+      "disposition": "Excluded: list/Tensor reconstruction omitted explicit dtype/device, unlike the production bridge."
+    },
+    {
+      "file": "baseline-full-explicit-dtype-stages.json",
+      "sha256": "8ea918bf5beb56c2e64a62a66e509c9c96a678790ef0aa84e663f94cc7d937d5",
+      "disposition": "Corrected exploratory stages; not used in the complete timing matrix."
+    },
+    {
+      "file": "baseline-history-explicit-dtype-stages.json",
+      "sha256": "b88910664522279d29764530b7e86aa1bd85658f1663790ae749f75d6ec8a074",
+      "disposition": "Corrected exploratory stages; not used in the complete timing matrix."
+    },
+    {
+      "file": "baseline-rust-profile.jsonl",
+      "sha256": "2f02ac5dc7f8f6fab49e95fe837b1b093da83c44c3e2ee2f72d0789a8c8e7320",
+      "disposition": "Initial sequential single-pass diagnostic; replaced by the planned three-repeat supplemental comparison."
+    },
+    {
+      "file": "paired-rust-profile.jsonl",
+      "sha256": "aab2d6cbabebfa1dc43f2e50bf849fba5857e0e34b6e262da0aa43c2df82b860",
+      "disposition": "Initial sequential single-pass diagnostic; replaced by the planned three-repeat supplemental comparison."
+    }
+  ]
+}

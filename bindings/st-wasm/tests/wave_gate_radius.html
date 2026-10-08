@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust WaveGate radius learning</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {WaveGateKernel} from "/module/spiraltorch_wasm.js";
+const out = document.querySelector("#result");
+const report = {schema: "spiraltorch.wave_gate_radius_browser.v1", status: "running"};
+function assert(ok, label) { if (!ok) throw Error(label); }
+function compare(actual, expected) {
+  assert(actual.length === expected.length, "shape mismatch");
+  let error = 0;
+  for (let i = 0; i < actual.length; i++) {
+    const delta = Math.abs(actual[i] - expected[i]);
+    assert(Number.isFinite(delta) && delta <= 1e-6 + 2e-5 * Math.abs(expected[i]), `value ${i}`);
+    error = Math.max(error, delta);
+  }
+  return error;
+}
+function reject(fn) {
+  let rejected = false;
+  try { const result = fn(); result?.free(); } catch { rejected = true; }
+  assert(rejected, "expected rejection");
+}
+let kernel;
+try {
+  await init();
+  const response = await fetch("/pretrained.json");
+  assert(response.ok, "reference response");
+  const fixture = (await response.json()).native_fixture;
+  const radius = fixture.radius;
+  kernel = new WaveGateKernel(-0.7, 1, 0.2, 64);
+  const x = new Float32Array(fixture.input), gate = new Float32Array(fixture.gate), bias = new Float32Array(fixture.bias);
+  const batch = kernel.forward_with_log_radius(x, gate, bias, 2, 2, radius.log_radius);
+  try {
+    report.forward_max_error = compare(batch.output, radius.output);
+    const gradient = batch.vjp_with_log_radius(new Float32Array(fixture.upstream));
+    try {
+      report.vjp_max_error = Math.max(...["grad_input", "grad_gate", "grad_bias"].map(key => compare(gradient[key], radius[key])),
+        compare([gradient.grad_log_radius], [radius.grad_log_radius]));
+    } finally { gradient.free(); }
+    const conditioning = JSON.parse(batch.conditioning_json());
+    report.conditioning_max_error = 0;
+    assert(Object.keys(conditioning).length === Object.keys(radius.conditioning).length, "conditioning shape");
+    for (const [key, expected] of Object.entries(radius.conditioning)) {
+      if (typeof expected === "number") report.conditioning_max_error = Math.max(report.conditioning_max_error, compare([conditioning[key]], [expected]));
+      else assert(conditioning[key] === expected, `conditioning ${key}`);
+    }
+  } finally { batch.free(); }
+  const teacher = kernel.forward_with_log_radius(x, gate, bias, 2, 2, 0.7);
+  const target = teacher.output;
+  teacher.free();
+  function step(state, update = true) {
+    const batch = kernel.forward_with_log_radius(x, gate, bias, 2, 2, state.log_radius);
+    try {
+      const output = batch.output;
+      const loss = output.reduce((sum, v, i) => sum + (v - target[i]) ** 2 / output.length, 0);
+      if (update) {
+        const derivative = batch.vjp_with_log_radius(Float32Array.from(output, (v, i) => 2 * (v - target[i]) / output.length));
+        try { state.log_radius = Math.fround(state.log_radius - 2 * derivative.grad_log_radius); }
+        finally { derivative.free(); }
+      }
+      return loss;
+    } finally { batch.free(); }
+  }
+  const state = {log_radius: 0};
+  report.initial_loss = step(state, false);
+  for (let i = 0; i < 400; i++) step(state);
+  report.final_loss = step(state, false);
+  report.learned_log_radius = state.log_radius;
+  assert(report.final_loss < report.initial_loss * 0.01, "radius did not learn");
+  const restored = JSON.parse(JSON.stringify(state));
+  step(state); step(restored);
+  report.resume_next_update_equal = state.log_radius === restored.log_radius;
+  assert(report.resume_next_update_equal, "SGD continuation mismatch");
+  for (const invalid of [NaN, Infinity, -Infinity, 100, -100, "0", null, true])
+    reject(() => kernel.forward_with_log_radius(x, gate, bias, 2, 2, invalid));
+  const empty = kernel.forward_with_log_radius(new Float32Array(), gate, bias, 0, 2, 0.5);
+  try {
+    const gradient = empty.vjp_with_log_radius(new Float32Array());
+    try { assert(gradient.grad_log_radius === 0, "empty radius derivative"); }
+    finally { gradient.free(); }
+  } finally { empty.free(); }
+  report.status = "passed";
+} catch (error) { report.status = "error"; report.error = String(error.stack || error); }
+finally { kernel?.free(); }
+out.textContent = JSON.stringify(report, null, 2);
+out.dataset.status = report.status;
+</script>

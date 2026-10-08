@@ -1,0 +1,44 @@
+{
+  "schema": "spiraltorch.topos_resident_graph_python_check.v1",
+  "source_revision": "d4c61e03a664f0dc15fc9c02eebca55374db8008",
+  "scope": "100 synthetic graph updates vs independent CPU Torch, not speed/quality",
+  "max_abs_error": {
+    "output": 5.960464477539063e-8,
+    "dx": 2.9802322387695312e-8,
+    "dg": 1.1920928955078125e-7,
+    "gate": 1.4901161193847656e-8,
+    "loss": 5.960464477539063e-8
+  },
+  "updates": 100,
+  "shape": [
+    2,
+    2,
+    3
+  ],
+  "porosities": [
+    0,
+    0.3
+  ],
+  "policies": [
+    "exact",
+    "module_compatible"
+  ],
+  "steps_per_case": 25,
+  "rtol": 0.0005,
+  "atol": 0.00003,
+  "reference": "independent CPU Torch autograd with its own gate trajectory",
+  "runtime": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "native_sha256": "42579ac70587c7abd46460d1794dfe501f717a941f5ed8c2400114618c5c6e84",
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    }
+  },
+  "source_sha256": {
+    "bindings/st-py/tests/test_nn_resident_topos.py": "08ae419da7397dd5301e20e5eed4c050b3e9ba6dbf85dde1a871f262493c00b3",
+    "tools/benchmark_topos_learning.py": "e62da98cea2e730454f89331cb5d86a5d4ca2d28e6a8922ae7a88b949cfa6e7f"
+  }
+}

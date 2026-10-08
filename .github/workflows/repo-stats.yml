@@ -34,7 +34,7 @@ jobs:
           fi
           tokei --version
 
-      - name: Generate badges & update README
+      - name: Generate badges & update statistics page
         run: |
           python3 tools/gen_repo_stats.py
 

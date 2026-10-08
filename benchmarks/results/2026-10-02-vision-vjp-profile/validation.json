@@ -1,0 +1,310 @@
+{
+  "schema": "spiraltorch.vision.gpu_profile_validation.v1",
+  "captured_source": "891f6d9b8e531a7b2757f006c59bc29ffc33b92c",
+  "boundary": "Results and hashes, not published raw weights, images, or hardware attestation",
+  "rust_toolchain": "1.98.0",
+  "runtime_binary_sha256": "1373ff31ac8e171dd40459eba64c3f7ea21f03d4f4796964c54297a576c2086b",
+  "backend_tests": {
+    "passed": 253,
+    "failed": 0
+  },
+  "vision_tests": {
+    "passed": 113,
+    "failed": 0,
+    "ignored": 1,
+    "ignored_reason": "manual stage diagnostic with synchronizing readbacks"
+  },
+  "strict_clippy": {
+    "scope": "st-backend-wgpu and st-vision libraries; --no-deps",
+    "passed": true
+  },
+  "formatter": {
+    "toolchain": "nightly",
+    "passed": true
+  },
+  "offline_verifier_tests": {
+    "passed": 7,
+    "failed": 0
+  },
+  "logs_sha256": {
+    "backend-final.log": "84f03d7de0eab97b94b8786aac5267077bd4cdf48e94f4afc84cf3faab197e1f",
+    "vision-final.log": "1916bf4a3b1e1209738c9d498ba2e776da8f2049b98fb2a941f4505ae6ecc351",
+    "clippy-complete.log": "ef8660121035062f56f36179424cba47a95eedd73817f6c62f7241980e439c76",
+    "fmt-nightly-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wasm-build-bounded.log": "45cac9485b4ef8abc9ac68074a8c0dc7d1b0e9b85995221070027bfabd2d6999",
+    "release-frozen.log": "455fc0c976414b0ccf3482760c40a926b1e7f3897ffce70fc0086420accb10be",
+    "native-fixture-final.log": "47743aeb1689477e57296b7f84840a3137a2f1337ac0cf01fc1c29cbcfec00c2",
+    "verifier-tests.log": "eb8c88bdf6d7bffd457b38469078be30b7e97db745e82c5f24162939bad78be2"
+  },
+  "native_fixture": {
+    "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "checks": [
+      "unsupported_before_closure",
+      "runtime_clone_capture",
+      "dense_depthwise_value_parity",
+      "view_packing",
+      "nested_capture_rejected",
+      "nonfinite_guard_rejected",
+      "retained_after_drop",
+      "cancelled_reuse",
+      "written_prefix_only"
+    ],
+    "passed": true,
+    "profile": {
+      "operations": [
+        {
+          "dilation": [
+            1,
+            1
+          ],
+          "input": [
+            1,
+            2,
+            2,
+            2
+          ],
+          "kind": "dense",
+          "padding": [
+            0,
+            0
+          ],
+          "passes": [
+            {
+              "elapsed_ns": 10042,
+              "end_tick": "10868670709083",
+              "phase": "input_vjp",
+              "start_tick": "10868670699041"
+            },
+            {
+              "elapsed_ns": 8166,
+              "end_tick": "10868670721666",
+              "phase": "weight_vjp",
+              "start_tick": "10868670713500"
+            },
+            {
+              "elapsed_ns": 5750,
+              "end_tick": "10868670727875",
+              "phase": "bias_vjp",
+              "start_tick": "10868670722125"
+            }
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "timestamp_period_ns": 1,
+          "upstream": [
+            1,
+            3,
+            2,
+            2
+          ],
+          "weights": [
+            3,
+            2,
+            1,
+            1
+          ]
+        },
+        {
+          "dilation": [
+            1,
+            1
+          ],
+          "input": [
+            1,
+            2,
+            2,
+            2
+          ],
+          "kind": "depthwise",
+          "padding": [
+            0,
+            0
+          ],
+          "passes": [
+            {
+              "elapsed_ns": 9000,
+              "end_tick": "10868670937625",
+              "phase": "input_vjp",
+              "start_tick": "10868670928625"
+            },
+            {
+              "elapsed_ns": 7292,
+              "end_tick": "10868670950000",
+              "phase": "weight_vjp",
+              "start_tick": "10868670942708"
+            },
+            {
+              "elapsed_ns": 6167,
+              "end_tick": "10868670956625",
+              "phase": "bias_vjp",
+              "start_tick": "10868670950458"
+            }
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "timestamp_period_ns": 1,
+          "upstream": [
+            1,
+            2,
+            2,
+            2
+          ],
+          "weights": [
+            2,
+            1,
+            1
+          ]
+        }
+      ],
+      "schema": "spiraltorch.convolution_vjp_gpu_profile.v1",
+      "scope": "Existing convolution VJP passes only; not whole-step throughput"
+    },
+    "schema": "spiraltorch.convolution_profile_fixture.v1"
+  },
+  "browser_fixture": {
+    "schema": "spiraltorch.convolution_profile_browser_evidence.v1",
+    "wasm_sha256": "77a406f71a43c1083d2a622903be6918fc84ebec5b48ea51e3c575c5562aae16",
+    "fixture": {
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "checks": [
+        "unsupported_before_closure",
+        "runtime_clone_capture",
+        "dense_depthwise_value_parity",
+        "view_packing",
+        "nested_capture_rejected",
+        "nonfinite_guard_rejected",
+        "retained_after_drop",
+        "cancelled_reuse",
+        "written_prefix_only"
+      ],
+      "passed": true,
+      "profile": {
+        "operations": [
+          {
+            "dilation": [
+              1,
+              1
+            ],
+            "input": [
+              1,
+              2,
+              2,
+              2
+            ],
+            "kind": "dense",
+            "padding": [
+              0,
+              0
+            ],
+            "passes": [
+              {
+                "elapsed_ns": 0,
+                "end_tick": "10375545421824",
+                "phase": "input_vjp",
+                "start_tick": "10375545421824"
+              },
+              {
+                "elapsed_ns": 0,
+                "end_tick": "10375545487360",
+                "phase": "weight_vjp",
+                "start_tick": "10375545487360"
+              },
+              {
+                "elapsed_ns": 0,
+                "end_tick": "10375545487360",
+                "phase": "bias_vjp",
+                "start_tick": "10375545487360"
+              }
+            ],
+            "stride": [
+              1,
+              1
+            ],
+            "timestamp_period_ns": 1,
+            "upstream": [
+              1,
+              3,
+              2,
+              2
+            ],
+            "weights": [
+              3,
+              2,
+              1,
+              1
+            ]
+          },
+          {
+            "dilation": [
+              1,
+              1
+            ],
+            "input": [
+              1,
+              2,
+              2,
+              2
+            ],
+            "kind": "depthwise",
+            "padding": [
+              0,
+              0
+            ],
+            "passes": [
+              {
+                "elapsed_ns": 0,
+                "end_tick": "10375545618432",
+                "phase": "input_vjp",
+                "start_tick": "10375545618432"
+              },
+              {
+                "elapsed_ns": 0,
+                "end_tick": "10375545618432",
+                "phase": "weight_vjp",
+                "start_tick": "10375545618432"
+              },
+              {
+                "elapsed_ns": 0,
+                "end_tick": "10375545618432",
+                "phase": "bias_vjp",
+                "start_tick": "10375545618432"
+              }
+            ],
+            "stride": [
+              1,
+              1
+            ],
+            "timestamp_period_ns": 1,
+            "upstream": [
+              1,
+              2,
+              2,
+              2
+            ],
+            "weights": [
+              2,
+              1,
+              1
+            ]
+          }
+        ],
+        "schema": "spiraltorch.convolution_vjp_gpu_profile.v1",
+        "scope": "Existing convolution VJP passes only; not whole-step throughput"
+      },
+      "schema": "spiraltorch.convolution_profile_fixture.v1"
+    }
+  },
+  "exploratory_pilot": {
+    "included_in_matched_grid": false,
+    "summary_sha256": "3c16dc06d57e8ca25002f7bb3018e962f68ca2d6b5b6693052253cce812856f5",
+    "passed": true
+  },
+  "publication_tools_sha256": {
+    "tools/verify_vision_gpu_profile.py": "ab94e798b4eaf26517c8ea59a84c1cc7f0e3d1d2ba7dfe6ab278e85ef9cc45e5",
+    "tools/test_vision_gpu_profile.py": "b9816f5bb949c025c8773393d3915126716cd52824df181a60f1982696115850"
+  }
+}

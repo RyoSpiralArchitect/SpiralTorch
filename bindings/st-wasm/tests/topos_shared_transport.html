@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Topos shared-row scalar WASM contract</title>
+<pre id="result" data-status="running">Running shared-row learning checks...</pre>
+<script type="module">
+import init, * as st from "/module/spiraltorch_wasm.js";
+import {checkSharedTopos, checkToposSnapshotOwnership} from "/topos_shared_transport.mjs";
+const result = document.querySelector("#result");
+try {
+  const exports = await init();
+  const report = {...checkSharedTopos(st), snapshot_ownership: checkToposSnapshotOwnership(st, exports.memory)};
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = report.status;
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error)});
+  result.dataset.status = "error";
+}
+</script>

@@ -1,0 +1,65 @@
+{
+  "schema": "spiraltorch.elliptic_anchored_study_preflight.v1",
+  "status": "passed",
+  "scope": "Launch/preflight only; actual twelve-run training is not yet completed",
+  "study_id": "229ccd7afba7893e7e18c7f354249957e977381afac80938c4c36cdcfd4b3ca8",
+  "source_revision": "af1c10c39a97ca862568dd3e3fb2259efa0e5ced",
+  "planned_runs": 12,
+  "planned_primary_updates": 6144,
+  "planned_extra_continuation_updates": 24,
+  "parameter_count_per_arm": 8451,
+  "tests": {
+    "passed": 165,
+    "skipped": 0,
+    "exit_code": 0,
+    "log_sha256": "19125cfe0a23bbf7ebff3d39ba04f804fc9f4c73b0e6201a69e2fc78f6a25385",
+    "coverage": [
+      "same-shape Torch/native forward and input/gate VJP",
+      "all four arms paired initialization and parameter count",
+      "no accelerator RNG changes",
+      "tiny HF loss updates all four arms; frozen base unchanged",
+      "interrupted resume exact adapter/full Adam/records",
+      "endpoint-only and immutable completed resume gates",
+      "all four signed gate trajectories and factorial contrasts",
+      "prior gated study summary byte-for-byte reproduction"
+    ]
+  },
+  "previous_gated_protocol_matches": [
+    "token data and split/block hashes",
+    "all minibatch schedules",
+    "frozen base parameter hash",
+    "model configuration hash",
+    "Torch and Transformers versions",
+    "shared training driver and helper source hashes"
+  ],
+  "artifacts": {
+    "plan_sha256": "19eab1f4e427de6ae662a3fa8c6d1611f03272030835e471788e70becf335515",
+    "config_sha256": "9c6c3604fddfbb8fd0e229b02898f289cd667ac0aec94115a2a8069b6b4b5464",
+    "native_sha256": "d4cd553f402cd8c248072017fd5c23725a6439ab275aeb6bed338cc2ed42808b",
+    "python_bridge_sha256": "8484b0b95168502bec19212c00d6c93bbd98b8582391a561adc6c5e1647dd260"
+  },
+  "runtime": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "transformers": "4.57.6",
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 2
+  },
+  "environment": {
+    "SPIRALTON_MAGIC": "0",
+    "SPIRALTON_TORCH": "0",
+    "SPIRALTON_MODEL_PATCHES": "0",
+    "SPIRALTON_NUMPY": "0",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+    "TOKENIZERS_PARALLELISM": "false",
+    "OMP_NUM_THREADS": "2"
+  },
+  "limitations": [
+    "No completed pretrained endpoint or speed result yet",
+    "Pride/Alice endpoints are reused and exploratory",
+    "Equal parameters/updates do not mean equal compute or feature rank",
+    "Models, corpus text, packages, raw logs and checkpoints stay local"
+  ]
+}

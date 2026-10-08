@@ -1,0 +1,66 @@
+{
+  "schema": "spiraltorch.wave_gate_radius_summary.v1",
+  "source_results_sha256": "17a0f2f571ae75afee6effb331de46614b90c4b26d33416f073fa6394797bd22",
+  "baseline_development_loss": 3.982235014438629,
+  "seeds": [
+    {
+      "seed": 41,
+      "development_loss": {
+        "off": 3.982235014438629,
+        "tangent": 3.9778005480766296,
+        "wave_gate_radius1": 3.9785044193267822,
+        "wave_gate_radius4": 3.977884352207184,
+        "wave_gate_learnable_radius1": 3.978478819131851,
+        "wave_gate_learnable_radius4": 3.97788068652153
+      },
+      "learned_minus_fixed_radius1": -0.000025600194931030273,
+      "learned_minus_fixed_radius4": -0.0000036656856536865234,
+      "learned_radius4_minus_tangent": 0.0000801384449005127,
+      "final_forward_log_radius": {
+        "wave_gate_learnable_radius1": 0.029858546,
+        "wave_gate_learnable_radius4": 1.4149601
+      }
+    },
+    {
+      "seed": 43,
+      "development_loss": {
+        "off": 3.982235014438629,
+        "tangent": 3.9778837263584137,
+        "wave_gate_radius1": 3.978602260351181,
+        "wave_gate_radius4": 3.9779589474201202,
+        "wave_gate_learnable_radius1": 3.978575438261032,
+        "wave_gate_learnable_radius4": 3.977954536676407
+      },
+      "learned_minus_fixed_radius1": -0.00002682209014892578,
+      "learned_minus_fixed_radius4": -0.000004410743713378906,
+      "learned_radius4_minus_tangent": 0.00007081031799316406,
+      "final_forward_log_radius": {
+        "wave_gate_learnable_radius1": 0.030049808,
+        "wave_gate_learnable_radius4": 1.4155337
+      }
+    },
+    {
+      "seed": 47,
+      "development_loss": {
+        "off": 3.982235014438629,
+        "tangent": 3.978056848049164,
+        "wave_gate_radius1": 3.97866427898407,
+        "wave_gate_radius4": 3.9781171083450317,
+        "wave_gate_learnable_radius1": 3.9786384999752045,
+        "wave_gate_learnable_radius4": 3.9781140983104706
+      },
+      "learned_minus_fixed_radius1": -0.000025779008865356445,
+      "learned_minus_fixed_radius4": -0.0000030100345611572266,
+      "learned_radius4_minus_tangent": 0.000057250261306762695,
+      "final_forward_log_radius": {
+        "wave_gate_learnable_radius1": 0.02931024,
+        "wave_gate_learnable_radius4": 1.4143344
+      }
+    }
+  ],
+  "means": {
+    "learned_minus_fixed_radius1": -0.000026067097981770832,
+    "learned_minus_fixed_radius4": -0.0000036954879760742188,
+    "learned_radius4_minus_tangent": 0.00006939967473347981
+  }
+}

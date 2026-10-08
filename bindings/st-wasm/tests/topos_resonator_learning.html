@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust Topos resonance: browser gradients and learning</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+const out = document.querySelector("#result");
+let report = {schema: "spiraltorch.topos_browser_learning.v2", status: "running"};
+try {
+  const wasm = await import("/module/spiraltorch_wasm.js");
+  const {runToposLearning} = await import("./topos_resonator_learning.mjs");
+  await wasm.default();
+  const response = await fetch("/learning.json", {cache: "no-store"});
+  if (!response.ok) throw Error("native fixture HTTP response: " + response.status);
+  report = runToposLearning(wasm.ToposResonatorKernel, (await response.json()).native_fixture);
+} catch (error) {
+  report.status = "error";
+  report.error = String(error.stack || error);
+}
+const {learning_losses, ...summary} = report;
+out.textContent = JSON.stringify({...summary, learning_losses}, null, 2);
+out.dataset.status = report.status;
+</script>

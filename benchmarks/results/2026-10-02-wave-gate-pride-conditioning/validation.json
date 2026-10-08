@@ -1,0 +1,69 @@
+{
+  "schema": "spiraltorch.wave_gate_conditioning_validation.v1",
+  "measurement_source_revision": "10764de454315e03fd69ba9e9c620b64d4688c7d",
+  "post_measurement_registration_fix": "db20806c1399123f656e40ce22e4fbbd64b487aa",
+  "integrated_source_revision": "5c735bb9df511a3bc68a6986fdd1c32545665e6a",
+  "source_sha256": {
+    "crates/st-nn/src/layers/wave_gate/learning.rs": "e8e3c188da526385d270cdbfeef12082df8d9ec7b97610924f5f26d29ef19be0",
+    "crates/st-nn/src/layers/wave_gate.rs": "1edc78e1d602d3c553ff56ae872ffd0a84c18ec9da7c3830057665af839f675b",
+    "bindings/st-py/src/wave_gate_learning.rs": "129f81354697bc0bdb5022de9fe75dc3f36ac5da43d2b0185b797180f06c7b02",
+    "bindings/st-py/spiraltorch/geometry_autograd.py": "49a03844af5aee730d1ae842f6fcffb79bc9162314c0a526b355f1198ddf2af6",
+    "bindings/st-py/examples/hf_wave_gate_conditioning.py": "2338b59a1ebbe844a6435f24a5de909fbd9bb816f1b36f049544be7ef63b14cc",
+    "bindings/st-py/examples/hf_wave_gate_pride_conditioning.json": "488e729f41a1daeec209533b905c962449f044afa57f143e63c2830ebaabbec4",
+    "bindings/st-py/examples/hf_elliptic_learning.py": "77ddef75e5d34cd76b3b3d54d2e25f09166dbff28abc029d68a4162d1940f1ab",
+    "bindings/st-wasm/src/wave_gate_learning.rs": "8279baf44f67de72dc9ebc832bb882bff6be380207083a2552d945932d01b3e5",
+    "bindings/st-wasm/tests/wave_gate_learning.html": "92ee8c492b224411dbd1a289a3c9fcef856203d30bf9326bbe7072f59639d1ff"
+  },
+  "native_sha256": "325899f799afbc9022b887c4f735406071e2d33728cebe0d5895175c582e7018",
+  "wasm_sha256": "4df7bc5b37ede9282e250fb3c0462a76d22427167d03183cd0470be64fd1ad87",
+  "wasm_glue_sha256": "853fa59703d14b1cb24d8f245b587542f2cba25e0c7362c77aa236c4eb4d3b22",
+  "retained_log_sha256": {
+    "default-after-review.log": "5622fe6a97f881bbace6ab5520c63322133b492befdff7f093bc67e9653a2e6c",
+    "imports.log": "28f1d6dd40bbd98902066c93c3f7623ea29531a4ea26f6d6a463772071d17a58",
+    "minimal-after.log": "6a6fee0317247825468e8d2c31780890cf33ff04ef26189f2abb542907936603",
+    "minimal-before.log": "febc873a0c9c54cd5a8dc0237e876053a3469ae8da4c3fa7dcd6818a1a110a1b",
+    "minimal-text-after.log": "f4048243ec3906d66cbaef1747749ef0a6b7ed3bcce263640d794fd1302defb9",
+    "native-build.log": "81d29eacd395272ac71ef14c233fd3194cf18b76cfd808a488693f57b4f75487",
+    "pride.log": "4056afe195c037dfc31ac2f986d67f0338900b0c7619aa2ed83e8d35de118125",
+    "python.log": "742e083a3338abf560613bc3458b65ea71a084d8bc3b552e4491e92460fc4dfb",
+    "rust-nn.log": "8d1e7c1fc52abdc0cb0c48482171df91332f106b1688cbfbdd7b3afba964ff75",
+    "wasm-build.log": "b54d566ccff2991bccae1dce50b08b6434f02bf6377cc6ffa7e1f581020f0bd2"
+  },
+  "checks": {
+    "rust_nn": {
+      "passed": 756,
+      "failed": 0,
+      "ignored": 0
+    },
+    "python_geometry_and_study": {
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0
+    },
+    "public_imports": {
+      "passed": 22
+    },
+    "native_build": "passed",
+    "wasm_nn_build": "passed",
+    "pinned_format": "passed",
+    "targeted_ruff": "passed",
+    "minimal_before": "failed: unresolved import st_nn",
+    "minimal_after": "passed",
+    "minimal_extension_module_text_after": "passed",
+    "default_features_after_review_fix": "passed",
+    "browser": "passed",
+    "browser_conditioning_max_error": 0,
+    "completed_conditions": 12,
+    "checkpoint_hashes_verified": 12,
+    "checkpoint_total_bytes": 230094,
+    "all_active_resume_equal": true,
+    "all_batches_match_fixed_schedule": true,
+    "driver_and_protocol_unchanged_during_training": true
+  },
+  "boundaries": [
+    "Runtime remained the frozen NN-enabled binary; the later change only guards optional feature registration.",
+    "Local projection gains are not complete loss-gradient ratios.",
+    "Tiny update budget and sparse development probe; no significance, generalization or speed claim.",
+    "No clipping observed on the logged training inputs; both saturation recipes gave identical traces."
+  ]
+}

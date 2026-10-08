@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Topos snapshot and learning-step benchmark</title>
+<pre id="result" data-status="running">Measuring scalar-WASM learning...</pre>
+<script type="module">
+import init, * as st from "/module/spiraltorch_wasm.js";
+import {runToposSnapshotBenchmark} from "/topos_snapshot_benchmark.mjs";
+const result = document.querySelector("#result");
+try {
+  await init();
+  const order = new URLSearchParams(location.search).get("case_order") ?? "forward";
+  const report = await runToposSnapshotBenchmark(st, order);
+  result.textContent = JSON.stringify(report);
+  result.dataset.status = report.status;
+} catch (error) {
+  result.textContent = JSON.stringify({status: "error", error: String(error)});
+  result.dataset.status = "error";
+}
+</script>

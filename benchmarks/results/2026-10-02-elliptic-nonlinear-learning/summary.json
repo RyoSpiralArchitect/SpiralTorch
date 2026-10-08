@@ -1,0 +1,182 @@
+{
+  "schema": "spiraltorch.elliptic_nonlinear_summary.v1",
+  "study_id": "45779e67f9c688c2dff5d12f3b68a8a961630785c731b62bb55164ccc6d59d45",
+  "steps_per_run": 512,
+  "runs": 9,
+  "primary_updates": 4608,
+  "comparisons": {
+    "pride_unused_tail": {
+      "blocks": 120,
+      "baseline_ce": 4.0737132688363396,
+      "arms": {
+        "tangent": {
+          "mean_ce": 3.566816002792782,
+          "mean_delta_vs_baseline": -0.5068972660435573,
+          "mean_delta_vs_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.568681957324346,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.56787139972051,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.563894651333491,
+              "delta_vs_tangent": 0.0
+            }
+          ]
+        },
+        "tanh_control": {
+          "mean_ce": 3.754524831639396,
+          "mean_delta_vs_baseline": -0.31918843719694356,
+          "mean_delta_vs_tangent": 0.18770882884661377,
+          "paired_delta_sample_sd": 0.006784594359978966,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7642160097757977,
+              "delta_vs_tangent": 0.19553405245145195
+            },
+            {
+              "seed": 43,
+              "ce": 3.7519918501377107,
+              "delta_vs_tangent": 0.18412045041720093
+            },
+            {
+              "seed": 47,
+              "ce": 3.7473666350046795,
+              "delta_vs_tangent": 0.18347198367118844
+            }
+          ]
+        },
+        "elliptic": {
+          "mean_ce": 3.7173868000507357,
+          "mean_delta_vs_baseline": -0.3563264687856038,
+          "mean_delta_vs_tangent": 0.1505707972579534,
+          "paired_delta_sample_sd": 0.0195322451282447,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7417838613192242,
+              "delta_vs_tangent": 0.17310190399487846
+            },
+            {
+              "seed": 43,
+              "ce": 3.7062988499800364,
+              "delta_vs_tangent": 0.13842745025952663
+            },
+            {
+              "seed": 47,
+              "ce": 3.704077688852946,
+              "delta_vs_tangent": 0.14018303751945504
+            }
+          ]
+        }
+      }
+    },
+    "alice_transfer": {
+      "blocks": 32,
+      "baseline_ce": 4.011807486414909,
+      "arms": {
+        "tangent": {
+          "mean_ce": 3.673727867503961,
+          "mean_delta_vs_baseline": -0.3380796189109483,
+          "mean_delta_vs_tangent": 0.0,
+          "paired_delta_sample_sd": 0.0,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.6978732869029045,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 43,
+              "ce": 3.6693658530712128,
+              "delta_vs_tangent": 0.0
+            },
+            {
+              "seed": 47,
+              "ce": 3.6539444625377655,
+              "delta_vs_tangent": 0.0
+            }
+          ]
+        },
+        "tanh_control": {
+          "mean_ce": 3.771032447616259,
+          "mean_delta_vs_baseline": -0.24077503879865025,
+          "mean_delta_vs_tangent": 0.09730458011229833,
+          "paired_delta_sample_sd": 0.015767289354519303,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7779050692915916,
+              "delta_vs_tangent": 0.08003178238868713
+            },
+            {
+              "seed": 43,
+              "ce": 3.7703223302960396,
+              "delta_vs_tangent": 0.10095647722482681
+            },
+            {
+              "seed": 47,
+              "ce": 3.7648699432611465,
+              "delta_vs_tangent": 0.11092548072338104
+            }
+          ]
+        },
+        "elliptic": {
+          "mean_ce": 3.759478154281775,
+          "mean_delta_vs_baseline": -0.25232933213313435,
+          "mean_delta_vs_tangent": 0.08575028677781422,
+          "paired_delta_sample_sd": 0.014134291495017007,
+          "seeds_better_than_tangent": 0,
+          "per_seed": [
+            {
+              "seed": 41,
+              "ce": 3.7693303525447845,
+              "delta_vs_tangent": 0.07145706564188004
+            },
+            {
+              "seed": 43,
+              "ce": 3.7554395496845245,
+              "delta_vs_tangent": 0.08607369661331177
+            },
+            {
+              "seed": 47,
+              "ce": 3.7536645606160164,
+              "delta_vs_tangent": 0.09972009807825089
+            }
+          ]
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Negative cross-entropy differences favor the named arm; no significance claim.",
+    "Seeds vary paired projection initialization and minibatch order; both are identical across arms within a seed.",
+    "Seeds share evaluation blocks; blocks are not independent experimental replicas.",
+    "All active arms have 11*features+2 trainable parameters. Effective feature rank, expressivity and compute are not equalized.",
+    "Tanh acts on the same anchor-linearized feature displacement, not a learned unconstrained MLP or the full geometric map.",
+    "The local anchor and Jacobian agree, but feature distributions and gradient conditioning away from the anchor are not equalized.",
+    "Evaluation blocks were previously inspected in the WaveGate study. This is a reused exploratory benchmark, not a pristine held-out confirmation.",
+    "These arms share the preceding WaveGate study's update budget but use 8450 rather than 1536/1537 parameters; cross-family differences are not a parameter-matched victory.",
+    "This summary checks published receipts, not checkpoint contents or process termination.",
+    "No speed or pristine-corpus generalization claim."
+  ],
+  "input_sha256": {
+    "plan": "04e1898494c29fe2c7b4d5680d6984daa5a300372c95252dd417cc04091741b9",
+    "results": "010b0da2303b8a3ba180ef86bd1d373022ee606c293b3905613df0b3dbf9c768",
+    "journal": "da99cd5ca0ead0f1b5ae4bcaa847d9e71293a8491d24e223d982a37b8dff884f"
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "schema": "spiraltorch.resident_attention.native.v1",
+  "passed": true,
+  "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "reference_torch_version": "2.12.1",
+  "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+  "kernel_contract_tests": 42,
+  "resident_regression_tests": 66,
+  "attention_filtered_tests": 12,
+  "checks": [
+    {
+      "name": "rectangular/plain",
+      "max_abs_error": 3.725290298461914e-8
+    },
+    {
+      "name": "rectangular/z_bias",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "rectangular/pair_bias",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "rectangular/both_biases",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "prefill/plain",
+      "max_abs_error": 5.960464477539063e-8
+    },
+    {
+      "name": "prefill/z_bias",
+      "max_abs_error": 3.725290298461914e-8
+    },
+    {
+      "name": "prefill/pair_bias",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "prefill/both_biases",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "cached_decode/plain",
+      "max_abs_error": 3.725290298461914e-8
+    },
+    {
+      "name": "cached_decode/z_bias",
+      "max_abs_error": 2.9802322387695312e-8
+    },
+    {
+      "name": "cached_decode/pair_bias",
+      "max_abs_error": 2.60770320892334e-8
+    },
+    {
+      "name": "cached_decode/both_biases",
+      "max_abs_error": 3.725290298461914e-8
+    },
+    {
+      "name": "cached_chunk/plain",
+      "max_abs_error": 2.9802322387695312e-8
+    },
+    {
+      "name": "cached_chunk/z_bias",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "cached_chunk/pair_bias",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "cached_chunk/both_biases",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "head_tail/plain",
+      "max_abs_error": 8.940696716308594e-8
+    },
+    {
+      "name": "head_tail/z_bias",
+      "max_abs_error": 4.470348358154297e-8
+    },
+    {
+      "name": "head_tail/pair_bias",
+      "max_abs_error": 2.9802322387695312e-8
+    },
+    {
+      "name": "head_tail/both_biases",
+      "max_abs_error": 5.960464477539063e-8
+    }
+  ],
+  "scope": "forward numerical parity only; no speed or learning claim"
+}

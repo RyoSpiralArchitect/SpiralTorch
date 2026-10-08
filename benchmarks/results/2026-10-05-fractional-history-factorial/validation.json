@@ -1,0 +1,36 @@
+{
+  "schema": "spiraltorch.fractional_history_factorial_validation.v1",
+  "status": "completed_and_verified",
+  "study_id": "d133d43f6bc4f281b8717d513e3c7c5ab4374c401ce3d98db43d38799e9cc75b",
+  "training_source_revision": "d9d995911217233705fbd80b4d33253a25c7ebff",
+  "verification_source_revision": "974a6c938eea5cd4fbf03fd8c63fc42c2881f5bc",
+  "native_evidence_revision": "9deb9b247ef4e4f18c70e57a5b2d95a388b3e557",
+  "native_sha256": "3b5d230bae85eafa0e0a156931197bdb45a50334c6045fcc35870ff50f1ccb9a",
+  "training_process_exit_code": 0,
+  "completed_resume_exit_code": 0,
+  "completed_resume_rescored_endpoints": false,
+  "sealed_files_unchanged_after_completed_resume": true,
+  "primary_updates": 6144,
+  "continuation_only_updates": 24,
+  "auxiliary_preflight_updates": 12,
+  "checkpoint_verification_exit_code": 0,
+  "checkpoint_verification_sha256": "d23eec776ce1477126d3245e04c22c1d94d1c8a3f5788fc179f518a3988763e9",
+  "summary_artifact_sha256": "04e2eb2d816bbe7ef93371c5b5512693b082bfd726e472ddae4b0a178592a5fd",
+  "summary_source_sha256": "25af45fd5a45830332e3792f3f805ba0d9e59b1ae54db15506f11d8d01527e67",
+  "checkpoint_verifier_sha256": "b588b4316db6fa5f2ebe5b444e1e04eb30bf06acf6c7e9ac7351a6d8b02fc09f",
+  "preservation": {
+    "current_primary_files": 100,
+    "previous_primary_files": 100,
+    "previous_client_files": 6,
+    "previous_runtime_files": 70,
+    "model_assets": 7
+  },
+  "tests": {
+    "verification": 20,
+    "geometry_regressions": 553,
+    "benchmark_correctness": 34,
+    "skipped": 0
+  },
+  "historical_raw_full_replay": "exact_replay",
+  "scope": "Completed offline CPU float32 exploratory study. Not speed, significance, convergence, pristine held-out confirmation or general LLM evidence. Primary source/runtime remained frozen throughout; verifier and post-hoc native impulse analysis are separate."
+}

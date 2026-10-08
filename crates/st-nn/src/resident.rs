@@ -9,9 +9,14 @@ use crate::{module::Module, Tensor, TensorError};
 pub use st_kernel_contracts::graph::{
     GraphDefinition, GraphGradientPolicy, GraphParameter, GraphStage, ParameterRole,
 };
+pub use st_kernel_contracts::topos_resonator::ToposResonatorKernel;
 use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
+mod attention;
+pub use attention::AttentionInferencePlan;
+#[cfg(feature = "wgpu")]
+pub use attention::ResidentAttentionBlock;
 #[cfg(feature = "wgpu")]
 mod convolution;
 mod graph;
@@ -34,7 +39,7 @@ pub use module_forward::{ResidentForwardCache, ResidentForwardStats};
 pub use module_update::{ModuleOptimizerStatePolicy, ResidentParameterBinding};
 pub use portable::{
     DEFAULT_MAX_PLAN_JSON_BYTES, GRAPH_PLAN_SCHEMA, GRAPH_PLAN_SCHEMA_V3, GRAPH_PLAN_SCHEMA_V4,
-    INFERENCE_PLAN_SCHEMA,
+    GRAPH_PLAN_SCHEMA_V5, INFERENCE_PLAN_SCHEMA,
 };
 
 /// Modules must emit operations equivalent to their ordinary forward semantics.
@@ -54,6 +59,11 @@ pub enum InferenceOp {
     Relu,
     Scale {
         gain: Tensor,
+    },
+    ToposResonator {
+        gate: Tensor,
+        kernel: ToposResonatorKernel,
+        max_volume: usize,
     },
 }
 
@@ -77,6 +87,15 @@ impl InferenceOp {
             Self::Scale { gain } => Self::Scale {
                 gain: gain.snapshot(),
             },
+            Self::ToposResonator {
+                gate,
+                kernel,
+                max_volume,
+            } => Self::ToposResonator {
+                gate: gate.snapshot(),
+                kernel: *kernel,
+                max_volume: *max_volume,
+            },
             Self::LayerNorm {
                 gain,
                 bias,
@@ -94,6 +113,10 @@ impl InferenceOp {
 
 #[derive(Debug, Error)]
 pub enum InferenceError {
+    #[error("invalid resident attention plan: {0}")]
+    Attention(&'static str),
+    #[error(transparent)]
+    AttentionContract(#[from] st_kernel_contracts::attention::AttentionError),
     #[error("resident Module forwarding cannot bypass a committed tensor execution plan")]
     ResidentForwardPolicy,
     #[error("resident module update rejected: {0}")]
@@ -182,7 +205,10 @@ impl InferencePlan {
         }
         let source_operations = operations.len();
         let rich = operations.iter().enumerate().any(|(i, op)| match op {
-            InferenceOp::Scale { .. } | InferenceOp::Relu | InferenceOp::LayerNorm { .. } => true,
+            InferenceOp::Scale { .. }
+            | InferenceOp::Relu
+            | InferenceOp::LayerNorm { .. }
+            | InferenceOp::ToposResonator { .. } => true,
             InferenceOp::Gelu => i == 0 || !matches!(operations[i - 1], InferenceOp::Linear { .. }),
             _ => false,
         });
@@ -221,7 +247,10 @@ impl InferencePlan {
                         .ok_or(InferenceError::UnsupportedGelu)?;
                     stage.gelu = true;
                 }
-                InferenceOp::Scale { .. } | InferenceOp::Relu | InferenceOp::LayerNorm { .. } => {
+                InferenceOp::Scale { .. }
+                | InferenceOp::Relu
+                | InferenceOp::LayerNorm { .. }
+                | InferenceOp::ToposResonator { .. } => {
                     unreachable!("rich operations were lowered above")
                 }
             }

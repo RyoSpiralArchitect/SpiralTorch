@@ -12,6 +12,8 @@ mod dataset;
 mod elliptic;
 mod export;
 mod frac;
+mod f32_buffer;
+mod fractional_learning;
 mod hpo;
 mod inference;
 mod introspect;
@@ -44,6 +46,9 @@ mod telemetry;
 mod tensor;
 mod text;
 mod theory;
+mod topos_resonator;
+#[cfg(feature = "nn")]
+mod wave_gate_learning;
 mod trainer;
 mod vision;
 mod wgpu;
@@ -286,6 +291,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     hpo::register(py, m)?;
     inference::register(py, m)?;
     frac::register(py, m)?;
+    fractional_learning::register(m)?;
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;
@@ -299,6 +305,9 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     zspace_runtime_protocol_catalog::register(py, m)?;
     zspace_semantic_review::register(py, m)?;
     elliptic::register(py, m)?;
+    topos_resonator::register(m)?;
+    #[cfg(feature = "nn")]
+    wave_gate_learning::register(m)?;
     theory::register(py, m)?;
     qr::register(py, m)?;
     julia_bridge::register(py, m)?;
@@ -452,6 +461,10 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "describe_wgpu_softmax_variants",
         "gl_coeffs_adaptive",
         "fracdiff_gl_1d",
+        "FractionalGlKernel",
+        "FractionalGlAngleChart",
+        "FractionalGlLearningBatch",
+        "FractionalGlGainLearningBatch",
         "fft_radix2",
         "fft_radix4",
         "fft_complex32",
@@ -503,6 +516,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
 
     #[cfg(feature = "nn")]
     exports.extend_from_slice(&[
+        "WaveGateKernel",
+        "WaveGateLearningBatch",
         "Identity",
         "Scaler",
         "NonLiner",

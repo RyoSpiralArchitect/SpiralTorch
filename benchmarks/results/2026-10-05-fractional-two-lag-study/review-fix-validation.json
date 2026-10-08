@@ -1,0 +1,23 @@
+{
+  "schema": "spiraltorch.fractional_two_lag_review_fix_validation.v1",
+  "source_revision": "a25aa224c472be1851f17e4a956e8c846039e3ef",
+  "tests": {
+    "geometry": {
+      "passed": 450,
+      "skipped": 0,
+      "log_sha256": "0ca61ee1392492722c6a95213bf694533f07f1c4462d55c8c1aa65dd22f9879c"
+    },
+    "benchmark": {
+      "passed": 34,
+      "skipped": 0,
+      "log_sha256": "b2b43f7f26205ba5dca7b422f046122610788657d72af72da4201442ed2a526b"
+    }
+  },
+  "initial_benchmark_collection": {
+    "status": "failed_before_tests",
+    "reason": "parent directory package import; corrected with explicit tools root and confcutdir/importlib",
+    "log_sha256": "f177c7ad74e20a6ee9f33308eff635834ef710fd63d4530f1b9e4ab03c392663"
+  },
+  "frozen_client_and_runtime_files_verified": 76,
+  "scope": "Review fix tests and immutable-runtime verification, not a training outcome"
+}

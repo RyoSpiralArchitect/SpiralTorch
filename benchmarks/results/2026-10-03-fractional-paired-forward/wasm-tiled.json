@@ -1,0 +1,1 @@
+{"status":"passed","cases":128,"output_derivative_input_vjp_bits_equal":true,"scope":"Actual wasm32 ND/tiled versus scalar-lane composition; not a browser or GPU timing result."}

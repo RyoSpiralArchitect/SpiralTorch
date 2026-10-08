@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import copy
+import json
 import math
+import os
 from dataclasses import dataclass
+from pathlib import Path
+import tempfile
 from typing import Any, Callable, Mapping
 
+from .repetition_objective import zspace_repetition_objective_control
 from .repetition_unlikelihood import (
     ZSPACE_REPETITION_UNLIKELIHOOD_CONTRACT_VERSION,
     ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER,
@@ -27,6 +33,8 @@ HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA = (
 HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY = "_spiraltorch_repetition_unlikelihood_plan"
 _MODEL_TOPK_MAX_FLOAT_BYTES = 32 * 1024 * 1024
 _MODEL_TOPK_SOURCE_KINDS = frozenset({"model_topk_history", "model_topk_periodic"})
+_OBJECTIVE_CHECKPOINT = "spiraltorch-repetition-objective.json"
+_OBJECTIVE_CHECKPOINT_SCHEMA = "spiraltorch.hf_repetition_objective_checkpoint.v1"
 
 __all__ = [
     "HF_REPETITION_UNLIKELIHOOD_BATCH_PLAN_KEY",
@@ -54,6 +62,7 @@ def hf_repetition_unlikelihood_recipe_contract(
     max_candidates_per_position: int,
     candidate_source: str | Mapping[str, object] = "prior_continuation",
     proposal_top_k: int = 8,
+    objective_control: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Return the exact objective recipe embedded in training identity."""
 
@@ -84,7 +93,7 @@ def hf_repetition_unlikelihood_recipe_contract(
         raise RuntimeError("Rust validation plan is missing its canonical config")
     canonical_config = dict(config)
     enabled = float(canonical_config["strength"]) > 0.0
-    return {
+    recipe = {
         "schema": "spiraltorch.hf_repetition_unlikelihood_recipe.v4",
         "enabled": enabled,
         "semantic_owner": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
@@ -106,9 +115,7 @@ def hf_repetition_unlikelihood_recipe_contract(
         "proposal_materialization": (
             "after_model_forward_from_detached_logits"
             if enabled and source_kind in _MODEL_TOPK_SOURCE_KINDS
-            else "in_data_collator"
-            if enabled
-            else None
+            else "in_data_collator" if enabled else None
         ),
         "config": canonical_config,
         "data_collator": (
@@ -116,6 +123,20 @@ def hf_repetition_unlikelihood_recipe_contract(
         ),
         "trainer": ("spiraltorch.HfRepetitionUnlikelihoodTrainer" if enabled else None),
     }
+    if objective_control is not None:
+        if not enabled:
+            raise ValueError("objective control requires positive repetition strength")
+        control = zspace_repetition_objective_control(
+            config=dict(objective_control),
+            base_strength=canonical_config["strength"],
+            completed_update_slots=0,
+            active_position_count=0,
+            eligible_target_count=0,
+        )
+        recipe["schema"] = "spiraltorch.hf_repetition_unlikelihood_recipe.v5"
+        recipe["objective_control"] = control["policy"]
+        recipe["objective_rule"] = control["policy"]["objective_rule"]
+    return recipe
 
 
 class HfRepetitionUnlikelihoodCollator:
@@ -224,6 +245,9 @@ class _RepetitionUnlikelihoodReceipt:
         self._base_loss_sum: Any = None
         self._auxiliary_loss_sum: Any = None
         self._total_loss_sum: Any = None
+        self._weighted_auxiliary_loss_sum: Any = None
+        self._first_objective_slot: int | None = None
+        self._last_objective_control: Mapping[str, Any] | None = None
         self._error: str | None = None
 
     def observe(
@@ -232,6 +256,9 @@ class _RepetitionUnlikelihoodReceipt:
         base_loss: Any,
         auxiliary_loss: Any,
         total_loss: Any,
+        *,
+        objective_control: Mapping[str, Any] | None = None,
+        weighted_auxiliary_loss: Any = None,
     ) -> None:
         aggregate = plan.get("aggregate")
         if not isinstance(aggregate, Mapping):
@@ -270,6 +297,15 @@ class _RepetitionUnlikelihoodReceipt:
             detached = value.detach().float()
             current = getattr(self, name)
             setattr(self, name, detached if current is None else current + detached)
+        if objective_control is not None:
+            weighted = weighted_auxiliary_loss.detach().float()
+            current = self._weighted_auxiliary_loss_sum
+            self._weighted_auxiliary_loss_sum = (
+                weighted if current is None else current + weighted
+            )
+            if self._first_objective_slot is None:
+                self._first_objective_slot = objective_control["completed_update_slots"]
+            self._last_objective_control = objective_control
 
     def abort(self, error: BaseException) -> None:
         self._error = f"{error.__class__.__name__}: {error}"
@@ -285,14 +321,12 @@ class _RepetitionUnlikelihoodReceipt:
         count = self.training_batch_count
         strength = float(dict(self.recipe.get("config") or {}).get("strength", 0.0))
         auxiliary_mean = self._mean(self._auxiliary_loss_sum, count)
-        return {
+        report = {
             "row_type": "hf_repetition_unlikelihood_receipt",
             "schema": HF_REPETITION_UNLIKELIHOOD_RECEIPT_SCHEMA,
-            "status": "aborted"
-            if self._error
-            else "ready"
-            if count
-            else "not_observed",
+            "status": (
+                "aborted" if self._error else "ready" if count else "not_observed"
+            ),
             "semantic_owner": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_OWNER,
             "semantic_backend": ZSPACE_REPETITION_UNLIKELIHOOD_SEMANTIC_BACKEND,
             "differentiation_owner": ZSPACE_REPETITION_UNLIKELIHOOD_DIFFERENTIATION_OWNER,
@@ -338,6 +372,33 @@ class _RepetitionUnlikelihoodReceipt:
                 "reduced held-out generation loops or improved language quality"
             ),
         }
+        if "objective_control" in self.recipe:
+            report.update(
+                {
+                    "schema": "spiraltorch.hf_repetition_unlikelihood_receipt.v4",
+                    "mean_weighted_auxiliary_loss": self._mean(
+                        self._weighted_auxiliary_loss_sum, count
+                    ),
+                    "first_completed_update_slots": self._first_objective_slot,
+                    "last_objective_control": self._last_objective_control,
+                }
+            )
+        return report
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _read_checkpoint_json(path: Path) -> dict[str, Any]:
+    with path.open("rb") as handle:
+        data = handle.read(16 * 1024 * 1024 + 1)
+    if len(data) > 16 * 1024 * 1024:
+        raise ValueError("repetition objective checkpoint metadata exceeds 16 MiB")
+    value = json.loads(data)
+    if not isinstance(value, dict):
+        raise ValueError("repetition objective checkpoint metadata must be an object")
+    return value
 
 
 class _HfRepetitionUnlikelihoodTrainerMixin:
@@ -349,19 +410,139 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
         zspace_repetition_unlikelihood_recipe: Mapping[str, object],
         **kwargs: Any,
     ) -> None:
-        self._zspace_repetition_unlikelihood_recipe = dict(
-            zspace_repetition_unlikelihood_recipe
+        self._zspace_repetition_unlikelihood_recipe = copy.deepcopy(
+            dict(zspace_repetition_unlikelihood_recipe)
         )
+        recipe = self._zspace_repetition_unlikelihood_recipe
+        self._spiraltorch_objective_policy = recipe.get("objective_control")
+        if self._spiraltorch_objective_policy is not None:
+            config = dict(recipe["config"])
+            canonical = hf_repetition_unlikelihood_recipe_contract(
+                **config,
+                ngram_order=3,
+                objective_control=self._spiraltorch_objective_policy["config"],
+            )
+            if _canonical_json(recipe) != _canonical_json(canonical):
+                raise ValueError(
+                    "repetition objective recipe differs from the Rust contract"
+                )
         self._zspace_repetition_unlikelihood_receipt = _RepetitionUnlikelihoodReceipt(
             self._zspace_repetition_unlikelihood_recipe
         )
         super().__init__(*args, **kwargs)
+        if self._spiraltorch_objective_policy is not None and getattr(
+            getattr(self, "args", None), "save_only_model", False
+        ):
+            raise ValueError(
+                "objective control requires full Trainer checkpoints, not save_only_model"
+            )
         self._spiraltorch_base_model_accepts_loss_kwargs = bool(
             getattr(self, "model_accepts_loss_kwargs", False)
         )
         # Otherwise Transformers token-normalizes only the model loss across an
         # accumulation group, multiplying this per-microbatch auxiliary term.
         self.model_accepts_loss_kwargs = False
+
+    def train(
+        self, resume_from_checkpoint: Any = None, *args: Any, **kwargs: Any
+    ) -> Any:
+        # Check before the base Trainer can load weights, including sharded paths.
+        if "model_path" in kwargs:
+            if resume_from_checkpoint not in (None, False):
+                raise ValueError("specify only one checkpoint resume argument")
+            resume_from_checkpoint = kwargs.pop("model_path")
+        if resume_from_checkpoint is True:
+            from transformers.trainer_utils import get_last_checkpoint
+
+            resume_from_checkpoint = get_last_checkpoint(self.args.output_dir)
+            if resume_from_checkpoint is None:
+                raise ValueError("no Trainer checkpoint found for objective resume")
+        if resume_from_checkpoint:
+            root = Path(resume_from_checkpoint)
+            marker = root / _OBJECTIVE_CHECKPOINT
+            if self._spiraltorch_objective_policy is not None or marker.exists():
+                saved = _read_checkpoint_json(marker)
+                state = _read_checkpoint_json(root / "trainer_state.json")
+                slot = state.get("global_step")
+                if (
+                    saved.get("schema") != _OBJECTIVE_CHECKPOINT_SCHEMA
+                    or _canonical_json(saved.get("recipe"))
+                    != _canonical_json(self._zspace_repetition_unlikelihood_recipe)
+                    or type(slot) is not int
+                    or slot < 0
+                    or type(saved.get("completed_update_slots")) is not int
+                    or saved["completed_update_slots"] != slot
+                    or saved.get("training_partition")
+                    != self._spiraltorch_training_partition()
+                ):
+                    raise ValueError(
+                        "repetition objective checkpoint recipe or update clock mismatch"
+                    )
+                # Rust validates the portable clock range before model loading.
+                self._spiraltorch_objective_control(slot, 0, 0)
+        return super().train(resume_from_checkpoint, *args, **kwargs)
+
+    def _spiraltorch_training_partition(self) -> dict[str, int]:
+        return {
+            "gradient_accumulation_steps": self.args.gradient_accumulation_steps,
+            "per_device_train_batch_size": self.args.per_device_train_batch_size,
+            "world_size": self.args.world_size,
+        }
+
+    def _save_checkpoint(
+        self, model: Any, trial: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        if self._spiraltorch_objective_policy is not None and self.args.should_save:
+            from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+
+            slot = self.state.global_step
+            self._spiraltorch_objective_control(slot, 0, 0)
+            directory = (
+                Path(self._get_output_dir(trial=trial))
+                / f"{PREFIX_CHECKPOINT_DIR}-{slot}"
+            )
+            directory.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema": _OBJECTIVE_CHECKPOINT_SCHEMA,
+                "recipe": self._zspace_repetition_unlikelihood_recipe,
+                "completed_update_slots": slot,
+                "training_partition": self._spiraltorch_training_partition(),
+            }
+            # Write before the base checkpoint so its optional Hub upload includes
+            # the guard. A missing/mismatched Trainer state cannot be resumed.
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=directory, delete=False
+                ) as handle:
+                    temporary = Path(handle.name)
+                    handle.write(_canonical_json(payload) + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, directory / _OBJECTIVE_CHECKPOINT)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+        return super()._save_checkpoint(model, trial, *args, **kwargs)
+
+    def _spiraltorch_objective_control(
+        self, slot: int, active: int, eligible: int
+    ) -> dict[str, Any]:
+        policy = self._spiraltorch_objective_policy
+        if policy is None:
+            raise ValueError("cannot resume a controlled objective without its policy")
+        control = zspace_repetition_objective_control(
+            config=policy["config"],
+            base_strength=policy["base_strength"],
+            completed_update_slots=slot,
+            active_position_count=active,
+            eligible_target_count=eligible,
+        )
+        if control["policy"] != policy:
+            raise RuntimeError(
+                "live repetition objective differs from the sealed Rust policy"
+            )
+        return control
 
     def _get_num_items_in_batch(self, batch_samples: Any, device: Any) -> Any:
         base_accepts = getattr(
@@ -526,7 +707,7 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
     ) -> Any:
         positions = plan.get("positions")
         if not isinstance(positions, list) or not positions:
-            return logits.sum() * 0.0
+            return logits[..., :0].sum()
         sequence_indices: list[int] = []
         prediction_indices: list[int] = []
         candidate_position_indices: list[int] = []
@@ -615,12 +796,24 @@ class _HfRepetitionUnlikelihoodTrainerMixin:
             )
         auxiliary_loss = self._spiraltorch_auxiliary_loss(logits, plan)
         strength = float(dict(expected_config or {}).get("strength", 0.0))
-        total_loss = base_loss + strength * auxiliary_loss
+        control = None
+        if self._spiraltorch_objective_policy is not None:
+            aggregate = plan["aggregate"]
+            control = self._spiraltorch_objective_control(
+                self.state.global_step,
+                aggregate["active_position_count"],
+                aggregate["eligible_target_count"],
+            )
+            strength = control["effective_strength"]
+        weighted_auxiliary_loss = strength * auxiliary_loss
+        total_loss = base_loss + weighted_auxiliary_loss
         self._zspace_repetition_unlikelihood_receipt.observe(
             plan,
             base_loss,
             auxiliary_loss,
             total_loss,
+            objective_control=control,
+            weighted_auxiliary_loss=weighted_auxiliary_loss,
         )
         return (total_loss, outputs) if return_outputs else total_loss
 

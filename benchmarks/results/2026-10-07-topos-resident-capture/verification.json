@@ -1,0 +1,146 @@
+{
+  "schema": "spiraltorch.topos_resident_capture_verification.v1",
+  "source": "0bbc5a65f0dfc23d78add8d3f61f3d3a391d7125",
+  "source_sha256": {
+    "crates/st-backend-wgpu/examples/topos_graph_profile.rs": "35064596c5bfeca55daafb7a46ffe8d25a2de93fda3befeba23b8bf5ca940228",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise.rs": "d23380b60258edeb97d255ab51fe0043c69fea99e066737edff246ded65eb3bb",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/topos.rs": "663e5e0d4ccfd80514b223be0c718e2e795a8ae5a1418d5de07c92b6e797be89",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/topos/tests.rs": "c388ffb29994161f65b536dcd7b7c89c92f30a756ff0a2ce9fb6c1aa0aec9e65",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/vjp.rs": "3d3d3302b10078a92c634638bd5c05d4ed329caeed3e0ff0aa8094b8d7cb22a7",
+    "crates/st-backend-wgpu/src/resident_training/graph.rs": "da8a4fe16cf3bf0225b8aba6c827461131080bb1bec15a84591da024b75ae755",
+    "crates/st-backend-wgpu/src/resident_training/graph/autograd.rs": "aea75ea4beec2b9c2236b7f561bd152898a169ed8f123cfb6acecb014a72f718",
+    "crates/st-backend-wgpu/src/resident_training/graph/autograd/prediction.rs": "65fc0c9f80c386b21c372a15830ec091c9aafc2ff0b0a8665eb27aec64f76fbf",
+    "crates/st-backend-wgpu/src/resident_training/graph/autograd/topos_tests.rs": "d9063b78b168fe349f541cc768705c26a17d3c970e6fd603911db80739f304fc",
+    "docs/topos_learning.md": "6273675d42a44802f3cc3634de6f5a9fc923e5b7eefcebebf4488578da211d27",
+    "Cargo.lock": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a",
+    "tools/test_resident_browser.cjs": "97c4a9071cd86eb7a194f019978a3ea7c144490880afe13851d0b4157f982db3",
+    "bindings/st-wasm/tests/resident_topos_graph.html": "bb82fa96f241e0e5158dbc8b081eff3cd1c2eb0779f76b89d03007eda6ca47b3",
+    "bindings/st-py/tests/test_nn_module_resident_forward.py": "06d4302b54b0e5fb335f563aeee93282a42ab4f26a4cc2da4285f9ad97518290",
+    "bindings/st-py/tests/test_nn_resident.py": "241ab48d694ac0256e7351920a6017a2422f5f0435bb8045147d86871c97e679",
+    "bindings/st-py/tests/test_nn_resident_classification.py": "e5f957eee72504e4d68c92561949b47b05f442b11e58a1bcfd6c8a0267ffc801",
+    "bindings/st-py/tests/test_nn_resident_exports.py": "bb5b7757280cb027cba26a86237710542787e97fe79a0f3cc0e6b27dfb93e2f4",
+    "bindings/st-py/tests/test_nn_resident_graph_autograd.py": "ec4908ca99c48eea8eaa4e0ec3136f0f64179fb3acd5ec55df28eac5f4bbb19c",
+    "bindings/st-py/tests/test_nn_resident_graph_forward.py": "40292cd4dcc6711290e18fbe106208ac5af8bd7d0213c9806b297da0f2b07ebe",
+    "bindings/st-py/tests/test_nn_resident_graph_learner.py": "33a8b10eacb03d6838f3897fc0eed1a25662eaa610ec923710793ec162fd6ad5",
+    "bindings/st-py/tests/test_nn_resident_graph_training.py": "3f676fc1fe77320da36b94142bcf0af20c6c88e0b41f980cf0a9c5b02ac04fd8",
+    "bindings/st-py/tests/test_nn_resident_loss.py": "baa5c71764dbd58779589651930d2dc09a01d72327dd1323f9472ade4d972143",
+    "bindings/st-py/tests/test_nn_resident_microbatch.py": "be1252429af77f0637a70188fe623586700dddf7baf9dc3742dd37ada56448cc",
+    "bindings/st-py/tests/test_nn_resident_module_update.py": "5556c47819c93cf8fd85da3a7ac009366fcd78afaa136d72acf4e13bfec0f7d8",
+    "bindings/st-py/tests/test_nn_resident_topos.py": "08ae419da7397dd5301e20e5eed4c050b3e9ba6dbf85dde1a871f262493c00b3",
+    "bindings/st-py/tests/test_nn_resident_training.py": "8de618729573dd3fbe724f3ca21678239327483f3e8d9ff3b4ec50ed74788ebd",
+    "bindings/st-py/tests/test_topos_capture.py": "d020a51439a4be1a44f55a2f9a0773ab8eb2295ef4f50fc0d3efedf06c4a4cc8",
+    "bindings/st-py/tests/test_topos_matched_controls.py": "4563ac1dac4372ce553f29c854aa7e94fb3398effec7e91f8d3c2a6311e1f094",
+    "bindings/st-py/tests/test_wgpu_resident.py": "ea166c6a7d17ca577ad049ac8c3daff36a78b1ed51ea61d36f2c65db2a8aa4b0"
+  },
+  "artifact_byte_sha256": {
+    "before_binary": "fc2bf856c94038d003e2d6fda281a863e0f5a84bf3482f16548777320f167ce2",
+    "after_binary": "7583ec777b3211729e1f191291e420f5ab94e869eae307991121e2cf0ca0c066",
+    "native": "55004ad3dc153ab107ae34a4d46c00a1b7cc89933109aa2968830ae50f7eea68",
+    "wasm": "2696c6b015cf2fc14d1201c07bc01993d70fbd18fed9ca409e5db9f1b313382d",
+    "wasm_js": "4bc3ea1dc10500c947259dfbb7946a626239a89595fa0c1e125cd3dfd218b48f",
+    "frozen_native": "42579ac70587c7abd46460d1794dfe501f717a941f5ed8c2400114618c5c6e84"
+  },
+  "hash_note": "All artifact hashes are file-byte hashes. Initial interactive build metadata mistakenly hashed path strings; it was corrected before this publication. Native loaded-byte identity and browser receipt independently agree.",
+  "runtime": {
+    "python": "3.12.6",
+    "torch": "2.12.1",
+    "native_sha256": "55004ad3dc153ab107ae34a4d46c00a1b7cc89933109aa2968830ae50f7eea68",
+    "adapter": {
+      "name": "Apple M4",
+      "backend": "Metal",
+      "device_type": "IntegratedGpu"
+    }
+  },
+  "browser_version": "154.0.8037.98",
+  "validation": {
+    "backend_topos_tests": 6,
+    "backend_training_tests": 48,
+    "nn_resident_tests": 53,
+    "nn_topos_updates": 300,
+    "python_tests": 119,
+    "python_subtests": 50,
+    "python_independent_torch_updates": 100,
+    "python_max_abs_error": {
+      "output": 5.960464477539063e-8,
+      "dx": 2.9802322387695312e-8,
+      "dg": 1.1920928955078125e-7,
+      "gate": 1.4901161193847656e-8,
+      "loss": 5.960464477539063e-8
+    },
+    "python_rtol": 0.0005,
+    "python_atol": 0.00003,
+    "browser_updates": 100,
+    "browser_checks": 4119,
+    "node_wasm_contract": "passed (no GPU)",
+    "touched_rustfmt": "passed"
+  },
+  "review": {
+    "kind": "independent read-only local source review",
+    "source": "0bbc5a65f0dfc23d78add8d3f61f3d3a391d7125",
+    "actionable_P1_P2_findings": 0,
+    "limits": "Static only; not independent execution, performance or provenance attestation."
+  },
+  "clippy": {
+    "strict_exit": 101,
+    "unique_unchanged_files": [
+      "crates/st-backend-wgpu/src/resident_dense.rs",
+      "crates/st-backend-wgpu/src/resident_graph.rs",
+      "crates/st-backend-wgpu/src/resident_matmul.rs",
+      "crates/st-backend-wgpu/src/resident_tensor.rs",
+      "crates/st-backend-wgpu/src/resident_training/readback.rs",
+      "crates/st-backend-wgpu/src/runtime/readback_batch.rs",
+      "crates/st-backend-wgpu/src/runtime.rs"
+    ],
+    "error": "unknown_lints: clippy::chunks_exact_to_as_chunks",
+    "compatibility_run": "passed with -D warnings -A unknown-lints; not a clean strict Clippy claim",
+    "version": "clippy 0.1.97 (2d8144b788 2026-07-07)"
+  },
+  "local_log_sha256": {
+    "capture-backend-clippy-compat.log": "8d15911b0dfadb9e14cfef95fbc7cec23975a54f0e01da298576685f0aaf9c5a",
+    "capture-backend-clippy.jsonl": "927032d4fb40a962dada2a346436fa485ee2fdf4114910921f2d043277200d07",
+    "capture-backend-clippy.stderr": "96a2227b7c4cdce531c4319d087c9038f29148a94760eb0a381b95fac523252c",
+    "capture-backend-topos-first.log": "d6b894c9fc5398b11e686a2125358de652e4fb292792eb16bf0860e9f0d236ba",
+    "capture-backend-training.log": "2220152be493f93a2be14d2baa52aef3a3db8d908ac7b83a177218b2a8e0d97c",
+    "capture-browser-nn-autograd-clients.log": "203a7a8c9e4779705d8bc59a36862bc734e38d5a2c347eac24f055328146ccd7",
+    "capture-browser-nn-graph-layer-norm.log": "80a1cda5ac41fac097525d301d54fa3549ca1677f73673d6b7c988fd52c0845d",
+    "capture-browser-nn-learner-clients.log": "053eb86eb369a923c201991d0a2be0c6da45d69fb449872c21feff2462ebc411",
+    "capture-browser-nn-module-forward.log": "3af5c30ec5ba402e827759e892e49b5d3471d4895c5eff3b9d0d31ec58d9c772",
+    "capture-browser-topos.log": "8a198ef908bde8a0e490a56fbd39c42711411ade820c7ad0d45735ddb77232ad",
+    "capture-nn-resident.log": "2da1c7720ff3d55d799f253a7696202a6bfc383d4f1c1e66f73637f4ec800f4a",
+    "capture-profile-after-build.log": "752892ca540b98ee9a7cc185d35c9389270c1cebb243acf1fb7c1a478a3d6f92",
+    "capture-profile-baseline-build.log": "22dd42418568f1e465c46c520d35442425891ecf4d72df15846c9e38da94fe09",
+    "capture-profile-before-smoke.json": "650caca78b88e752cf0afde760b92bfd537733a55d2b4f0115b3176d1b8b9ff0",
+    "capture-python-build.log": "2a87050177223c26c0a16b7923737a0cd73b9def520d1e94cc10a5272bdeebc5",
+    "capture-python-regression.log": "f2ab4b409a71eac8a3644877f536bd53cbf04c71c3ae83a3146d9e652670d501",
+    "capture-runtime-identity.json": "c43ecb716c33a0e75bf225c7f9122689bd330b48e027aee9fed2e01dd97004c0",
+    "capture-rustfmt.log": "98a654fbc6164a9bd469f9a97678f6f634c6700fbfa767d25d9f332d86550b0d",
+    "capture-wasm-bindgen.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "capture-wasm-build.log": "a5a4b5e0ea5b93d611044b76e10799030c1a0584b82769160f467c3b8ad38140",
+    "capture-wasm-node-bindgen.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "capture-wasm-node-contract.log": "2eb6d7a5aac27f1d44cc282258bec7c77839c653708de29883d6dd63aaf268e6"
+  },
+  "local_browser_regressions": {
+    "nn-graph-layer-norm": {
+      "sha256": "15a9083d4bd7880519a926601e792d4b9d6a78145396a26726320915b4daedce",
+      "status": "passed",
+      "wasm_sha256": "2696c6b015cf2fc14d1201c07bc01993d70fbd18fed9ca409e5db9f1b313382d"
+    },
+    "nn-autograd-clients": {
+      "sha256": "30fd534e9b46b5f3670e5567dc2fd1e81e499b73df71e3a3f5f74659cf2c9c19",
+      "status": "passed",
+      "wasm_sha256": "2696c6b015cf2fc14d1201c07bc01993d70fbd18fed9ca409e5db9f1b313382d"
+    },
+    "nn-learner-clients": {
+      "sha256": "d1fd97e79355db07dd2ed89ff394d3b07dc9b93a7b359fa4861792449bbf4a91",
+      "status": "passed",
+      "wasm_sha256": "2696c6b015cf2fc14d1201c07bc01993d70fbd18fed9ca409e5db9f1b313382d"
+    },
+    "nn-module-forward": {
+      "sha256": "09456abc8a786b00c66b0ad2146c52c5146254cecdc2c05e1a267169cb40b3e0",
+      "status": "passed",
+      "wasm_sha256": "2696c6b015cf2fc14d1201c07bc01993d70fbd18fed9ca409e5db9f1b313382d"
+    }
+  },
+  "raw_scope": "Full four-run states, immutable binaries and logs retained locally. Public profile retains every sample and per-case state digests; browser receipt is complete. No old frozen records were changed.",
+  "rust_toolchain": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+}

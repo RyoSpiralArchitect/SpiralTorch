@@ -1,0 +1,11 @@
+{
+  "hf_fractional_angle_study.py": "ed634786346e90bdb4149ac631cee6c759f1e90820b047ff5ac068e62b4f49ba",
+  "hf_fractional_gain_study.py": "43a2656c6fc011c8c5a875ac104100798c307763e6627608e7da2828a3a2eac5",
+  "hf_fractional_lag_study.py": "e08cb15676e73dfa14f866624c0fe9ee46ca435c0eff427aa6556bd9850d46f6",
+  "hf_fractional_pride_window.json": "625ae33fd8e77b2da102bb410bf700641397ffb9792dceda896a543dc957825e",
+  "hf_fractional_window_study.py": "35600fb9177e162dffe3e4b56378e9461fad16e9cb7093171cc02d92be1fd7a5",
+  "hf_wave_gate_conditioning.py": "982dbc4b73f76dfcb904d71749725137113dc1a5db868f09dcf3f4622eb83df0",
+  "hf_wave_gate_long_horizon.py": "e863f36cabd5518f34103ff99fd7f426d91bfdc7db28cc5c3fd73604fbe51d8a",
+  "preflight_fractional_gain_study.py": "b9dce883e2a92ba084fb15b081083ed17d3f866c815373e26e7a981fee9199df",
+  "summarize_wave_gate_long_horizon.py": "77ac10c302ac450ea4121deb87782594491378e83957b9d0748686d923f736c4"
+}

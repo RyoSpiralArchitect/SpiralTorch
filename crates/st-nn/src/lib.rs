@@ -115,7 +115,9 @@ pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv3d, Conv4d, Conv6da, MaxPo
 pub use layers::linear::Linear;
 pub use layers::lora_linear::LoraLinear;
 pub use layers::sequential::Sequential;
-pub use layers::wave_gate::WaveGate;
+pub use layers::wave_gate::{
+    WaveGate, WaveGateConditioning, WaveGateKernel, WaveGateLearningBatch, WaveGateVjp,
+};
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{
@@ -124,11 +126,11 @@ pub use layers::{
     HamiltonJacobiTensorStep, KleinGordonAudit, KleinGordonBackwardAudit, KleinGordonConfig,
     KleinGordonPropagation, KleinGordonTensorBackward, KleinGordonTensorStep, LayerNorm, Lstm,
     Relu, Scaler, StochasticSchrodingerAudit, StochasticSchrodingerBackwardAudit,
-    StochasticSchrodingerConfig, StochasticSchrodingerLayer, ToposResonator, ToposResonatorAudit,
-    ToposResonatorBackwardAudit, ToposResonatorConfig, ToposResonatorTensorBackward,
-    ToposResonatorTensorStep, ZRelativityModule, ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry,
-    ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, ZSpaceLayerNorm, ZSpaceLayerNormTelemetry,
-    ZSpaceMixer,
+    StochasticSchrodingerConfig, StochasticSchrodingerLayer, ToposGateLayout, ToposResonator,
+    ToposResonatorAudit, ToposResonatorBackwardAudit, ToposResonatorConfig,
+    ToposResonatorTensorBackward, ToposResonatorTensorStep, ZRelativityModule, ZSpaceBatchNorm1d,
+    ZSpaceBatchNormTelemetry, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, ZSpaceLayerNorm,
+    ZSpaceLayerNormTelemetry, ZSpaceMixer,
 };
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,

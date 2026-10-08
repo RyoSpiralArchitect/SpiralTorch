@@ -1,0 +1,79 @@
+{
+  "schema": "spiraltorch.topos_capture_summary.v1",
+  "source_revision": "bfdbbc3035a4e67f179913933f53a6eae35b60c9",
+  "base_revision": "88dbb8a429ffd86fe758dbfafd559faacaba7123",
+  "status": "validated_and_measured",
+  "processes": 24,
+  "repetitions_per_condition": 3,
+  "warmup_per_route": 2,
+  "rotated_rounds_per_process": 12,
+  "rows": [
+    {
+      "shape": [
+        2,
+        16,
+        64
+      ],
+      "iterations": 4,
+      "coupling": 0.25,
+      "old_public_ms": 0.486313,
+      "new_list_ms": 0.48800049999999995,
+      "new_bulk_recomputed_ms": 0.10752049999999999,
+      "new_captured_ms": 0.0825835,
+      "new_torch_reference_ms": 0.22458299999999998,
+      "native_old_new_all_tensor_hashes_equal": true
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "iterations": 4,
+      "coupling": 0.25,
+      "old_public_ms": 48.9560625,
+      "new_list_ms": 49.1998745,
+      "new_bulk_recomputed_ms": 8.6941875,
+      "new_captured_ms": 6.561104,
+      "new_torch_reference_ms": 4.8076455,
+      "native_old_new_all_tensor_hashes_equal": true
+    },
+    {
+      "shape": [
+        2,
+        16,
+        64
+      ],
+      "iterations": 16,
+      "coupling": 0.75,
+      "old_public_ms": 0.7235205,
+      "new_list_ms": 0.7241875,
+      "new_bulk_recomputed_ms": 0.33999999999999997,
+      "new_captured_ms": 0.1755205,
+      "new_torch_reference_ms": 0.848375,
+      "native_old_new_all_tensor_hashes_equal": true
+    },
+    {
+      "shape": [
+        2,
+        128,
+        768
+      ],
+      "iterations": 16,
+      "coupling": 0.75,
+      "old_public_ms": 74.9312705,
+      "new_list_ms": 75.73204150000001,
+      "new_bulk_recomputed_ms": 37.6752085,
+      "new_captured_ms": 23.168999499999998,
+      "new_torch_reference_ms": 18.12875,
+      "native_old_new_all_tensor_hashes_equal": true
+    }
+  ],
+  "scope": "CPU float32 forward and joint input/broadcast-gate VJP, including host transport; Rust retains its audit work. Torch is an independent matching finite-unroll reference. No quality, end-to-end model throughput, browser or GPU speed claim.",
+  "caveats": [
+    "Before and after binaries were measured sequentially, not interleaved. Routes rotate within each process.",
+    "Median of three process medians; not a confidence interval.",
+    "The captured Rust tape retains four N-element f32 vectors plus metadata (16*N bytes), excluding client tensors and temporary buffers.",
+    "Scalar WASM was exercised in Node, not a browser or WebGPU."
+  ]
+}

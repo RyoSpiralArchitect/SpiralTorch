@@ -74,14 +74,18 @@ impl PredictionOutputs {
             }
             (
                 Node::Pointwise {
-                    plan, parameters, ..
+                    plan,
+                    workspace,
+                    parameters,
+                    ..
                 },
-                GraphStage::Pointwise { .. },
+                GraphStage::Pointwise { .. } | GraphStage::ToposResonator { .. },
             ) => {
                 let inputs: Vec<_> = std::iter::once(&g.activations[stage])
                     .chain(parameters.iter().map(|&id| &g.parameters[id]))
                     .collect();
-                ForwardBinding::Pointwise(plan.forward().bind_into(
+                ForwardBinding::Pointwise(plan.bind_forward(
+                    workspace,
                     &inputs,
                     tensor.values(),
                     &resources.empty_flags,

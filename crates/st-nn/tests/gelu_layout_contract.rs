@@ -221,13 +221,21 @@ fn sequential_keeps_custom_module_retained_inputs_intact() {
     let second = first.try_gelu().unwrap();
     assert_eq!(model.forward(&input).unwrap(), second);
     assert_eq!(&*saved.borrow(), &[input.clone(), first.clone()]);
-    model
-        .backward(&input, &Tensor::from_vec(2, 6, vec![1.0; 12]).unwrap())
-        .unwrap();
-    assert_eq!(
-        &*saved.borrow(),
-        &[input.clone(), first.clone(), input, first]
-    );
+    for scale in [1.0, -0.75] {
+        let seeds: Vec<_> = (0..12).map(|i| scale * (i as f32 - 5.0) / 4.0).collect();
+        let gradient: Vec<_> = input
+            .data()
+            .iter()
+            .zip(&seeds)
+            .map(|(&x, &g)| {
+                let (y, first_derivative) = reference(f64::from(x));
+                f64::from(g) * first_derivative * reference(y).1
+            })
+            .collect();
+        let seed = Tensor::from_vec(2, 6, seeds).unwrap();
+        check(&model.backward(&input, &seed).unwrap(), &gradient);
+        assert_eq!(&*saved.borrow(), &[input.clone(), first.clone()]);
+    }
 }
 
 #[test]
@@ -408,7 +416,10 @@ fn owned_sequential_and_default_custom_module_preserve_contracts() {
     let output = model.forward_owned(intermediate).unwrap();
     assert_eq!(bits(&output), bits(&expected));
     assert_eq!(&*saved.borrow(), &[before]);
+}
 
+#[test]
+fn untracked_nested_sequential_reuses_owned_storage() {
     let mut inner = Sequential::new();
     inner.push(Gelu::new());
     let mut model = Sequential::new();
@@ -417,9 +428,15 @@ fn owned_sequential_and_default_custom_module_preserve_contracts() {
     let input = owned_fixture();
     let expected = input.try_gelu().unwrap().try_gelu().unwrap();
     let pointer = input.data().as_ptr();
-    let output = model.forward_owned(input).unwrap();
+    let output = model.forward_untracked_owned(input).unwrap();
     assert_eq!(output.data().as_ptr(), pointer);
     assert_eq!(bits(&output), bits(&expected));
+    assert!(matches!(
+        model.backward(&owned_fixture(), &expected),
+        Err(TensorError::InvalidValue {
+            label: "sequential_forward_missing"
+        })
+    ));
 }
 
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]

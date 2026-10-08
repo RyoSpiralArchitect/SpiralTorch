@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust elliptic learning snapshots</title>
+<pre id="result" data-status="running">running</pre>
+<script type="module">
+import init, {EllipticWarpKernel} from "/module/spiraltorch_wasm.js";
+const out = document.querySelector("#result");
+const report = {schema: "spiraltorch.elliptic_browser_learning.v1", status: "running"};
+function assert(ok, text) { if (!ok) throw Error(text); }
+function reject(fn) {
+  let rejected = false;
+  try { fn(); } catch { rejected = true; }
+  assert(rejected, "expected rejection");
+}
+function compare(actual, expected) {
+  assert(actual.length === expected.length, "shape mismatch");
+  let error = 0;
+  for (let i = 0; i < actual.length; i++) {
+    const delta = Math.abs(actual[i] - expected[i]);
+    assert(Number.isFinite(actual[i]) && delta <= 1e-6 + 2e-5 * Math.abs(expected[i]), `value ${i}`);
+    error = Math.max(error, delta);
+  }
+  return error;
+}
+let kernel, snapshot;
+try {
+  await init();
+  const response = await fetch("/pretrained.json");
+  assert(response.ok, "native fixture response");
+  const fixture = (await response.json()).native_fixture;
+  kernel = new EllipticWarpKernel(1, 4, 2, 64);
+  snapshot = kernel.forward(new Float32Array(fixture.input));
+  report.forward_max_error = compare(snapshot.features, fixture.features);
+  report.vjp_max_error = compare(snapshot.vjp(new Float32Array(fixture.upstream)), fixture.vjp);
+  snapshot.features.fill(NaN);
+  compare(snapshot.features, fixture.features);
+  reject(() => snapshot.vjp(new Float32Array([1])));
+  reject(() => snapshot.vjp(new Float32Array(27).fill(NaN)));
+  const targetBatch = kernel.forward(new Float32Array([1, 0.4, 0.6]));
+  const target = targetBatch.features;
+  targetBatch.free();
+  const coordinates = new Float32Array([1, 0.1, 0.2]);
+  const losses = [];
+  for (let step = 0; step <= 100; step++) {
+    const batch = kernel.forward(coordinates);
+    try {
+      const features = batch.features;
+      const loss = features.reduce((sum, value, i) => sum + (value - target[i]) ** 2 / 9, 0);
+      losses.push(loss);
+      if (step === 100) break;
+      const gradient = batch.vjp(Float32Array.from(features, (value, i) => 2 * (value - target[i]) / 9));
+      coordinates[1] -= 0.2 * gradient[1];
+      coordinates[2] -= 0.2 * gradient[2];
+    } finally { batch.free(); }
+  }
+  assert(losses.at(-1) < losses[0] * 0.1, "local chart did not learn");
+  report.learning_losses = losses;
+  report.final_orientation = Array.from(coordinates);
+  for (const bad of [[0,0,0], [0,0,1], [-1,0,0.5], [NaN,1,1], [1e-30,0,1e20], [1,2]])
+    reject(() => kernel.forward(new Float32Array(bad)));
+  for (const bad of [0, -1, 0.5, NaN, Infinity, 4294967296, "1", null, true]) {
+    reject(() => new EllipticWarpKernel(1, bad, 1, 64));
+    reject(() => new EllipticWarpKernel(1, 2, bad, 64));
+    reject(() => new EllipticWarpKernel(1, 2, 1, bad));
+  }
+  const empty = kernel.forward(new Float32Array());
+  assert(empty.features.length === 0 && empty.vjp(new Float32Array()).length === 0, "empty snapshot");
+  empty.free();
+  kernel.free(); kernel = null;
+  compare(snapshot.vjp(new Float32Array(fixture.upstream)), fixture.vjp);
+  report.status = "passed";
+} catch(error) { report.status = "error"; report.error = String(error.stack || error); }
+finally { snapshot?.free(); kernel?.free(); }
+out.textContent = JSON.stringify(report, null, 2);
+out.dataset.status = report.status;
+</script>

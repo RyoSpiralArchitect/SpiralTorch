@@ -1,0 +1,129 @@
+{
+  "schema": "spiraltorch.fractional_paired_forward_verification.v1",
+  "status": "local_validation_passed",
+  "parent_revision": "98027f0177a2ae60f90d52c2a4622d7ddb229601",
+  "source": {
+    "baseline_core_sha256": "ca9877e560fdd558baabacd3da7a20651904edc4e72d878f74a10c928f852f81",
+    "paired_core_sha256": "1a9b4882bc36e85e6b265c77c194ecc4f01b49d087474bf3f8527fd86b405b99",
+    "cargo_lock_sha256": "cf7e9e875514bcb798ddb84e196a2937cb3b9d8da0668cb982cc20d67539c18a"
+  },
+  "builds": {
+    "native": {
+      "profile": "release",
+      "rust": "1.98.0",
+      "command": "cargo +1.98.0 build --locked --offline --manifest-path bindings/st-py/Cargo.toml --release (PYO3_PYTHON pinned)",
+      "sha256": "fc4bd21dbd8c79a95104e464f4b83860b5c891fc7a29cf5daaddcd25bd7f9eee",
+      "log_sha256": "44da23ae2a148fba3ca6f9de13a688f7a5d2cf699cfb8e6f9e903e71c347d247",
+      "frozen_package_files_rechecked": 70
+    },
+    "wasm": {
+      "profile": "dev",
+      "target": "wasm32-unknown-unknown",
+      "rust": "1.98.0",
+      "bindgen": "0.2.104",
+      "command": "cargo +1.98.0 build --locked --offline -p spiraltorch-wasm --target wasm32-unknown-unknown; wasm-bindgen --target nodejs",
+      "wasm_sha256": "817e8b76f0fee754ead3afc335434c533adf3c408b6585ba43efe66fcea371d5",
+      "js_sha256": "c4b91001679110b61e3d439ea87b7ff4094f25d4c5315a822a643a1a51c49a27",
+      "log_sha256": "4f14a42125686365e355768c7e825d3c4dfa1a54d89588000ef0da233f889634"
+    }
+  },
+  "rust_tests": {
+    "debug": {
+      "passed": 123,
+      "failed": 0,
+      "command": "cargo +1.98.0 test --locked --offline -p st-frac",
+      "log_sha256": "4fd851407c64b16574cd590db3baf272bd3d1e1b2f666b71c67b6da3ad8544da"
+    },
+    "release": {
+      "passed": 123,
+      "failed": 0,
+      "command": "cargo +1.98.0 test --locked --offline -p st-frac --release",
+      "log_sha256": "72265d174d1a8f8033340aac9f7b1105a3038af30e52c70b0f75dedb912efebb"
+    },
+    "ci_filtered_learning_tests": {
+      "passed": 3,
+      "command": "cargo +1.98.0 test --locked --offline -p st-frac --release --lib learning::tests"
+    }
+  },
+  "python_tests": {
+    "passed": 354,
+    "failed": 0,
+    "skipped": 0,
+    "existing_torch_warnings": 18,
+    "files": [
+      "bindings/st-py/tests/test_fractional_history_study.py",
+      "bindings/st-py/tests/test_fractional_memory_study.py",
+      "bindings/st-py/tests/test_fractional_history.py",
+      "bindings/st-py/tests/test_fractional_learning.py",
+      "bindings/st-py/tests/test_geometry_autograd.py",
+      "bindings/st-py/tests/test_wave_gate_learning.py",
+      "bindings/st-py/tests/test_wave_gate_radius.py",
+      "bindings/st-py/tests/test_wave_gate_vjp.py",
+      "bindings/st-py/tests/test_wave_gate_conditioning_example.py",
+      "bindings/st-py/tests/test_wave_gate_long_horizon.py",
+      "bindings/st-py/tests/test_wave_gate_long_horizon_summary.py",
+      "bindings/st-py/tests/test_elliptic_causal_learning.py",
+      "bindings/st-py/tests/test_elliptic_gated_study.py",
+      "bindings/st-py/tests/test_elliptic_anchored.py",
+      "bindings/st-py/tests/test_elliptic_directional.py",
+      "bindings/st-py/tests/test_elliptic_causal_study.py",
+      "bindings/st-py/tests/test_elliptic_anchored_study.py",
+      "bindings/st-py/tests/test_elliptic_learning.py",
+      "bindings/st-py/tests/test_elliptic_nonlinear_study.py",
+      "bindings/st-py/tests/test_elliptic_context_ablation.py",
+      "bindings/st-py/tests/test_elliptic_gated_causal.py",
+      "bindings/st-py/tests/test_elliptic_chart_step.py",
+      "bindings/st-py/tests/test_fractional_selective_vjp.py",
+      "bindings/st-py/tests/test_geometry_optional_dependency.py",
+      "bindings/st-py/tests/test_fractional_lag_study.py"
+    ],
+    "log_sha256": "3ebbf4bdc25ef34bc49b944424147e8bd4788040b817d1221a18bdb990ce0004",
+    "import_isolation": "Pre-import asserted native package path; PYTHONNOUSERSITE, python -P -B, pytest --import-mode=importlib. Offline HF and Spiralton auto-patches disabled.",
+    "final_recheck_log_sha256": "4ec2688fe306bd88b8c8610e3ecbbb9072e3401e1f652693600610fac213f1f4"
+  },
+  "benchmark_tests": {
+    "passed": 17,
+    "failed": 0,
+    "skipped": 0,
+    "file": "tools/test_benchmark_fractional_learning.py",
+    "log_sha256": "40625c89f78f4c8e15a6e0b892e46a994dac5af9d56bc4e15cf4892eabdb2f4e",
+    "scope": "Mathematical reference and published-statistic/receipt reconstruction, no timing thresholds and no private checkpoint execution."
+  },
+  "checks": {
+    "rustfmt": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all --check"
+    },
+    "clippy": {
+      "status": "passed",
+      "command": "cargo +1.98.0 clippy --locked --offline -p st-frac --all-targets --features wgpu -- -D warnings",
+      "log_sha256": "830d181c539951001320f1842893829cee9a39f84ece5502fb9a2375c80c5a4f",
+      "caveat": "Existing vendored wgpu/dependency warnings remain. Initial profiler median lint failed and was fixed before final validation; core arithmetic unchanged.",
+      "initial_failure_log_sha256": "2b4d759a4a49c2e26e7519c0e0cb2b23ea14a91a93be95f770f1e2d2e87ce2c3"
+    }
+  },
+  "wasm_tests": {
+    "tiled_cases": 128,
+    "selective_cases": 54,
+    "full_fit_updates": 100,
+    "history_fit_updates": 500,
+    "scope": "Actual wasm32 via Node; no browser performance claim."
+  },
+  "pretrained": {
+    "receipt": "pretrained-parity.json",
+    "adapters": 6,
+    "total_auxiliary_updates": 24,
+    "batch_policy": "Replay each checkpoint final scheduled batch twice, in each separate native binary.",
+    "scope": "Loss/gradient/parameter/Adam bitwise regression only; no new primary study or heldout scores."
+  },
+  "timing": {
+    "plan": "timing-plan.json",
+    "processes": 24,
+    "failed": 0,
+    "supplemental_rust_processes": 6,
+    "stage_diagnostics": 2,
+    "interrupted_and_exploratory_disposition": "excluded-diagnostics.json",
+    "scope": "Ambient-load CPU operators, same finite mathematical map and requested alpha VJP. No model quality, resident/GPU/WASM throughput or portable speed claim."
+  },
+  "privacy": "Only numeric receipts, hashes and source/commands published. Weights, corpora, native packages, tensor payloads, raw logs and local paths retained locally."
+}

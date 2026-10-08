@@ -1,0 +1,375 @@
+{
+  "schema": "spiraltorch.fractional_history_checkpoint_verification.v1",
+  "status": "passed",
+  "study_id": "b44d343718330010cbc9b3320e737ded41143d5a1b0da95ffb3e7f3ed9775e39",
+  "planned_runs_verified": 12,
+  "primary_updates": 6144,
+  "extra_continuation_updates": 24,
+  "artifacts": {
+    "plan.json": "93376a2879e520917aa9759e4c0fda5c923776a70893d433d74ec25a811922a8",
+    "journal.json": "86ba12c0d1f6f11fdde2726554c0cb7901dce0bee2f6ac7d8e00880a684f0465",
+    "results.json": "14d2cc0a85fa3185c954896b3af708b706d9fe1b2d12cf8ce11a60c3b6e1c1a2"
+  },
+  "frozen_client_files_verified": 6,
+  "frozen_package_files_verified": 67,
+  "runs": {
+    "41:pointwise": {
+      "checkpoint": {
+        "filename": "checkpoint-o5ii5tw1.pt",
+        "sha256": "9cc0c2fbb0df08bda9a88e08267b954aace065acbce91706c9a13ae35adc732f"
+      },
+      "cursor": 512,
+      "parameter_count": 768,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "9f0abd93a887e3887660e7f6f8e3a944db7fa93ec61a86e1ac7ebe2f290f3d56",
+      "final_parameter_sha256": "eec91dab8b7e2c2a2fb06842f27e42af80ca3b1eb14d08bf7c6b54efea44e332",
+      "gates": {
+        "gate": {
+          "l2": 5.049279689788818,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "41:ema_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-plehe8os.pt",
+        "sha256": "9b9518b3555b84eb73d10e76d1b69cb0f0b56b0bdad34080643e02affc5e51a4"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "26d757dd51a07323ed7c1a5a898a6955698bbf6bb979d3d83d276bafd7a9b3fb",
+      "final_parameter_sha256": "602abb1211a91b17c7c46e1edec2506d6568f33dc89348f54a5038bc59bb837b",
+      "gates": {
+        "gate": {
+          "l2": 4.11591911315918,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.031805038452148,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_decay": 0.3412865102291107,
+      "scalar_changed": true,
+      "nonzero_scalar_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "41:history_fixed": {
+      "checkpoint": {
+        "filename": "checkpoint-4u3mvnoz.pt",
+        "sha256": "67f36c574778794dcb8096ebed146efe9f973403bf94a835b9ccb9d73bcd8d9b"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "412c5307f4d2a9957bae3ce05ab2133ac43d3ab61b4e86eedb1e8f5d02531f1d",
+      "final_parameter_sha256": "0dcad9aa994cf95754a283a460a3e84158ecf0497a26072fd41787fc32cfab15",
+      "gates": {
+        "gate": {
+          "l2": 4.130446434020996,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.033865928649902,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.5,
+      "scalar_changed": false,
+      "nonzero_scalar_gradient_steps": 0,
+      "frozen_scalar_has_no_adam_state": true
+    },
+    "41:history_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-usuwy2vu.pt",
+        "sha256": "7a39bbe4f33bd11d8e619baee31d52efeb997420f959e2970d599bcbaf2e16ee"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "412c5307f4d2a9957bae3ce05ab2133ac43d3ab61b4e86eedb1e8f5d02531f1d",
+      "final_parameter_sha256": "caa46ddecfd21f4e3fcf88abdcb71fcfff3c9b946cd4301e395bfe2d696f297f",
+      "gates": {
+        "gate": {
+          "l2": 4.336144924163818,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.029987335205078,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 1.0347979068756104,
+      "scalar_changed": true,
+      "nonzero_scalar_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "43:pointwise": {
+      "checkpoint": {
+        "filename": "checkpoint-g1b_k7nu.pt",
+        "sha256": "824706c9b2d76985e92796898e9ff9122044dbbbefc4e6488ce67248e387bf19"
+      },
+      "cursor": 512,
+      "parameter_count": 768,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "9f0abd93a887e3887660e7f6f8e3a944db7fa93ec61a86e1ac7ebe2f290f3d56",
+      "final_parameter_sha256": "6bbce04bd48d5098cccb1f13ea64a592cbafe6c13c99af666d50b3a03d155a87",
+      "gates": {
+        "gate": {
+          "l2": 5.063220977783203,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "43:ema_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-4yle8gtv.pt",
+        "sha256": "feab4c329cb533ef141a3176e859417a3d50e4f581144d592089845deee82331"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "26d757dd51a07323ed7c1a5a898a6955698bbf6bb979d3d83d276bafd7a9b3fb",
+      "final_parameter_sha256": "54c773981a1e52cf4d88ae420cb8c85ce33a0276e1c91e754464821c0f8eddbb",
+      "gates": {
+        "gate": {
+          "l2": 4.1158318519592285,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.050457000732422,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_decay": 0.3524857461452484,
+      "scalar_changed": true,
+      "nonzero_scalar_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "43:history_fixed": {
+      "checkpoint": {
+        "filename": "checkpoint-n2pl_r8t.pt",
+        "sha256": "ff990ea024b9f1160cafcffe5859d43a788e041bab29b86fef529a7749f75d30"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "412c5307f4d2a9957bae3ce05ab2133ac43d3ab61b4e86eedb1e8f5d02531f1d",
+      "final_parameter_sha256": "64b5677b49423fea5fd495f41d2f905e08e959323f4f2d623eb9470a36e1b496",
+      "gates": {
+        "gate": {
+          "l2": 4.141010761260986,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.0515618324279785,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.5,
+      "scalar_changed": false,
+      "nonzero_scalar_gradient_steps": 0,
+      "frozen_scalar_has_no_adam_state": true
+    },
+    "43:history_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-7l5exopc.pt",
+        "sha256": "1d7fc364ef1b89905026c21379c7320646fa04c608554a2278d6642e42425666"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "412c5307f4d2a9957bae3ce05ab2133ac43d3ab61b4e86eedb1e8f5d02531f1d",
+      "final_parameter_sha256": "a6c96d7e9a58302d19c1dd1ba78f22cb5ea82fd0d66e2d5497512373f8a8b6e8",
+      "gates": {
+        "gate": {
+          "l2": 4.324892997741699,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.049515724182129,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.9887135028839111,
+      "scalar_changed": true,
+      "nonzero_scalar_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "47:pointwise": {
+      "checkpoint": {
+        "filename": "checkpoint-8_i01efn.pt",
+        "sha256": "72c6266ce732212ef718c6e3bc5f4f6d548e962b071a086ce5260637a930f1a1"
+      },
+      "cursor": 512,
+      "parameter_count": 768,
+      "trainable_parameter_count": 768,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "9f0abd93a887e3887660e7f6f8e3a944db7fa93ec61a86e1ac7ebe2f290f3d56",
+      "final_parameter_sha256": "df9f7ba1779a50b876795ddba18640eeae397e5ebafeb24f93897b377e0fe54d",
+      "gates": {
+        "gate": {
+          "l2": 5.111724376678467,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true
+    },
+    "47:ema_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-10hzkq28.pt",
+        "sha256": "e49db4bcf883e6fa07322503322dce0149afa297357521457862db1de2dd17c9"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "26d757dd51a07323ed7c1a5a898a6955698bbf6bb979d3d83d276bafd7a9b3fb",
+      "final_parameter_sha256": "ee54701d0b429303f684de52eb676c4c704e29dc0bcf514c58a31de30c2b2574",
+      "gates": {
+        "gate": {
+          "l2": 4.129459381103516,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.099515438079834,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_decay": 0.3568528890609741,
+      "scalar_changed": true,
+      "nonzero_scalar_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    },
+    "47:history_fixed": {
+      "checkpoint": {
+        "filename": "checkpoint-v5btlqtf.pt",
+        "sha256": "89216f402d335798ae8fe95ba8cd44a62ab3a5e0eae4ee40e457ece056176635"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1536,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "412c5307f4d2a9957bae3ce05ab2133ac43d3ab61b4e86eedb1e8f5d02531f1d",
+      "final_parameter_sha256": "db081cf16c0d91d90a6b4406ab9b0cc0c5d03a9d3cd5e6d4593d9ea3a76504bf",
+      "gates": {
+        "gate": {
+          "l2": 4.152476787567139,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.1006669998168945,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.5,
+      "scalar_changed": false,
+      "nonzero_scalar_gradient_steps": 0,
+      "frozen_scalar_has_no_adam_state": true
+    },
+    "47:history_learned": {
+      "checkpoint": {
+        "filename": "checkpoint-kwboh8fm.pt",
+        "sha256": "12bf4262ed6c88b1dd00f95129b13520729c6218154745b4ab4485fa9874617d"
+      },
+      "cursor": 512,
+      "parameter_count": 1537,
+      "trainable_parameter_count": 1537,
+      "finite_adapter_and_adam": true,
+      "checkpoint_records_and_endpoint_receipt_match": true,
+      "optimizer_recipe_and_restored_state_equal": true,
+      "initial_parameter_sha256": "412c5307f4d2a9957bae3ce05ab2133ac43d3ab61b4e86eedb1e8f5d02531f1d",
+      "final_parameter_sha256": "fa8cffdf4812a1f56208b9eb85e503ec078277a4b41ac8e3d72ac05cffa47343",
+      "gates": {
+        "gate": {
+          "l2": 4.340447425842285,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        },
+        "local_gate": {
+          "l2": 5.09745454788208,
+          "changed_from_initial": true,
+          "nonzero_gradient_steps": 512
+        }
+      },
+      "frozen_base_unchanged": true,
+      "resume_next_update_equal": true,
+      "final_alpha": 0.9956767559051514,
+      "scalar_changed": true,
+      "nonzero_scalar_gradient_steps": 511,
+      "frozen_scalar_has_no_adam_state": null
+    }
+  },
+  "scope": "Saved contents and receipts only. The original driver executed frozen-base and next-update checks. No model training or endpoint scoring here."
+}

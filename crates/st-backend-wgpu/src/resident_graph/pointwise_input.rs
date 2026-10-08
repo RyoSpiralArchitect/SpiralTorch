@@ -24,9 +24,9 @@ impl ResidentGraph {
         input: &ResidentTensor,
         output: &wgpu::Buffer,
     ) -> BoundaryBinding {
-        let GraphStage::Pointwise { parameters, .. } = &self.definition.stages()[0] else {
-            unreachable!("pointwise input requires a first pointwise stage");
-        };
+        let parameters = self.definition.stages()[0]
+            .pointwise_parameters()
+            .expect("first pointwise stage");
         let plan = self.pointwise_input.as_ref().unwrap().clone();
         let inputs: Vec<_> = std::iter::once(input.values())
             .chain(parameters.iter().map(|&id| &self.parameters[id]))
