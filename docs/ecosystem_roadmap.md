@@ -352,8 +352,11 @@ controls rather than choosing between them:
    WGPU and browser WebGPU. Frozen QKV/output projection lowering now connects
    existing `Linear` and `ZRBFAttention` parameters and geometric bias without
    activation readback, with 12 matched full-chain controls on both clients.
-   This is mean-only inference; uncertainty outputs, backward, KV-cache ownership
-   and complete decoder integration remain open.
+   The standalone [resident attention VJP](resident_attention_learning.md) now
+   carries Q/K/V and both bias gradients into GPU-only synthetic SGD updates,
+   checked against the same PyTorch function. This does not yet train the frozen
+   NN projection chain: trainable projection ownership, uncertainty outputs,
+   KV-cache ownership and complete decoder integration remain open.
 3. **Measure the complete language path.** Require numerical agreement before
    transfer-inclusive throughput measurements, with resident-only timings
    labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are

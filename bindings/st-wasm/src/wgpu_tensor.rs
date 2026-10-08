@@ -4,6 +4,8 @@ use js_sys::{Array, Float32Array, Number, Promise};
 use st_backend_wgpu::resident_tensor::{ResidentTensor, TensorDevice, TensorReadback};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
+mod attention;
+pub use attention::*;
 mod pointwise;
 pub use pointwise::*;
 

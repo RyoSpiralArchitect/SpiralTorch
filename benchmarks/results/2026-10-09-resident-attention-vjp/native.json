@@ -1,0 +1,531 @@
+{
+  "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "checks": [
+    {
+      "max_abs_error": {
+        "forward": 3.725290298461914e-8,
+        "key": 7.450580596923828e-9,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_None_bias_0",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 3.725290298461914e-8,
+        "key": 7.450580596923828e-9,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_None_bias_0",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "key": 1.1175870895385742e-8,
+        "query": 1.1175870895385742e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_None_bias_1",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "key": 1.1175870895385742e-8,
+        "query": 1.1175870895385742e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_None_bias_1",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.21540641784668e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_None_bias_2",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.21540641784668e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_None_bias_2",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 3.725290298461914e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 2.9802322387695312e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_None_bias_3",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 3.725290298461914e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 2.9802322387695312e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_None_bias_3",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 1.4901161193847656e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_0",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 1.4901161193847656e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_0",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 7.450580596923828e-9,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_1",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 7.450580596923828e-9,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_1",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_2",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_2",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_3",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 5.960464477539063e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_0_bias_3",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 7.450580596923828e-9,
+        "query": 2.2351741790771484e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_2_bias_0",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 7.450580596923828e-9,
+        "query": 2.2351741790771484e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_2_bias_0",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "key": 1.4901161193847656e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_2_bias_1",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "key": 1.4901161193847656e-8,
+        "query": 1.4901161193847656e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_2_bias_1",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.21540641784668e-8,
+        "key": 1.4901161193847656e-8,
+        "pair_bias": 4.470348358154297e-8,
+        "query": 9.313225746154785e-9,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_2_bias_2",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.21540641784668e-8,
+        "key": 1.4901161193847656e-8,
+        "pair_bias": 4.470348358154297e-8,
+        "query": 9.313225746154785e-9,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "mask_2_bias_2",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 2.2351741790771484e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_2_bias_3",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 2.2351741790771484e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "mask_2_bias_3",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "key": 2.60770320892334e-8,
+        "pair_bias": 3.5762786865234375e-7,
+        "query": 2.9802322387695312e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 3.5762786865234375e-7
+      },
+      "name": "head_tail",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 4.470348358154297e-8,
+        "key": 2.60770320892334e-8,
+        "pair_bias": 3.5762786865234375e-7,
+        "query": 2.9802322387695312e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 3.5762786865234375e-7
+      },
+      "name": "head_tail",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 2.2351741790771484e-8,
+        "query": 3.1403033062815666e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "max_head",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 5.960464477539063e-8,
+        "key": 2.2351741790771484e-8,
+        "query": 3.1403033062815666e-8,
+        "value": 2.9802322387695312e-8
+      },
+      "name": "max_head",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 1.1175870895385742e-7,
+        "key": 9.313225746154785e-10,
+        "pair_bias": 5.587935447692871e-9,
+        "query": 3.725290298461914e-8,
+        "value": 1.862645149230957e-9,
+        "z_bias": 5.587935447692871e-9
+      },
+      "name": "key_tile_tail",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 1.1175870895385742e-7,
+        "key": 9.313225746154785e-10,
+        "pair_bias": 5.587935447692871e-9,
+        "query": 3.725290298461914e-8,
+        "value": 1.862645149230957e-9,
+        "z_bias": 5.587935447692871e-9
+      },
+      "name": "key_tile_tail",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 3.3527612686157227e-8,
+        "key": 0,
+        "pair_bias": 2.9802322387695312e-8,
+        "query": 0,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "zero_scale",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 3.3527612686157227e-8,
+        "key": 0,
+        "pair_bias": 2.9802322387695312e-8,
+        "query": 0,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "zero_scale",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.1175870895385742e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "negative_scale",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 2.9802322387695312e-8,
+        "key": 7.450580596923828e-9,
+        "pair_bias": 5.960464477539063e-8,
+        "query": 1.1175870895385742e-8,
+        "value": 2.9802322387695312e-8,
+        "z_bias": 5.960464477539063e-8
+      },
+      "name": "negative_scale",
+      "strided": true
+    },
+    {
+      "max_abs_error": {
+        "forward": 0,
+        "key": 0,
+        "pair_bias": 0,
+        "query": 0,
+        "value": 0,
+        "z_bias": 0
+      },
+      "name": "empty_query",
+      "strided": false
+    },
+    {
+      "max_abs_error": {
+        "forward": 0,
+        "key": 0,
+        "pair_bias": 0,
+        "query": 0,
+        "value": 0,
+        "z_bias": 0
+      },
+      "name": "empty_query",
+      "strided": true
+    }
+  ],
+  "edge_checks": {
+    "forward_reduction_cases": 3,
+    "inherited_guard_cases": 12,
+    "range_cases": [
+      {
+        "max_abs_error": {
+          "key": 0,
+          "query": 0,
+          "value": 0
+        },
+        "name": "wide_intermediates",
+        "reference": "shared Rust f64 VJP"
+      },
+      {
+        "max_abs_error": {
+          "key": 0,
+          "pair_bias": 72057594037927940,
+          "query": 72057594037927940,
+          "value": 0
+        },
+        "name": "probability_underflow",
+        "reference": "shared Rust f64 VJP"
+      }
+    ]
+  },
+  "learning": {
+    "final_parameter_errors": {
+      "key": 2.9802322387695312e-8,
+      "pair_bias": 0,
+      "query": 3.725290298461914e-9,
+      "value": 1.4901161193847656e-8,
+      "z_bias": 0
+    },
+    "steps": 16,
+    "trace": [
+      {
+        "loss": 0.1587946914785274,
+        "max_abs_error": 2.9802322387695312e-8,
+        "step": 0
+      },
+      {
+        "loss": 0.158056315853422,
+        "max_abs_error": 2.9802322387695312e-8,
+        "step": 1
+      },
+      {
+        "loss": 0.1573215387992032,
+        "max_abs_error": 5.960464477539063e-8,
+        "step": 2
+      },
+      {
+        "loss": 0.15659033331122257,
+        "max_abs_error": 7.450580596923828e-8,
+        "step": 3
+      },
+      {
+        "loss": 0.15586267643656332,
+        "max_abs_error": 2.9802322387695312e-8,
+        "step": 4
+      },
+      {
+        "loss": 0.15513855121145975,
+        "max_abs_error": 2.9802322387695312e-8,
+        "step": 5
+      },
+      {
+        "loss": 0.15441793613495508,
+        "max_abs_error": 4.470348358154297e-8,
+        "step": 6
+      },
+      {
+        "loss": 0.15370080838670275,
+        "max_abs_error": 5.960464477539063e-8,
+        "step": 7
+      },
+      {
+        "loss": 0.15298715592833778,
+        "max_abs_error": 2.9802322387695312e-8,
+        "step": 8
+      },
+      {
+        "loss": 0.15227696036560218,
+        "max_abs_error": 4.470348358154297e-8,
+        "step": 9
+      },
+      {
+        "loss": 0.1515702052737121,
+        "max_abs_error": 2.9802322387695312e-8,
+        "step": 10
+      },
+      {
+        "loss": 0.15086686261644638,
+        "max_abs_error": 3.725290298461914e-8,
+        "step": 11
+      },
+      {
+        "loss": 0.15016692580679583,
+        "max_abs_error": 4.470348358154297e-8,
+        "step": 12
+      },
+      {
+        "loss": 0.1494703811460619,
+        "max_abs_error": 4.470348358154297e-8,
+        "step": 13
+      },
+      {
+        "loss": 0.1487771943773954,
+        "max_abs_error": 3.725290298461914e-8,
+        "step": 14
+      },
+      {
+        "loss": 0.1480873662904017,
+        "max_abs_error": 2.9802322387695312e-8,
+        "step": 15
+      }
+    ],
+    "validation_readbacks": "after all updates"
+  },
+  "passed": true,
+  "schema": "spiraltorch.resident_attention_vjp.validation.v1",
+  "scope": "synthetic gradient/update parity; no speed, full-decoder or quality claim",
+  "torch_version": "2.12.1"
+}

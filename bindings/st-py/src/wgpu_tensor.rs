@@ -1,5 +1,6 @@
 //! Owning Python handles over Rust's immutable N-D GPU storage.
 use pyo3::prelude::*;
+mod attention;
 mod pointwise;
 #[cfg(feature = "wgpu")]
 pub(crate) use pointwise::{PyPointwiseInputs, PyPointwisePlan};
@@ -194,6 +195,66 @@ impl PyWgpuTensor {
             inner: py.detach(|| self.inner.gelu()).map_err(error)?,
         })
     }
+    /// Resident [B,H,Q,D] attention. None is unmasked; offset=0 is causal.
+    #[pyo3(signature = (keys, values, scale, *, causal_offset=None, z_bias=None, pair_bias=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn scaled_dot_attention(
+        &self,
+        py: Python<'_>,
+        keys: &Self,
+        values: &Self,
+        scale: f32,
+        causal_offset: Option<&Bound<'_, PyAny>>,
+        z_bias: Option<&Self>,
+        pair_bias: Option<&Self>,
+    ) -> PyResult<Self> {
+        let mask = attention::mask(causal_offset)?;
+        Ok(Self {
+            inner: py
+                .detach(|| {
+                    self.inner.scaled_dot_attention(
+                        &keys.inner,
+                        &values.inner,
+                        scale,
+                        mask,
+                        z_bias.map(|v| &v.inner),
+                        pair_bias.map(|v| &v.inner),
+                    )
+                })
+                .map_err(error)?,
+        })
+    }
+    /// First-order VJP, without host readback or implicit broadcast reduction.
+    #[pyo3(signature = (keys, values, upstream, scale, *, causal_offset=None, z_bias=None, pair_bias=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn scaled_dot_attention_vjp(
+        &self,
+        py: Python<'_>,
+        keys: &Self,
+        values: &Self,
+        upstream: &Self,
+        scale: f32,
+        causal_offset: Option<&Bound<'_, PyAny>>,
+        z_bias: Option<&Self>,
+        pair_bias: Option<&Self>,
+    ) -> PyResult<attention::PyAttentionGradients> {
+        let mask = attention::mask(causal_offset)?;
+        Ok(attention::PyAttentionGradients {
+            inner: py
+                .detach(|| {
+                    self.inner.scaled_dot_attention_vjp(
+                        &keys.inner,
+                        &values.inner,
+                        &upstream.inner,
+                        scale,
+                        mask,
+                        z_bias.map(|v| &v.inner),
+                        pair_bias.map(|v| &v.inner),
+                    )
+                })
+                .map_err(error)?,
+        })
+    }
     fn depthwise_conv2d(
         &self,
         py: Python<'_>,
@@ -284,6 +345,7 @@ pub(crate) fn register(parent: &Bound<'_, PyModule>, module: &Bound<'_, PyModule
         target.add_class::<PyWgpuTensorDevice>()?;
         target.add_class::<PyWgpuTensor>()?;
         target.add_class::<PyWgpuTensorSnapshot>()?;
+        attention::register(target)?;
         pointwise::register(target)?;
     }
     Ok(())
