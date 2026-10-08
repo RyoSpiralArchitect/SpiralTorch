@@ -22,6 +22,3 @@ Counts describe repository size, not runtime performance or learning quality.
 <img src="badges/deps.svg" alt="crates" />
 </p>
 <!-- STATS:END -->
----
-
-**SpiralTorch is a Rust-first AI training framework** that keeps language,

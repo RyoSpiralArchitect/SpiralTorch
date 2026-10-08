@@ -22,6 +22,7 @@ Run repository commands from the repository root.
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
+**SpiralTorch is a Rust-first AI training framework** that keeps language,
 geometry, and device heuristics in the same conversation. SpiralK orchestrates
 the kernels, the hypergrad tape streams Z-space meaning, and the high-level
 `st-nn` modules stay PyTorch-compatible without shipping NumPy or PyTorch.

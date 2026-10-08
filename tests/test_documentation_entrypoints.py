@@ -23,6 +23,15 @@ def load_tool(name):
 
 
 class DocumentationEntrypointTests(unittest.TestCase):
+    def test_project_introduction_is_not_split_across_statistics_page(self):
+        project = (ROOT / "docs/reference/project.md").read_text(encoding="utf-8")
+        stats = (ROOT / "docs/repository-stats.md").read_text(encoding="utf-8")
+        opening = "**SpiralTorch is a Rust-first AI training framework** that keeps language,"
+        continuation = "geometry, and device heuristics in the same conversation."
+        self.assertIn(opening + "\n" + continuation, project)
+        self.assertNotIn(opening, stats)
+        self.assertEqual(stats.split("<!-- STATS:END -->", 1)[1].strip(), "")
+
     def test_entrypoints_stay_short_and_link_to_docs(self):
         for relative in ("README.md", "bindings/st-py/README.md"):
             with self.subTest(path=relative):
