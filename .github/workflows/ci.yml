@@ -403,6 +403,7 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target web --out-dir "$RUNNER_TEMP/spiraltorch-wasm-webgpu"
           node bindings/st-wasm/tests/resident_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
+          node bindings/st-wasm/tests/attention_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/tensor_mean_types.cjs "$RUNNER_TEMP/spiraltorch-wasm-webgpu/spiraltorch_wasm.js"
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/vision-input-checkpoint-wasm"

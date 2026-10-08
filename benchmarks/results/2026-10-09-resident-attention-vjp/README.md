@@ -61,3 +61,24 @@ No claim is made about CUDA/Furnace, full decoder training, projection ownership
 KV-cache management, throughput, geometry quality, or PyTorch superiority. These
 remain separately measured follow-ups. Version 0.4.29 is unchanged; this API has
 not been republished to PyPI.
+
+## CI Follow-Up
+
+CI on `b68ebb97` rejected a constant-size `chunks_exact(5)` in the new VJP test.
+It now uses `as_chunks::<5>()` and asserts that no remainder was discarded.
+The real-Metal attention suite again passed 25 tests with one existing benchmark
+ignored. Local Clippy now also checks **all targets**, including unit tests, with
+the same toolchain-only `-A unknown-lints` limitation. CI policy is unchanged.
+
+The original `validation.json` Rust/Clippy versions match the outer routing
+directory's toolchain, not the actual checkout's. Those two provenance fields
+are withdrawn. [ci-followup.json](ci-followup.json) records the checkout-selected
+Rust/Clippy 1.97.0 and fresh validation; it does not retroactively regenerate the
+browser result. Original numerical receipts and hashes remain unchanged.
+
+The shipped TypeScript surface now includes the attention methods and both new
+handle types. A CI check compares their contract with freshly generated
+wasm-bindgen declarations. Locally, the shipped declarations passed strict
+TypeScript checking and four negative contract mutations were rejected. Generated
+declarations were not tested locally. Full public
+Python/WASM GPU execution remains deferred pending disk-space approval.

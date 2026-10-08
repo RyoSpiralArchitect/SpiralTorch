@@ -224,6 +224,10 @@ declare module "spiraltorch-wasm" {
         depthwiseConv2d(weights: WgpuTensor, bias: WgpuTensor, strideH: number, strideW: number, padH: number, padW: number, dilationH: number, dilationW: number): WgpuTensor;
         /** NCHW dense convolution with resident [O, I, KH, KW] weights and [O] bias. */
         conv2d(weights: WgpuTensor, bias: WgpuTensor, strideH: number, strideW: number, padH: number, padW: number, dilationH: number, dilationW: number): WgpuTensor;
+        /** Null/undefined is unmasked; zero is causal prefill. Inputs and biases are borrowed. */
+        scaledDotAttention(keys: WgpuTensor, values: WgpuTensor, scale: number, causal_offset: number | null | undefined, biases: WgpuAttentionBiases): WgpuTensor;
+        /** Logical input-shaped gradients; no implicit broadcast reduction or averaging. */
+        scaledDotAttentionVjp(keys: WgpuTensor, values: WgpuTensor, upstream: WgpuTensor, scale: number, causal_offset: number | null | undefined, biases: WgpuAttentionBiases): WgpuAttentionGradients;
         snapshot(): WgpuTensorSnapshot;
         free(): void;
     }
@@ -231,6 +235,27 @@ declare module "spiraltorch-wasm" {
         private constructor();
         readonly shape: Uint32Array;
         readValues(): Promise<Float32Array>;
+        free(): void;
+    }
+
+    /** Optional attention inputs retained as immutable Rust handles, not copied GPU storage. */
+    export class WgpuAttentionBiases {
+        constructor();
+        setZBias(bias: WgpuTensor): void;
+        setPairBias(bias: WgpuTensor): void;
+        clearZBias(): void;
+        clearPairBias(): void;
+        free(): void;
+    }
+
+    /** Each getter returns an independently retained handle into the packed gradient allocation. */
+    export class WgpuAttentionGradients {
+        private constructor();
+        readonly query: WgpuTensor;
+        readonly key: WgpuTensor;
+        readonly value: WgpuTensor;
+        readonly zBias: WgpuTensor | undefined;
+        readonly pairBias: WgpuTensor | undefined;
         free(): void;
     }
 

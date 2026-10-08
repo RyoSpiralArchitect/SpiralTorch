@@ -1,0 +1,115 @@
+{
+  "schema": "spiraltorch.resident_attention_vjp.ci_followup.v1",
+  "created_at": "2026-10-08T22:34:17.602Z",
+  "parent_commit": "b68ebb970f53687527ccdb6b2aacc0b57d54645f",
+  "original_validation_sha256": "306c71f2bdaeb879221fab388d0fae2a8d654eff32d17560fddb4ce6c4d289e1",
+  "original_ci_failure": {
+    "job_url": "https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/37852980784/job/113570337074",
+    "lint": "clippy::chunks_exact_to_as_chunks",
+    "fix": "Use as_chunks::<5>() with an explicit empty-remainder assertion; no kernel or tolerance change"
+  },
+  "toolchain_correction": {
+    "withdrawn_fields": [
+      "validation.json:toolchain.rustc",
+      "validation.json:toolchain.clippy"
+    ],
+    "reason": "The original version strings match the outer routing directory rather than this checkout. This record captures the toolchain inside the checkout for the new validation only.",
+    "checkout_toolchain": {
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)\nbinary: rustc\ncommit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3\ncommit-date: 2026-07-07\nhost: aarch64-apple-darwin\nrelease: 1.97.0\nLLVM version: 22.1.6",
+      "cargo": "cargo 1.97.0 (c980f4866 2026-06-30)",
+      "clippy": "clippy 0.1.97 (2d8144b788 2026-07-07)"
+    }
+  },
+  "source_sha256": {
+    "crates/st-backend-wgpu/src/resident_tensor/attention/vjp/tests.rs": "102c38e45fd921fa43b7c6bb0f2e54b99bfd078f7d146567494eb901f67fbd74",
+    "bindings/st-wasm/types/spiraltorch-wasm.d.ts": "9ec6b46acf42dc1316cf7634052b315b51b275f21afc2cd6bac3667e22d9a009",
+    "bindings/st-wasm/tests/attention_types.cjs": "f6fed3e5c0c363a793fff94b460c798dc5e2da63898177a616cde721aaa409af",
+    ".github/workflows/ci.yml": "993cc7da9bd82e45f0590c109c57eee612f23fd4324ec2fe78aabb7b1ca3672a"
+  },
+  "unchanged_original_sources": [
+    "Cargo.lock",
+    "crates/st-backend-wgpu/src/resident_tensor.rs",
+    "crates/st-backend-wgpu/src/resident_tensor/attention.rs",
+    "crates/st-backend-wgpu/src/resident_tensor/attention/vjp.rs",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention.wgsl",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/attention_backward.wgsl",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/layer_norm_wide.wgsl",
+    "crates/st-backend-wgpu/src/shaders/rounded_add.wgsl",
+    "crates/st-backend-wgpu/tests/support/attention_vjp.rs",
+    "crates/st-backend-wgpu/tests/fixtures/resident_attention_vjp_torch.json",
+    "tools/generate_resident_attention_vjp_torch_fixture.py",
+    "bindings/st-py/src/wgpu_tensor.rs",
+    "bindings/st-py/src/wgpu_tensor/attention.rs",
+    "bindings/st-wasm/src/wgpu_tensor.rs",
+    "bindings/st-wasm/src/wgpu_tensor/attention.rs"
+  ],
+  "original_outputs_unchanged": true,
+  "wasm_binary_unchanged": true,
+  "native_regression": {
+    "command": [
+      "env",
+      "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1",
+      "cargo",
+      "test",
+      "--locked",
+      "--release",
+      "-p",
+      "st-backend-wgpu",
+      "--lib",
+      "resident_tensor::attention",
+      "--",
+      "--test-threads=1",
+      "--nocapture"
+    ],
+    "started_at": "2026-10-08T22:30:59.292Z",
+    "finished_at": "2026-10-08T22:30:59.979Z",
+    "exit_code": 0,
+    "passed": 25,
+    "failed": 0,
+    "ignored": 1,
+    "adapters": [
+      "resident attention VJP adapter: AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }"
+    ],
+    "raw_receipt_sha256": "ad373514239e253820810b3393d02f3351cfa5fd91271cd5c699e75bb72644a5"
+  },
+  "local_clippy": {
+    "command": [
+      "cargo",
+      "clippy",
+      "--locked",
+      "--release",
+      "-p",
+      "st-backend-wgpu",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings",
+      "-A",
+      "unknown-lints"
+    ],
+    "exit_code": 0,
+    "raw_receipt_sha256": "339126fe52fc95286cf8a6ae127652b612551ede2d785027be73d44ca6e90edd",
+    "scope": "All backend targets including unit tests. Local unknown-lints exception only; current CI Clippy still owns its independent strict gate."
+  },
+  "typescript": {
+    "shipped_contract": "passed",
+    "negative_declaration_mutations_rejected": 4,
+    "generated_contract": "not run locally; CI step added",
+    "strict_typecheck": {
+      "command": [
+        "tsc",
+        "--noEmit",
+        "--strict",
+        "--lib",
+        "es2022,dom",
+        "bindings/st-wasm/types/spiraltorch-wasm.d.ts"
+      ],
+      "exit_code": 0,
+      "version": "Version 5.9.2",
+      "raw_receipt_sha256": "b162c482161ddc19cfdb7ff85489ee97fd1b7f6cf9c8c785849a5ffb7ff7d001"
+    }
+  },
+  "full_public_gpu_clients": "Still deferred locally for disk-space approval; no deletion performed",
+  "performance_claim": false,
+  "quality_claim": false
+}

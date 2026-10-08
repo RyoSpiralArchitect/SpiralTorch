@@ -199,10 +199,11 @@ fn gradients_match_shared_reference_for_biases_masks_batches_and_dimension_tails
                 if let (AttentionMask::Causal { query_offset }, Some(pair)) =
                     (mask, &actual.pair_bias)
                 {
-                    for row in read(pair).chunks_exact(5).enumerate() {
-                        assert!(row.1[query_offset + row.0 % 3 + 1..]
-                            .iter()
-                            .all(|&v| v == 0.));
+                    let values = read(pair);
+                    let (rows, remainder) = values.as_chunks::<5>();
+                    assert!(remainder.is_empty());
+                    for (index, row) in rows.iter().enumerate() {
+                        assert!(row[query_offset + index % 3 + 1..].iter().all(|&v| v == 0.));
                     }
                 }
             }
