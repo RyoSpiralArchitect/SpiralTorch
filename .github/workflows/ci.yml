@@ -173,6 +173,7 @@ jobs:
         if: matrix.run_upper_stack
         run: |
           cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib --test classification --test autograd_observability --test autograd_sgd --test layer_norm_numerics --test layer_norm_autograd --test row_indexing --test wgpu_feature_ownership --test ensemble
+          cargo run --locked -p st-tensor --release --no-default-features --features cpu,faer --example readme_autograd
           cargo test -p st-nn --release --features golden --lib --test training_gradient_reduction
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release

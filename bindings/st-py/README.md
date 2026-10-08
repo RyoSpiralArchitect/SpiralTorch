@@ -34,6 +34,23 @@ model.add(Linear(2, 2, name="head"))
 print(model(st.Tensor(1, 2, [0.25, 0.75])).tolist())
 ```
 
+## Native Gradients
+
+Differentiate a squared norm with Rust-owned autograd, without NumPy or PyTorch:
+
+```python
+import spiraltorch as st
+
+x = st.AutogradTensor.variable(st.Tensor(1, 2, [1.0, -2.0]))
+x.hadamard(x).sum().backward()
+assert x.grad().tolist() == [[2.0, -4.0]]
+print(x.grad().tolist())
+```
+
+This uses host tensors. Continue with [learning recipes](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/python/recipes.md),
+[geometric learning](https://github.com/RyoSpiralArchitect/SpiralTorch/blob/main/docs/geometric_learning_bridge.md),
+or [direct Rust use](https://github.com/RyoSpiralArchitect/SpiralTorch#native-autograd-two-ways).
+
 ## Find Your Entry Point
 
 | Surface | Purpose |

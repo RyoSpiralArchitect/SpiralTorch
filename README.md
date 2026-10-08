@@ -40,6 +40,46 @@ New resident, geometry, or learning APIs may require a source build; consult the
 [release tag](https://github.com/RyoSpiralArchitect/SpiralTorch/releases) before
 assuming that an example is available in your installed wheel.
 
+## Native Autograd, Two Ways
+
+**Python:** differentiate a squared norm without NumPy or PyTorch.
+
+```python
+import spiraltorch as st
+
+x = st.AutogradTensor.variable(st.Tensor(1, 2, [1.0, -2.0]))
+x.hadamard(x).sum().backward()
+assert x.grad().tolist() == [[2.0, -4.0]]
+print(x.grad().tolist())
+```
+
+**Rust:** call the same core directly, with no Python runtime.
+
+```rust
+use st_tensor::{AutogradTensor, PureResult, Tensor};
+
+fn main() -> PureResult<()> {
+    let x = AutogradTensor::variable(Tensor::from_vec(1, 2, vec![1.0, -2.0])?)?;
+    x.hadamard(&x)?.sum()?.backward()?;
+    let gradient = x.grad().expect("leaf gradient");
+    assert_eq!(gradient.data(), &[2.0, -4.0]);
+    println!("{:?}", gradient.data());
+    Ok(())
+}
+```
+
+From a source checkout, run the checked-in example on CPU:
+
+```bash
+cargo run --locked -p st-tensor --release --no-default-features \
+  --features cpu,faer --example readme_autograd
+```
+
+These are host-tensor examples, not resident GPU graphs. Continue with the
+[Rust nonlinear learning example](crates/st-tensor/examples/autograd_xor.rs),
+[Python learning recipes](docs/python/recipes.md), or the
+[geometric learning bridge](docs/geometric_learning_bridge.md).
+
 ## Choose a Path
 
 | I want to... | Start here |
