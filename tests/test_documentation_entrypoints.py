@@ -23,6 +23,23 @@ def load_tool(name):
 
 
 class DocumentationEntrypointTests(unittest.TestCase):
+    def test_native_autograd_example_matches_readme_and_runs_in_ci(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        blocks = re.findall(r"```rust\n(.*?)\n```", readme, re.DOTALL)
+        self.assertEqual(len(blocks), 1)
+        example = ROOT / "crates/st-tensor/examples/readme_autograd.rs"
+        self.assertEqual(blocks[0].strip(), example.read_text(encoding="utf-8").strip())
+        command = (
+            "cargo run --locked -p st-tensor --release --no-default-features "
+            "--features cpu,faer --example readme_autograd"
+        )
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        step = ci.split("- name: test upper stack\n", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn(command, step)
+        self.assertNotIn("continue-on-error", step)
+        self.assertNotIn("|| true", step)
+        self.assertIn(command, readme.replace("\\\n  ", ""))
+
     def test_project_introduction_is_not_split_across_statistics_page(self):
         project = (ROOT / "docs/reference/project.md").read_text(encoding="utf-8")
         stats = (ROOT / "docs/repository-stats.md").read_text(encoding="utf-8")
