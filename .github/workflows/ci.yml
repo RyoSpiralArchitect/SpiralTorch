@@ -785,3 +785,4 @@ jobs:
           python -I -S -B tools/test_topos_single_admission_results.py
           python -I -S -B tools/test_topos_core_row_vjp_results.py
           python -I -S -B tools/test_topos_wasm_snapshot_results.py
+          python -I -S -B benchmarks/results/2026-10-08-topos-core-forward-traversal/verify_v2.py
