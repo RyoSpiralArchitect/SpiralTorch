@@ -87,6 +87,12 @@ jobs:
 
           echo "release source contract ok: version=$package_version tag=${release_tag:-preflight} source=$source_ref"
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check repository license metadata before building
+        run: python -I -B scripts/security/generate_repo_manifest.py --check-only
+
       - name: Reject already published release before building
         if: github.event_name != 'workflow_dispatch' || inputs.release_tag != ''
         uses: actions/github-script@v8

@@ -15,6 +15,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_license_metadata_is_checked_before_wheel_builds(self) -> None:
+        command = "python -I -B scripts/security/generate_repo_manifest.py --check-only"
+        official = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")
+        contract = official.split("\n  release_contract:\n", 1)[1].split("\n  wheels:\n", 1)[0]
+        self.assertIn(command, contract)
+        self.assertIn('python-version: "3.12"', contract)
+        self.assertNotIn("continue-on-error", contract)
+        wheels = official.split("\n  wheels:\n", 1)[1].split("\n  pypi:\n", 1)[0]
+        self.assertIn("needs: release_contract", wheels)
+        manual = (ROOT / ".github/workflows/wheels.yml").read_text(encoding="utf-8")
+        self.assertLess(manual.index(command), manual.index("- name: Build wheel"))
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        inventory = ci.split("\n  workspace-inventory:\n", 1)[1].split("\n  version-consistency:\n", 1)[0]
+        self.assertIn(command.replace("python ", "python3 "), inventory)
+        self.assertIn("python3 -I -B tests/test_generate_repo_manifest.py", inventory)
+
     def test_package_version_matches_native_manifest_and_lock(self) -> None:
         metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
         version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
@@ -30,7 +46,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_manual_publish_contract_rejects_missing_tag_before_build(self) -> None:
         workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")
         contract = workflow.split("\n  release_contract:\n", 1)[1].split("\n  wheels:\n", 1)[0]
-        script = textwrap.dedent(contract.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0])
+        script = textwrap.dedent(contract.split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
         metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
         version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
         for publish, tag, expected_code in (("true", "", 1), ("false", "", 0),

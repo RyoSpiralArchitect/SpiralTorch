@@ -23,6 +23,7 @@ REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
 CANONICAL_AGPL_PHRASE = "gnu affero general public license"
 CANONICAL_AGPL_VERSION = "version 3"
 THIRD_PARTY_PREFIXES = ("vendor",)
+FROZEN_LICENSE_DECLARATIONS = Path("scripts/security/frozen_benchmark_licenses.json")
 
 
 @dataclass
@@ -44,6 +45,7 @@ class PackageRecord:
     version: str | None
     license_expression: str
     license_scope: str
+    license_source: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,6 +62,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Optional destination for the manifest JSON. Defaults to <repo-root>/spiraltorch-repo-license-manifest.json.",
+    )
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Validate tracked package license metadata without hashing the full tree or writing a manifest. "
+        "Permits local modifications; this is a source preflight, not a release attestation.",
     )
     parser.add_argument(
         "--allow-untracked",
@@ -151,7 +159,57 @@ def validate_notice(root: Path) -> None:
         raise SystemExit("NOTICE file must explicitly reference the AGPL obligations.")
 
 
-def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | None:
+def load_frozen_license_declarations(root: Path, tracked_files: set[Path]) -> dict[Path, str]:
+    """Supplement exact historical fixture bytes, never exempt a directory from licensing."""
+    catalog = root / FROZEN_LICENSE_DECLARATIONS
+    if FROZEN_LICENSE_DECLARATIONS not in tracked_files:
+        if catalog.exists():
+            raise SystemExit(f"License declarations must be tracked: {FROZEN_LICENSE_DECLARATIONS}")
+        return {}
+    data = json.loads(catalog.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) != {"schema_version", "declarations"} or data["schema_version"] != 1:
+        raise SystemExit("Invalid frozen license declarations schema.")
+    entries = data["declarations"]
+    if not isinstance(entries, list) or not entries:
+        raise SystemExit("Frozen license declarations must be a nonempty list.")
+    declarations: dict[Path, str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"manifest", "sha256", "license"}:
+            raise SystemExit("Invalid frozen license declaration fields.")
+        name = entry["manifest"]
+        if not isinstance(name, str):
+            raise SystemExit("Frozen manifest path must be a string.")
+        relative = Path(name)
+        if (
+            relative.as_posix() != name
+            or relative.is_absolute()
+            or ".." in relative.parts
+            or relative.parts[:2] != ("benchmarks", "results")
+            or len(relative.parts) < 6
+            or relative.parts[3] != "reproduction"
+            or relative.name != "Cargo.toml"
+            or relative not in tracked_files
+        ):
+            raise SystemExit(f"Not a tracked frozen reproduction manifest: {name}")
+        if relative in declarations:
+            raise SystemExit(f"Duplicate frozen license declaration: {name}")
+        path = root / relative
+        if path.resolve() != path or not path.is_file():
+            raise SystemExit(f"Frozen manifest must be a regular repository file: {name}")
+        if entry["license"] != REQUIRED_LICENSE_TOKEN:
+            raise SystemExit(f"Frozen manifest must retain {REQUIRED_LICENSE_TOKEN}: {name}")
+        if digest(path, "sha256") != entry["sha256"]:
+            raise SystemExit(f"Frozen manifest SHA256 mismatch: {name}")
+        package = tomllib.loads(path.read_text(encoding="utf-8")).get("package", {})
+        if package.get("publish") is not False or "license" in package or "license-file" in package:
+            raise SystemExit(f"Frozen declaration is only for an unlicensed-metadata, non-publishable fixture: {name}")
+        declarations[relative] = entry["license"]
+    return declarations
+
+
+def record_cargo_packages(
+    root: Path, manifest_path: Path, frozen_declarations: dict[Path, str] | None = None
+) -> PackageRecord | None:
     text = manifest_path.read_text(encoding="utf-8")
     data = tomllib.loads(text)
     package = data.get("package")
@@ -163,6 +221,7 @@ def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | No
     license_scope = license_scope_for_manifest(root, manifest_path)
     license_field = pkg.get("license")
     license_file = pkg.get("license-file")
+    license_source = None
     if license_field:
         if license_scope == "project" and REQUIRED_LICENSE_TOKEN not in license_field:
             raise SystemExit(
@@ -180,6 +239,9 @@ def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | No
                 f"{REQUIRED_LICENSE_TOKEN} or the GNU Affero GPL v3 license text."
             )
         license_expression = f"file:{license_file}"
+    elif frozen_declarations and manifest_path.relative_to(root) in frozen_declarations:
+        license_expression = frozen_declarations[manifest_path.relative_to(root)]
+        license_source = FROZEN_LICENSE_DECLARATIONS.as_posix()
     else:
         raise SystemExit(f"{manifest_path}: package section is missing an AGPL license declaration.")
 
@@ -189,6 +251,7 @@ def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | No
         version=pkg.get("version"),
         license_expression=license_expression,
         license_scope=license_scope,
+        license_source=license_source,
     )
 
 
@@ -227,13 +290,15 @@ def record_pyproject(root: Path, manifest_path: Path) -> PackageRecord | None:
 
 
 def gather_compliance_metadata(root: Path, tracked_files: Iterable[Path]) -> dict[str, list[dict[str, str]]]:
+    tracked_files = set(tracked_files)
+    frozen_declarations = load_frozen_license_declarations(root, tracked_files)
     cargo_records: list[dict[str, str]] = []
     python_records: list[dict[str, str]] = []
 
     for relative in tracked_files:
         path = root / relative
         if path.name == "Cargo.toml":
-            record = record_cargo_packages(root, path)
+            record = record_cargo_packages(root, path, frozen_declarations)
             if record:
                 cargo_records.append(
                     {
@@ -242,6 +307,7 @@ def gather_compliance_metadata(root: Path, tracked_files: Iterable[Path]) -> dic
                         "version": record.version or "",
                         "license": record.license_expression,
                         "license_scope": record.license_scope,
+                        **({"license_source": record.license_source} if record.license_source else {}),
                     }
                 )
         elif path.name == "pyproject.toml":
@@ -297,7 +363,11 @@ def main() -> None:
     if not (repo_root / ".git").exists():
         raise SystemExit(f"{repo_root} does not appear to be a Git repository (missing .git directory).")
 
-    ensure_clean_tree(repo_root, allow_untracked=args.allow_untracked)
+    if args.check_only:
+        if args.output:
+            raise SystemExit("--check-only does not write a manifest; omit --output.")
+    else:
+        ensure_clean_tree(repo_root, allow_untracked=args.allow_untracked)
 
     canonical_path = args.canonical_license or repo_root / DEFAULT_CANONICAL_LICENSE
     if not canonical_path.is_absolute():
@@ -315,6 +385,12 @@ def main() -> None:
     relative_str = relative_canonical.as_posix()
     if relative_str not in {path.as_posix() for path in tracked_files}:
         raise SystemExit("Canonical license file is not tracked by Git.")
+
+    if args.check_only:
+        metadata = gather_compliance_metadata(repo_root, tracked_files)
+        print(f"License metadata preflight passed: {len(metadata['cargo'])} Cargo, "
+              f"{len(metadata['python'])} Python records. No release manifest written.")
+        return
 
     manifest = build_manifest(repo_root, tracked_files, canonical_metadata)
 
