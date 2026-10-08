@@ -171,7 +171,15 @@ impl Module for WaveRnn {
         Ok(output)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let result = self.backward_retained(input, grad_output);
+        if result.is_ok() {
+            self.cache.get_mut().take();
+        }
+        result
+    }
+
+    fn backward_retained(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         validate_finite_tensor("wave_rnn_backward_grad_output", grad_output)?;
         self.validate_readout_parameters()?;
         let cache = self
@@ -242,7 +250,6 @@ impl Module for WaveRnn {
         validate_finite_tensor("wave_rnn_grad_input", &grad_input)?;
         self.readout.accumulate_euclidean(&grad_readout)?;
         self.readout_bias.accumulate_euclidean(&grad_bias)?;
-        self.cache.borrow_mut().take();
         Ok(grad_input)
     }
 

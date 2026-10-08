@@ -1,11 +1,17 @@
 use super::*;
+use crate::layers::spiral_rnn::SpiralRnn;
+use crate::layers::wave_scan::{WaveScan, WaveScanStack};
 use crate::layers::Identity;
-use crate::{BatchNorm1d, Dropout, Gelu, Linear, Lstm};
+use crate::{
+    BatchNorm1d, Dropout, Gelu, GradientBands, Linear, Lstm, ToposResonator, WaveRnn,
+    ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock,
+};
 use std::cell::Cell;
 use std::rc::Rc;
 
 #[test]
 fn backward_uses_the_mask_that_produced_the_loss() {
+    let _guard = crate::test_global_state_lock();
     let mut sequence = Sequential::new();
     sequence.push(Dropout::with_seed(0.5, Some(47)).unwrap());
     let input = Tensor::from_vec(4, 32, vec![1.0; 128]).unwrap();
@@ -19,6 +25,7 @@ fn backward_uses_the_mask_that_produced_the_loss() {
 
 #[test]
 fn batchnorm_pullbacks_do_not_update_running_statistics() {
+    let _guard = crate::test_global_state_lock();
     let mut sequence = Sequential::new();
     sequence.push(BatchNorm1d::new("norm", 2, 0.1, 1e-5).unwrap());
     let input = Tensor::from_vec(3, 2, vec![1., -2., 3., 1., 0., 2.]).unwrap();
@@ -40,6 +47,7 @@ fn batchnorm_pullbacks_do_not_update_running_statistics() {
 
 #[test]
 fn lstm_sequence_matches_direct_layer_without_advancing_state_on_pullback() {
+    let _guard = crate::test_global_state_lock();
     let mut reference = Lstm::new("recurrent", 2, 3).unwrap();
     let mut sequence = Sequential::new();
     sequence.push(Lstm::new("recurrent", 2, 3).unwrap());
@@ -56,10 +64,108 @@ fn lstm_sequence_matches_direct_layer_without_advancing_state_on_pullback() {
         for _ in 0..2 {
             assert_eq!(
                 sequence.backward(&input, &upstream).unwrap(),
-                reference.backward(&input, &upstream).unwrap()
+                reference.backward_retained(&input, &upstream).unwrap()
             );
         }
     }
+}
+
+fn consuming_layers() -> Vec<Box<dyn Module>> {
+    vec![
+        Box::new(Lstm::new("lstm", 6, 2).unwrap()),
+        Box::new(SpiralRnn::new("spiral", 2, 2, 3).unwrap()),
+        Box::new(WaveRnn::new("rnn", 2, 2, 1, 1, 0, -1., 1.).unwrap()),
+        Box::new(WaveScan::new("scan", 2, 2, 1, 1, 0, 1, -1., 1.).unwrap()),
+        Box::new(
+            WaveScanStack::new(vec![
+                WaveScan::new("a", 2, 2, 1, 1, 0, 1, -1., 1.).unwrap(),
+                WaveScan::new("b", 2, 2, 1, 1, 0, 2, -1., 1.).unwrap(),
+            ])
+            .unwrap(),
+        ),
+        Box::new(ZSpaceCoherenceScan::new(2, 3, 3, -1., 1.).unwrap()),
+        Box::new(ZSpaceCoherenceWaveBlock::new(2, 3, 3, -1., 1., 1, vec![1, 2]).unwrap()),
+    ]
+}
+
+fn gradients(module: &dyn Module) -> HashMap<String, Tensor> {
+    let mut result = HashMap::new();
+    module
+        .visit_parameters(&mut |p| {
+            if let Some(g) = p.gradient() {
+                result.insert(p.name().to_owned(), g.clone());
+            }
+            Ok(())
+        })
+        .unwrap();
+    result
+}
+
+#[test]
+fn every_consuming_layer_reuses_its_tape_in_nested_sequences_and_band_pullbacks() {
+    let _guard = crate::test_global_state_lock();
+    let input = Tensor::from_fn(2, 6, |r, c| (r * 6 + c) as f32 * 0.03 - 0.1).unwrap();
+    let seed = Tensor::from_vec(2, 2, vec![0.25, -0.2, 0.125, 0.3]).unwrap();
+    for (index, (mut reference, layer)) in consuming_layers()
+        .into_iter()
+        .zip(consuming_layers())
+        .enumerate()
+    {
+        let mut child = Sequential::new();
+        child.push_boxed(layer);
+        let mut sequence = Sequential::new();
+        sequence.push(child);
+        sequence
+            .load_state_dict(&reference.state_dict().unwrap())
+            .unwrap();
+        assert_eq!(
+            sequence.forward(&input).unwrap(),
+            reference.forward(&input).unwrap()
+        );
+        let expected = reference.backward(&input, &seed).unwrap();
+        assert!(
+            reference.backward(&input, &seed).is_err(),
+            "one-shot contract, layer {index}"
+        );
+        let expected_parameters = gradients(reference.as_ref());
+        for _ in 0..2 {
+            sequence.zero_accumulators().unwrap();
+            assert_eq!(
+                sequence.backward(&input, &seed).unwrap(),
+                expected,
+                "layer {index}"
+            );
+            assert_eq!(gradients(&sequence), expected_parameters, "layer {index}");
+        }
+        sequence.zero_accumulators().unwrap();
+        let bands =
+            GradientBands::from_components(seed.clone(), seed.clone(), seed.clone()).unwrap();
+        let actual = sequence.backward_bands(&input, &bands).unwrap();
+        for (actual, expected) in actual.data().iter().zip(expected.data()) {
+            assert!((actual - 3. * expected).abs() < 1e-5, "layer {index}");
+        }
+        sequence.forward_untracked(&input).unwrap();
+        assert!(sequence.backward(&input, &seed).is_err());
+    }
+}
+
+#[test]
+fn gradient_clearing_preserves_nested_topos_forward_but_parameter_updates_do_not() {
+    let _guard = crate::test_global_state_lock();
+    let mut child = Sequential::new();
+    child.push(ToposResonator::new("topos", 2, 3).unwrap());
+    let mut sequence = Sequential::new();
+    sequence.push(child);
+    let input = Tensor::from_vec(2, 3, vec![0.25; 6]).unwrap();
+    sequence.forward(&input).unwrap();
+    sequence.zero_accumulators().unwrap();
+    let first = sequence.backward(&input, &input).unwrap();
+    let first_parameters = gradients(&sequence);
+    sequence.zero_accumulators().unwrap();
+    assert_eq!(sequence.backward(&input, &input).unwrap(), first);
+    assert_eq!(gradients(&sequence), first_parameters);
+    sequence.apply_step(0.01).unwrap();
+    assert!(sequence.backward(&input, &input).is_err());
 }
 
 struct Counted {
@@ -84,6 +190,11 @@ impl Module for Counted {
     }
 
     fn backward(&mut self, _input: &Tensor, grad: &Tensor) -> PureResult<Tensor> {
+        if grad.data().iter().any(|x| !x.is_finite()) {
+            return Err(TensorError::InvalidValue {
+                label: "test_backward_failure",
+            });
+        }
         Ok(grad.clone())
     }
 
@@ -104,6 +215,7 @@ impl Module for Counted {
 
 #[test]
 fn nested_pullbacks_do_not_repeat_forward_and_untracked_propagates() {
+    let _guard = crate::test_global_state_lock();
     let forwards = Rc::new(Cell::new(0));
     let untracked = Rc::new(Cell::new(0));
     let mut child = Sequential::new();
@@ -128,6 +240,7 @@ fn nested_pullbacks_do_not_repeat_forward_and_untracked_propagates() {
 
 #[test]
 fn eval_does_not_disable_backward_and_untracked_does_not_change_training() {
+    let _guard = crate::test_global_state_lock();
     let mut sequence = Sequential::new();
     sequence.push(Dropout::with_seed(0.5, Some(7)).unwrap());
     let input = Tensor::from_vec(1, 128, vec![1.; 128]).unwrap();
@@ -147,6 +260,7 @@ fn eval_does_not_disable_backward_and_untracked_does_not_change_training() {
 
 #[test]
 fn new_and_failed_forwards_invalidate_old_state_without_replaying() {
+    let _guard = crate::test_global_state_lock();
     let forwards = Rc::new(Cell::new(0));
     let mut sequence = Sequential::new();
     sequence.push(Counted {
@@ -160,15 +274,20 @@ fn new_and_failed_forwards_invalidate_old_state_without_replaying() {
     sequence.forward(&b).unwrap();
     assert!(sequence.backward(&a, &a).is_err());
     sequence.backward(&b, &b).unwrap();
+    let invalid = Tensor::from_vec(1, 2, vec![f32::NAN; 2]).unwrap();
+    assert!(sequence.backward(&b, &invalid).is_err());
+    assert!(sequence.backward(&b, &b).is_err());
+    sequence.forward(&b).unwrap();
     assert!(sequence
         .forward(&Tensor::from_vec(1, 2, vec![f32::NAN; 2]).unwrap())
         .is_err());
     assert!(sequence.backward(&b, &b).is_err());
-    assert_eq!(forwards.get(), 3);
+    assert_eq!(forwards.get(), 4);
 }
 
 #[test]
 fn input_and_output_mutation_cannot_rewrite_saved_activations() {
+    let _guard = crate::test_global_state_lock();
     let mut sequence = Sequential::new();
     sequence.push(Identity);
     sequence.push(Gelu::new());
@@ -198,6 +317,7 @@ fn input_and_output_mutation_cannot_rewrite_saved_activations() {
 
 #[test]
 fn mutation_boundaries_require_a_new_forward() {
+    let _guard = crate::test_global_state_lock();
     let input = Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap();
     let mut sequence = Sequential::new();
     sequence.push(Linear::new("linear", 2, 2).unwrap());
@@ -221,6 +341,7 @@ fn mutation_boundaries_require_a_new_forward() {
 
 #[test]
 fn shared_parameter_exports_before_and_after_forward_cannot_change_pullback() {
+    let _guard = crate::test_global_state_lock();
     for export_first in [false, true] {
         let mut sequence = Sequential::new();
         sequence.push(Linear::new("linear", 2, 2).unwrap());

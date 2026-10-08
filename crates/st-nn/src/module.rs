@@ -897,6 +897,15 @@ pub trait Module {
     /// respect to `input`.
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor>;
 
+    /// Pull back without consuming the latest forward state. Containers and
+    /// band schedules use this for multiple cotangents of the same prediction.
+    /// The caller must keep input, parameters and layer state unchanged.
+    /// Modules whose ordinary backward consumes a cache must override this;
+    /// the default is suitable for stateless or already reusable pullbacks.
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward(input, grad_output)
+    }
+
     /// Visits immutable parameters.
     fn visit_parameters(
         &self,
@@ -924,7 +933,7 @@ pub trait Module {
                 continue;
             }
             self.begin_backward_band_pass(band, grad)?;
-            let result = self.backward(input, grad);
+            let result = self.backward_retained(input, grad);
             self.end_backward_band_pass(band)?;
             let contribution = result?;
             let backend = current_tensor_util_backend_for_values(total.data().len());

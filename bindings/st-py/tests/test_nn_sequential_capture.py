@@ -46,8 +46,9 @@ def test_topos_sequence_matches_direct_rust_kernel_on_repeated_pullbacks():
     model.add_topos_resonator("topos", st.Tensor(1, 3, gate), kernel)
     x = st.Tensor(2, 3, values)
     tape = kernel.capture_shared_rows(values, gate, 2, 3)
-    assert model.forward(x).tolist() == [list(tape.output()[:3]), list(tape.output()[3:])]
+    assert model.forward(x).tolist() == [list(tape.output[:3]), list(tape.output[3:])]
     for factor in (0.3, -0.2, 0.0):
+        model.zero_accumulators()
         seed = [factor] * 6
         dx, _ = tape.vjp(seed)
         actual = model.backward(x, st.Tensor(2, 3, seed)).tolist()

@@ -345,7 +345,15 @@ impl Module for SpiralRnn {
         Ok(output)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let result = self.backward_retained(input, grad_output);
+        if result.is_ok() {
+            self.cache.get_mut().take();
+        }
+        result
+    }
+
+    fn backward_retained(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let cache = self
             .cache
             .borrow()
@@ -739,7 +747,6 @@ impl Module for SpiralRnn {
         self.bias.accumulate_euclidean(&grad_bias)?;
         self.phase_bias.accumulate_euclidean(&grad_phase_bias)?;
         self.anchor.accumulate_euclidean(&grad_anchor)?;
-        self.cache.borrow_mut().take();
         Ok(grad_input)
     }
 

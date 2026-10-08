@@ -313,7 +313,7 @@ impl Module for Sequential {
         let result = (|| {
             let mut grad = grad_output.clone();
             for (idx, layer) in self.layers.iter_mut().enumerate().rev() {
-                grad = layer.backward(&saved.inputs[idx], &grad)?;
+                grad = layer.backward_retained(&saved.inputs[idx], &grad)?;
             }
             Ok(grad)
         })();
@@ -330,6 +330,13 @@ impl Module for Sequential {
     ) -> PureResult<()> {
         for layer in &self.layers {
             layer.visit_parameters(visitor)?;
+        }
+        Ok(())
+    }
+
+    fn zero_accumulators(&mut self) -> PureResult<()> {
+        for layer in &mut self.layers {
+            layer.zero_accumulators()?;
         }
         Ok(())
     }

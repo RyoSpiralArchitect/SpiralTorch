@@ -1051,6 +1051,11 @@ impl Module for ToposResonator {
         visitor(&mut self.gate)
     }
 
+    fn zero_accumulators(&mut self) -> PureResult<()> {
+        self.gate.zero_gradient();
+        Ok(())
+    }
+
     fn infuse_text(&mut self, text: &str) -> PureResult<()> {
         let Some(encoder) = self.encoder.as_ref() else {
             return Ok(());

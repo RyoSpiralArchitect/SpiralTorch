@@ -183,6 +183,16 @@ Shape/input validation failures permit a valid retry; a child backward failure
 invalidates the tape, but does not roll back already accumulated gradients.
 Clear accumulators before restarting such a failed step.
 
+`zero_accumulators()` clears gradients without discarding the captured forward,
+including nested sequences and Topos. Containers and band schedules call
+`Module::backward_retained`; the built-in LSTM, SpiralRnn, WaveRnn, WaveScan,
+coherence scan and coherence-wave layers support this without consuming their
+forward caches. Their ordinary one-shot `backward` remains available. Custom
+modules with consuming backward caches must implement `backward_retained` too;
+its default only delegates to `backward`. Direct retained-pullback callers must
+keep the input, parameters and module state unchanged. Sequential checks that
+boundary for its owned children.
+
 `eval()` changes layer behavior, not gradient recording. Explicit
 `Sequential::forward_untracked` / `forward_untracked_owned` (Python:
 `model.forward_untracked(x)`) bypass container activation retention, propagate
@@ -196,6 +206,12 @@ foreign or non-row-major parameters require isolated comparison values. This
 is a correctness repair and removal of redundant forward executions, not a
 measured wall-clock or peak-memory improvement. The existing WASM WebGPU graph
 already uses its separate opaque forward tokens and is unchanged.
+The `sequential_forward_tape_contract` Rust example executes Dropout, seven
+consuming layer/stack types, nested Topos, repeated pullbacks and gradient clears
+when compiled to scalar WASM and loaded in Node. This is a host-Tensor contract
+check, not a browser WebGPU benchmark. LSTM's native CPU scan clock is unavailable
+on wasm32; its optional `bptt_scan_elapsed_us` is `null` there rather than calling
+unsupported `std::time::Instant::now()` or fabricating a zero-duration result.
 Isolated parameter and WGPU operand snapshots can add copies;
 previous capture timings are not measurements of this revised path.
 Python Torch feature-gate adapters and scalar WASM shared-row methods use the
