@@ -15,6 +15,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_package_version_matches_native_manifest_and_lock(self) -> None:
+        metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
+        version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
+        manifest = (ROOT / "bindings/st-py/Cargo.toml").read_text(encoding="utf-8")
+        native_version = re.search(r'^version = "([^"]+)"$', manifest, re.MULTILINE).group(1)
+        self.assertEqual(native_version, version)
+        lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
+        locked_versions = re.findall(
+            r'^name = "spiraltorch-py"\nversion = "([^"]+)"$', lock, re.MULTILINE
+        )
+        self.assertEqual(locked_versions, [version])
+
     def test_manual_publish_contract_rejects_missing_tag_before_build(self) -> None:
         workflow = (ROOT / ".github/workflows/release_wheels.yml").read_text(encoding="utf-8")
         contract = workflow.split("\n  release_contract:\n", 1)[1].split("\n  wheels:\n", 1)[0]

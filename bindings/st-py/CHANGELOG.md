@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+## 0.4.28
+
+### Learning And Geometry
+
+- Connect Rust-owned Topos resonance, WaveGate, elliptic/Lie, and causal
+  fractional-history operators to native Python and scalar WASM clients, with
+  owned captures, typed-buffer transport, and first-order derivatives. Add
+  optional Torch/HF adapters, explicit placement and checkpoint-continuation
+  helpers. The Torch geometry bridges execute Rust f32 on CPU even for MPS/CUDA
+  inputs; they are not GPU-resident HF training, higher-order autograd, AMP, or
+  `torch.compile` support.
+- Preserve the actual host `nn.Sequential` forward activations for backward,
+  including stochastic masks and stateful child pullbacks. Repeated cotangents
+  and gradient clearing can reuse a valid capture; only the latest successful
+  forward is authoritative. **Migration:** prepare the trainer before forward;
+  after parameter/mode/structure changes or state loading, run forward again
+  before backward. Use `forward_untracked()` for explicit inference without
+  container activation retention. Captures retain additional host memory;
+  failed backward does not roll back gradients already accumulated by children.
+- Add shared-feature Topos gates to native NN learning and the v5 resident
+  inference/training plan. Keep explicit resident updates and checked weight
+  handoff separate from automatic `ModuleTrainer` routing or optimizer resume.
+
+### Resident Execution And Interoperability
+
+- Expose owning N-D WGPU tensors, views and chained operations with explicit
+  upload/readback boundaries. Lower supported high-level NN modules into
+  reusable resident graphs, including Linear/GELU, LayerNorm and shared-row
+  Topos inside `Sequential`. Unsupported layers reject rather than silently
+  executing on the host; ordinary host `Tensor` remains a different route.
+- Extend explicit resident loss/VJP/SGD, classification and microbatch training,
+  clipping/momentum, and vision convolution/backbone training clients. Python
+  and separately built WASM clients share Rust semantics and checked
+  weight/input checkpoint boundaries, not a general optimizer-state resume.
+- Harden parameter-pack/cache invalidation, foreign DLPack ownership, tensor
+  layouts and numerical guards. Retain matched backend comparisons and rejected
+  optimizations without claiming a universal PyTorch speedup. Geometry effects
+  and pretrained-model learning quality require separate controlled evidence.
+
+### Documentation And Release Gates
+
 - Restore the normal import path on Python 3.8/3.9 by avoiding their unsupported
   dataclass `slots` keyword for `ZMetrics`; retain slots on Python 3.10+ and
   preserve fields, defaults and `dataclasses.replace`. Gate the installed Linux
@@ -10,7 +51,6 @@
 - Keep eager HF callback type aliases importable on Python 3.8/3.9 with
   `typing` generics, `Optional`, and forward-referenced subprocess annotations;
   optional HF runtimes are still not required for the normal import path.
-
 - Gate installed wheels on native Sequential captures, shared-Topos learning
   and weight handoff, WaveGate/Elliptic/fractional-history derivatives, and
   resident plan round-tripping. These bounded CPU mechanics checks require no
@@ -26,6 +66,12 @@
   Preserve the README Python smoke surface after the move. Centralize the
   reviewed-source -> immutable tag -> signed wheels -> verified PyPI checklist
   in the release runbook, keeping source-only APIs distinct from shipped wheels.
+
+See the [learning bridge](../../docs/geometric_learning_bridge.md),
+[Topos capture and migration notes](../../docs/topos_learning.md),
+[resident module boundary](../../docs/module_resident_forward.md), and
+[release runbook](../../docs/ops/release.md) for supported routes and validation
+scope. A source version bump is not evidence of published platform wheels.
 
 ## 0.4.27
 

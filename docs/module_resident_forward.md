@@ -40,8 +40,13 @@ print(x.snapshot().read_values())  # explicit terminal observation
 
 `model.forward(x)` and `model(x)` select by input type, not a hidden fallback:
 host `Tensor` keeps its existing host-returning route; `WgpuTensor` uses the
-input's device and returns `WgpuTensor`. Supported modules are `Linear`,
-`Scaler`, `Gelu`, `Relu`, and compositions of them in `Sequential`.
+input's device and returns `WgpuTensor`. Direct Python resident entry points are
+`Linear`, `Scaler`, `Gelu`, `Relu`, and `Sequential`. Inside `Sequential`, the
+resident plan also supports `LayerNorm` and
+[shared-row Topos](topos_learning.md) added with `add_topos_resonator`.
+Standalone Python `LayerNorm.forward` still accepts only host `Tensor`; compose
+it inside `Sequential` for this resident route. This does not extend support to
+`ZSpaceLayerNorm` or to non-shared Topos gate layouts.
 Unsupported layers reject before executing their host implementation.
 
 When the next consumer is the host, `model.forward_snapshot(x)` returns a
@@ -55,7 +60,8 @@ capture = model.forward_snapshot(x)
 values = capture.read_values()
 ```
 
-The method supports the same five built-in module types, takes only `WgpuTensor`,
+The method supports the same direct entry points and Sequential compositions,
+takes only `WgpuTensor`,
 and rejects CPU-only builds. Parameters and cache selection are shared with
 ordinary forwarding, not reconstructed by Python.
 
