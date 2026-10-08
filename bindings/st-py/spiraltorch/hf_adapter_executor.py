@@ -15,10 +15,11 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, Mapping, Optional, Sequence
 
 from ._process import local_pid_alive, local_process_group_alive
 from .hf_adapter import (
@@ -95,7 +96,7 @@ CommandRunner = Callable[[Sequence[str]], object]
 ProcessStarted = Callable[[int], None]
 ProcessProgress = Callable[[int], None]
 ProcessStopRequested = Callable[[Mapping[str, object]], None]
-StopRequestLoader = Callable[[], Mapping[str, object] | None]
+StopRequestLoader = Callable[[], Optional[Mapping[str, object]]]
 
 
 def _now() -> str:

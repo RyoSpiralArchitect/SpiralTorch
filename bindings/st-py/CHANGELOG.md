@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Restore the normal import path on Python 3.8/3.9 by avoiding their unsupported
+  dataclass `slots` keyword for `ZMetrics`; retain slots on Python 3.10+ and
+  preserve fields, defaults and `dataclasses.replace`. Gate the installed Linux
+  wheel on CPython 3.8 learning-stack smoke in CI and both wheel-build paths,
+  without rebuilding Rust or claiming optional-HF/all-platform compatibility.
+- Keep eager HF callback type aliases importable on Python 3.8/3.9 with
+  `typing` generics, `Optional`, and forward-referenced subprocess annotations;
+  optional HF runtimes are still not required for the normal import path.
+
+- Gate installed wheels on native Sequential captures, shared-Topos learning
+  and weight handoff, WaveGate/Elliptic/fractional-history derivatives, and
+  resident plan round-tripping. These bounded CPU mechanics checks require no
+  optional ML packages and do not claim GPU execution or LLM quality gains.
+- Require the direct manual PyPI job to wait for successful signed-asset
+  attachment and verified GitHub Release publication, not only wheel builds.
+  A failure in signing or release finalization now prevents that upload path.
+  Reject tagless publish requests before building; retain tagless build-only
+  preflights.
+
 - Shorten the repository and PyPI entry points; relocate detailed APIs, training
   recipes, browser examples, and build validation to indexed topic guides.
   Preserve the README Python smoke surface after the move. Centralize the

@@ -9,9 +9,9 @@ import shlex
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping, Optional
 
 from .hf_ft import (
     HF_FINETUNE_RUN_CARD_FILENAME,
@@ -1268,7 +1268,7 @@ def hf_gpt2_finetune_milestone_handoff_lines(
     ]
 
 
-HandoffRunner = Callable[..., subprocess.CompletedProcess[str] | None]
+HandoffRunner = Callable[..., Optional["subprocess.CompletedProcess[str]"]]
 HandoffPackageRunner = Callable[..., Mapping[str, Any]]
 
 

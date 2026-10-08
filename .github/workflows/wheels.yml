@@ -182,6 +182,18 @@ jobs:
           python -P ../../tools/smoke_zspace_runtime_protocols.py
           python -I ../../tools/smoke_dlpack_interop.py
           python -I ../../tools/smoke_autograd.py
+          python -I ../../tools/smoke_learning_stack.py
+      - name: Select minimum supported CPython (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.8"
+      - name: Verify installed wheel on CPython 3.8 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -I -c 'import sys; assert sys.version_info[:2] == (3, 8)'
+          python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+          python -I tools/smoke_learning_stack.py
       - name: Upload
         uses: actions/upload-artifact@v7
         with:

@@ -50,7 +50,12 @@ generated size counts are not a release or performance gate.
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
 Both PyPI workflows call the same manifest-backed wheel validator before any
-token or trusted-publisher upload. Official release builds also execute all HF
+token or trusted-publisher upload. The direct manual publish job also depends
+on successful signed-asset attachment and verified GitHub Release publication;
+it cannot race that job or publish to PyPI after its failure. Official release
+requests with `publish_pypi=true` and no `release_tag` fail before building,
+while a build-only preflight can still omit the tag. Official release builds
+also execute all HF
 and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
 They also execute the installed wheel through the Rust-owned runtime protocol
@@ -65,6 +70,22 @@ atomic SGD failure/ownership checks, a 300-step multiclass logits-loss fixture,
 and a 400-step affine LayerNorm learning fixture run
 on every installed release wheel before upload. This is a mechanics gate,
 not a claim about LLM fine-tuning quality.
+`tools/smoke_learning_stack.py` additionally exercises the installed native
+Sequential forward capture, a 24-update shared-Topos learning loop and exact
+weight-only prediction handoff, WaveGate/Elliptic/fractional-history VJPs against
+finite differences, and owned typed-buffer transport. It round-trips the
+resident Linear/GELU/LayerNorm/Topos plan but does not dispatch a GPU; passing
+this portable release smoke is not evidence of real-GPU execution. The same
+smoke runs for manual wheel artifacts and PR CI. Its isolated regression also
+blocks Torch, NumPy, Transformers, and pytest to check the dependency-light
+native route, rather than skipping missing features.
+On Linux, PR CI and both wheel-build workflows also install the same wheel
+under CPython 3.8 and execute the learning-stack smoke before completion or
+artifact upload. This does not rebuild Rust or test optional HF dependencies.
+Other platform wheels still use their configured Python 3.12 smoke; the Linux
+minimum-version gate is not an all-platform/all-version compatibility claim.
+The separate source regression simulates the pre-3.10 dataclass signature to
+catch unsupported `slots` arguments; simulation alone is not runtime evidence.
 Catalog v4 records every normal-admission profile plus
 Rust-owned byte/node/depth limits
 for serialized Python/WASM surfaces; typed Rust admission has no serialized

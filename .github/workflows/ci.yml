@@ -660,6 +660,8 @@ jobs:
           python -P tests/test_readme_python_blocks.py
           python -P tests/test_release_status.py
           python -P tests/test_release_workflows.py
+          python -I tests/test_release_learning_smoke.py
+          python -I tests/test_python_compatibility.py
           python -P tests/test_run_char_vae_context_chain.py
           python -P tests/test_run_pypi_publish_from_release.py
           python -P tests/test_runtime_imports.py
@@ -718,6 +720,7 @@ jobs:
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_autograd_tensor.py bindings/st-py/tests/test_autograd_nonlinear.py bindings/st-py/tests/test_classification.py bindings/st-py/tests/test_classification_torch.py bindings/st-py/tests/test_autograd_sgd.py bindings/st-py/tests/test_layer_norm.py bindings/st-py/tests/test_layer_norm_autograd.py bindings/st-py/tests/test_row_indexing.py bindings/st-py/tests/test_tensor_mean.py
           python -I examples/autograd_tied_embedding.py
           python -I tools/smoke_autograd.py
+          python -I tools/smoke_learning_stack.py
           python -I -m pytest --import-mode=importlib -q bindings/st-py/tests/test_fft_numerics.py
           python -I tools/smoke_fft.py
       - name: LLM schedule study orchestration and assessment
@@ -804,3 +807,14 @@ jobs:
           python -I -S -B tools/test_topos_core_row_vjp_results.py
           python -I -S -B tools/test_topos_wasm_snapshot_results.py
           python -I -S -B benchmarks/results/2026-10-08-topos-core-forward-traversal/verify_v2.py
+      - name: Select minimum supported CPython (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.8"
+      - name: Verify installed wheel on CPython 3.8 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -I -c 'import sys; assert sys.version_info[:2] == (3, 8)'
+          python -m pip install --no-deps --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+          python -I tools/smoke_learning_stack.py
