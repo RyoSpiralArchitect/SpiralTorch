@@ -624,11 +624,18 @@ jobs:
         run: |
           spiral-runtime-preflight --list-presets
           python -P tools/smoke_hf_console_scripts.py
-      - name: Run README python blocks
+      - name: Run README and reference Python blocks
         env:
           PYTHONNOUSERSITE: "1"
         run: |
-          python -P tools/run_readme_python_blocks.py --readme README.md --cwd .
+          python -P tools/run_readme_python_blocks.py --cwd . \
+            --readme README.md \
+            --readme bindings/st-py/README.md \
+            --readme docs/reference/installation.md \
+            --readme docs/reference/native-api.md \
+            --readme docs/reference/learning.md \
+            --readme docs/reference/geometry.md \
+            --readme docs/reference/wasm.md
       - name: Run hello_session example
         env:
           PYTHONNOUSERSITE: "1"
@@ -648,6 +655,8 @@ jobs:
           python -P tests/test_llm_char_vae_context_guidance.py
           python -P tests/test_publish_pypi_wheels.py
           python -P tests/test_release_runbook.py
+          python -P tests/test_documentation_entrypoints.py
+          python -P tests/test_readme_python_blocks.py
           python -P tests/test_release_status.py
           python -P tests/test_release_workflows.py
           python -P tests/test_run_char_vae_context_chain.py

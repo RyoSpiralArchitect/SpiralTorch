@@ -4,6 +4,40 @@ This runbook keeps the PyPI path explicit and auditable. The safe default is a
 GitHub Actions dry-run: it validates the signed release wheels and PyPI state
 without uploading.
 
+## Release Cadence
+
+Prefer a small release after a coherent, reviewed user-visible milestone rather
+than waiting for the whole research roadmap. This is a maintainer checkpoint,
+not a timed job or permission to publish an unfinished branch.
+
+1. Close the prerequisite PR stack in parent-first order. Record the exact
+   reviewed source SHA and its passing checks; do not tag a working tree or an
+   unrelated CI-green revision.
+2. Inspect the current PyPI version, existing tags, and GitHub Release state.
+   Choose the next unused version. Never reuse a version that was tagged or
+   partially published, and never move an existing release tag.
+3. Prepare a narrow release PR: synchronize `bindings/st-py/Cargo.toml`,
+   `bindings/st-py/pyproject.toml`, and the `spiraltorch-py` entry in `Cargo.lock`.
+   Move reviewed items from `bindings/st-py/CHANGELOG.md`'s Unreleased section
+   into that version, with API changes, source-only limitations, and validation
+   scope. Update this runbook's version examples and the package README baseline
+   together. A version bump is preparation, not evidence of publication.
+4. Review and merge that release PR after its checks pass. Verify the merged
+   source and tag that exact commit as `v<package-version>`. The official wheel
+   workflow must install and test all three platform wheels, retain the signed
+   payload, and finish the verified GitHub Release before a PyPI upload.
+5. Run readiness with `--no-clipboard`, then the publish dry-run. Select an
+   actual publish method explicitly only after the release assets and package
+   metadata agree. Never read a clipboard token merely to inspect readiness.
+6. Verify the published wheel hashes and simple-index visibility. Record
+   success only after verification; for an uncertain upload, inspect first
+   rather than rebuilding, retagging, or re-uploading.
+
+Keep release history in the package changelog, operational commands here, and
+API examples in the topic guides. The root README is an entry point, not a
+second release runbook. Update `docs/repository-stats.md` independently; its
+generated size counts are not a release or performance gate.
+
 ## Release Wheel Workflows
 
 - Manual wheel artifact build: `.github/workflows/wheels.yml`

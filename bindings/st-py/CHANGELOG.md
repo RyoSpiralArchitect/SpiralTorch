@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Shorten the repository and PyPI entry points; relocate detailed APIs, training
+  recipes, browser examples, and build validation to indexed topic guides.
+  Preserve the README Python smoke surface after the move. Centralize the
+  reviewed-source -> immutable tag -> signed wheels -> verified PyPI checklist
+  in the release runbook, keeping source-only APIs distinct from shipped wheels.
+
 ## 0.4.27
 
 - Deliver the native LayerNorm autograd APIs from 0.4.26 through a corrected
