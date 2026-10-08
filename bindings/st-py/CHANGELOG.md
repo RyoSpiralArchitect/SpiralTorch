@@ -43,6 +43,11 @@
 
 ### Documentation And Release Gates
 
+- Restore the normal import path on Python 3.8/3.9 by avoiding their unsupported
+  dataclass `slots` keyword for `ZMetrics`; retain slots on Python 3.10+ and
+  preserve fields, defaults and `dataclasses.replace`. Gate the installed Linux
+  wheel on CPython 3.8 learning-stack smoke in CI and both wheel-build paths,
+  without rebuilding Rust or claiming optional-HF/all-platform compatibility.
 - Gate installed wheels on native Sequential captures, shared-Topos learning
   and weight handoff, WaveGate/Elliptic/fractional-history derivatives, and
   resident plan round-tripping. These bounded CPU mechanics checks require no

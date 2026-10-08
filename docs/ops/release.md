@@ -79,6 +79,13 @@ this portable release smoke is not evidence of real-GPU execution. The same
 smoke runs for manual wheel artifacts and PR CI. Its isolated regression also
 blocks Torch, NumPy, Transformers, and pytest to check the dependency-light
 native route, rather than skipping missing features.
+On Linux, PR CI and both wheel-build workflows also install the same wheel
+under CPython 3.8 and execute the learning-stack smoke before completion or
+artifact upload. This does not rebuild Rust or test optional HF dependencies.
+Other platform wheels still use their configured Python 3.12 smoke; the Linux
+minimum-version gate is not an all-platform/all-version compatibility claim.
+The separate source regression simulates the pre-3.10 dataclass signature to
+catch unsupported `slots` arguments; simulation alone is not runtime evidence.
 Catalog v4 records every normal-admission profile plus
 Rust-owned byte/node/depth limits
 for serialized Python/WASM surfaces; typed Rust admission has no serialized
