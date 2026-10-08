@@ -346,6 +346,11 @@ jobs:
         run: |
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-node"
+          # Release Node glue no longer exposes internal __wasm. Use public
+          # initSync from web glue for the explicit memory-growth ownership test.
+          wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
+            --target web --out-dir "$RUNNER_TEMP/spiraltorch-wasm-web"
+          printf '{"type":"module"}\n' > "$RUNNER_TEMP/spiraltorch-wasm-web/package.json"
           module="$RUNNER_TEMP/spiraltorch-wasm-node/spiraltorch_wasm.js"
           node bindings/st-wasm/tests/numeric_boundaries.cjs "$module"
           node bindings/st-wasm/tests/fft_numerics.cjs "$module"
@@ -371,7 +376,7 @@ jobs:
           node bindings/st-wasm/tests/elliptic_chart_step.mjs "$module"
           node tools/probe_topos_capture_wasm.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             "$RUNNER_TEMP/topos-captured-vjp.json" --require-capture
-          node tools/probe_topos_shared_transport.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
+          node tools/probe_topos_shared_transport.mjs "$RUNNER_TEMP/spiraltorch-wasm-web" \
             "$RUNNER_TEMP/topos-shared-transport.json"
           node tools/probe_topos_browser_learning.mjs "$RUNNER_TEMP/spiraltorch-wasm-node" \
             bindings/st-wasm/tests/topos_resonator_learning_fixture.json \

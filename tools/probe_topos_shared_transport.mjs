@@ -12,6 +12,8 @@ const wasm = await readFile(join(directory, "spiraltorch_wasm_bg.wasm"));
 const loaded = await import(pathToFileURL(modulePath).href);
 const api = loaded.initSync ? loaded : loaded.default;
 const exports = api.initSync ? api.initSync({module: wasm}) : api.__wasm;
+if (!(exports?.memory instanceof WebAssembly.Memory))
+  throw Error("Snapshot ownership requires real WASM memory: generate --target web glue and use its public initSync(); release Node glue may not expose __wasm.");
 const hash = data => createHash("sha256").update(data).digest("hex");
 const report = {...checkSharedTopos(api), schema: "spiraltorch.topos_shared_transport.v1",
   snapshot_ownership: checkToposSnapshotOwnership(api, exports.memory),
