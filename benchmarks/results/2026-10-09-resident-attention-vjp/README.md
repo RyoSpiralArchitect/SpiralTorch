@@ -82,3 +82,26 @@ wasm-bindgen declarations. Locally, the shipped declarations passed strict
 TypeScript checking and four negative contract mutations were rejected. Generated
 declarations were not tested locally. Full public
 Python/WASM GPU execution remains deferred pending disk-space approval.
+
+## Full WASM Client Follow-Up
+
+The public WASM gap is now closed for all 18 fixture cases at PR head `d7e1ffe2`.
+CI run `37855393243` built the full `webgpu` package, passed its generated and
+shipped declaration checks, and uploaded artifact `11583937677`. Its ZIP digest
+was verified against the CI upload receipt before extraction. The package was
+then executed in the browser through `resident_attention_clients.html`, not the
+standalone backend example. No local rebuild or cache deletion was necessary.
+
+[public-wasm-ci.json](public-wasm-ci.json) contains every condition and error;
+[public-wasm-ci.manifest.json](public-wasm-ci.manifest.json) pins the CI head,
+artifact, module/WASM/source/fixture hashes and exact validation scope. Maximum
+absolute gradient error is `3.5762786865234375e-7`. Retained gradient tensors were
+read after freeing the parent gradient container, inputs and bias container.
+The page also rejected missing and cross-origin modules rather than reporting a
+successful check. Browser console inspection found no relevant warnings/errors.
+
+The artifact has one-day CI retention; its original ZIP and raw result are also
+kept locally. Rebuild the qualified source with the pinned lockfile/CLI to repeat
+the check after expiry. The public-client test covers canonical forward/VJP and
+handle ownership, not another SGD/strided/wide-range or performance experiment.
+Public Python GPU execution is still pending in macOS CI at this checkpoint.
