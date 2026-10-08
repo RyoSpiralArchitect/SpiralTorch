@@ -285,6 +285,7 @@ fn malformed_seeds_fail_before_parameter_gradients_change() {
     let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
     let mut field = fixture_field();
     let input = Tensor::from_vec(2, 6, vec![0.125; 12]).unwrap();
+    field.forward(&input).unwrap();
     field
         .backward(&input, &Tensor::from_vec(2, 4, vec![1.0; 8]).unwrap())
         .unwrap();
@@ -307,6 +308,7 @@ fn field_parameter_vjp_matches_finite_differences() {
     let input = Tensor::from_vec(2, 6, (0..12).map(|i| 0.05 + i as f32 / 100.0).collect()).unwrap();
     let seed =
         Tensor::from_vec(2, 4, vec![0.5, -0.25, 0.75, 0.125, -0.5, 0.25, -0.125, 1.0]).unwrap();
+    field.forward(&input).unwrap();
     field.backward(&input, &seed).unwrap();
     let values = parameters(&field, false);
     let gradients = parameters(&field, true);
@@ -354,6 +356,97 @@ fn field_parameter_vjp_matches_finite_differences() {
             );
         }
     }
+}
+
+#[test]
+fn field_gradient_clearing_preserves_the_forward_capture() {
+    let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+    let mut field = fixture_field();
+    let input = Tensor::from_vec(2, 6, vec![0.125; 12]).unwrap();
+    let seed = Tensor::from_vec(2, 4, vec![1.0; 8]).unwrap();
+    field.forward(&input).unwrap();
+    field.backward(&input, &seed).unwrap();
+    let values = parameters(&field, false);
+    let gradients = parameters(&field, true);
+    assert!(gradients.iter().flatten().any(|value| *value != 0.0));
+    for _ in 0..2 {
+        field.zero_accumulators().unwrap();
+        assert!(parameters(&field, true)
+            .iter()
+            .flatten()
+            .all(|value| *value == 0.0));
+        field.backward(&input, &seed).unwrap();
+        assert_eq!(parameters(&field, true), gradients);
+        assert_eq!(parameters(&field, false), values);
+    }
+}
+
+#[test]
+fn field_parameter_changes_still_require_a_new_forward() {
+    let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+    let mut field = fixture_field();
+    let input = Tensor::from_vec(2, 6, vec![0.125; 12]).unwrap();
+    let seed = Tensor::from_vec(2, 4, vec![1.0; 8]).unwrap();
+    field.forward(&input).unwrap();
+    field.backward(&input, &seed).unwrap();
+    let gradients = parameters(&field, true);
+    field
+        .visit_parameters_mut(&mut |p| {
+            p.value_mut().data_mut()[0] += 1e-3;
+            Ok(())
+        })
+        .unwrap();
+    assert!(matches!(
+        field.backward(&input, &seed),
+        Err(TensorError::InvalidValue {
+            label: "sequential_forward_missing"
+        })
+    ));
+    assert_eq!(parameters(&field, true), gradients);
+    field.forward(&input).unwrap();
+    field.zero_accumulators().unwrap();
+    field.backward(&input, &seed).unwrap();
+}
+
+#[test]
+fn field_rate_scaling_is_atomic_and_preserves_the_forward_capture() {
+    let _policy = push_backend_policy(BackendPolicy::from_device_caps(DeviceCaps::cpu()));
+    let mut field = fixture_field();
+    field
+        .visit_parameters_mut(&mut |p| {
+            p.attach_realgrad(if p.name() == "color_out::bias" {
+                f32::MAX
+            } else {
+                0.125
+            })
+        })
+        .unwrap();
+    let rates = |field: &NerfField| {
+        let mut rates = Vec::new();
+        field
+            .visit_parameters(&mut |p| {
+                rates.push(p.realgrad().unwrap().learning_rate());
+                Ok(())
+            })
+            .unwrap();
+        rates
+    };
+    let input = Tensor::from_vec(2, 6, vec![0.125; 12]).unwrap();
+    let seed = Tensor::from_vec(2, 4, vec![1.0; 8]).unwrap();
+    field.forward(&input).unwrap();
+    let before = rates(&field);
+    let values = parameters(&field, false);
+    for factor in [2.0, 0.0, -1.0, f32::NAN, f32::INFINITY] {
+        assert!(field.scale_learning_rates(factor).is_err());
+        assert_eq!(rates(&field), before);
+    }
+    field.scale_learning_rates(0.5).unwrap();
+    assert_eq!(
+        rates(&field),
+        before.iter().map(|rate| rate * 0.5).collect::<Vec<_>>()
+    );
+    field.backward(&input, &seed).unwrap();
+    assert_eq!(parameters(&field, false), values);
 }
 
 #[test]

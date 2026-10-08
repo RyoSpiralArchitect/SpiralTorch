@@ -500,6 +500,21 @@ impl Module for NerfField {
         Ok(())
     }
 
+    fn zero_accumulators(&mut self) -> PureResult<()> {
+        self.trunk.zero_accumulators()?;
+        self.density_head.zero_accumulators()?;
+        self.feature_head.zero_accumulators()?;
+        self.color_head.zero_accumulators()
+    }
+
+    fn scale_learning_rates(&mut self, factor: f32) -> PureResult<()> {
+        self.visit_parameters(&mut |parameter| parameter.validate_learning_rate_scale(factor))?;
+        self.trunk.scale_learning_rates(factor)?;
+        self.density_head.scale_learning_rates(factor)?;
+        self.feature_head.scale_learning_rates(factor)?;
+        self.color_head.scale_learning_rates(factor)
+    }
+
     fn visit_parameters_mut(
         &mut self,
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,

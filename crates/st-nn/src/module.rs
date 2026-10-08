@@ -1051,7 +1051,9 @@ pub trait Module {
         self.visit_parameters_mut(&mut |parameter| parameter.try_scale_learning_rate(factor))
     }
 
-    /// Clears accumulators across every parameter.
+    /// Clears accumulators without changing parameter values or forward state.
+    /// Containers with cache-owning children should delegate to their children
+    /// rather than use a mutable parameter visitor that invalidates captures.
     fn zero_accumulators(&mut self) -> PureResult<()> {
         self.visit_parameters_mut(&mut |param| {
             param.zero_gradient();
