@@ -513,8 +513,8 @@ print(f"Z-space shape: {z_vec.shape()}, loss: {loss}")
 ### Explore More Features
 
 - **[SpiralTorchVision](../docs/spiraltorchvision.md)**: Computer vision with Z-space geometry
-- **[SpiralTorchRL](../README.md#spiraltorchrl)**: Reinforcement learning with hypergradient policies
-- **[SpiralTorchRec](../README.md#spiraltorchrec)**: Recommendation systems with topos guards
+- **[SpiralTorchRL](reference/learning.md#spiraltorchrl-agents)**: Reinforcement learning with hypergradient policies
+- **[SpiralTorchRec](reference/learning.md#spiraltorchrec-open-topos-recommendation-lattice)**: Recommendation systems with topos guards
 - **[Plugin System](../docs/plugin_system.md)**: Extend SpiralTorch with custom components
 
 ### Tutorials
@@ -526,8 +526,8 @@ print(f"Z-space shape: {z_vec.shape()}, loss: {loss}")
 ### Advanced Topics
 
 - **[Z-Space Theory](../docs/zspace_intro.md)**: Deep dive into hyperbolic geometry
-- **[SpiralK DSL](../README.md#heuristics-spiralk)**: Customize kernel heuristics
-- **[Self-Rewrite](../README.md#self-rewrite)**: Automated performance tuning
+- **[SpiralK DSL](reference/kernels.md#heuristics-spiralk--optional--powerful)**: Customize kernel heuristics
+- **[Self-Rewrite](reference/project.md)**: Automated performance tuning
 
 ### Community
 

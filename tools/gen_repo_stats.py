@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 BADGE_DIR = ROOT / "docs" / "badges"
-README = ROOT / "README.md"
+STATS_DOC = ROOT / "docs" / "repository-stats.md"
 
 def run(cmd: list[str]) -> str:
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
@@ -78,8 +78,8 @@ def badge_svg(label: str, value: str, color: str) -> str:
   </g>
 </svg>"""
 
-def update_readme_section(section_md: str) -> None:
-    content = README.read_text(encoding="utf-8")
+def update_stats_section(section_md: str) -> None:
+    content = STATS_DOC.read_text(encoding="utf-8")
     start = "<!-- STATS:START -->"
     end = "<!-- STATS:END -->"
     new_block = f"{start}\n{section_md.strip()}\n{end}"
@@ -95,11 +95,11 @@ def update_readme_section(section_md: str) -> None:
             re.S,
         )
         if not legacy.search(content):
-            print("README markers not found; skipping README update.", file=sys.stderr)
+            print("Stats markers not found; skipping stats update.", file=sys.stderr)
             return
         replacement = f"## Code stats\n\n{new_block}\n"
         content = legacy.sub(replacement, content, count=1)
-    README.write_text(content, encoding="utf-8")
+    STATS_DOC.write_text(content, encoding="utf-8")
 
 def main():
     BADGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,7 +141,7 @@ def main():
     (BADGE_DIR/"deps.svg").write_text(badge_svg("crates", digits(deps), deps_color), encoding="utf-8")
     (BADGE_DIR/"total-code.svg").write_text(badge_svg("total code", digits(total_code), total_color), encoding="utf-8")
 
-    # README セクション更新
+    # Keep generated counts out of the short project entry point.
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     section = f"""
 > _auto-generated: {now}_
@@ -154,13 +154,13 @@ def main():
 | Workspace+deps crates | {digits(deps)} |
 
 <p>
-<img src="docs/badges/rust-loc.svg" alt="rust loc" />
-<img src="docs/badges/total-code.svg" alt="total code" />
-<img src="docs/badges/deps.svg" alt="crates" />
+<img src="badges/rust-loc.svg" alt="rust loc" />
+<img src="badges/total-code.svg" alt="total code" />
+<img src="badges/deps.svg" alt="crates" />
 </p>
 """.strip()
 
-    update_readme_section(section)
+    update_stats_section(section)
 
 if __name__ == "__main__":
     main()

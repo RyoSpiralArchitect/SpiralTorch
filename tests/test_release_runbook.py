@@ -29,7 +29,7 @@ class ReleaseRunbookTests(unittest.TestCase):
         self.assertIn("getpass.getpass", helper)
         self.assertNotIn("--body-file", helper)
 
-        for relative in ("README.md", "docs/ops/release.md"):
+        for relative in ("docs/ops/release.md",):
             with self.subTest(path=relative):
                 text = (ROOT / relative).read_text(encoding="utf-8")
 

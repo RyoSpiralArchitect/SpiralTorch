@@ -66,7 +66,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_release_docs_match_active_package_version(self) -> None:
         metadata = (ROOT / "bindings/st-py/pyproject.toml").read_text(encoding="utf-8")
         version = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE).group(1)
-        for path in ["README.md", "docs/ops/release.md"]:
+        for path in ["docs/ops/release.md"]:
             with self.subTest(path=path):
                 text = (ROOT / path).read_text(encoding="utf-8")
                 versions = re.findall(r"\b(?:VERSION=|release_tag=v)(\d+\.\d+\.\d+)", text)
