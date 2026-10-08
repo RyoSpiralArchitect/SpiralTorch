@@ -47,6 +47,11 @@
   and weight handoff, WaveGate/Elliptic/fractional-history derivatives, and
   resident plan round-tripping. These bounded CPU mechanics checks require no
   optional ML packages and do not claim GPU execution or LLM quality gains.
+- Require the direct manual PyPI job to wait for successful signed-asset
+  attachment and verified GitHub Release publication, not only wheel builds.
+  A failure in signing or release finalization now prevents that upload path.
+  Reject tagless publish requests before building; retain tagless build-only
+  preflights.
 
 - Shorten the repository and PyPI entry points; relocate detailed APIs, training
   recipes, browser examples, and build validation to indexed topic guides.

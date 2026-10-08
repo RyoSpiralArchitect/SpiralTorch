@@ -53,6 +53,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_CHECKOUT_REF: ${{ inputs.checkout_ref }}
           INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_PUBLISH_PYPI: ${{ inputs.publish_pypi }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -64,6 +65,10 @@ jobs:
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             release_tag="$INPUT_RELEASE_TAG"
+            if [ "$INPUT_PUBLISH_PYPI" = "true" ] && [ -z "$release_tag" ]; then
+              echo "publish_pypi=true requires release_tag before building wheels." >&2
+              exit 1
+            fi
             if [ -n "$INPUT_CHECKOUT_REF" ]; then
               source_ref="$INPUT_CHECKOUT_REF"
             fi
@@ -259,7 +264,9 @@ jobs:
 
   pypi:
     name: Publish wheels to PyPI
-    needs: wheels
+    needs:
+      - wheels
+      - attach
     if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi == 'true'
     runs-on: ubuntu-22.04
     environment:

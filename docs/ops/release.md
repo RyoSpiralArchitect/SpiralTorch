@@ -50,7 +50,12 @@ generated size counts are not a release or performance gate.
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
 Both PyPI workflows call the same manifest-backed wheel validator before any
-token or trusted-publisher upload. Official release builds also execute all HF
+token or trusted-publisher upload. The direct manual publish job also depends
+on successful signed-asset attachment and verified GitHub Release publication;
+it cannot race that job or publish to PyPI after its failure. Official release
+requests with `publish_pypi=true` and no `release_tag` fail before building,
+while a build-only preflight can still omit the tag. Official release builds
+also execute all HF
 and Z-Space console entrypoints on Linux, macOS, and Windows after installing
 each wheel, so a platform-specific missing runtime payload blocks publication.
 They also execute the installed wheel through the Rust-owned runtime protocol
