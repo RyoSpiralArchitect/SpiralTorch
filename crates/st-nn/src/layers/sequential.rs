@@ -214,6 +214,10 @@ impl Module for Sequential {
 }
 
 #[cfg(test)]
+#[path = "sequential_capture_tests.rs"]
+mod capture_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::layers::linear::Linear;
