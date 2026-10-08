@@ -4125,6 +4125,14 @@ impl PySequential {
         crate::nn_resident::forward_argument(&self.inner, input)
     }
 
+    /// Host forward without retaining Sequential backward activations.
+    pub fn forward_untracked(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        self.inner
+            .forward_untracked(&input.inner)
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
     /// Submit forward, then capture its output; read the snapshot explicitly.
     pub fn forward_snapshot(
         &self,

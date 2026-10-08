@@ -172,10 +172,71 @@ is fabricated for the fused core sum. `ToposGateLayout` re-exports the core
 layout enum under the existing NN API name.
 
 This is a host-Tensor Rust NN layer, usable in ordinary `Sequential`; it does
-not make that graph GPU-resident. `Sequential::backward` currently recomputes
-its activations, so direct-layer capture savings must not be generalized to
-the whole graph. Isolated parameter and WGPU operand snapshots can add copies;
+not make that graph GPU-resident. Host `Sequential` retains the inputs from its
+actual forward and reuses them for backward, including repeated band pullbacks.
+It no longer reruns the layers to reconstruct activations: Dropout masks,
+recurrent state and the Topos tape remain those used by the original prediction.
+This removes container-driven replay, not any internal recomputation a child
+module chooses to perform; it is not a claim that every graph is replay-free.
+The latest successful forward is authoritative; a new or failed forward,
+structural/mutable-parameter access, state load, text infusion or mode change
+invalidates it. Input/parameter guards reject mismatches before child pullbacks.
+Shape/input validation failures permit a valid retry; a child backward failure
+invalidates the tape, but does not roll back already accumulated gradients.
+Clear accumulators before restarting such a failed step.
+Prepare the trainer or attach optimizer tapes before the training forward.
+`ModuleTrainer::prepare` is a mutable-parameter boundary and invalidates an
+earlier capture, including one produced while checking a resident-to-host
+weight handoff. Run a fresh forward after preparation before calling backward.
+
+`zero_accumulators()` clears gradients without discarding the captured forward,
+including nested sequences and Topos. `Module::scale_learning_rates` likewise
+keeps the capture while prevalidating all optimizer rates before mutation.
+Trainer coherence-driven LR adjustments use this path at their original point
+before backward; moving them after backward is not required. Arbitrary mutable
+parameter visits still invalidate the container capture. Containers and band schedules call
+`Module::backward_retained`; the built-in LSTM, SpiralRnn, WaveRnn, WaveScan,
+coherence scan and coherence-wave layers support this without consuming their
+forward caches. Their ordinary one-shot `backward` remains available. Custom
+modules with consuming backward caches must implement `backward_retained` too;
+its default only delegates to `backward`. Direct retained-pullback callers must
+keep the input, parameters and module state unchanged. Sequential checks that
+boundary for its owned children.
+
+`eval()` changes layer behavior, not gradient recording. Explicit
+`Sequential::forward_untracked` / `forward_untracked_owned` (Python:
+`model.forward_untracked(x)`) bypass container activation retention, propagate
+through nested sequences and invalidate any old host tape. Individual layers
+may still keep their own internal caches. The original owned-forward path is
+used there; this is not an implicit CPU fallback for resident inputs.
+
+Saved activation snapshots increase retained host memory and can prevent
+in-place storage reuse. Protected row-major parameters use cheap content stamps;
+foreign or non-row-major parameters require isolated comparison values. This
+is a correctness repair and removal of redundant forward executions, not a
+measured wall-clock or peak-memory improvement. The existing WASM WebGPU graph
+already uses its separate opaque forward tokens and is unchanged.
+The `sequential_forward_tape_contract` Rust example executes Dropout, seven
+consuming layer/stack types, nested Topos, repeated pullbacks and gradient clears
+when compiled to scalar WASM and loaded in Node. This is a host-Tensor contract
+check, not a browser WebGPU benchmark. LSTM's native CPU scan clock is unavailable
+on wasm32; its optional `bptt_scan_elapsed_us` is `null` there rather than calling
+unsupported `std::time::Instant::now()` or fabricating a zero-duration result.
+Isolated parameter and WGPU operand snapshots can add copies;
 previous capture timings are not measurements of this revised path.
+
+`bindings/st-py/tests/test_nn_sequential_capture.py` also compares 48 synthetic
+SGD updates with independent CPU Torch: two seeds, twelve steps each, with and
+without Topos in a Dropout/Linear/GELU/Linear model. A separately advanced seeded
+Dropout stream supplies the same masks to the reference; this does not assert
+RNG equivalence with Torch Dropout. Losses, outputs, input VJPs and updated
+parameters are checked at every step (`rtol=5e-4`, `atol=3e-5`). Both optimizers
+retain their own parameter trajectories after initialization. Two differently
+scaled pullbacks per prediction test accumulation without forward replay.
+Parameter gradients are checked indirectly through their SGD updates, not a
+Python gradient-inspection API. This is a correctness test, not pretrained FT,
+a speed comparison or evidence that Topos improves model quality.
+
 Python Torch feature-gate adapters and scalar WASM shared-row methods use the
 compact core path described above; generic Torch broadcasts still use the
 legacy expanded route. For the distinct resident NN path, use the shared-gate

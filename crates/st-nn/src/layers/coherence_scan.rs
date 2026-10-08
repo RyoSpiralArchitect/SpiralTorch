@@ -545,10 +545,15 @@ impl Module for ZSpaceCoherenceScan {
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        let cache = self
-            .cache
-            .borrow_mut()
-            .take()
+        let result = self.backward_retained(input, grad_output);
+        self.cache.get_mut().take();
+        result
+    }
+
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let cache = self.cache.borrow();
+        let cache = cache
+            .as_ref()
             .ok_or(TensorError::EmptyInput("zspace_coherence_scan_cache"))?;
 
         let (batch, cols) = input.shape();

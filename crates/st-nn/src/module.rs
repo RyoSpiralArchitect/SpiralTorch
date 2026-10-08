@@ -885,10 +885,26 @@ pub trait Module {
         self.forward(&input)
     }
 
+    /// Forward without retaining a container's backward activations. This is
+    /// not evaluation mode; individual layers may still retain their own state.
+    /// Containers override this to propagate the request to nested children.
+    fn forward_untracked_owned(&self, input: Tensor) -> PureResult<Tensor> {
+        self.forward_owned(input)
+    }
+
     /// Propagates a gradient backwards. Implementations should populate the
     /// relevant parameter accumulators before returning the gradient with
     /// respect to `input`.
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor>;
+
+    /// Pull back without consuming the latest forward state. Containers and
+    /// band schedules use this for multiple cotangents of the same prediction.
+    /// The caller must keep input, parameters and layer state unchanged.
+    /// Modules whose ordinary backward consumes a cache must override this;
+    /// the default is suitable for stateless or already reusable pullbacks.
+    fn backward_retained(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward(input, grad_output)
+    }
 
     /// Visits immutable parameters.
     fn visit_parameters(
@@ -917,7 +933,7 @@ pub trait Module {
                 continue;
             }
             self.begin_backward_band_pass(band, grad)?;
-            let result = self.backward(input, grad);
+            let result = self.backward_retained(input, grad);
             self.end_backward_band_pass(band)?;
             let contribution = result?;
             let backend = current_tensor_util_backend_for_values(total.data().len());
@@ -1027,7 +1043,17 @@ pub trait Module {
         }
     }
 
-    /// Clears accumulators across every parameter.
+    /// Scales optimizer rates without changing parameter values. Cache-owning
+    /// modules whose mutable visitor invalidates forward state should override
+    /// this optimizer-only operation, prevalidating every rate before mutation.
+    fn scale_learning_rates(&mut self, factor: f32) -> PureResult<()> {
+        crate::optim::validate_module_learning_rate_scale(self, factor)?;
+        self.visit_parameters_mut(&mut |parameter| parameter.try_scale_learning_rate(factor))
+    }
+
+    /// Clears accumulators without changing parameter values or forward state.
+    /// Containers with cache-owning children should delegate to their children
+    /// rather than use a mutable parameter visitor that invalidates captures.
     fn zero_accumulators(&mut self) -> PureResult<()> {
         self.visit_parameters_mut(&mut |param| {
             param.zero_gradient();

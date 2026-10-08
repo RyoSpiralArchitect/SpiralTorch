@@ -376,6 +376,13 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \
             --target nodejs --out-dir "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu"
           node bindings/st-wasm/tests/nn_plan.cjs "$RUNNER_TEMP/spiraltorch-wasm-nn-cpu/spiraltorch_wasm.js"
+      - name: Host NN forward tapes compiled to scalar WASM
+        run: |
+          cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --example sequential_forward_tape_contract
+          wasm-bindgen target/wasm32-unknown-unknown/release/examples/sequential_forward_tape_contract.wasm \
+            --target nodejs --out-dir "$RUNNER_TEMP/sequential-forward-tape"
+          node -e 'console.log(require(process.argv[1]).run_sequential_forward_tape_contract())' \
+            "$RUNNER_TEMP/sequential-forward-tape/sequential_forward_tape_contract.js"
       - name: Browser WebGPU binding build
         run: |
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib
@@ -723,6 +730,7 @@ jobs:
             bindings/st-py/tests/test_geometry_autograd.py \
             bindings/st-py/tests/test_topos_capture.py \
             bindings/st-py/tests/test_topos_shared_transport.py \
+            bindings/st-py/tests/test_nn_sequential_capture.py \
             bindings/st-py/tests/test_topos_matched_controls.py \
             bindings/st-py/tests/test_topos_capture_results.py \
             bindings/st-py/tests/test_geometry_adapters.py \
