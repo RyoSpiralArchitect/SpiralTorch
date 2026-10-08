@@ -97,6 +97,35 @@ exactly. Manual recovery with a non-empty `release_tag` also requires
 compliance manifests, signatures, and publication helpers on one source ref.
 Leave both inputs empty for a build-only branch preflight.
 
+### License Metadata Preflight
+
+PR CI and both wheel workflows validate tracked Cargo/Python license metadata
+before building wheels:
+
+```bash
+python scripts/security/generate_repo_manifest.py --check-only
+```
+
+This read-only source check permits local modifications, hashes only license
+text and explicitly pinned historical Cargo manifests, and writes no release
+manifest. It is not an attestation. Full release manifest generation still
+requires a clean tracked tree and hashes its files before signing.
+
+Active crates declare their own license. Three historical reproduction
+manifests omitted that metadata; their original bytes and benchmark hashes
+must not change. `scripts/security/frozen_benchmark_licenses.json` explicitly
+declares the existing project AGPL license for those exact SHA-256 identities
+under the root `NOTICE`. The release manifest records this declaration source,
+and the catalog itself is tracked and hashed. This is not a directory exemption:
+new omissions, changed bytes, conflicting licenses, or publishable crates fail.
+
+The official `v0.4.28` run
+([37812035284](https://github.com/RyoSpiralArchitect/SpiralTorch/actions/runs/37812035284))
+built all three wheels but failed this license validation in the attach job,
+before creating a signed payload. It did not publish to PyPI. Leave that tag
+unchanged and use a new version after fixing the source; retained-payload
+recovery cannot repair a run that never produced that payload.
+
 ### Immutable GitHub Releases
 
 Do not publish an empty release before the official wheel job finishes.
