@@ -184,6 +184,10 @@ invalidates it. Input/parameter guards reject mismatches before child pullbacks.
 Shape/input validation failures permit a valid retry; a child backward failure
 invalidates the tape, but does not roll back already accumulated gradients.
 Clear accumulators before restarting such a failed step.
+Prepare the trainer or attach optimizer tapes before the training forward.
+`ModuleTrainer::prepare` is a mutable-parameter boundary and invalidates an
+earlier capture, including one produced while checking a resident-to-host
+weight handoff. Run a fresh forward after preparation before calling backward.
 
 `zero_accumulators()` clears gradients without discarding the captured forward,
 including nested sequences and Topos. `Module::scale_learning_rates` likewise

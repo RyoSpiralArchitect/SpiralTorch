@@ -582,8 +582,8 @@ def test_module_trainer_prepare_step_zero_and_realgrad_controls() -> None:
     x = st.Tensor.rand(2, 2, seed=21)
     y = st.Tensor.rand(2, 1, seed=22)
 
-    pred_before = model.forward(x)
     trainer.prepare(model)
+    pred_before = model.forward(x)
     grad_pred = loss.backward(pred_before, y)
     _ = model.backward(x, grad_pred)
     trainer.step(model)
