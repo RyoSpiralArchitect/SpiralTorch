@@ -1,0 +1,85 @@
+{
+  "schema": "spiraltorch.byte_corpus.float32_review.v1",
+  "date_utc": "2026-10-09",
+  "base_revision": "0700a15d07d02b60037761b645640e04f3728fb0",
+  "scope": "Reference/comparator repair and offline recheck of frozen results; no new GPU learning run or quality/speed claim.",
+  "source_sha256": {
+    "tools/byte_corpus_study.py": "22c742261388471435ae7c7006e8be6d1e14472f49431c0877824123061c3938",
+    "tools/test_byte_corpus_study.py": "60eea49fca1b8d7334e603ffe661d8c125a0f1884322a640382f04a93868430b",
+    "docs/byte_corpus_learning.md": "733ca22b91e15542f976a659afde1f760ec4179d9daa614ecca27cfa08ccf938",
+    "benchmarks/results/2026-10-09-byte-corpus-f32-review/README.md": "e31b9340eea88f5ad532e294f699c49747f34db9f943623a033b4359ba685472"
+  },
+  "review": {
+    "mode": "Independent read-only local review followed by parent execution",
+    "findings": [
+      "Float32 conversion could masquerade as a nonzero geometry learning delta.",
+      "Integer JSON parameters could infer a nondifferentiable Torch dtype."
+    ],
+    "focused_post_fix_findings": 0,
+    "reviewer_ran_tests": false
+  },
+  "checks": {
+    "before_fix": {
+      "tests": 12,
+      "failures": 2,
+      "errors": 1,
+      "log": "review-regressions-before.log"
+    },
+    "after_fix_with_torch": {
+      "tests": 12,
+      "passed": 12,
+      "skipped": 0,
+      "command": "python3 -I -B tools/test_byte_corpus_study.py -v",
+      "torch_version": "2.12.1",
+      "device": "cpu",
+      "log": "review-regressions-after.log"
+    },
+    "stdlib_only": {
+      "tests": 12,
+      "passed": 10,
+      "skipped": 2,
+      "reason": "Optional CPU PyTorch unavailable under -S",
+      "command": "python3 -I -S -B tools/test_byte_corpus_study.py -v",
+      "log": "review-stdlib-tests.log"
+    },
+    "frozen_native_comparison": {
+      "passed": true,
+      "decoded_comparison_equals_original": true,
+      "output": "f32-review-native-comparison.json",
+      "original_public_sha256": "f2dc3e9105a73e89ef1738a661ddf8ed3986f5ac64a78c7f283c6f20e6e60acd"
+    },
+    "frozen_browser_comparison": {
+      "passed": true,
+      "decoded_comparison_equals_original": true,
+      "output": "f32-review-browser-comparison.json",
+      "original_public_sha256": "289747b67d48eb6e728e668689975baafdd1ac884ddd6f9a5a0b16e7523c1159"
+    }
+  },
+  "frozen_input_sha256": {
+    "request": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3",
+    "reference": "b879c3101fdf487d046226673ace0fab805cfe5afc49baf5eb3c6c11d0486024",
+    "native": "7af6eb07bdb40085f06d091808e13f9deb5d6cf79d76a3a97c0f173d42c0ba4f",
+    "browser": "cfdb48e4941395612e812d91827e31a25b4c71212768cee2712f29470b6d1d59"
+  },
+  "criteria": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_delta_relative_l2": 0.002,
+    "minimum_reference_delta_l2": 1e-8,
+    "thresholds_unchanged": true,
+    "delta_initial_domain": "effective float32 parameter values"
+  },
+  "local_artifact_group": "2026-10-09-byte-corpus-cross-client-resume",
+  "local_artifact_sha256": {
+    "review-regressions-before.log": "eab993d7ca406bf7d3bb73a8c422ca820f6c0bac169e032e9ab439c607a59dc1",
+    "review-regressions-after.log": "b9296476afde857e8257b9795bcba6bad3c8e7b811141e57a10bb0313b73fd3a",
+    "review-stdlib-tests.log": "7ce59b387add894d1abe42e38e1b062adf56ef9074f280f725c8f79b1831327f",
+    "f32-review-native-comparison.json": "57828ab354a3d84443b4ca15df0a0a13f34e644c9c815289ab48861a0029bdc4",
+    "f32-review-browser-comparison.json": "76ced591da2c0077827e2c4319d2da9a0e78972aeaf8acf025cda0decd30f60a"
+  },
+  "limits": [
+    "Existing standard-library CI skips the two optional Torch tests; both ran locally.",
+    "Frozen pilot inputs and measured outputs are unchanged; this is offline reanalysis, not a rerun.",
+    "Existing small-corpus, unequal-capacity and unequal-compute limitations remain."
+  ]
+}

@@ -1,8 +1,11 @@
 """Fail-closed result validation and deterministic, paired input controls."""
 import copy
 import importlib.util
+import json
 import math
 from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 import unittest
 
 spec = importlib.util.spec_from_file_location("study", Path(__file__).with_name("byte_corpus_study.py"))
@@ -69,6 +72,33 @@ class Controls(unittest.TestCase):
         self.assertTrue(result["numerical_checks_passed"])
         self.assertEqual(result["paired_deltas"], [dict(seed=11, geometry_minus_ordinary_bpb=0.)])
 
+    def test_float32_conversion_is_not_a_geometry_learning_delta(self):
+        raw, ref, actual = fixture()
+        request = json.loads(raw)
+        for i, parameter in enumerate(request["cases"][1]["parameters"]):
+            if parameter["name"].startswith("geometry."):
+                parameter["values"] = [.3] * len(parameter["values"])
+                for report in (ref, actual):
+                    report["cases"][1]["final_parameters"][i] = [study.f32(.3)] * len(parameter["values"])
+        raw = study.encoded(request)
+        for report in (ref, actual):
+            report["request_sha256"] = study.digest(raw)
+        with self.assertRaisesRegex(ValueError, "geometry learning delta"):
+            study.compare(raw, ref, actual)
+
+    def test_noncanonical_initial_values_with_real_updates_pass(self):
+        raw, ref, actual = fixture()
+        request = json.loads(raw)
+        for i, parameter in enumerate(request["cases"][1]["parameters"]):
+            if parameter["name"].startswith("geometry."):
+                parameter["values"] = [.3] * len(parameter["values"])
+                for report in (ref, actual):
+                    report["cases"][1]["final_parameters"][i] = [study.f32(.3 + 1e-4)] * len(parameter["values"])
+        raw = study.encoded(request)
+        for report in (ref, actual):
+            report["request_sha256"] = study.digest(raw)
+        self.assertTrue(study.compare(raw, ref, actual)["numerical_checks_passed"])
+
     def test_missing_or_misidentified_results_fail(self):
         edits = [
             lambda a: a["cases"].pop(),
@@ -112,6 +142,46 @@ class Controls(unittest.TestCase):
         actual["cases"][1]["final_parameters"][2] = [x + 5e-7 for x in initial]
         with self.assertRaisesRegex(ValueError, "geometry learning delta"):
             study.compare(raw, ref, actual)
+
+
+@unittest.skipUnless(importlib.util.find_spec("torch"), "requires optional CPU PyTorch")
+class TorchReferenceControls(unittest.TestCase):
+    def reference(self, request):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "request.json", root / "reference.json"
+            study.write_new(source, request)
+            study.reference(SimpleNamespace(request=source, output=output))
+            return source.read_bytes(), json.loads(output.read_bytes())
+
+    def test_integer_parameter_literals_preserve_float32_reference(self):
+        request = json.loads(fixture()[0])
+        _, expected = self.reference(request)
+        for case in request["cases"]:
+            for parameter in case["parameters"]:
+                parameter["values"] = [int(x) if int(x) == x else x for x in parameter["values"]]
+        _, actual = self.reference(request)
+        self.assertEqual(actual["dtype"], "float32")
+        self.assertEqual(actual["cases"], expected["cases"])
+
+    def test_zero_gradient_reference_cannot_qualify_rounding_as_learning(self):
+        request = json.loads(fixture()[0])
+        request["train_batches"] = request["train_batches"][:1]
+        request["checkpoint_every"] = 1
+        for case in request["cases"]:
+            for parameter in case["parameters"]:
+                if parameter["name"].startswith("geometry."):
+                    parameter["values"] = [.3] * len(parameter["values"])
+                elif parameter["name"] == "head.output.weight":
+                    parameter["values"] = [0.] * len(parameter["values"])
+        raw, ref = self.reference(request)
+        for parameter, final in zip(request["cases"][1]["parameters"], ref["cases"][1]["final_parameters"]):
+            if parameter["name"].startswith("geometry."):
+                self.assertEqual(final, [study.f32(x) for x in parameter["values"]])
+        measured = copy.deepcopy(ref)
+        measured.update(engine="spiraltorch", adapter="test-only GPU adapter")
+        with self.assertRaisesRegex(ValueError, "geometry learning delta"):
+            study.compare(raw, ref, measured)
 
 
 if __name__ == "__main__":
