@@ -14,6 +14,12 @@ pub(super) fn explicit_update<'de, D: serde::Deserializer<'de>>(
     GeometryUpdate::deserialize(deserializer).map(Some)
 }
 
+pub(super) fn explicit_metric<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<ByteDecoderPairMetric>, D::Error> {
+    ByteDecoderPairMetric::deserialize(deserializer).map(Some)
+}
+
 pub(super) fn same_bits(left: &[f32], right: &[f32]) -> bool {
     left.len() == right.len()
         && left
@@ -30,11 +36,27 @@ impl Case {
 
 impl Request {
     pub(super) fn controls(&self) -> bool {
-        self.schema == "spiraltorch.byte_corpus.request.v2"
+        self.schema != "spiraltorch.byte_corpus.request.v1"
+    }
+
+    pub(super) fn metric_controls(&self) -> bool {
+        self.schema == "spiraltorch.byte_corpus.request.v3"
+    }
+
+    pub(super) fn arms_per_seed(&self) -> usize {
+        if self.metric_controls() {
+            5
+        } else if self.controls() {
+            3
+        } else {
+            2
+        }
     }
 
     pub(super) fn checkpoint_schema(&self) -> &'static str {
-        if self.controls() {
+        if self.metric_controls() {
+            "spiraltorch.byte_corpus.checkpoint.v3"
+        } else if self.controls() {
             "spiraltorch.byte_corpus.checkpoint.v2"
         } else {
             CHECKPOINT_SCHEMA
@@ -42,6 +64,13 @@ impl Request {
     }
 
     pub(super) fn report_schema(&self, complete: bool) -> &'static str {
+        if self.metric_controls() {
+            return if complete {
+                "spiraltorch.byte_corpus.result.v3"
+            } else {
+                "spiraltorch.byte_corpus.partial.v3"
+            };
+        }
         match (self.controls(), complete) {
             (false, true) => "spiraltorch.byte_corpus.result.v1",
             (false, false) => "spiraltorch.byte_corpus.partial.v1",
@@ -51,6 +80,9 @@ impl Request {
     }
 
     pub(super) fn validate_modes(&self, cases: &[&Case]) -> Result<()> {
+        if !self.metric_controls() && cases.iter().any(|c| c.pair_metric.is_some()) {
+            return Err("v1/v2 do not admit an explicit pair metric".into());
+        }
         if !self.controls() {
             if cases.len() != 2
                 || cases[0].geometry == cases[1].geometry
@@ -60,37 +92,59 @@ impl Request {
             }
             return Ok(());
         }
-        if cases.len() != 3 || cases.iter().any(|c| c.geometry_update.is_none()) {
-            return Err("v2 requires three explicit update policies per seed".into());
+        if cases.len() != self.arms_per_seed() || cases.iter().any(|c| c.geometry_update.is_none())
+        {
+            return Err(
+                "control study needs each required arm with an explicit update policy".into(),
+            );
         }
-        for (geometry, update) in [
-            (false, GeometryUpdate::Train),
-            (true, GeometryUpdate::Train),
-            (true, GeometryUpdate::Frozen),
-        ] {
+        let modes = if self.metric_controls() {
+            use ByteDecoderPairMetric::{EuclideanChordSquared, PoincareSquared};
+            vec![
+                (false, GeometryUpdate::Train, None),
+                (true, GeometryUpdate::Train, Some(PoincareSquared)),
+                (true, GeometryUpdate::Frozen, Some(PoincareSquared)),
+                (true, GeometryUpdate::Train, Some(EuclideanChordSquared)),
+                (true, GeometryUpdate::Frozen, Some(EuclideanChordSquared)),
+            ]
+        } else {
+            vec![
+                (false, GeometryUpdate::Train, None),
+                (true, GeometryUpdate::Train, None),
+                (true, GeometryUpdate::Frozen, None),
+            ]
+        };
+        for (geometry, update, metric) in modes {
             if cases
                 .iter()
-                .filter(|c| c.geometry == geometry && c.geometry_update == Some(update))
+                .filter(|c| {
+                    c.geometry == geometry
+                        && c.geometry_update == Some(update)
+                        && c.pair_metric == metric
+                })
                 .count()
                 != 1
             {
-                return Err(
-                    "v2 needs ordinary, learned geometry and frozen geometry once per seed".into(),
-                );
+                return Err("missing or repeated geometry metric/update arm for seed".into());
             }
         }
         let geometric = cases.iter().filter(|c| c.geometry).collect::<Vec<_>>();
-        let (a, b) = (&geometric[0].parameters, &geometric[1].parameters);
-        if a.len() != b.len()
-            || a.iter().zip(b).any(|(a, b)| {
-                a.name != b.name || a.shape != b.shape || !same_bits(&a.values, &b.values)
-            })
-        {
-            return Err("learned and frozen geometry must start bitwise identical".into());
+        let a = &geometric[0].parameters;
+        if geometric[1..].iter().any(|case| {
+            let b = &case.parameters;
+            a.len() != b.len()
+                || a.iter().zip(b).any(|(a, b)| {
+                    a.name != b.name || a.shape != b.shape || !same_bits(&a.values, &b.values)
+                })
+        }) {
+            return Err("all geometry metric/update arms must start bitwise identical".into());
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod metric_tests;
 
 #[cfg(test)]
 mod tests {

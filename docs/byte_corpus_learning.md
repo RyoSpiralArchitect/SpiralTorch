@@ -226,7 +226,7 @@ Only its geometry tensor rates become zero in the shared all-or-none SGD owner.
 Coordinates may change as embeddings learn. Reports include the policy and the
 number of trainable scalars, not only total parameter count. Result, partial and
 study-checkpoint schemas become `v2`; the outer opaque segment transport remains
-`segment.v1`. Both browser pages accept either request version explicitly.
+`segment.v1`. Both browser pages select request versions explicitly.
 
 The request hash binds the freeze policy across resume. Before GPU allocation,
 the checkpoint loader also compares every frozen geometry tensor's bits against
@@ -246,6 +246,56 @@ fixed acceptance criteria or warrants a general language-quality claim.
 The [three-arm pilot record](../benchmarks/results/2026-10-09-byte-corpus-frozen-geometry-v2/README.md)
 retains every seed and both native/browser comparisons, including the small,
 mixed learned-versus-frozen differences.
+
+### Metric By Trainability Control (v3)
+
+Use `--metric-geometry-control` instead of `--frozen-geometry-control` to
+prepare `spiraltorch.byte_corpus.request.v3`. Each seed has five arms:
+
+| Arm | `geometry` | `geometry_update` | Request `pair_metric` |
+| --- | --- | --- | --- |
+| Ordinary | false | train | omitted |
+| Poincare learned | true | train | `poincare_squared.v1` |
+| Poincare frozen | true | frozen | `poincare_squared.v1` |
+| Flat learned | true | train | `euclidean_chord_squared.v1` |
+| Flat frozen | true | frozen | `euclidean_chord_squared.v1` |
+
+All four geometric arms share every initial parameter bit, including the
+backbone. Within each trainability setting, the two metrics have the same
+total/trainable parameter counts, data order, learning rate and update budget.
+The ordinary arm still has fewer parameters. Three seeds fit the existing
+16-case bound; missing/repeated arms or unequal initializations fail preflight.
+v1/v2 reject the metric field, even if it names their existing Poincare default.
+Explicit null is not a request metric. In v3 **reports**, the ordinary row has
+`pair_metric: null`, and geometric rows carry their explicit metric string.
+
+Flat uses `4 * ||x_q - x_k||^2` on the same causal wave and bounded nonlinear
+coordinates, not a new linear encoder. The factor four matches the Poincare
+origin-local scale only. Initial functions and compute are not equal. Freezing
+holds geometry weights, not coordinates: the complete pullback still reaches
+the learned embeddings for both metrics.
+
+Result/partial/study-checkpoint schemas are v3. Ordinary/Poincare model payloads
+remain model-checkpoint v1; flat payloads use model-checkpoint v2 with explicit
+metric identity. The request hash and Rust topology validation prevent silently
+changing a saved metric. The outer browser segment envelope stays v1.
+
+The comparator derives BPB from the recorded held-out batch losses, rather
+than using the separately supplied summary as a contrast input. Besides all
+v2 contrasts, it retains flat-minus-Poincare in trained and frozen settings,
+flat trained-minus-frozen, and their metric-by-training interaction. Each
+v3 contrast includes the Torch-reference value, observed absolute discrepancy
+and sign agreement. These are numerical diagnostics, not confidence intervals
+or evidence of statistical significance. Small effects must be interpreted
+against the observed discrepancy and across every preselected seed; no arm is
+discarded because its contrast is unfavorable.
+
+The [five-arm pilot record](../benchmarks/results/2026-10-10-byte-corpus-metric-controls-v3/README.md)
+retains all 15 native/browser cases, independent Torch comparisons, first-step
+controls and exact 37-to-128 same-runtime resume checks. The observed effects
+are small and seed-dependent; this is not a general geometry-quality ranking.
+
+### Numerical Acceptance
 
 Every training CE, held-out batch CE and final parameter is compared against
 independent PyTorch with the predeclared `3e-6 + 5e-5 * abs(reference)` gate.

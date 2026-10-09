@@ -1,0 +1,27 @@
+{
+  "schema": "spiraltorch.byte_corpus.inherited_reports.v1",
+  "comparisons": [
+    {
+      "engine": "native",
+      "inherited_cases": 9,
+      "strict_case_reports_identical": true,
+      "old_full_report_sha256": "d4ca25e9c875f4e9520882ee8437ca110349cc2f42009a4c510224c72fd18531",
+      "new_full_report_sha256": "76e1aabde9134ca7df8b3aef6adaf53b98fda8b706d83176ff4cc00467b931ea"
+    },
+    {
+      "engine": "browser",
+      "inherited_cases": 9,
+      "strict_case_reports_identical": true,
+      "old_full_report_sha256": "32e84bf6c2bd326aed070f9a9ddba734c584e82e39bcfe3e9ab308084ce0186a",
+      "new_full_report_sha256": "d01902e17646baadea422984cc5819536ec730aae6379ca10b5bc5556136158f"
+    },
+    {
+      "engine": "independent_pytorch",
+      "inherited_cases": 9,
+      "strict_case_reports_identical": true,
+      "old_full_report_sha256": "1ac3e09d1973b63c0591932f1b41609618b129baedb63cb9b964d16617dddb75",
+      "new_full_report_sha256": "253c53b21ffe4bb158e559efdf66a035444b222cf83d2d5e90a09964d45dc322"
+    }
+  ],
+  "comparison": "Strict JSON case equality with exact types and signed-zero f64 bits, after removing only pair_metric from non-flat v3 rows; includes full weights and trajectories; not cross-runtime equality"
+}

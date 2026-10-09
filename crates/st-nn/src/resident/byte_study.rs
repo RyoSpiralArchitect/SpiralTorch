@@ -1,10 +1,10 @@
-//! Bounded paired/three-arm corpus studies with request-bound, all-case resume.
+//! Bounded matched corpus studies with request-bound, all-case resume.
 //! Native and browser clients share model math, data order and acceptance gates.
 use crate::{
     resident::{
         AttentionInferencePlan, AttentionMask, ByteDecoderCheckpoint, ByteDecoderGeometryPlan,
-        ByteDecoderPlan, ByteLmBatch, InferenceOp, InferencePlan, ResidentByteDecoder,
-        ResidualAttentionPlan, ToposResonatorKernel,
+        ByteDecoderPairMetric, ByteDecoderPlan, ByteLmBatch, InferenceOp, InferencePlan,
+        ResidentByteDecoder, ResidualAttentionPlan, ToposResonatorKernel,
     },
     Tensor,
 };
@@ -30,7 +30,8 @@ use policy::GeometryUpdate;
 
 /// A fixed request: documents, initial models, SGD rate and all selected windows.
 /// v1 pairs ordinary/learned geometry; v2 adds identical-initialization frozen
-/// geometry. This is a bounded study protocol, not an arbitrary scheduler.
+/// geometry; v3 crosses learned/frozen with Poincare/flat pair distance.
+/// This is a bounded study protocol, not an arbitrary scheduler.
 pub struct ByteCorpusStudy {
     request: Request,
     request_sha256: String,
@@ -135,6 +136,8 @@ struct Case {
     geometry: bool,
     #[serde(default, deserialize_with = "policy::explicit_update")]
     geometry_update: Option<GeometryUpdate>,
+    #[serde(default, deserialize_with = "policy::explicit_metric")]
+    pair_metric: Option<ByteDecoderPairMetric>,
     parameters: Vec<Parameter>,
 }
 
@@ -161,7 +164,9 @@ fn parse(input: &[u8]) -> Result<Request> {
     // Bounds belong to this interactive study runner, not the public model API.
     if !matches!(
         r.schema.as_str(),
-        "spiraltorch.byte_corpus.request.v1" | "spiraltorch.byte_corpus.request.v2"
+        "spiraltorch.byte_corpus.request.v1"
+            | "spiraltorch.byte_corpus.request.v2"
+            | "spiraltorch.byte_corpus.request.v3"
     ) || !(1..=8).contains(&c.batch)
         || !(2..=128).contains(&c.steps)
         || !(2..=128).contains(&c.width)
@@ -179,7 +184,7 @@ fn parse(input: &[u8]) -> Result<Request> {
         || !(1..=128).contains(&r.validation_batches.len())
         || !(1..=64).contains(&r.checkpoint_every)
         || !(2..=16).contains(&r.cases.len())
-        || r.cases.len() % if r.controls() { 3 } else { 2 } != 0
+        || r.cases.len() % r.arms_per_seed() != 0
     {
         return Err("invalid study configuration".into());
     }
@@ -297,13 +302,13 @@ fn plan(c: &Config, case: &Case) -> Result<ByteDecoderPlan> {
         let gains = (0..c.blocks.len())
             .map(|i| p.values(&format!("geometry.raw_gain.{i}"), &[c.heads]))
             .collect::<Result<Vec<_>>>()?;
-        Some(ByteDecoderGeometryPlan::new(
-            &projection,
-            &decay,
-            &phase,
-            &gains,
-            c.curvature,
-        )?)
+        Some(
+            ByteDecoderGeometryPlan::new(&projection, &decay, &phase, &gains, c.curvature)?
+                .with_pair_metric(
+                    case.pair_metric
+                        .unwrap_or(ByteDecoderPairMetric::PoincareSquared),
+                ),
+        )
     } else {
         None
     };
@@ -702,6 +707,9 @@ impl ByteCorpusStudy {
                     .filter(|p| !case.frozen() || !p.name.starts_with("geometry."))
                     .map(|p| p.values.len())
                     .sum::<usize>());
+            }
+            if r.metric_controls() {
+                report["pair_metric"] = json!(case.pair_metric);
             }
             reports.push(report);
             if capture {

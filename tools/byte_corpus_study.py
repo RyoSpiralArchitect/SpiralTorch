@@ -17,6 +17,8 @@ import subprocess
 REQUEST = "spiraltorch.byte_corpus.request.v1"
 RESULT = "spiraltorch.byte_corpus.result.v1"
 REQUEST_V2 = "spiraltorch.byte_corpus.request.v2"
+REQUEST_V3 = "spiraltorch.byte_corpus.request.v3"
+POINCARE, FLAT = "poincare_squared.v1", "euclidean_chord_squared.v1"
 ATOL, RTOL, DELTA_RTOL = 3e-6, 5e-5, .002
 
 
@@ -68,29 +70,42 @@ def trainable_scalars(case):
 
 
 def request_version(request):
+    if request["schema"] != REQUEST_V3 and any("pair_metric" in c for c in request["cases"]):
+        raise ValueError("v1/v2 have no explicit pair metric")
     if request["schema"] == REQUEST:
         if any("geometry_update" in c for c in request["cases"]):
             raise ValueError("v1 has no explicit geometry update policy")
         return 1
-    if request["schema"] != REQUEST_V2:
+    if request["schema"] not in (REQUEST_V2, REQUEST_V3):
         raise ValueError("wrong request schema")
+    version = 3 if request["schema"] == REQUEST_V3 else 2
+    modes = {(False, "train", None), (True, "train", POINCARE), (True, "frozen", POINCARE),
+             (True, "train", FLAT), (True, "frozen", FLAT)} if version == 3 else {
+                 (False, "train", None), (True, "train", None), (True, "frozen", None)}
     def key(parameters):
+        for p in parameters:
+            if (not p["shape"] or any(type(d) is not int or d <= 0 for d in p["shape"])
+                    or math.prod(p["shape"]) != len(p["values"])
+                    or any(type(v) not in (int, float) or not math.isfinite(v) for v in p["values"])):
+                raise ValueError("invalid parameter shape or value")
         return [(p["name"], p["shape"], [struct.pack("<f", x) for x in p["values"]]) for p in parameters]
+    if not 2 <= len(request["cases"]) <= 16 or any(type(c["seed"]) is not int or not 0 <= c["seed"] <= (1 << 53) - 1 for c in request["cases"]):
+        raise ValueError("invalid control study case count or seed")
     for seed in {c["seed"] for c in request["cases"]}:
         group = [c for c in request["cases"] if c["seed"] == seed]
-        if (len(group) != 3 or any(type(c["geometry"]) is not bool for c in group)
-                or {(c["geometry"], c.get("geometry_update")) for c in group}
-                != {(False, "train"), (True, "train"), (True, "frozen")}):
-            raise ValueError("v2 needs one ordinary, learned and frozen geometry case per seed")
+        if (len(group) != len(modes) or any(type(c["geometry"]) is not bool for c in group)
+                or {(c["geometry"], c.get("geometry_update"), c.get("pair_metric")) for c in group} != modes
+                or (version == 3 and any(not c["geometry"] and "pair_metric" in c for c in group))):
+            raise ValueError("missing, duplicate or invalid metric/update arm per seed")
         core = [key([p for p in c["parameters"] if not p["name"].startswith("geometry.")]) for c in group]
         if any(c != core[0] for c in core[1:]):
-            raise ValueError("v2 backbones differ")
+            raise ValueError("control backbones differ")
         geometric = [key(c["parameters"]) for c in group if c["geometry"]]
-        if geometric[0] != geometric[1]:
-            raise ValueError("learned/frozen initial geometry bits differ")
+        if any(g != geometric[0] for g in geometric[1:]):
+            raise ValueError("metric/update arms have different initial geometry bits")
     if not request["cases"]:
         raise ValueError("empty control study")
-    return 2
+    return version
 
 
 def validate_numbers(seeds, rate):
@@ -159,6 +174,12 @@ def windows(documents, steps):
 def prepare(args):
     rate = validate_numbers(args.seed, args.rate)
     controls = getattr(args, "frozen_geometry_control", False)
+    metrics = getattr(args, "metric_geometry_control", False)
+    if metrics and controls:
+        raise ValueError("select either the v2 frozen control or the v3 metric control")
+    version = 3 if metrics else 2 if controls else 1
+    if metrics and len(args.seed) > 3:
+        raise ValueError("five-arm controls allow at most three seeds within the 16-case budget")
     if controls and len(args.seed) > 5:
         raise ValueError("three-arm controls allow at most five seeds within the 16-case budget")
     revision = subprocess.check_output(["git", "rev-parse", "--verify", args.revision + "^{commit}"], text=True).strip()
@@ -212,15 +233,22 @@ def prepare(args):
         for enabled, values in [(False, plain), (True, geometry)]:
             cases.append(dict(name=f"seed{seed}_{'geometry' if enabled else 'ordinary'}", seed=seed,
                               geometry=enabled, parameters=values))
-            if controls:
+            if controls or metrics:
                 cases[-1]["geometry_update"] = "train"
-        if controls:
+            if metrics and enabled:
+                cases[-1]["pair_metric"] = POINCARE
+        if controls or metrics:
             cases.append(dict(name=f"seed{seed}_geometry_frozen", seed=seed, geometry=True,
                               geometry_update="frozen", parameters=geometry))
-    request = dict(schema=REQUEST_V2 if controls else REQUEST, config=config, train_documents=train, validation_documents=valid,
+        if metrics:
+            cases[-1]["pair_metric"] = POINCARE
+            for update in ("train", "frozen"):
+                cases.append(dict(name=f"seed{seed}_flat" + ("_frozen" if update == "frozen" else ""),
+                                  seed=seed, geometry=True, geometry_update=update, pair_metric=FLAT, parameters=geometry))
+    request = dict(schema=f"spiraltorch.byte_corpus.request.v{version}", config=config, train_documents=train, validation_documents=valid,
                    train_batches=train_batches, validation_batches=valid_batches,
                    checkpoint_every=args.checkpoint_every, rate=rate, cases=cases)
-    manifest = dict(schema=f"spiraltorch.byte_corpus.preparation.v{2 if controls else 1}", source_revision=revision,
+    manifest = dict(schema=f"spiraltorch.byte_corpus.preparation.v{version}", source_revision=revision,
                     config=config, train_sources=train_info, validation_sources=valid_info,
                     training_window_selection="seed-20261009 shuffled complete windows, repeated only after an epoch",
                     validation_window_selection="evenly spaced, distinct complete windows, no score-based selection",
@@ -233,6 +261,11 @@ def prepare(args):
     request_version(request)
     if controls:
         manifest["geometry_control"] = "identical initial geometry weights; frozen tensors keep their full embedding pullback"
+    if metrics:
+        manifest["geometry_control"] = "Poincare/flat distance crossed with trained/frozen weights; all four geometric arms share initial bits and full embedding pullbacks"
+        manifest["primary_contrasts"] = ["flat_minus_poincare_bpb", "flat_frozen_minus_poincare_frozen_bpb",
+                                         "metric_by_training_interaction_bpb"]
+        manifest["scope"] = "Fixed small corpus; geometric arms match parameters and SGD budget, not compute or initial function; ordinary has fewer parameters; no broad quality/speed claim"
     args.output.mkdir(parents=True, exist_ok=False)
     write_new(args.output / "request.json", request)
     write_new(args.output / "preparation.json", manifest)
@@ -290,7 +323,13 @@ def reference(args):
             x = embedded
             for i, topos in enumerate(config["blocks"]):
                 count = 13 if topos else 12
-                pair = metric(coordinates, p[6 + i], config["curvature"]) if case["geometry"] else None
+                pair = None
+                if case["geometry"]:
+                    if case.get("pair_metric") == FLAT:
+                        square = (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
+                        pair = (-functional.softplus(p[6 + i])[None, :, None, None] * (4 * square[:, None])).tril()
+                    else:
+                        pair = metric(coordinates, p[6 + i], config["curvature"])
                 x = block_forward(x, p[offset:offset + count], config["heads"], None, pair, topos)
                 offset += count
             head = p[offset:]
@@ -320,8 +359,10 @@ def reference(args):
                             parameter_tensors=len(p), parameter_scalars=sum(v.numel() for v in p),
                             training=training, validation=evaluation,
                             final_parameters=[v.detach().reshape(-1).tolist() for v in p]))
-        if version == 2:
+        if version >= 2:
             reports[-1].update(geometry_update=case["geometry_update"], trainable_parameter_scalars=trainable_scalars(case))
+        if version == 3:
+            reports[-1]["pair_metric"] = case.get("pair_metric")
     write_new(args.output, dict(schema=f"spiraltorch.byte_corpus.result.v{version}", engine="independent_pytorch", torch_version=torch.__version__,
                                dtype="float32", device="cpu", threads=1, request_sha256=digest(raw), cases=reports))
 
@@ -331,11 +372,18 @@ def close(actual, expected, label):
         raise ValueError(label + ": length mismatch")
     maximum = 0.
     for a, e in zip(actual, expected):
+        if type(a) not in (int, float) or type(e) not in (int, float):
+            raise ValueError(label + ": nonnumeric scalar")
         error = abs(a - e)
         if not math.isfinite(a) or not math.isfinite(e) or error > ATOL + RTOL * abs(e):
             raise ValueError(f"{label}: {a} != {e}")
         maximum = max(maximum, error)
     return maximum
+
+
+def heldout_bpb(point):
+    losses = point["batch_losses"]
+    return math.fsum(losses) / len(losses) / math.log(2)
 
 
 def compare(request_raw, reference_report, actual):
@@ -359,11 +407,14 @@ def compare(request_raw, reference_report, actual):
     for spec, expected, got in zip(expected_cases, reference_report["cases"], actual["cases"]):
         name = spec["name"]
         for row in [expected, got]:
-            if row["seed"] != spec["seed"] or row["geometry"] != spec["geometry"]:
+            if type(row["seed"]) is not int or row["seed"] != spec["seed"] or row["geometry"] is not spec["geometry"]:
                 raise ValueError("case mode/seed mismatch")
-            if version == 2 and (row.get("geometry_update") != spec["geometry_update"]
-                                or row.get("trainable_parameter_scalars") != trainable_scalars(spec)):
+            if version >= 2 and (row.get("geometry_update") != spec["geometry_update"]
+                                or type(row.get("trainable_parameter_scalars")) is not int
+                                or row["trainable_parameter_scalars"] != trainable_scalars(spec)):
                 raise ValueError("case update policy or trainable count mismatch")
+            if version == 3 and ("pair_metric" not in row or row["pair_metric"] != spec.get("pair_metric")):
+                raise ValueError("case metric identity mismatch")
             if row["parameter_tensors"] != len(spec["parameters"]) or row["parameter_scalars"] != sum(len(p["values"]) for p in spec["parameters"]):
                 raise ValueError("parameter count mismatch")
             if [s["revision"] for s in row["training"]] != list(range(1, n + 1)):
@@ -405,27 +456,54 @@ def compare(request_raw, reference_report, actual):
         summaries.append(dict(name=name, seed=spec["seed"], geometry=spec["geometry"],
                               parameter_scalars=got["parameter_scalars"], train_ce_max_error=train_error,
                               heldout_ce_max_error=eval_error, final_parameter_max_error=parameter_error,
-                              initial_heldout_bpb=got["validation"][0]["bits_per_byte"],
-                              final_heldout_bpb=got["validation"][-1]["bits_per_byte"], geometry_deltas=geometry_deltas))
-        if version == 2:
+                              initial_heldout_bpb=heldout_bpb(got["validation"][0]),
+                              final_heldout_bpb=heldout_bpb(got["validation"][-1]), geometry_deltas=geometry_deltas))
+        if version >= 2:
             summaries[-1].update(geometry_update=spec["geometry_update"], trainable_parameter_scalars=trainable_scalars(spec))
+        if version == 3:
+            summaries[-1]["pair_metric"] = spec.get("pair_metric")
+            summaries[-1]["reference_final_heldout_bpb"] = heldout_bpb(expected["validation"][-1])
+            summaries[-1]["final_heldout_bpb_abs_error"] = abs(summaries[-1]["final_heldout_bpb"] - summaries[-1]["reference_final_heldout_bpb"])
     pairs = []
     for seed in sorted({c["seed"] for c in summaries}):
         paired = [c for c in summaries if c["seed"] == seed]
-        if len(paired) != (3 if version == 2 else 2) or {c["geometry"] for c in paired} != {False, True}:
+        if len(paired) != {1: 2, 2: 3, 3: 5}[version] or {c["geometry"] for c in paired} != {False, True}:
             raise ValueError("incomplete paired seed")
         plain = next(c for c in paired if not c["geometry"])
-        geometry = next(c for c in paired if c["geometry"] and not frozen(c))
+        geometry = next(c for c in paired if c["geometry"] and not frozen(c) and c.get("pair_metric", POINCARE) == POINCARE)
         pairs.append(dict(seed=seed, geometry_minus_ordinary_bpb=geometry["final_heldout_bpb"] - plain["final_heldout_bpb"]))
-        if version == 2:
-            fixed = next(c for c in paired if frozen(c))
+        if version >= 2:
+            fixed = next(c for c in paired if frozen(c) and c.get("pair_metric", POINCARE) == POINCARE)
             pairs[-1].update(frozen_geometry_minus_ordinary_bpb=fixed["final_heldout_bpb"] - plain["final_heldout_bpb"],
                              learned_geometry_minus_frozen_bpb=geometry["final_heldout_bpb"] - fixed["final_heldout_bpb"])
-    return dict(schema=f"spiraltorch.byte_corpus.comparison.v{version}", request_sha256=digest(request_raw),
+        if version == 3:
+            flat = next(c for c in paired if c.get("pair_metric") == FLAT and not frozen(c))
+            flat_frozen = next(c for c in paired if c.get("pair_metric") == FLAT and frozen(c))
+            flat_training = flat["final_heldout_bpb"] - flat_frozen["final_heldout_bpb"]
+            pairs[-1].update(flat_minus_poincare_bpb=flat["final_heldout_bpb"] - geometry["final_heldout_bpb"],
+                             flat_frozen_minus_poincare_frozen_bpb=flat_frozen["final_heldout_bpb"] - fixed["final_heldout_bpb"],
+                             flat_learned_minus_frozen_bpb=flat_training,
+                             metric_by_training_interaction_bpb=flat_training - pairs[-1]["learned_geometry_minus_frozen_bpb"])
+            r = "reference_final_heldout_bpb"
+            reference_contrasts = dict(geometry_minus_ordinary_bpb=geometry[r] - plain[r],
+                frozen_geometry_minus_ordinary_bpb=fixed[r] - plain[r], learned_geometry_minus_frozen_bpb=geometry[r] - fixed[r],
+                flat_minus_poincare_bpb=flat[r] - geometry[r], flat_frozen_minus_poincare_frozen_bpb=flat_frozen[r] - fixed[r],
+                flat_learned_minus_frozen_bpb=flat[r] - flat_frozen[r],
+                metric_by_training_interaction_bpb=(flat[r] - flat_frozen[r]) - (geometry[r] - fixed[r]))
+            pairs[-1]["reference_contrasts"] = reference_contrasts
+            pairs[-1]["absolute_torch_discrepancy"] = {k: abs(pairs[-1][k] - value) for k, value in reference_contrasts.items()}
+            pairs[-1]["same_sign_as_torch"] = {k: ((pairs[-1][k] > 0) - (pairs[-1][k] < 0)) == ((v > 0) - (v < 0))
+                                              for k, v in reference_contrasts.items()}
+    result = dict(schema=f"spiraltorch.byte_corpus.comparison.v{version}", request_sha256=digest(request_raw),
                 numerical_checks_passed=True, criteria=dict(atol=ATOL, rtol=RTOL, geometry_delta_relative_l2=DELTA_RTOL),
                 cases=summaries, paired_deltas=pairs,
                 mean_geometry_minus_ordinary_bpb=statistics.mean(p["geometry_minus_ordinary_bpb"] for p in pairs),
                 scope="Fixed small corpus/recipe/seeds; different parameter counts and compute, no general quality or speed claim")
+    if version == 3:
+        for key in ("flat_minus_poincare_bpb", "flat_frozen_minus_poincare_frozen_bpb", "metric_by_training_interaction_bpb"):
+            result["mean_" + key] = statistics.mean(p[key] for p in pairs)
+        result["scope"] = "Poincare/flat geometric arms match parameters and SGD budget, not compute or initial functions; ordinary is a lower-parameter context arm; no general quality/speed claim"
+    return result
 
 
 def main():
@@ -441,7 +519,9 @@ def main():
                           ("blocks",1),("updates",128),("checkpoint-every",64),("validation-batches",32)]:
         p.add_argument("--" + name, type=int, default=default)
     p.add_argument("--rate", type=float, default=.05)
-    p.add_argument("--frozen-geometry-control", action="store_true", help="v2: add an identical-initialization geometry-frozen arm per seed")
+    control = p.add_mutually_exclusive_group()
+    control.add_argument("--frozen-geometry-control", action="store_true", help="v2: add an identical-initialization geometry-frozen arm per seed")
+    control.add_argument("--metric-geometry-control", action="store_true", help="v3: cross Poincare/flat metric with trained/frozen geometry, plus ordinary (five arms per seed)")
     p = commands.add_parser("reference")
     p.add_argument("request", type=Path)
     p.add_argument("output", type=Path)

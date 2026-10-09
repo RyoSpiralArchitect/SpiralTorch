@@ -66,7 +66,112 @@ def frozen_fixture():
     return raw, reference, actual
 
 
+def metric_fixture():
+    raw, reference, actual = frozen_fixture()
+    request = study.decode_json(raw)
+    request["schema"] = study.REQUEST_V3
+    for value in (request, reference, actual):
+        value["cases"] += copy.deepcopy(value["cases"][1:3])
+        value["cases"][3]["name"], value["cases"][4]["name"] = "flat", "flat_frozen"
+    for index, case in enumerate(request["cases"]):
+        if index:
+            case["pair_metric"] = study.POINCARE if index < 3 else study.FLAT
+    raw = study.encoded(request)
+    for report in (reference, actual):
+        report.update(schema="spiraltorch.byte_corpus.result.v3", request_sha256=study.digest(raw))
+        for index, (case, spec) in enumerate(zip(report["cases"], request["cases"])):
+            case["pair_metric"] = spec.get("pair_metric")
+            loss = (4., 3.9, 4.1, 3.7, 4.)[index]
+            case["validation"][-1].update(batch_losses=[loss], mean_ce=loss, bits_per_byte=loss / math.log(2))
+    return raw, reference, actual
+
+
 class Controls(unittest.TestCase):
+    def test_contrasts_do_not_use_tolerance_accepted_summary_perturbations(self):
+        raw, reference, actual = metric_fixture()
+        expected = study.compare(raw, reference, actual)
+        actual["cases"][3]["validation"][-1]["bits_per_byte"] += 1e-4
+        actual["cases"][3]["validation"][-1]["mean_ce"] += 1e-4
+        self.assertEqual(study.compare(raw, reference, actual), expected)
+        reference["cases"][3]["validation"][-1]["bits_per_byte"] -= 1e-4
+        self.assertEqual(study.compare(raw, reference, actual), expected)
+
+    def test_metric_factorial_contrasts_and_reordered_arms(self):
+        raw, reference, actual = metric_fixture()
+        expected = study.compare(raw, reference, actual)
+        self.assertEqual(expected["schema"], "spiraltorch.byte_corpus.comparison.v3")
+        contrast = expected["paired_deltas"][0]
+        self.assertAlmostEqual(contrast["flat_minus_poincare_bpb"], -.2 / math.log(2))
+        self.assertAlmostEqual(contrast["flat_frozen_minus_poincare_frozen_bpb"], -.1 / math.log(2))
+        self.assertAlmostEqual(contrast["metric_by_training_interaction_bpb"], -.1 / math.log(2))
+        request = study.decode_json(raw)
+        for value in (request, reference, actual):
+            value["cases"].reverse()
+        raw = study.encoded(request)
+        for value in (reference, actual):
+            value["request_sha256"] = study.digest(raw)
+        self.assertEqual(study.compare(raw, reference, actual)["paired_deltas"], expected["paired_deltas"])
+
+    def test_metric_requests_require_five_distinct_matched_arms(self):
+        for variant in ("missing", "duplicate", "absent", "null", "ordinary_metric", "geometry_bits",
+                        "backbone_bits", "old_version", "missing_policy"):
+            request = study.decode_json(metric_fixture()[0])
+            if variant == "missing":
+                request["cases"].pop()
+            elif variant == "duplicate":
+                request["cases"][3]["pair_metric"] = study.POINCARE
+            elif variant == "absent":
+                request["cases"][3].pop("pair_metric")
+            elif variant == "null":
+                request["cases"][3]["pair_metric"] = None
+            elif variant == "ordinary_metric":
+                request["cases"][0]["pair_metric"] = None
+            elif variant in ("geometry_bits", "backbone_bits"):
+                request["cases"][3]["parameters"][2 if variant == "geometry_bits" else 0]["values"][0] += .01
+            elif variant == "old_version":
+                request["schema"] = study.REQUEST_V2
+            elif variant == "missing_policy":
+                request["cases"][4].pop("geometry_update")
+            with self.subTest(variant=variant), self.assertRaises(ValueError):
+                study.request_version(request)
+
+    def test_metric_case_budget_rejects_four_otherwise_valid_seed_groups(self):
+        request = study.decode_json(metric_fixture()[0])
+        group = request["cases"]
+        request["cases"] = []
+        for seed in (11, 23, 37, 41):
+            copied = copy.deepcopy(group)
+            for case in copied:
+                case["seed"] = seed
+                case["name"] = f"seed{seed}_{case['name']}"
+            single = dict(request, cases=copied)
+            self.assertEqual(study.request_version(single), 3)
+            request["cases"] += copied
+            if seed != 41:
+                self.assertEqual(study.request_version(request), 3)
+        self.assertEqual(len(request["cases"]), 20)
+        with self.assertRaisesRegex(ValueError, "case count"):
+            study.request_version(request)
+
+    def test_metric_reports_reject_relabels_freeze_drift_and_boolean_numbers(self):
+        for variant in ("metric", "missing_metric", "ordinary_metric", "policy", "frozen_drift", "boolean"):
+            raw, reference, actual = metric_fixture()
+            if variant == "metric":
+                actual["cases"][3]["pair_metric"] = study.POINCARE
+            elif variant == "missing_metric":
+                actual["cases"][0].pop("pair_metric")
+            elif variant == "ordinary_metric":
+                actual["cases"][0]["pair_metric"] = study.FLAT
+            elif variant == "policy":
+                actual["cases"][4]["geometry_update"] = "train"
+            elif variant == "frozen_drift":
+                actual["cases"][4]["final_parameters"][2][0] += 1e-7
+            else:
+                actual["cases"][0]["final_parameters"][3][0] = False
+                reference["cases"][0]["final_parameters"][3][0] = 0.
+            with self.subTest(variant=variant), self.assertRaises(ValueError):
+                study.compare(raw, reference, actual)
+
     def test_json_decoder_preserves_signed_zero_and_rejects_ambiguity(self):
         value = study.decode_json('[0, -0, -0.0, -0e0, 12]')
         self.assertEqual(value[0], 0)
@@ -242,6 +347,32 @@ class Controls(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("torch"), "requires optional CPU PyTorch")
 class TorchReferenceControls(unittest.TestCase):
+    def test_metric_reference_runs_all_arms_with_full_frozen_pullback(self):
+        request = study.decode_json(metric_fixture()[0])
+        # Width two's LayerNorm can erase this tiny fixture's metric contrast.
+        # Use a sensitive four-channel control, not a changed comparison gate.
+        request["config"].update(steps=4, width=4, hidden=6, heads=2, geometry_cols=4)
+        plain, geometric = study.parameters(request["config"], 11)
+        for p in geometric:
+            if p["name"].startswith("geometry.raw_gain."):
+                p["values"] = [4.] * len(p["values"])
+        for case in request["cases"]:
+            case["parameters"] = copy.deepcopy(geometric if case["geometry"] else plain)
+        request.update(train_documents=[list(range(1, 10))], validation_documents=[list(range(11, 16))],
+                       train_batches=[[(0, 0)], [(0, 4)]], validation_batches=[[(0, 0)]])
+        _, reference = self.reference(request)
+        self.assertEqual(len(reference["cases"]), 5)
+        for index in (2, 4):
+            case, report = request["cases"][index], reference["cases"][index]
+            for p, final in zip(case["parameters"], report["final_parameters"]):
+                if p["name"].startswith("geometry."):
+                    self.assertEqual(final, [study.f32(v) for v in p["values"]])
+            for slot in (0, 1):
+                self.assertNotEqual(report["final_parameters"][slot], case["parameters"][slot]["values"])
+            self.assertEqual(report["training"][0], reference["cases"][index - 1]["training"][0])
+            self.assertEqual(report["validation"][0], reference["cases"][index - 1]["validation"][0])
+        self.assertNotEqual(reference["cases"][1]["validation"][0], reference["cases"][3]["validation"][0])
+
     def test_raw_negative_zero_literal_is_preserved_by_frozen_reference(self):
         request = json.loads(frozen_fixture()[0])
         for case in request["cases"][1:]:

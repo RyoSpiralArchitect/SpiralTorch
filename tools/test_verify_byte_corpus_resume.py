@@ -104,7 +104,61 @@ def frozen_fixture():
     return args
 
 
+def metric_fixture():
+    args = frozen_fixture()
+    request = args[0]
+    request["schema"] = RESUME.STUDY.REQUEST_V3
+    for value in [request, *args[2:]]:
+        value["cases"] += copy.deepcopy(value["cases"][1:3])
+        value["cases"][3]["name"], value["cases"][4]["name"] = "flat", "flat_frozen"
+    for i in range(1, 5):
+        request["cases"][i]["pair_metric"] = RESUME.STUDY.POINCARE if i < 3 else RESUME.STUDY.FLAT
+    for report in args[2:5]:
+        report["schema"] = report["schema"].removesuffix("v2") + "v3"
+        for case, spec in zip(report["cases"], request["cases"]):
+            case["pair_metric"] = spec.get("pair_metric")
+    args[5]["schema"] = "spiraltorch.byte_corpus.checkpoint.v3"
+    for case in args[5]["cases"][3:]:
+        model = json.loads(case["model_json"])
+        model["schema"] = "spiraltorch.nn.byte_decoder_checkpoint.v2"
+        model["model"]["geometry"]["pair_metric"] = RESUME.STUDY.FLAT
+        case["model_json"] = json.dumps(model)
+    return args
+
+
 class ResumeVerifierTests(unittest.TestCase):
+    def test_metric_resume_selects_model_schema_per_arm(self):
+        result = RESUME.verify(*metric_fixture())
+        self.assertEqual(result["schema"], "spiraltorch.byte_corpus.resume_verification.v3")
+        self.assertEqual([c["pair_metric"] for c in result["cases"]],
+                         [None, RESUME.STUDY.POINCARE, RESUME.STUDY.POINCARE, RESUME.STUDY.FLAT, RESUME.STUDY.FLAT])
+
+    def test_metric_resume_rejects_changed_or_missing_identity(self):
+        for variant in ("schema", "flat_to_poincare", "poincare_to_flat", "report", "missing", "frozen_drift"):
+            args = metric_fixture()
+            if variant == "schema":
+                args[5]["schema"] = "spiraltorch.byte_corpus.checkpoint.v2"
+            elif variant in ("flat_to_poincare", "poincare_to_flat"):
+                slot = 3 if variant == "flat_to_poincare" else 1
+                model = json.loads(args[5]["cases"][slot]["model_json"])
+                if slot == 3:
+                    model["schema"] = "spiraltorch.nn.byte_decoder_checkpoint.v1"
+                    model["model"]["geometry"].pop("pair_metric")
+                else:
+                    model["schema"] = "spiraltorch.nn.byte_decoder_checkpoint.v2"
+                    model["model"]["geometry"]["pair_metric"] = RESUME.STUDY.FLAT
+                args[5]["cases"][slot]["model_json"] = json.dumps(model)
+            else:
+                for report in args[2:5]:
+                    if variant == "report":
+                        report["cases"][3]["pair_metric"] = RESUME.STUDY.POINCARE
+                    elif variant == "missing":
+                        report["cases"][0].pop("pair_metric")
+                    else:
+                        report["cases"][4]["final_parameters"][2][0] += 1e-7
+            with self.subTest(variant=variant), self.assertRaises(ValueError):
+                RESUME.verify(*args)
+
     def test_invalid_request_policy_cannot_pass_even_with_matching_artifacts(self):
         for variant in ("missing_arm", "duplicate_mode", "ordinary_frozen", "geometry_init", "core_init", "v1_policy"):
             args = frozen_fixture()

@@ -37,7 +37,7 @@ def exact(left, right):
     return left == right
 
 
-def stored_parameters(record, cursor):
+def stored_parameters(record, cursor, pair_metric=None):
     """Extract tensors in Rust's documented owner order; no model mathematics.
 
     Full topology/operation validation remains ByteCorpusStudy's Rust preflight.
@@ -45,7 +45,9 @@ def stored_parameters(record, cursor):
     """
     require(set(record) == {"schema", "update_rule", "window_state", "attempted_revision", "model"},
             "incomplete model envelope")
-    require(record["schema"] == "spiraltorch.nn.byte_decoder_checkpoint.v1", "model schema")
+    flat = pair_metric == STUDY.FLAT
+    require(pair_metric in (None, STUDY.POINCARE, STUDY.FLAT), "saved metric identity")
+    require(record["schema"] == f"spiraltorch.nn.byte_decoder_checkpoint.v{2 if flat else 1}", "model schema")
     require(record["update_rule"] == "stateless_sgd.v1", "model update rule")
     require(record["window_state"] == "reset_positions_and_geometry.v1", "model window state")
     require(record["attempted_revision"] == str(cursor), "model clock")
@@ -60,8 +62,13 @@ def stored_parameters(record, cursor):
         parameters.extend(value["parameters"])
 
     geometry = model["geometry"]
+    require(not flat or geometry is not None, "flat model requires geometry")
     if geometry is not None:
-        require(set(geometry) == {"projection", "curvature", "raw_decay", "raw_phase", "raw_gains"},
+        fields = {"projection", "curvature", "raw_decay", "raw_phase", "raw_gains"}
+        if flat:
+            fields.add("pair_metric")
+            require(geometry.get("pair_metric") == pair_metric, "saved metric differs")
+        require(set(geometry) == fields,
                 "geometry envelope")
         graph(geometry["projection"])
         for values in [geometry["raw_decay"], geometry["raw_phase"], *geometry["raw_gains"]]:
@@ -97,12 +104,14 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         for report in (full, prefix, resumed_case):
             require(all(exact(report[key], case[key]) for key in ("name", "seed", "geometry")),
                     "case identity/order differs")
-            if version == 2:
+            if version >= 2:
                 require(case["geometry_update"] in {"train", "frozen"}
                         and report.get("geometry_update") == case["geometry_update"], "case update policy differs")
                 trainable = sum(len(p["values"]) for p in case["parameters"]
                                 if case["geometry_update"] != "frozen" or not p["name"].startswith("geometry."))
                 require(exact(report.get("trainable_parameter_scalars"), trainable), "trainable count differs")
+            if version == 3:
+                require("pair_metric" in report and exact(report["pair_metric"], case.get("pair_metric")), "report metric differs")
             require(exact(report["parameter_tensors"], len(case["parameters"])), "parameter count")
             require(exact(report["parameter_scalars"], sum(len(p["values"]) for p in case["parameters"])),
                     "parameter scalar count")
@@ -111,7 +120,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 require(len(values) == len(parameter["values"]), "weight shape")
                 for value in values:
                     f32(value)
-                if version == 2 and case["geometry_update"] == "frozen" and parameter["name"].startswith("geometry."):
+                if version >= 2 and case["geometry_update"] == "frozen" and parameter["name"].startswith("geometry."):
                     require(list(map(f32, values)) == list(map(f32, parameter["values"])), "frozen weight bits differ")
         require(len(full["training"]) == total, "incomplete baseline training")
         require(exact([p["revision"] for p in full["training"]], list(range(1, total + 1))),
@@ -134,7 +143,7 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
                 "evaluation prefix differs or extra pause evaluation")
         require(saved["name"] == case["name"], "saved case identity")
         model = STUDY.decode_json(saved["model_json"])
-        stored = stored_parameters(model, cursor)
+        stored = stored_parameters(model, cursor, case.get("pair_metric"))
         require((model["model"]["geometry"] is not None) is case["geometry"], "saved geometry mode")
         require(len(stored) == len(case["parameters"]), "saved tensor count")
         for parameter, expected, readback in zip(stored, case["parameters"], prefix["final_parameters"]):
@@ -153,6 +162,8 @@ def verify(request, request_hash, baseline, partial, resumed, checkpoint):
         summaries.append({"name": case["name"], "updates": total,
                           "pause": cursor, "evaluation_revisions": evaluations,
                           "final_mean_ce": full["validation"][-1]["mean_ce"]})
+        if version == 3:
+            summaries[-1].update(pair_metric=case.get("pair_metric"), geometry_update=case["geometry_update"])
     return {"schema": f"spiraltorch.byte_corpus.resume_verification.v{version}", "passed": True,
             "request_sha256": request_hash, "exact_resumed_report_equal": True,
             "exact_training_and_evaluation_prefixes": True,
