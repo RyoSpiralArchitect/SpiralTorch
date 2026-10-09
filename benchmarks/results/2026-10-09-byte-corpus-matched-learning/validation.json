@@ -1,0 +1,484 @@
+{
+  "schema": "spiraltorch.byte_corpus.evidence.v1",
+  "date_utc": "2026-10-09",
+  "status": "native_and_actual_browser_paired_learning_numerically_passed",
+  "scope": "Small document-held-out repository prose pilot. No LLM-quality, equal-capacity, equal-compute, runtime-attestation or speed claim.",
+  "source": {
+    "base_revision": "01e12ac8cc9bb10a1b151a8d7b1fda6b157fea64",
+    "tested_worktree_files": {
+      ".github/workflows/ci.yml": {
+        "bytes": 54314,
+        "sha256": "a5d9006c9506709ce5b47ddd508664aef2470afdb06f610a665d4949d9b4fb5e"
+      },
+      "Cargo.lock": {
+        "bytes": 119721,
+        "sha256": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62"
+      },
+      "crates/st-nn/Cargo.toml": {
+        "bytes": 6277,
+        "sha256": "59d731dca665fef0ccba145ffd8b796a0bc8cdeba64e5e46f4d9f8ef168160bf"
+      },
+      "crates/st-nn/examples/resident_byte_learning.rs": {
+        "bytes": 4260,
+        "sha256": "2e44aa71eb5c5767c95b7b7f778b1fdfa83269c04b36ab5f1fcf53d1c13b9467"
+      },
+      "crates/st-nn/examples/resident_byte_learning_browser.rs": {
+        "bytes": 765,
+        "sha256": "34ada5a7bb2c682be77ebcacc79f374dda4ec4c920271adad2ae3a3f2a46595a"
+      },
+      "crates/st-nn/examples/support/byte_learning.rs": {
+        "bytes": 19472,
+        "sha256": "4b66673dde03c91e3458df8d0e80dd0744f34784181f7707d2e7007fe7a9f885"
+      },
+      "crates/st-nn/tests/byte_learning_browser.html": {
+        "bytes": 3491,
+        "sha256": "d88b9e766fef7cedae433fcf8aacbad8f25186df7ee40965300cd6eab713ebab"
+      },
+      "docs/byte_corpus_learning.md": {
+        "bytes": 7048,
+        "sha256": "591ee0ae46d36785b54663caa351a80f8351bab958ce6d5bcd83c63ffd1c6e61"
+      },
+      "docs/resident_byte_decoder.md": {
+        "bytes": 11529,
+        "sha256": "3154fab128ade0e8bba8c96af44084b029a83cd264dd6927e495f07bdcb2a226"
+      },
+      "tools/byte_corpus_study.py": {
+        "bytes": 19722,
+        "sha256": "ca8570d986b5cc8849ad8565df8dae9ff09081874640080e6563469843858dd3"
+      },
+      "tools/test_byte_corpus_study.py": {
+        "bytes": 5900,
+        "sha256": "baeca3a18fa492df1ac465a6c2f386f38cf8d2af11b9ed919bf4450ce6bfad03"
+      }
+    },
+    "reused_parent_files_sha256": {
+      "crates/st-nn/examples/support/byte_decoder.rs": "bc4cb23998d416d0b6f1489342688e63fd244706a05fe2f56a0ce7cf6ee8162c",
+      "crates/st-nn/examples/support/byte_decoder/geometry_controls.rs": "78de7fb76b94c0f943eacd2c28bc80ee9a22748974d35378fae3c0e6993f9c83",
+      "crates/st-nn/src/resident.rs": "750c775a6a813a33961e535bfa091b5eb3734de9fe58ae42bcda3f9bf94569c9",
+      "crates/st-nn/src/resident/byte_decoder.rs": "701a92d27b1a57902345c7b9dbb843dc7d5ac382a825442eca7aa263a17da76c",
+      "crates/st-nn/src/resident/byte_decoder/geometry.rs": "b9942fa2d424514c339334f10a51c9960c5bff4c5a78c3a070abee8d496fb417",
+      "crates/st-nn/src/resident/byte_decoder/tests.rs": "75395555d8a834935b98917a6090579296ea6195ff7e5591d24bbcfc0f6a7295",
+      "crates/st-nn/src/resident/byte_decoder/training.rs": "78060dbfaa5ec03a64aa641be94281d934d46f9eea802e2693e89f91e96ecdbb",
+      "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "5b1d26a2bbab08d082ada7682912f2374b621e16b07dbf804b3603408b49864d",
+      "crates/st-nn/src/resident/byte_decoder/training/tests.rs": "fd655df3585adeecd9dc0322f5f682ed2ffdb3851b9522b0744ad4a1113251c1",
+      "crates/st-nn/tests/byte_decoder_browser.html": "55dede459cc5311045dbd9387752b0e64f4caca298554240576da0bf26af61d8",
+      "crates/st-nn/tests/fixtures/resident_byte_geometry_torch.json": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b",
+      "tools/generate_resident_byte_decoder_torch_fixture.py": "47b5af2f4bfbf5ce6bf367d9d32f762db86d6b5ac2117c8e5a264376dcd78430",
+      "tools/generate_resident_byte_geometry_torch_fixture.py": "1e1ad19737664ffd25648446eb75b54096fe762a553e3453b1aa4ecf91f87ccf",
+      "crates/st-nn/tests/resident_byte_decoder.rs": "349befd5eddefe5df5b48c3060b386436ee3744df71a7471d6510364f169b57e",
+      "crates/st-nn/examples/resident_byte_decoder_browser.rs": "0abef817822ad8f9aabb43861c67e51232bfc89c132cb18a05643f12802f1c39",
+      "crates/st-nn/tests/fixtures/resident_byte_decoder_torch.json": "ef9bc46892fce5591dc4b3f0ebd527a76b493b160faeb05887ff61daec389874",
+      "tools/generate_causal_zspace_wave_torch_fixture.py": "517cae06fd27833d15e3bb574b959e7c2e4696a7a43271efe6e9ba454a66b8fa",
+      "tools/generate_poincare_bias_torch_fixture.py": "ba71c5410cd69316e9161f4ae9c975555751216be8dfa289e9010d982251dd18",
+      "crates/st-kernel-contracts/src/causal_wave.rs": "b4d5cbbd11c45a260c85bbd06bf523345ea36635c431eb529bc4a47cdb4d3c77",
+      "crates/st-kernel-contracts/src/poincare.rs": "6ca1659ab6ae3d74bb2fa4d29c4526918e36ea72a9c80ba314f80f823ee3ccda",
+      "crates/st-backend-wgpu/src/resident_tensor/causal_wave.rs": "67a6d32f452b9646481711903200509e002fd16f9b2d8d2130f4381e19cae3d9",
+      "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "4860593c2ab67a750e6f14ca29f6f4925c4d420730bc202e69000460dae7e7e2"
+    },
+    "notes": [
+      "Only the shared orchestration/examples, preparation/reference/comparison tool, tests, docs and CI are new; production model mathematics is unchanged from the base commit.",
+      "Unrelated human-deleted historical archives are not included or restored."
+    ]
+  },
+  "environment": {
+    "native": {
+      "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "aarch64-apple-darwin",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }"
+    },
+    "browser": {
+      "actually_executed": true,
+      "target": "wasm32-unknown-unknown",
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "wasm_bindgen_cli": "0.2.129",
+      "runner": "Same shared Rust implementation as native; no page-side model math."
+    },
+    "reference": {
+      "python": "3.12.6",
+      "framework": "PyTorch",
+      "version": "2.12.1",
+      "device": "cpu",
+      "dtype": "float32",
+      "threads": 1,
+      "deterministic_algorithms": true,
+      "imports_spiraltorch": false
+    }
+  },
+  "protocol": {
+    "preparation": "preparation.json",
+    "request_sha256": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3",
+    "config": {
+      "batch": 2,
+      "steps": 32,
+      "width": 16,
+      "hidden": 32,
+      "heads": 2,
+      "blocks": [
+        false
+      ],
+      "geometry_cols": 4,
+      "curvature": -0.75
+    },
+    "rate_float32": 0.05000000074505806,
+    "seeds": [
+      11,
+      23,
+      37
+    ],
+    "updates_per_case": 128,
+    "checkpoint_every": 64,
+    "validation_revisions": [
+      0,
+      64,
+      128
+    ],
+    "train_target_bytes_per_case": 8192,
+    "validation_target_bytes_per_checkpoint": 2048,
+    "parameter_scalars": {
+      "ordinary": 11216,
+      "geometry": 11290
+    },
+    "common_parameters_bitwise_identical_before_compile": true,
+    "byte_alphabet_size": 256,
+    "topos_enabled": false,
+    "near_duplicate_prose_deduplicated": false,
+    "full_reports_used_for_comparison": true,
+    "preparation_replay_byte_identical": true,
+    "criteria": {
+      "atol": 0.000003,
+      "rtol": 0.00005,
+      "geometry_delta_relative_l2": 0.002,
+      "minimum_geometry_reference_delta_l2": 1e-8
+    },
+    "criteria_frozen_before_measurement": true,
+    "no_quality_or_speed_gate": true
+  },
+  "summary": {
+    "native": {
+      "cases": 6,
+      "updates_per_case": 128,
+      "paired_deltas": [
+        {
+          "seed": 11,
+          "geometry_minus_ordinary_bpb": 0.000027022774017559925
+        },
+        {
+          "seed": 23,
+          "geometry_minus_ordinary_bpb": -0.003072566797905907
+        },
+        {
+          "seed": 37,
+          "geometry_minus_ordinary_bpb": -0.002001759817971127
+        }
+      ],
+      "max_training_ce_error": 9.5367431640625e-7,
+      "max_heldout_ce_error": 0.000001430511474609375,
+      "max_final_parameter_error": 2.384185791015625e-7,
+      "max_geometry_delta_relative_error": 0.00001928224657832324
+    },
+    "browser": {
+      "cases": 6,
+      "updates_per_case": 128,
+      "paired_deltas": [
+        {
+          "seed": 11,
+          "geometry_minus_ordinary_bpb": 0.000027108765342731544
+        },
+        {
+          "seed": 23,
+          "geometry_minus_ordinary_bpb": -0.0030725775468214422
+        },
+        {
+          "seed": 37,
+          "geometry_minus_ordinary_bpb": -0.0020017920647177334
+        }
+      ],
+      "max_training_ce_error": 9.5367431640625e-7,
+      "max_heldout_ce_error": 9.5367431640625e-7,
+      "max_final_parameter_error": 2.384185791015625e-7,
+      "max_geometry_delta_relative_error": 0.000009870352922683123
+    },
+    "interpretation": "Held-out BPB falls in all six cases. Geometry yields two small improvements and one small regression. These three seeds and the unequal capacity/compute do not establish general benefit."
+  },
+  "checks": {
+    "native": {
+      "status": "passed",
+      "build": "cargo build --locked --release -p st-nn --no-default-features --features wgpu --example resident_byte_learning",
+      "run": "target/release/examples/resident_byte_learning REQUEST.json",
+      "raw": "native-final.json",
+      "comparison": "native-final-comparison.json"
+    },
+    "browser": {
+      "status": "passed",
+      "build": "env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH RUSTFLAGS= cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --no-default-features --features wgpu --example resident_byte_learning_browser",
+      "bindgen": "wasm-bindgen --target web --out-dir target/resident-byte-learning-web target/wasm32-unknown-unknown/release/examples/resident_byte_learning_browser.wasm",
+      "page": "crates/st-nn/tests/byte_learning_browser.html",
+      "raw": "browser-final.json",
+      "comparison": "browser-final-comparison.json",
+      "page_completion_not_numerical_promotion": true
+    },
+    "comparison": {
+      "command": "python3 -I -S -B tools/byte_corpus_study.py compare REQUEST.json TORCH.json ACTUAL.json NEW_COMPARISON.json",
+      "native_passed": true,
+      "browser_passed": true,
+      "reference_frozen_before_native_browser_measurements": true
+    },
+    "rust_runner_tests": {
+      "status": "passed",
+      "tests": 8,
+      "command": "cargo test --locked --release -p st-nn --no-default-features --features wgpu --example resident_byte_learning",
+      "log": "runner-tests-fifo.log",
+      "scope": "CPU preflight and bounded filesystem reader controls; runtime execution is recorded separately."
+    },
+    "python_controls": {
+      "status": "passed",
+      "tests": 8,
+      "command": "python3 -I -S -B tools/test_byte_corpus_study.py",
+      "log": "comparator-tests-closeout.log"
+    },
+    "workspace_format": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all -- --check",
+      "log": "workspace-fmt-nightly-final.log",
+      "earlier_attempt": {
+        "command": "cargo fmt --all -- --check",
+        "status": "failed",
+        "log": "workspace-fmt-final.log",
+        "reason": "Stable rustfmt ignores the repository's nightly-only ignore configuration and requests import reordering only in unchanged bindings/st-py/src/lib.rs; CI-pinned nightly passes."
+      }
+    },
+    "browser_module_syntax": {
+      "status": "passed",
+      "log": "browser-syntax-final.log"
+    },
+    "license_metadata": {
+      "status": "passed",
+      "command": "python3 -I -B scripts/security/generate_repo_manifest.py --check-only",
+      "log": "license-preflight-final.log"
+    },
+    "strict_clippy": {
+      "status": "not_rerun_in_this_pilot",
+      "parent_record": "../2026-10-09-byte-causal-geometry-owner/validation.json",
+      "note": "Parent strict st-nn all-target lint recorded existing findings on unchanged files; this pilot does not claim clean strict workspace lint."
+    }
+  },
+  "review": {
+    "mode": "Independent read-only local reviewer plus parent verification",
+    "repairs": [
+      "Native input bounded before allocation and while reading; writerless FIFO rejected nonblocking with a timeout-bounded child regression.",
+      "Preparation rejects duplicate/out-of-range seeds and rates that overflow or underflow float32 before creating outputs.",
+      "Measured and independent-reference engine identities prevent accidental reference-as-actual promotion; the original failing negative test log is retained.",
+      "Relative geometry change-vector test now uses nonzero incorrect deltas below the absolute tolerance, isolating the relative gate."
+    ],
+    "final_scoped_review_findings": 0,
+    "parent_review_separate": "PR 2253 has an unresolved coordinate-VJP redundant head-reduction performance finding at this snapshot. The historical pilot records the tested kernel unchanged and does not claim long-sequence readiness."
+  },
+  "evidence": {
+    "public_files": {
+      "README.md": {
+        "bytes": 4331,
+        "sha256": "d0b8370a3e37f66789119ab41fcb168de84082093718948462d4da31cb30588d"
+      },
+      "browser-comparison.json": {
+        "bytes": 6475,
+        "sha256": "289747b67d48eb6e728e668689975baafdd1ac884ddd6f9a5a0b16e7523c1159"
+      },
+      "browser.json": {
+        "bytes": 44155,
+        "sha256": "1aec0426eaafbd17b7ffac35f52e37ee0aa0867f6257b781afcace855a051e99"
+      },
+      "native-comparison.json": {
+        "bytes": 6440,
+        "sha256": "f2dc3e9105a73e89ef1738a661ddf8ed3986f5ac64a78c7f283c6f20e6e60acd"
+      },
+      "native.json": {
+        "bytes": 44174,
+        "sha256": "3c37bfa796d792716a5f5d1858f4a2ea68bcfe0062798b88a8fda288db214daf"
+      },
+      "preparation.json": {
+        "bytes": 2233,
+        "sha256": "028432f58a91adc55747877c2220a35df98b2cc4135f080d6bd8d7d597609197"
+      }
+    },
+    "local_only_files": {
+      "browser-final-comparison.json": {
+        "bytes": 4790,
+        "sha256": "76ced591da2c0077827e2c4319d2da9a0e78972aeaf8acf025cda0decd30f60a"
+      },
+      "browser-final-comparison.log": {
+        "bytes": 260,
+        "sha256": "762332bdac233756dfe3bf53c4bf005cbdcd58ee55e444d5424b8da1abbbd976"
+      },
+      "browser-final.js": {
+        "bytes": 47674,
+        "sha256": "0552a1776f0cbf4ebf29075605bb4afd5ba384c6d9d03f43654c857402f69230"
+      },
+      "browser-final.json": {
+        "bytes": 2211817,
+        "sha256": "cfdb48e4941395612e812d91827e31a25b4c71212768cee2712f29470b6d1d59"
+      },
+      "browser-final.wasm": {
+        "bytes": 1676163,
+        "sha256": "a3a07f7d9f5b6a7c26e3f715b67bdbe9c15505805e53cbe5c835bfb758367b23"
+      },
+      "browser-reviewed-comparison.json": {
+        "bytes": 4790,
+        "sha256": "76ced591da2c0077827e2c4319d2da9a0e78972aeaf8acf025cda0decd30f60a"
+      },
+      "browser-reviewed-comparison.log": {
+        "bytes": 260,
+        "sha256": "762332bdac233756dfe3bf53c4bf005cbdcd58ee55e444d5424b8da1abbbd976"
+      },
+      "browser-reviewed.json": {
+        "bytes": 2211817,
+        "sha256": "cfdb48e4941395612e812d91827e31a25b4c71212768cee2712f29470b6d1d59"
+      },
+      "browser-syntax-final.log": {
+        "bytes": 29,
+        "sha256": "bb86d1bea0efff45c7a8c7929d2009ec12304f24ffd8d2edad005b8960298055"
+      },
+      "build-final.log": {
+        "bytes": 114548,
+        "sha256": "e22304cd5160711a2e0fa6ac189855cb31114ada22f06fb4bd684d430de6cfd7"
+      },
+      "build-initial.log": {
+        "bytes": 114689,
+        "sha256": "022bc6c488d37ed4e110d24b9976d95fb36e1c6577699b615e194472fd6ff911"
+      },
+      "build-reviewed.log": {
+        "bytes": 114548,
+        "sha256": "b9a1a0fd5cb98ffeb0610a5acf68b9c2dcf02aea1113266fe73f7a582011a369"
+      },
+      "comparator-tests-before-fix.log": {
+        "bytes": 732,
+        "sha256": "516c33d9a6ba5319c32bf1c098007a46474e98701c373c893948f2efefe2ba70"
+      },
+      "comparator-tests-closeout.log": {
+        "bytes": 106,
+        "sha256": "fdb64f76ee3faf48d76ab43bbb2a2d0a9d4cc51971bf0df9590990e31971669c"
+      },
+      "comparator-tests-engine-fixed.log": {
+        "bytes": 104,
+        "sha256": "ba7ccc824660f99f10c5378a4598ede6de9cccb44d4230bf847998033f779998"
+      },
+      "comparator-tests-final.log": {
+        "bytes": 105,
+        "sha256": "fd49aba5f35c938be43436424bc3c2f9f2397a091da4f7e2a3cf10e5b4ba5abf"
+      },
+      "comparator-tests-relative-guard.log": {
+        "bytes": 106,
+        "sha256": "f41dcd6bb4c47a8cfd051c6146cc5c4ce810845249725ce89362bfcb2b60bb01"
+      },
+      "frozen/preparation.json": {
+        "bytes": 1829,
+        "sha256": "f65f2c2cbdb4ca75f8375f004f0340f0887f191894bf93fa46339d0b0298068b"
+      },
+      "frozen/request.json": {
+        "bytes": 2031056,
+        "sha256": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3"
+      },
+      "license-preflight-final.log": {
+        "bytes": 92,
+        "sha256": "7e3bafca86ae060ba136f6496ea7995b3451956c05c2ea87f379e4e97d7e2ab1"
+      },
+      "native-final-binary": {
+        "bytes": 6447968,
+        "sha256": "9383cffa29ca45608d49dd692679b0d467598033a6feb56f465b7a8dba9ac1f6"
+      },
+      "native-final-comparison.json": {
+        "bytes": 4755,
+        "sha256": "57828ab354a3d84443b4ca15df0a0a13f34e644c9c815289ab48861a0029bdc4"
+      },
+      "native-final-comparison.log": {
+        "bytes": 258,
+        "sha256": "ade21b44dd49c35440767567d6a1f6584bca6021b82f608df3178c685d30d504"
+      },
+      "native-final.json": {
+        "bytes": 1425042,
+        "sha256": "7af6eb07bdb40085f06d091808e13f9deb5d6cf79d76a3a97c0f173d42c0ba4f"
+      },
+      "native-final.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "native-initial-comparison.json": {
+        "bytes": 4755,
+        "sha256": "57828ab354a3d84443b4ca15df0a0a13f34e644c9c815289ab48861a0029bdc4"
+      },
+      "native-initial-comparison.log": {
+        "bytes": 258,
+        "sha256": "ade21b44dd49c35440767567d6a1f6584bca6021b82f608df3178c685d30d504"
+      },
+      "native-initial.json": {
+        "bytes": 1425019,
+        "sha256": "ba5081d92312c7130d2f3d48196b955e17c132e2e8e091199d8bd0274482795f"
+      },
+      "native-initial.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "preparation-replay/preparation.json": {
+        "bytes": 1829,
+        "sha256": "f65f2c2cbdb4ca75f8375f004f0340f0887f191894bf93fa46339d0b0298068b"
+      },
+      "preparation-replay/request.json": {
+        "bytes": 2031056,
+        "sha256": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3"
+      },
+      "preparation-replay.log": {
+        "bytes": 160,
+        "sha256": "a51fab3410f6abd63f54881cb726ecb2ad10f36eaf7ca2583c04c6d4239c10e1"
+      },
+      "runner-tests-fifo.log": {
+        "bytes": 115403,
+        "sha256": "caa81232b1de6946670e3e977d8792ed2b7c51f9cef6351fd5a127eab209adab"
+      },
+      "runner-tests-reviewed.log": {
+        "bytes": 115332,
+        "sha256": "478378149a2cdce2522ed5aee621b2d882a98bf68fdd7683bbfab9bbde0aab2b"
+      },
+      "runner-tests.log": {
+        "bytes": 115196,
+        "sha256": "86c4d29a4b422dedab879ea55c1fadfcfc3087b1d85c5305e4631e2fd266a5ff"
+      },
+      "torch-reference.json": {
+        "bytes": 1424946,
+        "sha256": "b879c3101fdf487d046226673ace0fab805cfe5afc49baf5eb3c6c11d0486024"
+      },
+      "torch-reference.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "wasm-final.log": {
+        "bytes": 111362,
+        "sha256": "3739ee177b6f47bbeed9c48b9087060a23b05eb0134a91bafa5c7afde884f76e"
+      },
+      "wasm-initial.log": {
+        "bytes": 111362,
+        "sha256": "c791cd6b50521303c0b81ed2d2480e122ea15331f4755ac1f82f308249f5a411"
+      },
+      "wasm-reviewed.log": {
+        "bytes": 111362,
+        "sha256": "e2d4f5eb162dc476f107c5266d9c1b92718da03067b8d12d69f5f4e2c15c4c84"
+      },
+      "workspace-fmt-final.log": {
+        "bytes": 60104,
+        "sha256": "08190f00ba6f3109326b4177d8024621ddce62d25486c5d27c2e151f8ff4bc0b"
+      },
+      "workspace-fmt-nightly-final.log": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "local_storage_policy": "Full raw inputs, weights, reports, logs and tested native/WASM artifacts retained locally. Public records expose scalar trajectories, comparison summaries, hashes and reproduction; no absolute host paths or credentials.",
+    "public_derivation": "native.json and browser.json preserve every raw scalar record and metadata, remove only cases[*].final_parameters, and add published_artifact omission metadata. Preparation/comparison files are semantic copies."
+  },
+  "limits": [
+    "Tiny scratch model, repository-prose windows, three seeds, one fixed recipe; no pretrained-model fine-tuning or general-domain generation evaluation.",
+    "Train/validation split is by document, not semantic near-duplicate removal.",
+    "Geometry adds 74 scalars and extra work; no capacity-matched or compute-matched ablation.",
+    "Shared learned gains are not context-conditioned routing.",
+    "No KV cache, streaming generation or complete-model checkpoint/resume evidence is added here.",
+    "No performance measurements or optimization adoption claim."
+  ]
+}
