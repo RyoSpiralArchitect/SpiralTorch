@@ -1,0 +1,59 @@
+{
+  "passed": true,
+  "scope": "Actual browser stop-zero download transport, not arithmetic or learning quality",
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "input_checkpoint_report_bits": [
+        "80000000",
+        "80000000",
+        "80000000"
+      ]
+    },
+    {
+      "name": "seed11_geometry",
+      "input_checkpoint_report_bits": [
+        "80000000",
+        "80000000",
+        "80000000"
+      ]
+    },
+    {
+      "name": "seed23_ordinary",
+      "input_checkpoint_report_bits": [
+        "80000000",
+        "80000000",
+        "80000000"
+      ]
+    },
+    {
+      "name": "seed23_geometry",
+      "input_checkpoint_report_bits": [
+        "80000000",
+        "80000000",
+        "80000000"
+      ]
+    },
+    {
+      "name": "seed37_ordinary",
+      "input_checkpoint_report_bits": [
+        "80000000",
+        "80000000",
+        "80000000"
+      ]
+    },
+    {
+      "name": "seed37_geometry",
+      "input_checkpoint_report_bits": [
+        "80000000",
+        "80000000",
+        "80000000"
+      ]
+    }
+  ],
+  "sha256": {
+    "signed-zero-request.json": "7281be697c8ea5ca313d086066e3023c771d240f0b2acb00813fcfbbcfbea9a8",
+    "browser-signed-zero-checkpoint.json": "a6da95c6634a215965a451488b92242aadc26538e3ed04d69259d81d94677360",
+    "browser-signed-zero-report.json": "8dc4335184d471f11dd62d60e764dbdbe2641ef75366310b2a488bdd07d7928d"
+  }
+}

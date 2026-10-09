@@ -1,0 +1,84 @@
+{
+  "schema": "spiraltorch.byte_corpus.resume_verification.v1",
+  "passed": true,
+  "request_sha256": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3",
+  "exact_resumed_report_equal": true,
+  "exact_training_and_evaluation_prefixes": true,
+  "saved_parameter_bits_match_paused_report": true,
+  "cases": [
+    {
+      "name": "seed11_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5602379590272903
+    },
+    {
+      "name": "seed11_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.560256689786911
+    },
+    {
+      "name": "seed23_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.554492086172104
+    },
+    {
+      "name": "seed23_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.552362345159054
+    },
+    {
+      "name": "seed37_ordinary",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5545293986797333
+    },
+    {
+      "name": "seed37_geometry",
+      "updates": 128,
+      "pause": 37,
+      "evaluation_revisions": [
+        0,
+        64,
+        128
+      ],
+      "final_mean_ce": 3.5531418845057487
+    }
+  ],
+  "scope": "Within-runtime report equality and saved parameter/history consistency; full model validity belongs to Rust preflight, not runtime attestation, quality or speed evidence",
+  "input_sha256": {
+    "request": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3",
+    "baseline": "7af6eb07bdb40085f06d091808e13f9deb5d6cf79d76a3a97c0f173d42c0ba4f",
+    "partial": "d2c24fd7ac1643b8675f22ee859f5a03e95c372520f6285e10452f0f58dc297b",
+    "resumed": "7af6eb07bdb40085f06d091808e13f9deb5d6cf79d76a3a97c0f173d42c0ba4f",
+    "checkpoint": "2f9bc728c7ef32c78564215ed062b9315cc723b38e2ca060d05e189f37b5118c"
+  }
+}
