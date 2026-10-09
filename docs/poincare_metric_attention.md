@@ -72,8 +72,14 @@ roundoff. The exact zero limit and one-ULP separations are tested; values on
 both sides of the switch retain nonzero VJPs.
 
 Four extended coefficients consume **64 bytes per batch/query/key pair**.
-Forward has O(B*T^2*C + B*H*T^2) work; backward deterministically accumulates both
-endpoints without floating-point atomics. This correctness-first materialized
+Forward has O(B*T^2*C + B*H*T^2) work. Backward first reduces head cotangents once
+per causal pair, then reuses that scale for each coordinate component. Its work
+is O(B*T^2*(C+H)), not O(B*T^2*C*H). The extra dispatch stores one extended
+scale, **16 bytes per batch/query/key pair**, in a private tail of that
+backward's gradient allocation. Returned views expose only gradients; the
+scratch storage lives as long as their shared allocation. The forward tape
+is not mutated and the storage-binding count is unchanged. There is no new
+host readback or floating-point atomic reduction. This correctness-first materialized
 path is not a memory-efficient/streaming Attention kernel or a speed result.
 Binding, storage, grid and backward-output limits are preflighted before
 forward. Arbitrary validated strided/offset operands are packed on the GPU.
@@ -119,3 +125,6 @@ path, not merely through a parallel Euclidean residual path.
 
 The [native/browser evidence bundle](../benchmarks/results/2026-10-09-poincare-bias/README.md)
 records frozen criteria, failures and repairs, runtime results and artifact hashes.
+The [pair-seed cache review repair](../benchmarks/results/2026-10-09-poincare-pair-seed-cache/README.md)
+adds bounded scratch preflight and retained, distinct-seed backward controls
+without changing that historical record or claiming a measured speedup.
