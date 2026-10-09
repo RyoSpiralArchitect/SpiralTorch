@@ -72,5 +72,9 @@ crate-type = ["cdylib"]
 name = "resident_embedding_browser"
 crate-type = ["cdylib"]
 
+[[example]]
+name = "causal_zspace_wave_browser"
+crate-type = ["cdylib"]
+
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

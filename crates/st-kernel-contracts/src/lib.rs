@@ -9,6 +9,7 @@
 //! allocation, or foreign-function interfaces.
 
 pub mod attention;
+pub mod causal_wave;
 pub mod classification;
 pub mod compaction;
 pub mod elementwise;

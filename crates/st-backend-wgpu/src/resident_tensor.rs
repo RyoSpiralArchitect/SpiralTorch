@@ -10,6 +10,7 @@ use thiserror::Error;
 
 pub mod attention;
 pub(crate) mod capture;
+pub mod causal_wave;
 mod checked_import;
 pub mod classification;
 mod concatenate;
@@ -27,6 +28,8 @@ pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error(transparent)]
+    CausalWave(#[from] st_kernel_contracts::causal_wave::CausalWaveError),
     #[error(transparent)]
     Indexing(#[from] st_kernel_contracts::indexing::IndexingError),
     #[error(transparent)]
@@ -76,6 +79,7 @@ struct Kernels {
     checked_import: std::sync::OnceLock<checked_import::CheckedImportKernels>,
     concatenate: std::sync::OnceLock<concatenate::ConcatenateKernels>,
     embedding: std::sync::OnceLock<embedding::EmbeddingKernels>,
+    causal_wave: std::sync::OnceLock<causal_wave::CausalWaveKernels>,
     guard_capture: std::sync::OnceLock<guard_capture::GuardCapture>,
     convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
     depthwise_vjp: std::sync::OnceLock<convolution::vjp::DepthwiseVjpKernels>,
@@ -235,6 +239,7 @@ impl TensorDevice {
             checked_import: std::sync::OnceLock::new(),
             concatenate: std::sync::OnceLock::new(),
             embedding: std::sync::OnceLock::new(),
+            causal_wave: std::sync::OnceLock::new(),
             guard_capture: std::sync::OnceLock::new(),
             convolution: std::sync::OnceLock::new(),
             depthwise_vjp: std::sync::OnceLock::new(),
