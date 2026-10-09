@@ -279,9 +279,10 @@ jobs:
           cargo test --locked --release -p st-backend-wgpu --test resident_attention_vjp -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu --test resident_embedding -- --test-threads=1
           cargo test --locked --release -p st-backend-wgpu resident_graph:: -- --test-threads=1
-          cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward --test resident_attention_chain --test resident_attention_training --test resident_residual_attention -- --test-threads=1
+          cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_training --test resident_nd_tensor --test resident_graph_training --test resident_graph_forward --test resident_attention_chain --test resident_attention_training --test resident_residual_attention --test resident_byte_decoder -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::attention::training -- --test-threads=1
           cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::residual_attention -- --test-threads=1
+          cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident::byte_decoder -- --test-threads=1
           cargo test --locked --release -p st-nn --features wgpu --lib conv2d_resident_matches_host_and_refreshes_parameters -- --test-threads=1
           cargo test --locked --release -p st-nn --features wgpu --lib conv2d_resident_vjp_matches_module_backward_and_refreshes_parameters -- --test-threads=1
           cargo test --locked --release -p st-nn --features wgpu --lib depthwise_resident_vjp_matches_module_backward_without_host_accumulation -- --test-threads=1
@@ -423,6 +424,7 @@ jobs:
         run: |
           cargo build --locked -p st-backend-wgpu --target wasm32-unknown-unknown --release --example resident_embedding_browser
           cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --no-default-features --features wgpu --example resident_residual_attention_browser
+          cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --no-default-features --features wgpu --example resident_byte_decoder_browser
           cargo check --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --features webgpu --lib
           cargo build --locked -p spiraltorch-wasm --target wasm32-unknown-unknown --release --features webgpu
           wasm-bindgen target/wasm32-unknown-unknown/release/spiraltorch_wasm.wasm \

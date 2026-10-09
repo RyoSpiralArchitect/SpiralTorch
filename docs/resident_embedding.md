@@ -76,11 +76,12 @@ calls the same Rust code through a small wasm-bindgen test entry point.
 
 ## Decoder and geometry follow-through
 
-The next composition must own token/position tables, every residual attention
-block and the final 256-way head in **one** `ResidentParameters`, not separate
-optimizers. Reuse an owner-free residual executor rather than duplicating block
-math. Join the entire derivative family after embedding accumulation, so a late
-input-gradient failure cannot leave an earlier head gradient apparently valid.
+The [resident byte decoder](resident_byte_decoder.md) now owns token/position
+tables, every residual attention block and the final 256-way head in **one**
+`ResidentParameters`, not separate optimizers. It reuses an owner-free residual
+executor rather than duplicating block math, and joins the entire derivative
+family after embedding accumulation so a late input-gradient failure cannot
+leave an earlier head gradient apparently valid.
 
 Full-sequence next-byte training requires structural causal masking with offset
 zero, explicitly shifted targets, document isolation and a tested position/reset

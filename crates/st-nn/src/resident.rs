@@ -14,12 +14,19 @@ use st_tensor::{Layout, NdLayout, NdLayoutError};
 use thiserror::Error;
 
 mod attention;
+mod byte_decoder;
 pub use attention::AttentionInferencePlan;
 #[cfg(feature = "wgpu")]
 pub use attention::{
     ResidentAttentionBlock, ResidentAttentionForward, ResidentAttentionTraining,
     ResidentAttentionVjp,
 };
+#[cfg(feature = "wgpu")]
+pub use byte_decoder::{
+    ByteDecoderBias, ByteDecoderBiasGradient, ResidentByteBatch, ResidentByteDecoder,
+    ResidentByteDecoderForward, ResidentByteDecoderVjp,
+};
+pub use byte_decoder::{ByteDecoderParameterLayout, ByteDecoderPlan, ByteLmBatch, BYTE_LM_VOCAB};
 pub use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
 #[cfg(feature = "wgpu")]
 mod convolution;
@@ -124,6 +131,8 @@ impl InferenceOp {
 
 #[derive(Debug, Error)]
 pub enum InferenceError {
+    #[error("invalid resident byte decoder: {0}")]
+    ByteDecoder(&'static str),
     #[error("invalid resident attention plan: {0}")]
     Attention(&'static str),
     #[error(transparent)]

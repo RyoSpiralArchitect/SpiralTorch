@@ -371,11 +371,14 @@ controls rather than choosing between them:
    [Resident embeddings](resident_embedding.md) now prepare exact integer IDs
    once and keep lookup values and stable duplicate-ID pullbacks on GPU. Native
    and browser probes compare 12 Torch forward/VJP cases and 16 CE/SGD updates.
-   This is the byte-input foundation, not yet a complete causal byte decoder or
-   a trainable causal Z-Space encoder; those must share one full-model owner.
+   The [resident byte decoder](resident_byte_decoder.md) now composes these
+   tables, causal residual blocks and a 256-way head under one full-model owner,
+   with document-bounded shifted targets and optional trainable Topos gates.
+   A causal Z-Space encoder with its own exact parameter VJP remains the next
+   missing learning mechanism; caller-owned score bias is not that encoder.
    These are source additions after 0.4.29, not APIs in that published wheel.
    The original host Modules remain unchanged; uncertainty outputs, KV-cache
-   ownership, complete decoder integration and learning-quality gains remain open.
+   ownership, full-model Python/WASM facades and learning-quality gains remain open.
 3. **Measure the complete language path.** Require numerical agreement before
    transfer-inclusive throughput measurements, with resident-only timings
    labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are

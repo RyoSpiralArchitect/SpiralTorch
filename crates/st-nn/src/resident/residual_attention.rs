@@ -2,7 +2,11 @@
 use super::*;
 
 #[cfg(feature = "wgpu")]
+mod autograd;
+#[cfg(feature = "wgpu")]
 mod training;
+#[cfg(feature = "wgpu")]
+pub(crate) use autograd::{ResidualAutograd, ResidualTape};
 #[cfg(feature = "wgpu")]
 pub use training::{
     ResidentResidualAttentionForward, ResidentResidualAttentionTraining,
@@ -60,6 +64,12 @@ impl ResidualAttentionPlan {
 
     pub fn attention_spec(&self) -> AttentionSpec {
         self.attention.attention_spec()
+    }
+
+    pub(crate) fn parameter_count(&self) -> Result<usize, InferenceError> {
+        Ok(self.pre.graph_definition()?.parameters().len()
+            + 4
+            + self.feed_forward.graph_definition()?.parameters().len())
     }
 }
 

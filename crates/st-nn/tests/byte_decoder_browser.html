@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident byte decoder training</title>
+<h1>Resident byte decoder training</h1>
+<p id="summary">Running the frozen Rust/WebGPU checks...</p>
+<a id="download" hidden>Download verification result</a>
+<pre id="result" data-status="running">Checking the complete byte model...</pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_resident_byte_decoder_checks} = await import("/target/resident-byte-decoder-web/resident_byte_decoder_browser.js");
+  await init();
+  const report = JSON.parse(await run_resident_byte_decoder_checks());
+  const counts = [18, 31];
+  const biasCounts = [0, 4];
+  const finite = value => Number.isFinite(value) && value >= 0;
+  if (report.schema !== "spiraltorch.resident_byte_decoder.validation.v1"
+      || report.passed !== true || report.checks.length !== 2
+      || report.checks.some((check, i) => check.parameter_count !== counts[i]
+        || check.parameter_errors.length !== counts[i]
+        || check.parameter_errors.some(error => !finite(error.max_abs_error))
+        || !finite(check.output_max_abs_error) || !finite(check.embedding_output_max_abs_error)
+        || check.gradient_layouts !== true
+        || check.bias_errors.length !== biasCounts[i] || !check.bias_errors.every(finite)
+        || check.causality.suffix_gradient_zero !== true || check.causality.sensitivity_control !== true
+        || !finite(check.causality.prefix_max_abs_error)
+        || !finite(check.causality.other_document_max_abs_error)
+        || !finite(check.causality.extension_max_abs_error)
+        || Object.keys(check.tapes).length !== 9 || Object.values(check.tapes).some(v => v !== true)
+        || check.learning.steps !== 16 || check.learning.trace.length !== 16
+        || check.learning.trace.some((step, j) => step.revision !== j + 1
+          || !finite(step.loss) || !finite(step.parameter_max_abs_error)))) {
+    throw Error("Incomplete byte decoder verification");
+  }
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  document.querySelector("#summary").textContent = "Passed: 1-block plain and 2-block Topos/geometry models, all 18/31 parameter VJPs, 16 updates each, causal and ownership controls. Synthetic correctness only, not language quality or speed.";
+  const download = document.querySelector("#download");
+  download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
+  download.download = "resident-byte-decoder.json";
+  download.hidden = false;
+} catch (error) {
+  result.textContent = JSON.stringify({passed:false, error:String(error.stack || error)});
+  result.dataset.status = "error";
+  document.querySelector("#summary").textContent = "Verification failed. See the diagnostic below.";
+}
+</script>
