@@ -12,6 +12,7 @@ pub mod attention;
 pub(crate) mod capture;
 mod checked_import;
 pub mod classification;
+mod concatenate;
 mod convolution;
 pub(crate) mod guard_capture;
 pub mod loss;
@@ -69,6 +70,7 @@ struct Kernels {
     classification: std::sync::OnceLock<classification::ClassificationKernels>,
     normalization: std::sync::OnceLock<normalization::LayerNormKernels>,
     checked_import: std::sync::OnceLock<checked_import::CheckedImportKernels>,
+    concatenate: std::sync::OnceLock<concatenate::ConcatenateKernels>,
     guard_capture: std::sync::OnceLock<guard_capture::GuardCapture>,
     convolution: std::sync::OnceLock<convolution::ConvolutionKernels>,
     depthwise_vjp: std::sync::OnceLock<convolution::vjp::DepthwiseVjpKernels>,
@@ -226,6 +228,7 @@ impl TensorDevice {
             classification: std::sync::OnceLock::new(),
             normalization: std::sync::OnceLock::new(),
             checked_import: std::sync::OnceLock::new(),
+            concatenate: std::sync::OnceLock::new(),
             guard_capture: std::sync::OnceLock::new(),
             convolution: std::sync::OnceLock::new(),
             depthwise_vjp: std::sync::OnceLock::new(),

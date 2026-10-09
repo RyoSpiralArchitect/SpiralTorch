@@ -83,6 +83,11 @@ crate-type = ["cdylib"]
 required-features = ["wgpu"]
 
 [[example]]
+name = "resident_attention_training_browser"
+crate-type = ["cdylib"]
+required-features = ["wgpu"]
+
+[[example]]
 name = "resident_nd_tensor"
 required-features = ["wgpu"]
 

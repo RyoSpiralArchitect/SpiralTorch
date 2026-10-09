@@ -14,6 +14,8 @@ pub enum NdLayoutError {
     InvalidReshape,
     #[error("dimensions cannot be broadcast to the requested shape")]
     InvalidBroadcast,
+    #[error("concatenation requires nonempty inputs, a valid axis, and matching other dimensions")]
+    InvalidConcatenation,
 }
 
 /// Element strides, not byte strides. Views never allocate or move tensor data.
@@ -265,9 +267,71 @@ pub fn broadcast_shape(lhs: &[usize], rhs: &[usize]) -> Result<Vec<usize>, NdLay
     Ok(shape)
 }
 
+/// Concatenate logical shapes without broadcasting. Scalars have no join axis.
+/// Empty axes are valid, but cannot hide rank/shape or address-space errors.
+pub fn concatenate_shape(shapes: &[&[usize]], axis: usize) -> Result<Vec<usize>, NdLayoutError> {
+    let first = *shapes.first().ok_or(NdLayoutError::InvalidConcatenation)?;
+    if axis >= first.len() {
+        return Err(NdLayoutError::InvalidConcatenation);
+    }
+    let mut output = first.to_vec();
+    output[axis] = 0;
+    for &shape in shapes {
+        if shape.len() != first.len()
+            || shape
+                .iter()
+                .zip(first)
+                .enumerate()
+                .any(|(i, (a, b))| i != axis && a != b)
+        {
+            return Err(NdLayoutError::InvalidConcatenation);
+        }
+        NdLayout::contiguous(shape)?;
+        output[axis] = output[axis]
+            .checked_add(shape[axis])
+            .ok_or(NdLayoutError::Overflow)?;
+    }
+    NdLayout::contiguous(&output)?;
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concatenate_shapes_validate_empty_axes_rank_and_overflow() {
+        assert_eq!(
+            concatenate_shape(&[&[2, 3, 4], &[2, 5, 4]], 1).unwrap(),
+            [2, 8, 4]
+        );
+        assert_eq!(
+            concatenate_shape(&[&[2, 0, 4], &[2, 3, 4]], 1).unwrap(),
+            [2, 3, 4]
+        );
+        assert_eq!(concatenate_shape(&[&[0, 3], &[0, 4]], 1).unwrap(), [0, 7]);
+        for (shapes, axis) in [
+            (vec![], 0),
+            (vec![&[][..]], 0),
+            (vec![&[2, 3][..]], 2),
+            (vec![&[2, 3][..], &[3, 3]], 1),
+            (vec![&[0, 3][..], &[0]], 1),
+            (vec![&[0, 3][..], &[1, 3]], 1),
+        ] {
+            assert_eq!(
+                concatenate_shape(&shapes, axis),
+                Err(NdLayoutError::InvalidConcatenation)
+            );
+        }
+        assert_eq!(
+            concatenate_shape(&[&[usize::MAX], &[1]], 0),
+            Err(NdLayoutError::Overflow)
+        );
+        assert_eq!(
+            concatenate_shape(&[&[usize::MAX / 2, 2], &[1, 2]], 0),
+            Err(NdLayoutError::Overflow)
+        );
+    }
 
     #[test]
     fn selection_preserves_strides_offsets_broadcasts_and_scalar_views() {

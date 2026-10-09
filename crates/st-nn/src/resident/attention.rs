@@ -1,9 +1,14 @@
-//! Frozen lowering of existing projection parameters, not a second trainable
-//! attention model. QKV is fused once on the host; activations never return there.
+//! Snapshot lowering of existing projection parameters. QKV is fused once on
+//! the host; inference stays frozen and training owns separate resident updates.
 
 use super::*;
 use crate::Linear;
 use st_kernel_contracts::attention::{AttentionMask, AttentionSpec};
+
+#[cfg(feature = "wgpu")]
+mod training;
+#[cfg(feature = "wgpu")]
+pub use training::{ResidentAttentionForward, ResidentAttentionTraining, ResidentAttentionVjp};
 
 /// Self-attention inference plan for `[batch, sequence, input_features]`.
 /// Parameter updates require rebuilding the plan. Bias inputs are independent

@@ -154,5 +154,6 @@ The generator `tools/generate_resident_attention_vjp_torch_fixture.py` refuses
 to overwrite an existing fixture. Regenerate to a new path with PyTorch 2.12.1
 and optional global patches disabled, then compare bytes. This bounded synthetic
 learning proves gradient/update connectivity, not an advantage over ordinary FT.
-QKV/output projection training, complete LLM graph integration and matched
-throughput measurement remain separate follow-ups.
+[QKV/output projection training](resident_attention_projection_training.md) now
+connects this primitive to one resident parameter owner and plain SGD. Complete
+LLM graph integration and matched throughput measurement remain separate follow-ups.

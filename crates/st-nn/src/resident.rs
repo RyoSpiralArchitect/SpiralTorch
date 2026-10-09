@@ -16,7 +16,10 @@ use thiserror::Error;
 mod attention;
 pub use attention::AttentionInferencePlan;
 #[cfg(feature = "wgpu")]
-pub use attention::ResidentAttentionBlock;
+pub use attention::{
+    ResidentAttentionBlock, ResidentAttentionForward, ResidentAttentionTraining,
+    ResidentAttentionVjp,
+};
 #[cfg(feature = "wgpu")]
 mod convolution;
 mod graph;

@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Resident attention projection training</title>
+<pre id="result" data-status="running">Checking resident projection training...</pre>
+<a id="download" hidden>Download training verification</a>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_attention_training_checks} = await import("/target/attention-projection-training-web/resident_attention_training_browser.js");
+  await init();
+  const report = JSON.parse(await run_attention_training_checks());
+  if (report.passed !== true || report.checks.length !== 30 || report.updates.length !== 16
+      || report.final_parameter_errors.length !== 4
+      || report.checks.some(check => check.max_abs_error.parameters.length !== 4)
+      || report.rejected_update_preserves_all_parameters !== true
+      || report.rejected_update_invalidates_old_gradients !== true) throw Error("Incomplete training verification");
+  result.textContent = JSON.stringify(report, null, 2);
+  result.dataset.status = "passed";
+  const download = document.querySelector("#download");
+  download.href = URL.createObjectURL(new Blob([result.textContent], {type:"application/json"}));
+  download.download = "resident-attention-projection-training.json";
+  download.hidden = false;
+} catch (error) {
+  result.textContent = JSON.stringify({passed:false, error:String(error.stack || error)});
+  result.dataset.status = "error";
+}
+</script>
