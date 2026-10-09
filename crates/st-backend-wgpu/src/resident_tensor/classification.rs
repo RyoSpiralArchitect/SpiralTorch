@@ -142,6 +142,7 @@ impl ResidentTensor {
             }),
             layout: output_layout,
             device: self.device.clone(),
+            validation: None,
         };
         let row_loss = runtime::empty_buffer::<f32>(
             gpu,

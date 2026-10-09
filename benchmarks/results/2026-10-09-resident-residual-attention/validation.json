@@ -1,0 +1,189 @@
+{
+  "schema": "spiraltorch.residual_attention.validation.v1",
+  "date_utc": "2026-10-09",
+  "source_base": "574b3bdcf1264d68afb910de4b079a006ab69159",
+  "source_status": "base plus content-hashed residual attention delta",
+  "package_version": "0.4.29",
+  "unreleased": true,
+  "toolchain": {
+    "rust": "1.97.0 (2d8144b78 2026-07-07)",
+    "host": "aarch64-apple-darwin",
+    "wasm_bindgen_cli": "0.2.129",
+    "formatter": "nightly-2026-04-15"
+  },
+  "fixture": {
+    "path": "crates/st-nn/tests/fixtures/residual_attention_torch.json",
+    "sha256": "2dfec722e484bdbd840fb0000096765ac1b1dbdb7cefa544af053e144016d3f3",
+    "oracle": {
+      "torch": "2.12.1",
+      "device": "cpu",
+      "dtype": "float32",
+      "threads": 1
+    },
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "unchanged_since_initial_generation": true
+  },
+  "validation": {
+    "native_wgpu": {
+      "passed": true,
+      "cases": 60,
+      "plain_updates": 32,
+      "topos_updates": 32,
+      "guards": 12,
+      "adapter": {
+        "name": "Apple M4",
+        "backend": "Metal",
+        "device_type": "IntegratedGpu"
+      }
+    },
+    "wasm_webgpu": {
+      "passed": true,
+      "cases": 60,
+      "plain_updates": 32,
+      "topos_updates": 32,
+      "guards": 12,
+      "adapter": {
+        "name": "",
+        "backend": "BrowserWebGpu",
+        "device_type": "Other"
+      },
+      "live_browser_execution": true
+    },
+    "native_nn_library": {
+      "passed": 874,
+      "failed": 0,
+      "ignored": 0
+    },
+    "native_attention_integrations": {
+      "passed": 2,
+      "failed": 0
+    },
+    "native_residual_integration": {
+      "passed": 1,
+      "failed": 0
+    },
+    "backend_tensor": {
+      "passed": 93,
+      "failed": 0,
+      "ignored": 1,
+      "ignored_reason": "pre-existing profiling experiment"
+    },
+    "backend_training": {
+      "passed": 47,
+      "failed": 0
+    },
+    "backend_graph": {
+      "passed": 27,
+      "failed": 0
+    },
+    "cpu_composition": {
+      "passed": 1,
+      "failed": 0
+    },
+    "thirteen_candidate_overflow_rejections": true,
+    "optional_geometry_terminal_guards": true,
+    "wasm_release_build": true,
+    "rustfmt": true,
+    "git_diff_check": true,
+    "isolated_python_compile": true,
+    "independent_review": {
+      "kind": "read-only static review",
+      "initial_actionable_findings": 2,
+      "remaining_actionable_findings": 0,
+      "runtime_independently_repeated": false
+    }
+  },
+  "scope": {
+    "performance_claim": false,
+    "language_quality_claim": false,
+    "matched_topos_quality_ablation": false,
+    "full_decoder": false,
+    "public_python_wasm_residual_wrappers": false,
+    "published_to_pypi": false,
+    "geometry_biases_optimized": false,
+    "intermediate_training_readbacks": false
+  },
+  "fixed_defects": [
+    {
+      "issue": "terminal_prediction_overflow_did_not_reject_vjp_or_sgd",
+      "reproduced_before_fix": true,
+      "regression_native_and_browser": true
+    },
+    {
+      "issue": "terminal_input_gradient_overflow_did_not_reject_sgd",
+      "reproduced_before_fix": true,
+      "regression_native_and_browser": true
+    }
+  ],
+  "probe_repairs": [
+    {
+      "issue": "test assumed AttentionSpec PartialEq and a separate value_shape method",
+      "production_changed": false
+    },
+    {
+      "issue": "cache test assumed every strided first-linear input remained direct",
+      "repair": "require binding reuse only on admitted direct paths; guard assertions remain unconditional",
+      "production_changed": false
+    }
+  ],
+  "source_sha256": {
+    ".github/workflows/ci.yml": "34c39067244f2fb5af8bd2a6c02d03d4a617622dc7f3bc90c174657e1882d5e8",
+    "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+    "crates/st-backend-wgpu/src/resident_graph/direct/tests.rs": "9b61934198b11e1238f89bedd43b3259fda34b35b580a387911f657a6feeb49a",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "c52e560da732cc8b802db8e4134e2feb0069c0b519c5be4e7d377f05b1ffa2fd",
+    "crates/st-backend-wgpu/src/resident_tensor/capture.rs": "710088f27ebef8e970b285be00b32b17daf0b07d4a825117869c5c4e35ce61f1",
+    "crates/st-backend-wgpu/src/resident_tensor/classification.rs": "3b6907d524c839b8403e0d22f0809bedf506891924dbade465017470852d3e18",
+    "crates/st-backend-wgpu/src/resident_tensor/loss.rs": "11a708a785129a96b83075829c5614bf2e506d1fb99e02eabf44e2146d88e102",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise.rs": "57b52d533e4b1b4d5741dc23ec4d439a81653614393b86c0b92bf0449b77d1cf",
+    "crates/st-backend-wgpu/src/resident_tensor/pointwise/vjp.rs": "0ba1aa3874ffb4e26f8a9849a74a5c6945cdaaf862683c89f3346e668243ad56",
+    "crates/st-backend-wgpu/src/resident_tensor/validity.rs": "88b7ad53522be70f849ce24a6cf6405a031a56186c8405d5c5ed5b810c7ac487",
+    "crates/st-backend-wgpu/src/resident_tensor/validity/tests.rs": "9fdf2672a77fcfb2a02491cd3794ca272bb22e8f06cb4ead232d409d60999539",
+    "crates/st-nn/Cargo.toml": "8d56ccc7736174a87be172616b4e061cbd21304327ecf87b3f4bb963e4ab7d96",
+    "crates/st-nn/examples/resident_residual_attention_browser.rs": "2e043112b4741279e9fb0ae2b1d277e9fc0fa595fd2b0464c2ee125eecb9fda0",
+    "crates/st-nn/examples/support/residual_attention.rs": "92f99b6a9e3097fa569260d24b75587e2bc4eb85f9039b2e14981db8dd5a6bc2",
+    "crates/st-nn/src/resident.rs": "e9386204d2b1328a33f128d320e2bc4fbba3a0270cc45143e132618ec3faa54d",
+    "crates/st-nn/src/resident/attention.rs": "3ff8c04c3c743d222336cd4a0e47216d14f2898a7480a3e65b7681655ef573a5",
+    "crates/st-nn/src/resident/attention/autograd.rs": "42e376545962a685e9235244c16f130b7a40c70562fcd4f15f3de3c59105facb",
+    "crates/st-nn/src/resident/attention/training.rs": "722388dd2a5ca49daa915437fa77d2ff8504cd27265a96c0ecde418dbf4c4b65",
+    "crates/st-nn/src/resident/residual_attention.rs": "bec94922ea99d68e267c819aa2ddb07ca2a41e1e146dc86042da0d38bdee0970",
+    "crates/st-nn/src/resident/residual_attention/tests.rs": "73ba9b1790bce5f956bb2a32e4ee0a3c1a7eb7cc6edca8f1977a123304b8f2d7",
+    "crates/st-nn/src/resident/residual_attention/training.rs": "6b73a3bb4a9aa05ba52700fd58676a913052ea170bba539bbea31a34a2d18183",
+    "crates/st-nn/src/resident/residual_attention/training/tests.rs": "e51a0b64af7a3d2299ab49a40291dbab02d1f9b182ea6970abe08a82a5dfe022",
+    "crates/st-nn/tests/fixtures/residual_attention_torch.json": "2dfec722e484bdbd840fb0000096765ac1b1dbdb7cefa544af053e144016d3f3",
+    "crates/st-nn/tests/resident_residual_attention.rs": "1e31409636cf770adc6eaabaa08d2207ad37f78274ce6c01defe0c1a2838308e",
+    "crates/st-nn/tests/residual_attention_browser.html": "e95624bfbe2b80674047382364e02918aa43693cf9cb6e0b2613455257a10cfa",
+    "docs/ecosystem_roadmap.md": "2df80deee414233eae0ffdcb98007cfa012387e89e228b510c71fd0e63c98ef3",
+    "docs/resident_residual_attention.md": "954e64c87f13c5478dbd6b783b58fcec10a15fd3d56e58acb1e11c89771cd638",
+    "tools/generate_residual_attention_torch_fixture.py": "df24a1698378c45bc1db6580693e42efd8437110c395f330564ff7e1c1f8b802"
+  },
+  "public_result_sha256": {
+    "native.json": "55374548a771adc5ed7b87d437ae300c11530c82cea9539a2bdc7689948e8d18",
+    "browser.json": "8af3d05f3a098717ea8805659683333839ca034e1d6285a9ba540e03f11f2db8"
+  },
+  "private_artifact_sha256": {
+    "native-probe-final": "5a04fb1b312aa1fdd50755f8230a8d0e0f857ce9e150464ff2c251e850d45636",
+    "wasm-final/resident_residual_attention_browser.js": "bc291b90244b78b55e0d6fed62f27ec56e5ebc5c30a616b2b013f56ace9b2a25",
+    "wasm-final/resident_residual_attention_browser_bg.wasm": "68227d96c34d42a1f4a4088fd43575b207362d98f75daaf535f14957dc778a87",
+    "wasm-final/resident_residual_attention_browser.d.ts": "0126071d0be16357e603215d42a08a307eda2c3ad5d4aac6a7648acff5451055"
+  },
+  "private_log_sha256": {
+    "backend-graph-regression-final.log": "8f2b72c7b95eccc37edda0d9a52a059fa198f39988cdfb30383e2441b4f95906",
+    "backend-graph-regression.log": "88e1ad759cd604bc64589e9c15348eb64dc25ae4c1f58ae5e05ad9bb6f5fc9b2",
+    "backend-training-regression.log": "469b463e1aaaca63880a616708db249f377299b626cfc745f62d5d482228a432",
+    "core-regression-final.log": "99bb1127b07f07aec1483704fc650e252ca475a92bfe338501d39a9c759cf19b",
+    "core-regression-guarded.log": "3d3655e45f6fe52c51274c33cca5e28966994aea3fd09f94c453211260f84032",
+    "core-regression-rerun.log": "2abfb378eff2bc21ff5fa561289f3dfcdc835919e058e8fce571bffb1098afca",
+    "core-regression.log": "72aecf25ba93b0711f25446dd10cc001a8c0b0d55a44c7f5cc674094e1f6e387",
+    "cpu-composition.log": "c367ccbdad5d5372714526554db735421162307e4a1411777f1655998f5f7a36",
+    "native-final.log": "e61cfe0780ad82ac5ed37da76dfd99379ae93f769bc804d53401990ef24020e3",
+    "native-probe-guarded.log": "bc2d7749f59413069feee56cf1414be7d507bd3bb1a04f48e3dcebe023f3bce2",
+    "native-probe.log": "224eb7c3f691c282ed2299da410b8c06f1972eacb08be8ef7501f40929be43dc",
+    "nn-full-regression.log": "0b4eea2cabd90146756902707bead5fdf8cbf02706c931aa1fa7e992eb521b96",
+    "tensor-guards.log": "c86be27903a26e2a3125c525261e8355887f6df04cdb257582f36e18d2fdd97d",
+    "terminal-negative-control.log": "67427cc26f1b0e6b8d602b2b24f60142884e48556be58a9503f013a5541c8975",
+    "wasm-build-final.log": "3491f027a2e79af97259ea8e7c260256d73421efba864eec09c419e511cc7759",
+    "wasm-build-guarded.log": "8c1d4a71af2a210cef1ffc7a1fe9f110302c07bdd5753c1196584141c2b3a83c",
+    "wasm-build.log": "8589df7190e581866714e22be8350f5c54ffab24b4a3bd249c05f125d42e6e8b"
+  }
+}

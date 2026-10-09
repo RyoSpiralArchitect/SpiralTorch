@@ -31,7 +31,7 @@ pub(crate) fn whole_outputs_exclusively_owned(outputs: &mut [ResidentTensor]) ->
     !outputs.is_empty()
         && outputs
             .iter_mut()
-            .all(|t| Shared::get_mut(&mut t.storage).is_some())
+            .all(|t| t.validation.is_none() && Shared::get_mut(&mut t.storage).is_some())
         && Shared::strong_count(&outputs[0].storage.flags) == outputs.len()
         && Shared::weak_count(&outputs[0].storage.flags) == 0
 }
@@ -70,6 +70,7 @@ pub(crate) fn allocate_whole_outputs<'a>(
                 }),
                 layout: layout.clone(),
                 device: device.clone(),
+                validation: None,
             })
         })
         .collect()

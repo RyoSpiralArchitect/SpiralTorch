@@ -19,6 +19,7 @@ pub mod loss;
 pub mod normalization;
 pub mod pointwise;
 pub mod profile;
+mod validity;
 
 /// An upstream tensor failed its finite-value contract. NN flags retain this bit.
 pub const INVALID_TENSOR_FLAG: u32 = 0x8000_0000;
@@ -278,6 +279,7 @@ impl TensorDevice {
             }),
             layout,
             device: self.clone(),
+            validation: None,
         })
     }
 
@@ -310,6 +312,7 @@ impl TensorDevice {
             }),
             layout,
             device: self.clone(),
+            validation: None,
         })
     }
 
@@ -385,6 +388,7 @@ impl TensorDevice {
             }),
             layout,
             device: self.clone(),
+            validation: None,
         })
     }
 
@@ -474,6 +478,7 @@ impl TensorDevice {
             }),
             layout,
             device: self.clone(),
+            validation: None,
         })
     }
 
@@ -583,6 +588,8 @@ pub struct ResidentTensor {
     storage: Shared<Storage>,
     layout: NdLayout,
     device: TensorDevice,
+    // A composed result can share values while retaining a stronger, frozen guard.
+    validation: Option<Shared<wgpu::Buffer>>,
 }
 
 impl ResidentTensor {
@@ -601,8 +608,9 @@ impl ResidentTensor {
     /// tensors until submission; already submitted reads precede reuse on the
     /// same queue. GPU flags are rewritten together with values, never separately.
     pub(crate) fn exclusively_owned(&mut self) -> bool {
-        Shared::get_mut(&mut self.storage)
-            .is_some_and(|storage| Shared::get_mut(&mut storage.flags).is_some())
+        self.validation.is_none()
+            && Shared::get_mut(&mut self.storage)
+                .is_some_and(|storage| Shared::get_mut(&mut storage.flags).is_some())
     }
 
     fn view(&self, layout: NdLayout) -> Result<Self, TensorError> {
@@ -669,13 +677,13 @@ impl ResidentTensor {
             encoder,
             op,
             Operand {
-                values: &self.storage.values,
-                flags: &self.storage.flags,
+                values: self.values(),
+                flags: self.flags(),
                 layout: &a,
             },
             Operand {
-                values: &rhs.storage.values,
-                flags: &rhs.storage.flags,
+                values: rhs.values(),
+                flags: rhs.flags(),
                 layout: &b,
             },
             &shape,
@@ -777,7 +785,7 @@ impl ResidentTensor {
         &self.storage.values
     }
     pub(crate) fn flags(&self) -> &wgpu::Buffer {
-        &self.storage.flags
+        self.validation.as_deref().unwrap_or(&self.storage.flags)
     }
 
     /// Capture logical values and validity now; awaiting does not re-read the source.

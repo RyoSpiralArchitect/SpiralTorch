@@ -5,6 +5,10 @@ use super::*;
 use crate::Linear;
 
 #[cfg(feature = "wgpu")]
+mod autograd;
+#[cfg(feature = "wgpu")]
+pub(crate) use autograd::{AttentionAutograd, AttentionTape};
+#[cfg(feature = "wgpu")]
 mod training;
 #[cfg(feature = "wgpu")]
 pub use training::{ResidentAttentionForward, ResidentAttentionTraining, ResidentAttentionVjp};

@@ -298,6 +298,7 @@ impl PointwiseVjpPlan {
                 }),
                 layout: reduction.layout.clone(),
                 device: device.clone(),
+                validation: None,
             });
         }
         self.encode_into(
