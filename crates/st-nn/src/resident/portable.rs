@@ -4,6 +4,7 @@ use super::{InferenceError, InferenceOp, InferencePlan};
 use serde::{Deserialize, Serialize};
 use st_tensor::{NdLayout, Tensor};
 mod graph;
+pub(crate) use graph::Record as GraphRecord;
 pub use graph::{
     GRAPH_PLAN_SCHEMA, GRAPH_PLAN_SCHEMA_V3, GRAPH_PLAN_SCHEMA_V4, GRAPH_PLAN_SCHEMA_V5,
 };

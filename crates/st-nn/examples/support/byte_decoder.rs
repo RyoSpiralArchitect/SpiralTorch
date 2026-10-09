@@ -19,6 +19,8 @@ use st_tensor::NdLayout;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type OwnedBias = (Option<ResidentTensor>, Option<ResidentTensor>);
 
+#[path = "byte_decoder/checkpoint_controls.rs"]
+mod checkpoint_controls;
 #[path = "byte_decoder/geometry_controls.rs"]
 mod geometry_controls;
 
@@ -689,12 +691,13 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
             trace.push(json!({"revision": revision, "loss": loss_values[0], "parameter_max_abs_error": maximum,
                 "geometry_gradient_relative_l2": geometry_relative}));
         }
-        checks.push(json!({"name": case["name"], "parameter_count": expected_count, "output_max_abs_error": output_error,
+        let checkpoint = checkpoint_controls::run(&runtime, case).await?;
+        checks.push(json!({"name": case["name"], "checkpoint":checkpoint, "parameter_count": expected_count, "output_max_abs_error": output_error,
             "embedding_output_max_abs_error": input_error, "parameter_errors": errors, "bias_errors": bias_errors, "gradient_layouts": true,
             "causality": causal, "tapes": tapes, "metric_controls": metric_controls, "learning": {"steps":16, "trace":trace}}));
     }
     Ok(
-        json!({"schema":"spiraltorch.resident_byte_decoder.validation.v2", "passed":true,
+        json!({"schema":"spiraltorch.resident_byte_decoder.validation.v3", "passed":true,
         "adapter":format!("{:?}",runtime.adapter_info()), "checks":checks,
         "scope":"complete 256-way byte decoder correctness and synthetic training, not language quality or speed"}),
     )

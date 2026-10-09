@@ -1,0 +1,297 @@
+{
+  "schema": "spiraltorch.byte_checkpoint_resume.validation.v1",
+  "source_revision": "cafe944b9cce71a511b481bad9f9fd6803b0a6a7",
+  "source_base_revision": "0700a15d07d02b60037761b645640e04f3728fb0",
+  "date": "2026-10-09",
+  "scope": "Same-runtime complete-model checkpoint/resume correctness; no cross-device transfer, quality or performance claim",
+  "toolchain": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "wasm_bindgen": "0.2.129",
+    "native_profile": "debug, default features plus wgpu",
+    "browser_profile": "release, no-default-features plus wgpu"
+  },
+  "criteria": {
+    "same_runtime_resume": "exact f32 bits and canonical model JSON, no tolerance",
+    "torch_reference": "abs_error <= 3e-6 + 5e-5 * abs(reference)",
+    "geometry_gradient_relative_l2_max": 0.002,
+    "large_revision": "9007199254740994",
+    "early_rank_rejection": "all nested graphs, including 200000 dimensions and 4096 identity stages in less than 1 MiB"
+  },
+  "checks": {
+    "native_byte_units": 14,
+    "portable_graph_units": 7,
+    "native_model_integration": 1,
+    "browser_model_cases": 4,
+    "cpu_only_library_check": "passed",
+    "workspace_nightly_fmt": "passed",
+    "clippy": {
+      "scope": "library, non-strict",
+      "exit_code": 0,
+      "st_nn_warnings": 23,
+      "changed_file_warnings": 0,
+      "warning_files_unchanged": true
+    }
+  },
+  "independent_review": {
+    "mode": "read-only local subagent",
+    "initial_findings": [
+      {
+        "priority": "P2",
+        "issue": "rank amplification before graph lowering",
+        "status": "fixed"
+      }
+    ],
+    "rereview_findings": 0,
+    "reviewer_did_not_execute_tests": true
+  },
+  "reports": {
+    "native": {
+      "sha256": "e230881a6e1be2ba0d3197534d7992e526687c36184df89cbcb306f92c72d4a1",
+      "passed": true,
+      "backend": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "cases": [
+        {
+          "name": "blocks1_geometryFalse",
+          "parameters": 18,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.465129852294922,
+              5.513395309448242
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31375,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 18,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        },
+        {
+          "name": "blocks2_geometryTrue",
+          "parameters": 31,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.620577335357666,
+              5.632585048675537
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 34746,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 31,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        },
+        {
+          "name": "causal_geometry_blocks1_metric_onlyTrue",
+          "parameters": 23,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551121711730957,
+              5.626387119293213
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31597,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 23,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        },
+        {
+          "name": "causal_geometry_blocks2_metric_onlyFalse",
+          "parameters": 37,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523879051208496,
+              5.480997085571289
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 35270,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 37,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        }
+      ]
+    },
+    "browser": {
+      "sha256": "e8ee8d5aface24441dc9d3a529a483efd9949b78e566cb9a3c460d0730996b1b",
+      "passed": true,
+      "backend": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "cases": [
+        {
+          "name": "blocks1_geometryFalse",
+          "parameters": 18,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.465129852294922,
+              5.513395309448242
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31375,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 18,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        },
+        {
+          "name": "blocks2_geometryTrue",
+          "parameters": 31,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.620577335357666,
+              5.632585048675537
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 34746,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 31,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        },
+        {
+          "name": "causal_geometry_blocks1_metric_onlyTrue",
+          "parameters": 23,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.551121711730957,
+              5.626387119293213
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 31597,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 23,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        },
+        {
+          "name": "causal_geometry_blocks2_metric_onlyFalse",
+          "parameters": 37,
+          "checkpoint": {
+            "captured_revision": 2,
+            "exact_logits_loss": true,
+            "exact_parameter_gradients": true,
+            "exact_parameters": true,
+            "final_revision": 6,
+            "first_losses": [
+              5.523879051208496,
+              5.480997085571289
+            ],
+            "foreign_gradients": true,
+            "foreign_tape": true,
+            "immutable_capture": true,
+            "json_bytes": 35270,
+            "large_revision": "9007199254740994",
+            "nonzero_update_control": true,
+            "parameter_count": 37,
+            "rejected_update_resume": true,
+            "restored_updates": 2
+          }
+        }
+      ]
+    }
+  },
+  "source_files_sha256": {
+    "crates/st-nn/examples/support/byte_decoder.rs": "ce417227d1ad09876fc15f395e5eea4bdb4c9f091e14146c0e1e355d526aff47",
+    "crates/st-nn/examples/support/byte_decoder/checkpoint_controls.rs": "b5069c0e319b348c4de2ad334db770c6a9ea90ac452ed5231070f2ada4b1d8bb",
+    "crates/st-nn/src/resident.rs": "5d6af157f3303556b3ff11b91dfee243f9745744615528d3d1820d35e8bef11a",
+    "crates/st-nn/src/resident/attention.rs": "b7a2ea5fd52076b0dc971b74700f489509c06cc375615e2d135991727d80312c",
+    "crates/st-nn/src/resident/byte_decoder.rs": "c1dce33d31a29acd581cac6db7c9c9cefdf24dd4775958d08148af2a22a6a818",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint.rs": "6aaac12d41b0241d80514a33f55e4cd19fea45e1d96cacfdbbf31ba3ea775650",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/gpu.rs": "56d9ba89aca4d72a9ac67871f9ae69632e7e665d8e09f747d9b3d8a8b7a092cb",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs": "1fe46360e5d9e586bfef9f1354156354195d0dbd9f77914f6d6cd27f4b91c09e",
+    "crates/st-nn/src/resident/byte_decoder/training.rs": "4ea58d623be76b6a9a521e4f9391cea9ae5e929e4b08d864fed61019e7ed283a",
+    "crates/st-nn/src/resident/portable.rs": "d20c767b4b404af492d88b191f7acb60db603222290be1589425842bbc0650aa",
+    "crates/st-nn/src/resident/portable/graph.rs": "b5579d7b7dfb4b415e396a265f107ad6c1277885d33364dbba9741b1b58a7611",
+    "crates/st-nn/src/resident/residual_attention.rs": "654f49d53072d85b970572753f356bf1f3d2eb1aca41f820123ec589cde2fa93",
+    "crates/st-nn/tests/byte_decoder_browser.html": "5a64a14f0224d8dd697e4107502d912e9b8aabeecd38fb22d17fcff982677ec9",
+    "docs/resident_byte_decoder.md": "adfd171fc4dd0340fe5d0bafdaf8fd67823de1d4395a88724ecd13f79ef2619b",
+    "Cargo.lock": "4fe1e2f36e965485d5924616114b8dcddc31c80fd66157b641f21c8697751f62",
+    "crates/st-nn/Cargo.toml": "59d731dca665fef0ccba145ffd8b796a0bc8cdeba64e5e46f4d9f8ef168160bf",
+    "crates/st-nn/tests/fixtures/resident_byte_decoder_torch.json": "ef9bc46892fce5591dc4b3f0ebd527a76b493b160faeb05887ff61daec389874",
+    "crates/st-nn/tests/fixtures/resident_byte_geometry_torch.json": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b"
+  },
+  "local_only_artifacts_sha256": {
+    "native-test-binary": "ccf673cd533580f0f9b879a97a35d4f847a730ac01887a20f96fabf56ee8d309",
+    "browser-final.wasm": "c4eacabd2aca762b8a4f1f3d8cf447ad27212d598de4c553790547adf60e7f4c",
+    "browser-final.js": "e6bf53527d89b7835eb30f6e7f5320fb067fcccd9be887f70f1253ad1255d3a8",
+    "native-final.json": "e230881a6e1be2ba0d3197534d7992e526687c36184df89cbcb306f92c72d4a1",
+    "browser-final.json": "e8ee8d5aface24441dc9d3a529a483efd9949b78e566cb9a3c460d0730996b1b",
+    "byte-unit-tests-final.log": "f66ded1951f3c30f8947c7f73dff50e8022e22a0a4c05fa75b7ac000aaa99596",
+    "portable-tests-final.log": "d9bf4e07db675c00c105bed5a30f48fa3732967dc3a732b1df2c28d39e4ecc5d",
+    "native-test-final.log": "ef9666a601121cc5fd142a0c113374b5a2e5c1dc77bf3c8bbdcdc8cc0e6a1dee",
+    "wasm-build-final.log": "e72a9382ee5de987f3d70c18a5783b6a0b459a47682e38e26e13ba5a28826afd",
+    "fmt-check-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cpu-only-check.log": "fb815b95a4a78012d81bd92631fdfecaa667fa2b97351ebc68f6551050cc533b",
+    "clippy.jsonl": "7e06208401e4b5c5bda1f0bf1192eeea1c68797e234f93714baa73603c4eff54",
+    "clippy.log": "c56910cd0023b2d80c1046a7207fb24a6cc7908b5b4aafa299933e8672c7ade2"
+  },
+  "limitations": [
+    "Data cursor, corpus identity, RNG, schedule, external biases and accepted-update history are not persisted.",
+    "Kernel/runtime options are caller-owned.",
+    "Cross-runtime native-to-browser handoff is not tested.",
+    "Negative-zero/subnormal JSON roundtrip is CPU-tested; JS parse/stringify transport is not bit-preserving.",
+    "This report is not a general speed or language-quality result."
+  ]
+}
