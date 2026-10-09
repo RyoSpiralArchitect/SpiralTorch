@@ -1,0 +1,71 @@
+{
+  "schema": "spiraltorch.byte_corpus.preparation.v1",
+  "source_revision": "01e12ac8cc9bb10a1b151a8d7b1fda6b157fea64",
+  "config": {
+    "batch": 2,
+    "steps": 32,
+    "width": 16,
+    "hidden": 32,
+    "heads": 2,
+    "blocks": [
+      false
+    ],
+    "geometry_cols": 4,
+    "curvature": -0.75
+  },
+  "train_sources": [
+    {
+      "path": "docs/reference/native-api.md",
+      "bytes": 29237,
+      "sha256": "4df55ccf696940a4e83c34784c87f573ffbd35cd315de2c527ad3dfc65fdfacc"
+    },
+    {
+      "path": "docs/reference/learning.md",
+      "bytes": 108148,
+      "sha256": "dd8d55b352738441edfb3ecc4e893ada9f19b5678ed1139fd865952045a9495a"
+    },
+    {
+      "path": "docs/geometric_learning_bridge.md",
+      "bytes": 6529,
+      "sha256": "ff6721615e4961d9839c61d1f76336fc6ba5e9b316623278341cf777e3557fa9"
+    }
+  ],
+  "validation_sources": [
+    {
+      "path": "docs/reference/geometry.md",
+      "bytes": 41936,
+      "sha256": "4e84c3b276137c4c83651844534e883838bff4def1edb123aace21eced145632"
+    },
+    {
+      "path": "docs/spiraltorch_manifesto.md",
+      "bytes": 3156,
+      "sha256": "25b8503888c7b89fcd1280b39b702087d65b2b2d37ab9e4becf98bc26e8216c3"
+    }
+  ],
+  "training_window_selection": "seed-20261009 shuffled complete windows, repeated only after an epoch",
+  "validation_window_selection": "evenly spaced, distinct complete windows, no score-based selection",
+  "train_target_bytes": 8192,
+  "validation_target_bytes": 2048,
+  "pairs": [
+    {
+      "seed": 11,
+      "common_initial_sha256": "b565556474e4580d3ef1a9f166d6fd3e82dce1b5dd1758c328b625936dfec649"
+    },
+    {
+      "seed": 23,
+      "common_initial_sha256": "767a1d830e2cd7ed799bbb33895a3051ad54710c0feabcc77c9fce54280bf148"
+    },
+    {
+      "seed": 37,
+      "common_initial_sha256": "74e52ebe5b0bb8631ae238805757cf40d97d45e7b148da7ae7cf2db2aed120a0"
+    }
+  ],
+  "request_sha256": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3",
+  "criteria": {
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_delta_relative_l2": 0.002,
+    "minimum_geometry_reference_delta_l2": 1e-8
+  },
+  "scope": "Small document-held-out repository-prose pilot, not broad language quality or equal-parameter/equal-compute comparison"
+}

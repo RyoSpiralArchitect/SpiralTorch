@@ -50,6 +50,9 @@ sha2 = "0.10"
 tempfile = "3"
 pollster = "0.3"
 
+[target.'cfg(all(not(target_arch = "wasm32"), unix))'.dev-dependencies]
+libc = "0.2"
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -94,6 +97,15 @@ required-features = ["wgpu"]
 
 [[example]]
 name = "resident_byte_decoder_browser"
+crate-type = ["cdylib"]
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_byte_learning"
+required-features = ["wgpu"]
+
+[[example]]
+name = "resident_byte_learning_browser"
 crate-type = ["cdylib"]
 required-features = ["wgpu"]
 

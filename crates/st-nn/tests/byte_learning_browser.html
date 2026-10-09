@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Paired byte corpus learning</title>
+<h1>Paired byte corpus learning</h1>
+<p id="summary">Loading the frozen, document-held-out request...</p>
+<a id="download" hidden>Download the complete learning result</a>
+<pre id="result" data-status="running">Rust/WebGPU learning is running. Numerical comparison is a separate step.</pre>
+<script type="module">
+const target = document.querySelector("#result");
+try {
+  const requestResponse = await fetch("/target/resident-byte-learning-web/request.json", {cache:"no-store"});
+  if (!requestResponse.ok) throw Error("Frozen request is missing");
+  const input = await requestResponse.text();
+  const request = JSON.parse(input);
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), x => x.toString(16).padStart(2,"0")).join("");
+  const {default:init, run_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
+  await init();
+  document.querySelector("#summary").textContent = `Running ${request.cases.length} cases, ${request.train_batches.length} updates per case. Request ${hash}`;
+  const report = JSON.parse(await run_resident_byte_learning(input));
+  const revisions = [0];
+  for (let i = 1; i <= request.train_batches.length; ++i) {
+    if (i % request.checkpoint_every === 0 || i === request.train_batches.length) revisions.push(i);
+  }
+  const finite = v => Number.isFinite(v);
+  if (report.schema !== "spiraltorch.byte_corpus.result.v1" || report.engine !== "spiraltorch" || report.request_sha256 !== hash
+      || report.cases.length !== request.cases.length
+      || report.cases.some((c, i) => c.name !== request.cases[i].name
+        || c.seed !== request.cases[i].seed || c.geometry !== request.cases[i].geometry
+        || c.parameter_tensors !== request.cases[i].parameters.length
+        || c.training.length !== request.train_batches.length
+        || c.training.some((s,j) => s.revision !== j+1 || !finite(s.ce))
+        || c.validation.length !== revisions.length
+        || c.validation.some((s,j) => s.revision !== revisions[j] || !finite(s.mean_ce) || !finite(s.bits_per_byte)
+          || s.target_bytes !== request.config.batch * request.config.steps * request.validation_batches.length
+          || s.batch_losses.length !== request.validation_batches.length || !s.batch_losses.every(finite))
+        || c.final_parameters.length !== request.cases[i].parameters.length
+        || c.final_parameters.some((p,j) => p.length !== request.cases[i].parameters[j].values.length || !p.every(finite)))) {
+    throw Error("Incomplete or mismatched corpus result");
+  }
+  target.textContent = JSON.stringify(report, null, 2);
+  target.dataset.status = "completed";
+  document.querySelector("#summary").textContent = "Completed all updates and held-out checkpoints. Download and compare against the independent Torch result. Completion alone is not a numerical pass or a quality claim.";
+  const download = document.querySelector("#download");
+  download.href = URL.createObjectURL(new Blob([target.textContent], {type:"application/json"}));
+  download.download = "resident-byte-corpus.json";
+  download.hidden = false;
+} catch (error) {
+  target.dataset.status = "error";
+  target.textContent = String(error.stack || error);
+  document.querySelector("#summary").textContent = "Learning failed; no partial result is promoted.";
+}
+</script>
