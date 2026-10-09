@@ -1,0 +1,77 @@
+{
+  "schema": "spiraltorch.byte_corpus.cross_client_resume.evidence.v1",
+  "date_utc": "2026-10-09",
+  "base_revision": "626d0494f3d1b671f3a25c1ae9dd497361ca35af",
+  "scope": "Actual same-host native Metal / browser WebGPU checkpoint handoffs, both directions, without rebuilding the runtime.",
+  "source_sha256": {
+    "benchmarks/results/2026-10-09-byte-corpus-cross-client-resume/README.md": "cecc8d18e6d40f1f056c93a1f5d6623655b171ac5a856c2585cc914a8b24ba20",
+    "benchmarks/results/2026-10-09-byte-corpus-cross-client-resume/verify.py": "43dc9f63bb2c5d72d83f4ba4fe1fc7e1089bf2c8bc7b0bc97fce85fa5df7e41f",
+    "tools/byte_corpus_study.py": "22c742261388471435ae7c7006e8be6d1e14472f49431c0877824123061c3938",
+    "tools/verify_byte_corpus_resume.py": "0d5f682b799f51c2516077bf18df88c0d4254c211b27048acbe695b737d37ea6",
+    "docs/byte_corpus_learning.md": "12b0f15ee6656de94b39324e6657496fb4a599fde2fbdd2a9a2969fed9b0eed4"
+  },
+  "runtime": {
+    "source_evidence": "../2026-10-09-byte-corpus-resume/validation.json",
+    "native_binary_sha256": "4e6a0057a53bde5fbc489b6d40084734ddf5f6c126a3a045a281f72fe4764bb9",
+    "browser_wasm_sha256": "59f1661e6dce7a207958dffa3d90c1999fea028a12fab5d2dfbed1d227b019b5",
+    "browser_javascript_sha256": "f98a8af87ef2a6a64e1416e8cd16600e687f4f088c3b746f63feb88e2c9dcaa3",
+    "fresh_native_process": true,
+    "fresh_browser_page": true,
+    "local_server_bind": "127.0.0.1",
+    "rebuild": false,
+    "gpu_runs_sequential": true
+  },
+  "protocol": {
+    "request_sha256": "fe4f21d72ce419703c3fd8c6bedc6eb89011d4a04f992f4085ad845b4006eba3",
+    "reference_sha256": "b879c3101fdf487d046226673ace0fab805cfe5afc49baf5eb3c6c11d0486024",
+    "cases_per_direction": 6,
+    "seeds": [
+      11,
+      23,
+      37
+    ],
+    "source_cursor": 37,
+    "target_cursor": 128,
+    "evaluation_revisions": [
+      0,
+      64,
+      128
+    ],
+    "atol": 0.000003,
+    "rtol": 0.00005,
+    "geometry_delta_relative_l2": 0.002,
+    "minimum_reference_delta_l2": 1e-8,
+    "request_reference_checkpoints_not_regenerated": true,
+    "thresholds_unchanged": true
+  },
+  "checks": {
+    "native_resume_exit_code": 0,
+    "browser_ui_completed_cases": 6,
+    "browser_ui_completed_updates": 128,
+    "independent_torch_gate_both_directions": true,
+    "checkpoint_bits_match_both_endpoints": true,
+    "retained_history_exact": true,
+    "negative_controls_rejected": 8,
+    "target_uninterrupted_reports_bitwise_equal": false,
+    "max_final_parameter_difference_vs_target_uninterrupted_both_directions": 2.384185791015625e-7,
+    "max_final_parameter_error_vs_torch_both_directions": 2.384185791015625e-7,
+    "verification_command": "python3 -I -S -B benchmarks/results/2026-10-09-byte-corpus-cross-client-resume/verify.py REQUEST REFERENCE RESUME_DIRECTORY HANDOFF_DIRECTORY NEW_OUTPUT"
+  },
+  "public_result_sha256": {
+    "verification.json": "a7ed0fe35a1c83b502ea17fd568bb09ce3201fa3362ab7a64b290b8a5e5f8a32"
+  },
+  "local_artifact_group": "2026-10-09-byte-corpus-cross-client-resume",
+  "selected_verification": "verification-final.json",
+  "raw_input_hashes": "verification.json:input_sha256",
+  "local_log_sha256": {
+    "browser-server.log": "ee8a090b5b1febd8de4a6833bb2def2ed8a4c8a73ac5d7abf18a10d69092516b",
+    "browser-to-native.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "limits": [
+    "Single host and fixed small recipe, not cross-hardware qualification.",
+    "No cross-client bitwise equality, live-state migration, speedup or learning-quality claim.",
+    "Adapter text and hashes are diagnostics, not runtime attestation.",
+    "Full model validity remains Rust-owned; the record-local verifier checks artifact consistency and the existing Torch gate.",
+    "The new record-local verifier has eight executed negative controls; no additional independent review is claimed for that verifier."
+  ]
+}

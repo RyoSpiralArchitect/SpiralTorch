@@ -5,7 +5,10 @@ windows, not only frozen synthetic examples. `resident_byte_learning` and
 `resident_byte_learning_browser` use the **same Rust runner and model**.
 Python prepares explicit data/initial weights and provides an independent
 CPU-f32 PyTorch comparison; it never implements SpiralTorch's execution route.
-This is a bounded pilot runner, not a new public checkpoint or tokenizer API.
+The runner is the public Rust `st_nn::resident::ByteCorpusStudy` API (feature
+`wgpu`). It is a bounded paired-study protocol, not a general training scheduler
+or a tokenizer API. Its request-bound checkpoints include complete model values,
+the common data cursor and scalar histories for all cases.
 
 The [2026-10-09 pilot record](../benchmarks/results/2026-10-09-byte-corpus-matched-learning/README.md)
 publishes every arm's scalar trajectory, the fixed acceptance criteria and
@@ -105,6 +108,96 @@ the result, and pass that JSON to the same `compare` command instead of
 independent comparison is still required. No page-side model mathematics is
 used. Do not expose a local server containing private inputs to other hosts.
 
+## Checkpoint And Resume
+
+Pause at an absolute update count **per case**, even between scheduled
+evaluations, then resume in a new process with the exact original request:
+
+```sh
+target/release/examples/resident_byte_learning target/byte-corpus-pilot/request.json \
+  --stop-after 37 --checkpoint-out target/byte-corpus-pilot/checkpoint-37.json \
+  > target/byte-corpus-pilot/partial-37.json
+target/release/examples/resident_byte_learning target/byte-corpus-pilot/request.json \
+  --resume target/byte-corpus-pilot/checkpoint-37.json \
+  --checkpoint-out target/byte-corpus-pilot/checkpoint-128.json \
+  > target/byte-corpus-pilot/resumed.json
+```
+
+Output checkpoint paths must be new. The CLI writes a same-directory temporary
+file, syncs its contents, then persists without replacing an existing file.
+This is not a full power-loss durability guarantee for the directory entry.
+Stop/resume flags require `--checkpoint-out`; unknown or duplicate flags fail.
+Input and checkpoint reads reject non-regular files and are bounded to 64 MiB.
+Resumable segments additionally preflight a conservative worst-case checkpoint
+size through the **final** update, including scalar histories and growth of
+float text. `checkpoint_size_bound()` exposes that estimate. A request that
+fits the input limit may still be too large for resumable execution; it fails
+before requesting a GPU, rather than after learning. The original uninterrupted
+`run` path retains its existing request limits.
+
+Rust clients use `ByteCorpusStudy::from_json`, `checkpoint_from_json`,
+`validate_segment`, and `advance(runtime, checkpoint.as_ref(), stop_after)`.
+These CPU preflight methods require no live device; the module is WGPU-gated.
+`run(runtime)` retains the original uninterrupted result format without taking
+a checkpoint. `advance` returns `ByteCorpusStudySegment { report, checkpoint }`;
+`checkpoint.to_json()` is portable model/state data, not live GPU buffers.
+
+The checkpoint schema is `spiraltorch.byte_corpus.checkpoint.v1`. Its SHA-256
+binds the **exact request bytes**, including whitespace, initial weights, case
+order, seeds, documents, explicit batch selections, fixed SGD rate, geometry and
+evaluation schedule. Keep that request unchanged alongside the checkpoint.
+There is no omitted RNG cursor: all selections are already in the request, and
+the model uses stateless SGD. The model checkpoint also fixes window-local
+position/geometry reset semantics. An exact hash detects accidental mixing;
+it is not a signature or proof that the recorded history was computed honestly.
+
+All cases must have the same cursor, continuous training histories, exactly the
+scheduled evaluation history, finite losses, matching model topology and matching
+attempted revisions. Every update in a segment must be accepted before the new
+checkpoint is returned. Failure or cancellation drops that segment's local
+models and leaves the caller's previous checkpoint unchanged. Partial reports
+use `spiraltorch.byte_corpus.partial.v1`, never the completed-result schema.
+A pause at 37 preserves evaluations at 0/64/128: it does **not** introduce an
+extra validation at 37. A completed checkpoint can be loaded without retraining.
+
+The browser export `advance_resident_byte_learning(input, checkpoint, stop)`
+calls the same Rust API. Open `byte_learning_resume_browser.html?stop=37` under
+the same local server, download its checkpoint and report, then close the page.
+Put that checkpoint at `target/resident-byte-learning-web/checkpoint.json` and
+open a **fresh page** at `byte_learning_resume_browser.html?resume=1`. It resumes
+to the request's total unless a `stop` query parameter is supplied. Checkpoint
+JSON is passed as an opaque string, preserving model float32 values and signed
+zero; the page does not parse/reconstruct model weights. Both report downloads
+also preserve the original Rust JSON string; a separately parsed copy is only
+used for UI validation/display. JavaScript `JSON.stringify` would erase signed
+zero and is therefore not used to produce the downloaded report. The segment
+export returns `report_json` and `checkpoint_json` strings. Neither browser page
+stores data remotely or implements a second learning loop.
+
+Compare resumed and uninterrupted trajectories/final weights within each
+runtime, then run the same independent Torch gate. Native and browser remain
+separate evidence scopes; this contract does not promise bitwise agreement
+across hardware, kernel options or driver versions.
+The [same-host cross-client record](../benchmarks/results/2026-10-09-byte-corpus-cross-client-resume/README.md)
+also tests native-to-browser and browser-to-native handoffs at update 37.
+Both retain exact saved prefixes and pass the same Torch criteria through 128;
+their final reports are not bitwise equal to target-only uninterrupted runs.
+
+```sh
+python3 -I -S -B tools/verify_byte_corpus_resume.py \
+  target/byte-corpus-pilot/request.json target/byte-corpus-pilot/native.json \
+  target/byte-corpus-pilot/partial-37.json target/byte-corpus-pilot/resumed.json \
+  target/byte-corpus-pilot/checkpoint-37.json target/byte-corpus-pilot/resume-check.json
+```
+
+The verifier requires type-aware, signed-zero-sensitive equality of the entire
+resumed/uninterrupted report and checks paused prefixes, stored float32 histories,
+and every saved tensor's shape and float32 bits against the paused readback.
+Full graph/operation validity remains the Rust preflight's responsibility.
+It writes a new
+small hash/result record, not raw weights. Use the corresponding browser files
+for a separate browser record. Retain raw reports and checkpoints locally.
+
 ## Acceptance And Limits
 
 Every training CE, held-out batch CE and final parameter is compared against
@@ -132,5 +225,6 @@ sampled task. They do not prove that geometry helps, scales to LLMs, or improves
 prose. Report each paired seed difference, including regressions; do not select
 a favorable seed, tune on this held-out set, or loosen the numerical gate after
 seeing the result. Larger independent corpora, repeated runs, capacity/compute
-controls, generation evaluation and complete-model checkpoint/resume remain
-separate work.
+controls, generation evaluation and general streamed/long-running training
+remain separate work. The resumable fixed study does not supply an Adam state,
+changing learning-rate schedule, continuous recurrent context or live sampler.

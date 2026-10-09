@@ -17,7 +17,8 @@ try {
   const {default:init, run_resident_byte_learning} = await import("/target/resident-byte-learning-web/resident_byte_learning_browser.js");
   await init();
   document.querySelector("#summary").textContent = `Running ${request.cases.length} cases, ${request.train_batches.length} updates per case. Request ${hash}`;
-  const report = JSON.parse(await run_resident_byte_learning(input));
+  const reportJson = await run_resident_byte_learning(input);
+  const report = JSON.parse(reportJson);
   const revisions = [0];
   for (let i = 1; i <= request.train_batches.length; ++i) {
     if (i % request.checkpoint_every === 0 || i === request.train_batches.length) revisions.push(i);
@@ -42,7 +43,8 @@ try {
   target.dataset.status = "completed";
   document.querySelector("#summary").textContent = "Completed all updates and held-out checkpoints. Download and compare against the independent Torch result. Completion alone is not a numerical pass or a quality claim.";
   const download = document.querySelector("#download");
-  download.href = URL.createObjectURL(new Blob([target.textContent], {type:"application/json"}));
+  // JS formatting is display-only; preserve Rust's numeric text and signed zero.
+  download.href = URL.createObjectURL(new Blob([reportJson], {type:"application/json"}));
   download.download = "resident-byte-corpus.json";
   download.hidden = false;
 } catch (error) {
