@@ -1,0 +1,215 @@
+{
+  "schema": "spiraltorch.resident_byte_decoder.evidence.v1",
+  "date_utc": "2026-10-09",
+  "status": "native_and_browser_correctness_passed",
+  "scope": "Synthetic causal byte decoder correctness and guarded learning, not language quality or speed",
+  "source": {
+    "base_revision": "7bdba5cec72285c705fec0ea4dcb764e7527f7f1",
+    "kind": "tested worktree source hashes relative to the parent commit; human-deleted unrelated benchmark archives excluded",
+    "sha256": {
+      "Cargo.lock": "3c4680f4007a671ca9968992d9bf569949cbdcb037c35597a1eff3a92e2d28f4",
+      ".github/workflows/ci.yml": "e0ed7b20049488b243434afef9f774599cce55ed13dc31454779f620fe838074",
+      "crates/st-nn/Cargo.toml": "a081aa3dc2f14298ea4bc73c90e66836b3a5b653ec5add7c8576429105498f60",
+      "crates/st-nn/src/resident.rs": "8d2fda861dd162614c78beebb7941134d692688e6ab70367c0b420760a85169f",
+      "crates/st-nn/src/resident/byte_decoder.rs": "069743e144ecda022106d274a1e06a808b1361d3589857db1ffca2e25cba1658",
+      "crates/st-nn/src/resident/byte_decoder/tests.rs": "cb945e9b7c29fb08a6bd71be48cad20fea2fbcef7df995f0d152aa75ca1b59de",
+      "crates/st-nn/src/resident/byte_decoder/training.rs": "00f49e1ee0452b6ccdd25801d694bd554340a3169b15d768c56d2497d933931b",
+      "crates/st-nn/src/resident/byte_decoder/training/tests.rs": "994caad612d2e256fc5c57e38d03045f85505a677fbed368f508e53de6b77435",
+      "crates/st-nn/src/resident/residual_attention.rs": "9ef150a8ec8e2a706a72aac3a1b491ef2f3d8836842d7944dbd822dd4bc19b13",
+      "crates/st-nn/src/resident/residual_attention/autograd.rs": "770c752a74b4534d0b2a88438350a8f109720c290ef454ca5cad09633ee62a75",
+      "crates/st-nn/src/resident/residual_attention/training.rs": "2b3656f52282568746aee1276195c41d3e75585f5873916133e3ea8067194e33",
+      "crates/st-nn/examples/support/byte_decoder.rs": "846f019409747986d942abff9e92ac83519defea0761cc6d3c30e48f6a5c0968",
+      "crates/st-nn/examples/resident_byte_decoder_browser.rs": "0abef817822ad8f9aabb43861c67e51232bfc89c132cb18a05643f12802f1c39",
+      "crates/st-nn/tests/resident_byte_decoder.rs": "349befd5eddefe5df5b48c3060b386436ee3744df71a7471d6510364f169b57e",
+      "crates/st-nn/tests/byte_decoder_browser.html": "c6ef91ca44488e49ec0782a367280b6108ab49d225472a8cfafab89f834ab097",
+      "crates/st-nn/tests/fixtures/resident_byte_decoder_torch.json": "ef9bc46892fce5591dc4b3f0ebd527a76b493b160faeb05887ff61daec389874",
+      "tools/generate_resident_byte_decoder_torch_fixture.py": "c4a096da395afd3d0aafeba7cd5e3ccb4020862d718bdb8130d2ee4c773581be"
+    }
+  },
+  "environment": {
+    "native": {
+      "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+      "target": "aarch64-apple-darwin",
+      "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }"
+    },
+    "browser": {
+      "target": "wasm32-unknown-unknown",
+      "adapter": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+      "wasm_bindgen_cli": "0.2.129"
+    },
+    "reference": {
+      "framework": "PyTorch",
+      "version": "2.12.1",
+      "device": "cpu",
+      "dtype": "float32",
+      "threads": 1,
+      "deterministic": true,
+      "imports_spiraltorch": false
+    }
+  },
+  "criteria": {
+    "absolute_tolerance": 0.000003,
+    "relative_tolerance": 0.00005,
+    "frozen_fixture_sha256": "ef9bc46892fce5591dc4b3f0ebd527a76b493b160faeb05887ff61daec389874",
+    "fixture_unchanged_after_initial_generation": true,
+    "numeric_tolerances_unchanged": true,
+    "models": 2,
+    "parameter_tensor_counts": [
+      18,
+      31
+    ],
+    "ce_sgd_updates_per_model": 16,
+    "all_parameters_compared_after_every_update": true,
+    "training_trajectory_readbacks_after_all_updates_queued": true,
+    "external_bias_vjps_per_model": [
+      0,
+      4
+    ],
+    "gradient_shapes_and_optional_presence": true,
+    "ownership_controls_per_model": 9,
+    "native_browser_result_fields_equal": true
+  },
+  "checks": {
+    "native_full_model": {
+      "status": "passed",
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_byte_decoder -- --nocapture --test-threads=1",
+      "report": "native.json"
+    },
+    "browser_full_model": {
+      "status": "passed",
+      "build": "cargo build --locked -p st-nn --target wasm32-unknown-unknown --release --no-default-features --features wgpu --example resident_byte_decoder_browser",
+      "page": "crates/st-nn/tests/byte_decoder_browser.html",
+      "report": "browser.json",
+      "built_with_empty_RUSTFLAGS": true,
+      "environment_unset": [
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_RUSTFLAGS",
+        "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+        "LIBRARY_PATH",
+        "PKG_CONFIG_PATH"
+      ]
+    },
+    "resident_unit_regression": {
+      "status": "passed",
+      "tests": 70,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --lib resident:: -- --test-threads=1",
+      "includes": "12-slot candidate rejection in a smaller two-block model and isolated token/position scatter failure at rates 0 and 0.125"
+    },
+    "cpu_byte_contract": {
+      "status": "passed",
+      "tests": 4,
+      "command": "cargo test --locked --release -p st-nn --no-default-features --lib resident::byte_decoder"
+    },
+    "residual_attention_regression": {
+      "status": "passed",
+      "vjp_cases": 60,
+      "training_updates": [
+        32,
+        32
+      ],
+      "guard_controls": 12,
+      "command": "SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1 cargo test --locked --release -p st-nn --no-default-features --features wgpu --test resident_residual_attention -- --nocapture --test-threads=1"
+    },
+    "formatting": {
+      "status": "passed",
+      "command": "cargo +nightly-2026-04-15 fmt --all -- --check"
+    },
+    "diff_whitespace": {
+      "status": "passed",
+      "command": "git diff --check"
+    },
+    "strict_clippy": {
+      "status": "not_passed",
+      "toolchain": "clippy 0.1.97",
+      "command": "cargo clippy --locked --release -p st-nn --no-default-features --features wgpu --lib --test resident_byte_decoder --example resident_byte_decoder_browser -- -D warnings",
+      "reason": "Seven existing chunks_exact_to_as_chunks lint attributes are unknown to the local toolchain; --no-deps -D warnings instead reaches st-nn and stops at 23 diagnostics in unchanged language/layers/z_rba/zspace_coherence files. No lint policy changes.",
+      "sources_verified_unchanged_from_base": true
+    }
+  },
+  "review": {
+    "type": "independent read-only local source review",
+    "implementation_findings": 0,
+    "probe_findings": 2,
+    "probe_findings_addressed": [
+      "Retained output now tested after a different input with positive sensitivity; gradients also tested immediately after failure and with opposite cotangent",
+      "Explicit embedding-output and each block z/pair gradient layouts and optional presence"
+    ],
+    "re_review": "no remaining actionable findings in bounded scope",
+    "runtime_checks_by": "parent agent, after review fixes"
+  },
+  "private_records": [
+    {
+      "name": "native-reviewed.log",
+      "bytes": 122737,
+      "sha256": "7caa9a672ee33e635e7b5fa9eb46b83c68f5f3a0254f527dda0452b069a042c5"
+    },
+    {
+      "name": "browser-reviewed.json",
+      "bytes": 12481,
+      "sha256": "b4aaacef4cdeb116b3034292132d5447c688fd90482384185912734542fa267f"
+    },
+    {
+      "name": "residual-regression.log",
+      "bytes": 149447,
+      "sha256": "ee75abd98738a9d3a0a452b711be459f5813110e506631a1bf88e30815df7195"
+    },
+    {
+      "name": "resident-unit-regression.log",
+      "bytes": 122207,
+      "sha256": "1f8505398ce48da315acfd0f70b97ab9632b1d5723cc0361fac420454d61826f"
+    },
+    {
+      "name": "cpu-final.log",
+      "bytes": 1362,
+      "sha256": "546fb203e09b77e113409553ef6dcbd37e2d907931b07bd91defad08dd162ab8"
+    },
+    {
+      "name": "wasm-reviewed.log",
+      "bytes": 111362,
+      "sha256": "861526a7509f78f22c16e4e92780fbe7ef5cef4002b2431191bcffe0f12e8185"
+    },
+    {
+      "name": "clippy-reviewed.log",
+      "bytes": 116017,
+      "sha256": "6eff1a3b15834d5459df66b731bfdb97d94b982a4e1ad8534a7dc41eaf14963d"
+    },
+    {
+      "name": "clippy-scoped.log",
+      "bytes": 128965,
+      "sha256": "4d21d7521719d5fd85cb615599ba0bb437f29a27a6962951f121757276c06cb2"
+    },
+    {
+      "name": "native-probe-reviewed",
+      "bytes": 8831136,
+      "sha256": "24e03b333adf9fc024bd8ce2cc73594bc505fa4c751592b818cd608bf63266de"
+    },
+    {
+      "name": "resident_byte_decoder_browser.js",
+      "bytes": 47517,
+      "sha256": "b96f5fdd923657f73dd8a7f33997fdf938054a1cd568784140e542a5cbe055de"
+    },
+    {
+      "name": "resident_byte_decoder_browser_bg.wasm",
+      "bytes": 5736919,
+      "sha256": "c14a81c71fe46390b49e33376f49e11ac5a9dd4ee88e3693920035d0eea39091"
+    },
+    {
+      "name": "resident_byte_decoder_browser.d.ts",
+      "bytes": 3867,
+      "sha256": "228af602e6470d8b06770570fa2e04956958ade10500f6080a340c123e2d7a8f"
+    },
+    {
+      "name": "resident_byte_decoder_browser_bg.wasm.d.ts",
+      "bytes": 2812,
+      "sha256": "4611637c1279fcb1b1e05222457f0785c160015ad210a6967cb28f270e4579da"
+    }
+  ],
+  "limitations": [
+    "Two tiny synthetic models, no corpus evaluation or throughput measurements",
+    "Configurations/seeds differ; losses are not a matched geometry ablation",
+    "External geometry producers are caller-owned and may violate causality; tested biases depend only on position",
+    "No learned causal Z-Space encoder or variable-size latent units",
+    "No full-model Python/JavaScript facade, checkpoint/resume, tied embeddings or streaming/KV-cache generation",
+    "Strict Clippy gate remains non-green for unchanged existing code; correctness tests do not replace that gate"
+  ]
+}

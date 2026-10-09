@@ -1,0 +1,192 @@
+{
+  "adapter": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+  "checks": [
+    {
+      "gradient_max_abs_error": 0,
+      "name": "duplicates",
+      "output_max_abs_error": 0,
+      "strided": false
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "multi_workgroup",
+      "output_max_abs_error": 0,
+      "strided": false
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "scalar",
+      "output_max_abs_error": 0,
+      "strided": false
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "empty_samples",
+      "output_max_abs_error": 0,
+      "strided": false
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "empty_table",
+      "output_max_abs_error": 0,
+      "strided": false
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "zero_width",
+      "output_max_abs_error": 0,
+      "strided": false
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "duplicates",
+      "output_max_abs_error": 0,
+      "strided": true
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "multi_workgroup",
+      "output_max_abs_error": 0,
+      "strided": true
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "scalar",
+      "output_max_abs_error": 0,
+      "strided": true
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "empty_samples",
+      "output_max_abs_error": 0,
+      "strided": true
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "empty_table",
+      "output_max_abs_error": 0,
+      "strided": true
+    },
+    {
+      "gradient_max_abs_error": 0,
+      "name": "zero_width",
+      "output_max_abs_error": 0,
+      "strided": true
+    }
+  ],
+  "edge_checks": {
+    "atomic_rejections": 2,
+    "broadcast": true,
+    "cross_device_rejections": 2,
+    "guard_cases": 7,
+    "rejected_shapes": 10,
+    "rejection_negative_controls": 4,
+    "stable_order": true,
+    "subnormals": true
+  },
+  "learning": {
+    "final_parameter_max_abs_error": 1.4901161193847656e-8,
+    "steps": 16,
+    "trace": [
+      {
+        "gradient_max_abs_error": 2.9802322387695312e-8,
+        "logits_max_abs_error": 0,
+        "loss": 1.0999140739440918,
+        "revision": 1
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 7.450580596923828e-9,
+        "loss": 1.076886773109436,
+        "revision": 2
+      },
+      {
+        "gradient_max_abs_error": 7.450580596923828e-9,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 1.0544354915618896,
+        "revision": 3
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 1.0325512886047363,
+        "revision": 4
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 1.011225938796997,
+        "revision": 5
+      },
+      {
+        "gradient_max_abs_error": 2.2351741790771484e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.9904497861862183,
+        "revision": 6
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.9702134132385254,
+        "revision": 7
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.9505061507225037,
+        "revision": 8
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.9313180446624756,
+        "revision": 9
+      },
+      {
+        "gradient_max_abs_error": 2.9802322387695312e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.9126380085945129,
+        "revision": 10
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.8944553732872009,
+        "revision": 11
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.8767588138580322,
+        "revision": 12
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.8595371246337891,
+        "revision": 13
+      },
+      {
+        "gradient_max_abs_error": 2.9802322387695312e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.8427789211273193,
+        "revision": 14
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 2.2351741790771484e-8,
+        "loss": 0.826472818851471,
+        "revision": 15
+      },
+      {
+        "gradient_max_abs_error": 1.4901161193847656e-8,
+        "logits_max_abs_error": 1.4901161193847656e-8,
+        "loss": 0.8106073141098022,
+        "revision": 16
+      }
+    ]
+  },
+  "passed": true,
+  "schema": "spiraltorch.resident_embedding.validation.v1",
+  "scope": "embedding correctness and resident CE/SGD, not a language model or speed benchmark"
+}

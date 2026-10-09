@@ -1,10 +1,8 @@
 use super::*;
-use crate::resident::attention::{AttentionAutograd, AttentionTape};
 use st_backend_wgpu::{
     resident_matmul::{MatmulAccumulation, MatmulKernel, MatmulTile},
     resident_tensor::{ResidentTensor, TensorDevice},
     resident_training::{
-        graph::{GraphForward, ResidentGraphAutograd},
         parameters::{
             ResidentParameterGradients, ResidentParameterSnapshot, ResidentParameterUpdate,
             ResidentParameters,
@@ -18,15 +16,12 @@ use st_backend_wgpu::{
 pub struct ResidentResidualAttentionForward {
     parameters: ResidentParameterSnapshot,
     submission: u64,
-    pre: GraphForward,
-    attention: AttentionTape,
-    feed_forward: GraphForward,
-    prediction: ResidentTensor,
+    tape: ResidualTape,
 }
 
 impl ResidentResidualAttentionForward {
     pub fn prediction(&self) -> &ResidentTensor {
-        &self.prediction
+        self.tape.prediction()
     }
 
     pub fn parameter_revision(&self) -> u64 {
@@ -66,12 +61,9 @@ impl ResidentResidualAttentionVjp {
 /// Ordering is pre-graph parameters, fused QKV weight/bias, output weight/bias,
 /// then feed-forward graph parameters. Original plans and host Modules are frozen.
 pub struct ResidentResidualAttentionTraining {
-    pre: ResidentGraphAutograd,
-    attention: AttentionAutograd,
-    feed_forward: ResidentGraphAutograd,
+    graph: ResidualAutograd,
     parameters: ResidentParameters,
-    pre_parameters: usize,
-    bound_revision: u64,
+    bound_revision: Option<u64>,
     forwards: u64,
     latest: Option<u64>,
 }
@@ -97,31 +89,18 @@ impl ResidualAttentionPlan {
         accumulation: MatmulAccumulation,
     ) -> Result<ResidentResidualAttentionTraining, InferenceError> {
         require_uncommitted_route()?;
-        let attention =
-            AttentionAutograd::new(&self.attention, runtime.clone(), tile, kernel, accumulation)?;
-        let device = attention.tensor_device();
-        let pre = self.pre.graph_definition()?;
-        let feed_forward = self.feed_forward.graph_definition()?;
-        let [qkv, output] = self.attention.graph_parts()?;
-        let values = [&pre, &qkv, &output, &feed_forward]
-            .into_iter()
-            .flat_map(|graph| graph.parameters())
+        let graph = ResidualAutograd::new(self, runtime, tile, kernel, accumulation)?;
+        let device = graph.tensor_device();
+        let values = self
+            .parameter_values()?
+            .iter()
             .map(|p| device.upload(&p.shape, &p.values))
             .collect::<Result<Vec<_>, _>>()?;
         let parameters = ResidentParameters::new(values)?;
         Ok(ResidentResidualAttentionTraining {
-            pre_parameters: pre.parameters().len(),
-            pre: ResidentGraphAutograd::new(runtime.clone(), pre, tile, kernel, accumulation)?,
-            attention,
-            feed_forward: ResidentGraphAutograd::new(
-                runtime,
-                feed_forward,
-                tile,
-                kernel,
-                accumulation,
-            )?,
+            graph,
             parameters,
-            bound_revision: 0,
+            bound_revision: None,
             forwards: 0,
             latest: None,
         })
@@ -130,15 +109,15 @@ impl ResidualAttentionPlan {
 
 impl ResidentResidualAttentionTraining {
     pub fn input_layout(&self) -> &NdLayout {
-        self.pre.input_layout()
+        self.graph.input_layout()
     }
 
     pub fn output_layout(&self) -> &NdLayout {
-        self.feed_forward.output_layout()
+        self.graph.output_layout()
     }
 
     pub fn attention_spec(&self) -> AttentionSpec {
-        self.attention.attention_spec()
+        self.graph.attention_spec()
     }
 
     pub fn tensor_device(&self) -> &TensorDevice {
@@ -156,56 +135,24 @@ impl ResidentResidualAttentionTraining {
         pair_bias: Option<&ResidentTensor>,
     ) -> Result<ResidentResidualAttentionForward, InferenceError> {
         require_uncommitted_route()?;
-        if input.layout().shape() != self.input_layout().shape() {
-            return Err(InferenceError::InvalidLayout);
-        }
-        self.attention_spec().validate_bias_shapes(
-            z_bias.map(|b| b.layout().shape()),
-            pair_bias.map(|b| b.layout().shape()),
-        )?;
-        for tensor in [Some(input), z_bias, pair_bias].into_iter().flatten() {
-            if !tensor
-                .device()
-                .runtime()
-                .context()
-                .shares_handles_with(self.tensor_device().runtime().context())
-            {
-                return Err(st_backend_wgpu::resident_tensor::TensorError::DeviceMismatch.into());
-            }
-        }
+        self.graph.validate_input(input, z_bias, pair_bias)?;
         let submission = self
             .forwards
             .checked_add(1)
             .ok_or(TrainingError::Overflow)?;
         self.latest = None;
         let parameters = self.parameters.snapshot();
-        if self.bound_revision != parameters.revision() {
-            let n = self.pre_parameters;
-            self.pre.set_parameter_tensors(&parameters.values()[..n])?;
-            self.attention
-                .set_parameters(&parameters.values()[n..n + 4])?;
-            self.feed_forward
-                .set_parameter_tensors(&parameters.values()[n + 4..])?;
-            self.bound_revision = parameters.revision();
+        if self.bound_revision != Some(parameters.revision()) {
+            self.graph.set_parameters(parameters.values())?;
+            self.bound_revision = Some(parameters.revision());
         }
-        self.pre.set_input_tensor(input)?;
-        let pre = self.pre.forward()?;
-        let attention = self
-            .attention
-            .forward(pre.prediction(), z_bias, pair_bias)?;
-        let residual = input.add(attention.prediction())?;
-        self.feed_forward.set_input_tensor(&residual)?;
-        let feed_forward = self.feed_forward.forward()?;
-        let prediction = residual.add(feed_forward.prediction())?;
+        let tape = self.graph.forward(input, z_bias, pair_bias)?;
         self.forwards = submission;
         self.latest = Some(submission);
         Ok(ResidentResidualAttentionForward {
             parameters,
             submission,
-            pre,
-            attention,
-            feed_forward,
-            prediction,
+            tape,
         })
     }
 
@@ -220,44 +167,15 @@ impl ResidentResidualAttentionTraining {
         {
             return Err(TrainingError::StaleForward.into());
         }
-        let guarded = self
-            .tensor_device()
-            .guard_together(&[cotangent, forward.prediction()])?;
-        let cotangent = &guarded[0];
-        let feed_forward = self
-            .feed_forward
-            .backward(&forward.feed_forward, cotangent)?;
-        let residual = cotangent.add(feed_forward.input_gradient())?;
-        let attention = self.attention.backward(&forward.attention, &residual)?;
-        let pre = self.pre.backward(&forward.pre, &attention.input)?;
-        let input = residual.add(pre.input_gradient())?;
-        let parameters: Vec<_> = pre
-            .parameter_gradients()
-            .iter()
-            .chain(&attention.parameters)
-            .chain(feed_forward.parameter_gradients())
-            .cloned()
-            .collect();
-        let has_z_bias = attention.z_bias.is_some();
-        let has_pair_bias = attention.pair_bias.is_some();
-        let mut family = vec![input];
-        family.extend(parameters);
-        family.extend(attention.z_bias);
-        family.extend(attention.pair_bias);
-        let mut family = self
-            .tensor_device()
-            .guard_together(&family.iter().collect::<Vec<_>>())?;
-        let pair_bias = if has_pair_bias { family.pop() } else { None };
-        let z_bias = if has_z_bias { family.pop() } else { None };
-        let input = family.remove(0);
-        let parameters = family;
+        let gradients = self.graph.backward(&forward.tape, cotangent)?;
+        let parameters = gradients.parameters;
         let bound = forward.parameters.bind_gradients(parameters.clone())?;
         Ok(ResidentResidualAttentionVjp {
-            input,
+            input: gradients.input,
             parameters,
             bound,
-            z_bias,
-            pair_bias,
+            z_bias: gradients.z_bias,
+            pair_bias: gradients.pair_bias,
         })
     }
 

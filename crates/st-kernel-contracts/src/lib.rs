@@ -14,6 +14,7 @@ pub mod compaction;
 pub mod elementwise;
 pub mod gradient_clip;
 pub mod graph;
+pub mod indexing;
 pub mod layout;
 pub mod momentum;
 pub mod normalization;
