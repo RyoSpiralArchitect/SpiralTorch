@@ -187,6 +187,12 @@ between different devices, kernels or compiler versions.
 
 ## The geometry boundary
 
+`CategoricalFisherRaoSquared` adds a probability-simplex metric with a complete
+resident root-map pullback. See [Fisher-Rao attention](fisher_rao_attention.md)
+for the shared Rust distance semantics, explicit checkpoint identity and the
+native/browser qualification recipe. It does not alter the default Poincare
+metric or the predeclared corpus-study arms.
+
 For a separate **one-time initial score-strength control**, see
 [causal bias calibration](causal_bias_calibration.md). It changes only per-head
 softplus gains, checks actual device RMS again, then uses this same learner and

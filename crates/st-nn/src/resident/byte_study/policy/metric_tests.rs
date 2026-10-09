@@ -31,6 +31,7 @@ fn five_arm_coverage_is_order_independent_and_explicit() {
         (1, "pair_metric", json!("euclidean_chord_squared.v1")),
         (3, "pair_metric", json!("poincare_squared.v1")),
         (4, "pair_metric", json!("unknown.v1")),
+        (4, "pair_metric", json!("categorical_fisher_rao_squared.v1")),
         (0, "pair_metric", Value::Null),
         (3, "pair_metric", Value::Null),
         (4, "geometry_update", json!("train")),

@@ -1,0 +1,208 @@
+{
+  "schema": "spiraltorch.fisher_rao_attention.validation.v1",
+  "captured_date_jst": "2026-10-10",
+  "base_revision": "1d3d35b0e46aa683d4a4276fa95d2f2166254677",
+  "metric": "categorical_fisher_rao_squared.v1",
+  "scope": "Synthetic numerical and gradient qualification and exact same-runtime resume only; not quality, speed, long-context, or runtime attestation.",
+  "reference": {
+    "sha256": "d338e0532d3df792c8bf234c04dc9fcee37df64106878d3a792db5a235207c46",
+    "torch": "2.12.1",
+    "dtype": "float32",
+    "device": "cpu",
+    "threads": 1,
+    "frozen_before_native_and_browser_full_model_execution": true
+  },
+  "gates": {
+    "atol": 3e-06,
+    "rtol": 5e-05,
+    "geometry_relative_l2": 0.002,
+    "minimum_reference_geometry_gradient_l2": 1e-08,
+    "retuned": false,
+    "resume": "exact float32 bits within each runtime"
+  },
+  "runtime_observations": {
+    "native": "AdapterInfo { name: \"Apple M4\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "browser": "AdapterInfo { name: \"\", vendor: 0, device: 0, device_type: Other, driver: \"\", driver_info: \"\", backend: BrowserWebGpu }",
+    "sequential_gpu_runs": true,
+    "browser_download": "opaque Rust JSON"
+  },
+  "repair": {
+    "finding": "Intermediate root cotangent narrowed to float32 rejected finite final logit and gain VJPs.",
+    "reproduced_native_before_fix": {
+      "exit_code": 101,
+      "passed": 0,
+      "failed": 1,
+      "log": "review-reproducer-before.log"
+    },
+    "resolution": "Private Wide cotangents survive through final simplex pullback; final guards shared.",
+    "requalified_against_original_reference": [
+      "native",
+      "actual_browser"
+    ],
+    "extra_boundary": "Native and browser, independently recomputed analytic float64 VJP",
+    "pre_review_model_results_are_not_repaired_source_evidence": true
+  },
+  "tests": {
+    "cpu_kernel_contracts": {
+      "passed": 84,
+      "failed": 0,
+      "ignored": 0
+    },
+    "core_concept_diffusion": {
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0
+    },
+    "native_pair": {
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    "model_checkpoint": {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    "study_policy": {
+      "passed": 27,
+      "failed": 0,
+      "ignored": 0
+    },
+    "torch_math": {
+      "run": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "fisher_verifier": {
+      "run": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "flat_verifier": {
+      "run": 12,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "optional_torch_stdlib_ci": {
+      "run": 3,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 3
+    }
+  },
+  "validation": {
+    "native_release_build": true,
+    "wasm_release_build": true,
+    "pinned_rustfmt_check": true,
+    "html_syntax": true,
+    "whitespace": true,
+    "strict_wgpu_clippy_run": false,
+    "hosted_feature_ci_run": false,
+    "existing_vendored_wgpu_warnings": true
+  },
+  "independent_review": {
+    "mode": "local read-only subagent",
+    "remaining_p1_p2": 0,
+    "scope": "Dirty implementation, tests, verifier and boundary changes; no GPU, builds or network.",
+    "stdlib_tests_passed": 16,
+    "extra_boundary_mutations_rejected": 12,
+    "independent_analytic_crosscheck": "Bernoulli-angle derivative"
+  },
+  "artifact_policy": "Raw arrays, weights, checkpoints, logs and binaries are local only. Hashes bind bytes but do not provide public raw access.",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "1917be1e23ebd2612abb26bb9f9f50115d7874f7c86be4118fe31cc886811917",
+    "crates/st-backend-wgpu/src/resident_tensor.rs": "055dae8a5d1c606dfe432c3a32da37c2440a5af969ce8346b420aeadae8f0042",
+    "crates/st-backend-wgpu/src/resident_tensor/fisher_rao.rs": "31c1af567426d469123f43c85b23b2ca4ac47d14bbffc3ea35987692c5697184",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare.rs": "c713b75f4bfe4cf1664614a841a1d8c2f4cf58d6f846c648ef1865d1d6fdc83c",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/fisher_chart.rs": "2c4ad63da5a06663be2f07715a8454ee9212ae88649c544ab13646e6b9b2087e",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/pair_spec.rs": "a42814e88c1cbe1831f53f7d5a6fad18f4fcb8523f3e1ce65da614a6bf30dbe6",
+    "crates/st-backend-wgpu/src/resident_tensor/poincare/tests.rs": "9256aae34809bb7c76b1c3825c8c0ceb610df73b4ae1c62acb11526ac9f80b1c",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/fisher_chart.wgsl": "7b454f40eab836a0b7ac5ce42581ebe29f978bbccc3b991fdacf06d88c482170",
+    "crates/st-backend-wgpu/src/resident_tensor/shaders/poincare.wgsl": "2e7f54af61ede6773a0be0c673c26c2a8b62c130478c745715f7e4e359b53661",
+    "crates/st-core/src/inference/concept_diffusion.rs": "5f6d4ab6f3f1f407c4e509b9dc9e4a4972cb86960e5fb65d6a366bb69b3fa3b0",
+    "crates/st-kernel-contracts/src/fisher_rao.rs": "077d2633bda1fe95e87a9a642943b290a88e2236e04f9d148fd581b2ba86825c",
+    "crates/st-kernel-contracts/src/fisher_rao/tests.rs": "24ae8459ad13fb4137963f14195b0c366470b9db9c5e23b99f9ca818b1319f82",
+    "crates/st-kernel-contracts/src/lib.rs": "a010de37816522b00f6cd015900657857ffcd32c19543fc6151024cb9c82ded1",
+    "crates/st-nn/examples/resident_byte_decoder_browser.rs": "54a32737577b1abe88aefa21b6a6418913175e0ea7cfeeff2dddc16c0e7ffaca",
+    "crates/st-nn/examples/resident_byte_flat_metric.rs": "e7764b265eed85aae3557be4d48eac1f6e7bc050d3439e9ed3a4c514fc0f3cca",
+    "crates/st-nn/examples/support/byte_decoder.rs": "cf058841dde25e7fa6f7e67232459c876a70f6e343f4858819ae3b31e3a937b2",
+    "crates/st-nn/examples/support/byte_decoder/checkpoint_controls.rs": "66f75357db481b9e93e572c3fdda1f660fe227326610a698354b92504f01cb60",
+    "crates/st-nn/examples/support/byte_decoder/fisher_controls.rs": "4d8795509cc6e376fed2fa7d1573f2740a18e888aef7bd146026c9b77c422ed5",
+    "crates/st-nn/src/resident/byte_decoder/checkpoint/tests.rs": "5e9fde43a9d4473940c5cec317e4ea1ff99b623f91398d6d75292bfd93fe2383",
+    "crates/st-nn/src/resident/byte_decoder/geometry.rs": "264a4280c338f8b6ade6eaa17f65e2d38992a3413ca64e2a2bedf57d1c7649e3",
+    "crates/st-nn/src/resident/byte_decoder/training/geometry.rs": "5822895ae59afaea1ba97b604086b4912be65858649f2183593682cca84669b7",
+    "crates/st-nn/src/resident/byte_study/policy/metric_tests.rs": "629188841165d12509394d9aaa3229a25b3ade5374923f0ba1be5f41c64db38e",
+    "crates/st-nn/tests/byte_fisher_rao_browser.html": "a28901e488720b940be01f7abac5fff564d41cdfd18ac8e5dd4376067a76694b",
+    "docs/fisher_rao_attention.md": "5cdab49691f439f0114a6f671c490486d254b6d80520d788a8ab324fc17f4598",
+    "docs/resident_byte_decoder.md": "dd765d150e803a0a03904a6cd26a9867f6eaf5a5a658fe27495f204509f33bc8",
+    "tools/fisher_rao_reference.py": "842faae185b0289365d621ed1e292ac0e6d5e25d83d0666846c2f4a80b4026e4",
+    "tools/generate_resident_byte_geometry_torch_fixture.py": "c553b97abe3de21c5cb5fc25ac231a99b9bf56674774e06c094cb9f0c90dc906",
+    "tools/test_fisher_rao_reference.py": "91c6c038c66b9c810076ff972efcf6b386e6faa2acf50bba15f8d2108a1a5ea7",
+    "tools/test_verify_byte_fisher_rao.py": "988fff64a3e0e9a94aabc209175f5d0e9da3dbb6bf635e18fdc949adedfc15d9",
+    "tools/verify_byte_flat_metric.py": "a4d1dd7f284c74563265a3baed1f6c46cbcd9b6cf339d8e1e6d79ba40819e29d"
+  },
+  "local_raw_sha256": {
+    "browser-comparison.json": "232e041a9643cc1abf110a8c8ea5bc4f677afc962d70a19517d39db3a301ebe4",
+    "browser.json": "5ecea5113874297ea782ed3b0929a2519e35484e14c8f7bf482d342613d0f3f0",
+    "core-concept-full-tests.log": "ea257cbfb2b87de97b57d45518d36f45565355718f53e2f9ce25f06b4bc4e94f",
+    "core-geometry-tests.log": "ef4e9dbbe87dcec1659cd5e1e6a69cd6136a5d6d586b43fe034d27d99d93cf55",
+    "cpu-kernel-full-tests.log": "bd81543cf9377d75345b8941d84f35671f9d934f7d9b6b7e04a178fa08841ae6",
+    "cpu-kernel-tests.log": "72cbb8cd28bd65772178650577f7dca62e356550911a889eac1784f8288f2536",
+    "fisher-verifier-tests-reviewed.log": "64d5be80ad5480505cbbf00db96750a9537359cc2a3ea0b6af3a3325e7196a6b",
+    "fisher-verifier-tests.log": "659a5b75bc6b0099bf58a5c4c1cfae7a9bf58e3543299d5b26bb0cedfa541516",
+    "flat-verifier-tests-reviewed.log": "210ce316baaccb9d7f205d3bf314c887922f82493dd270c204c6e52b01ef86ae",
+    "flat-verifier-tests.log": "dabe54ca31056539fc1bcf1820c3ef3be97c85b2d483ff7411fe443fd434695a",
+    "legacy-default.json": "631abe16ab140c6fcfee65d072963ba3ed3532a2701606c770b50241f1b5af4b",
+    "legacy-default.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "legacy-study-tests.log": "c6dd9c0b69dd8f90cdf237612837ad689061270a62ec9b0dbe5d49d1fcdfc9ea",
+    "model-checkpoint-tests.log": "81acc958acc58c7221dbfdb457cca51361765cf9a8d01608f613ef83830f8d49",
+    "model-study-tests.log": "c6ab53db9dec69d0a355ffbc3e5e1b768790ab99f3323cac008732eea94f17f1",
+    "native-comparison-reviewed.json": "88e8289fce81a00052d7fd162ede3343e9c2eaf71c0abc9efc1be876979ededf",
+    "native-comparison.json": "91e672097840d49b6cf5a43bc699bc1968a354528b575e4356a532ea9f6bcc53",
+    "native-model-binary": "113a9fc9b4d98733832f44e69b64b37ca001c66d2c6ba4f2da329e44435dd4be",
+    "native-model-build-reviewed.log": "c9ca4c99e1efba92f2296ddc4cc030ee34289603d86ac4340e40fbdd7b72eaad",
+    "native-model-build.log": "73df3541be148be1b353296cecb6a5eed73a79c5ace0f18d3f4d45e0d8e343b0",
+    "native-pair-tests-reviewed.log": "e9ca837a0e217dcef0b23e54cebd2714415261801d28442ca69130a36a65713f",
+    "native-pair-tests.log": "508695a418210b429ba86a65e3626cd4cdba621d5cf388efb1fe4ae9ada7a26e",
+    "native-reviewed-binary": "99bafa548edc0d00ad7330e20625c89b93abdc6f046265f00ac48e5d5efaa1f6",
+    "native-reviewed.json": "a8695f9f703ac818b2cb189675cbdc70978c692ae9748bc1f2e2743c0de3eacc",
+    "native-reviewed.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native.json": "f649da1f016c236b08c45a022d3cb658a03e79506b316c08d3b88c2f80b9d7a6",
+    "native.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pre-registered.json": "659fc783c97841a3ee9aa50a471f3d68e403733b99196a139cff313b4e06a244",
+    "reference.json": "d338e0532d3df792c8bf234c04dc9fcee37df64106878d3a792db5a235207c46",
+    "reference.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "resident_byte_decoder_browser.js": "045ca755681c0eb7c7fc68df0aec2ca3efe25b7930b2211e47a1ed6355ccd3fb",
+    "resident_byte_decoder_browser_bg.wasm": "0102d6a9f2b3ee5adb7f94d993c8cc1c1fdf783afc08ddf09c859caf33187e56",
+    "review-addendum.json": "757d13200a44f2e8230f89879c84d7f82e7d48bacd951cbddd5de25af6f371f1",
+    "review-reproducer-before.log": "4f02d7be3a1057358547df9041040c52ee947d7421be5f70a402bc3fa3ac5b79",
+    "torch-math-tests-reviewed.log": "5ba5a02ebc7053cba2faca970d61d791e9f5703e3a0f1337c420a93b51018c56",
+    "torch-math-tests.log": "d87cd35ecd8e718308d91d92238900a3d2bb3bb6c7339c217ada653f44b93de4",
+    "torch-optional-stdlib-tests.log": "d0caa4efe89a5a247dac941b91efe526e51839a53d0dc36e07e05f2c8c41632b",
+    "wasm-before-review.wasm": "f3270343c7e8ddfc741d89c2a314484154493e385a6a7549ddacfa0f546f4f7f",
+    "wasm-model-build-reviewed.log": "5705d24ba7b9ac96ba78f6119ea6f63b385a107310bb4eb1ce3c6111ccba18fb",
+    "wasm-model-build.log": "af89a8795d7636f206000233930531528ad648422a0a33dd89d8c377176bf2a8"
+  },
+  "public_sha256": {
+    "README.md": "c0ddf094a33e3ed417a5df588732335b87d498205d1e90ca9ab9f45010c6de76",
+    "browser-comparison.json": "232e041a9643cc1abf110a8c8ea5bc4f677afc962d70a19517d39db3a301ebe4",
+    "native-comparison.json": "88e8289fce81a00052d7fd162ede3343e9c2eaf71c0abc9efc1be876979ededf",
+    "pre-registered.json": "659fc783c97841a3ee9aa50a471f3d68e403733b99196a139cff313b4e06a244",
+    "scalar-trajectories.json": "91420eb4d0c7b267769d73547089e4a3a92aba882aacbf3788cccc55514bd5b1"
+  },
+  "toolchains": {
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "rustfmt": "nightly-2026-04-15",
+    "wasm_bindgen": "0.2.129",
+    "host": "aarch64-apple-darwin"
+  },
+  "next_not_done": [
+    "strength-matched corpus Fisher arms",
+    "geometric mixtures",
+    "long-context quality",
+    "performance comparison"
+  ]
+}

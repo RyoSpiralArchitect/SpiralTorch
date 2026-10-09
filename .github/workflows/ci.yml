@@ -29,6 +29,8 @@ jobs:
           python3 -I -S -B -m unittest discover -s tools -p 'test_verify_byte_corpus*.py'
           python3 -I -S -B tools/test_verify_byte_parameter_rates.py
           python3 -I -S -B tools/test_verify_byte_flat_metric.py
+          python3 -I -S -B tools/test_verify_byte_fisher_rao.py
+          python3 -I -S -B tools/test_fisher_rao_reference.py
           python3 -I tests/test_resident_rank_bench.py
           python3 -I tests/test_resident_rank_adaptation_bench.py
           python3 -I tests/test_matmul_rank_bench.py

@@ -1,0 +1,18 @@
+{
+  "schema": "spiraltorch.fisher_rao_attention.measurement_plan.v1",
+  "scope": "New categorical Fisher-Rao metric through the existing Rust resident byte decoder; synthetic numerical and gradient qualification, not corpus quality or speed.",
+  "metric": "categorical_fisher_rao_squared.v1",
+  "fixture_seeds": [1761, 1863],
+  "blocks": [1, 2],
+  "parameter_tensors": [23, 37],
+  "updates": 16,
+  "sgd_rate": 0.125,
+  "resume_revision": 7,
+  "atol": 0.000003,
+  "rtol": 0.00005,
+  "geometry_gradient_relative_l2": 0.002,
+  "minimum_reference_geometry_gradient_l2": 1e-8,
+  "controls": ["causal_prefix", "document_isolation", "metric_off", "detached_metric_pullback", "zero_qk_first_case", "Topos_and_external_bias_second_case", "atomic_rejection", "portable_checkpoint", "exact_same_runtime_resume"],
+  "reference": "Independent CPU-f32 PyTorch/autograd, generated and hashed before native/browser model execution. Both consume the same frozen fixture.",
+  "artifact_policy": "Raw tensors, weights, checkpoints, logs and binaries local only; publish scalar errors, hashes, source and reproduction."
+}

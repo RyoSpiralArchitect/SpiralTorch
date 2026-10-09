@@ -23,6 +23,8 @@ type OwnedBias = (Option<ResidentTensor>, Option<ResidentTensor>);
 mod bias_scale_controls;
 #[path = "byte_decoder/checkpoint_controls.rs"]
 mod checkpoint_controls;
+#[path = "byte_decoder/fisher_controls.rs"]
+mod fisher_controls;
 #[path = "byte_decoder/geometry_controls.rs"]
 mod geometry_controls;
 #[path = "byte_decoder/parameter_rate_controls.rs"]
@@ -91,6 +93,9 @@ fn plan(case: &Value, steps: usize) -> Result<ByteDecoderPlan> {
             }
             Some(Value::String(s)) if s == "euclidean_chord_squared.v1" => {
                 ByteDecoderPairMetric::EuclideanChordSquared
+            }
+            Some(Value::String(s)) if s == "categorical_fisher_rao_squared.v1" => {
+                ByteDecoderPairMetric::CategoricalFisherRaoSquared
             }
             _ => return Err("unknown geometry pair metric".into()),
         };
@@ -524,8 +529,30 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
 /// A local, independent Torch fixture; raw observations are returned only for
 /// the new metric control, never added to previously published v3 reports.
 pub async fn run_flat_metric(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    run_metric(runtime, fixture_json, "flat", "euclidean_chord_squared.v1").await
+}
+
+pub async fn run_fisher_rao(runtime: WgpuRuntime, fixture_json: &str) -> Result<Value> {
+    let boundary = fisher_controls::run(runtime.clone()).await?;
+    let mut result = run_metric(
+        runtime,
+        fixture_json,
+        "fisher_rao",
+        "categorical_fisher_rao_squared.v1",
+    )
+    .await?;
+    result["wide_pullback_control"] = boundary;
+    Ok(result)
+}
+
+async fn run_metric(
+    runtime: WgpuRuntime,
+    fixture_json: &str,
+    kind: &str,
+    metric: &str,
+) -> Result<Value> {
     let fixture: Value = serde_json::from_str(fixture_json)?;
-    if fixture["schema"] != "spiraltorch.resident_byte_geometry_flat.torch_fixture.v1"
+    if fixture["schema"] != format!("spiraltorch.resident_byte_geometry_{kind}.torch_fixture.v1")
         || fixture["tolerance"] != json!({"atol":3e-6,"rtol":5e-5,"geometry_relative_l2":0.002})
     {
         return Err("invalid flat metric reference contract".into());
@@ -534,13 +561,17 @@ pub async fn run_flat_metric(runtime: WgpuRuntime, fixture_json: &str) -> Result
         .as_array()
         .ok_or("missing flat metric cases")?;
     if cases.len() != 2
-        || cases.iter().any(|case| {
-            case["config"]["causal_geometry"]["pair_metric"] != "euclidean_chord_squared.v1"
-        })
+        || cases
+            .iter()
+            .any(|case| case["config"]["causal_geometry"]["pair_metric"] != metric)
     {
         return Err("incomplete or mislabeled flat metric cases".into());
     }
-    run_cases(runtime, cases, &[23, 37], true, false).await
+    let mut result = run_cases(runtime, cases, &[23, 37], true, false).await?;
+    result["schema"] = json!(format!(
+        "spiraltorch.resident_byte_geometry_{kind}.validation.v1"
+    ));
+    Ok(result)
 }
 
 async fn run_cases(
@@ -785,7 +816,7 @@ async fn run_cases(
         }
         if raw {
             let check = checks.last_mut().unwrap();
-            check["metric"] = json!("euclidean_chord_squared.v1");
+            check["metric"] = case["config"]["causal_geometry"]["pair_metric"].clone();
             check["parameter_names"] =
                 json!(parameters.iter().map(|p| &p["name"]).collect::<Vec<_>>());
             check["parameter_shapes"] =

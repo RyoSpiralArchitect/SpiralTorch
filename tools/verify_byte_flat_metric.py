@@ -12,6 +12,7 @@ rates = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rates)
 require, bits, compare, relative = rates.require, rates.bits, rates.compare_values, rates.relative_gradient
 METRIC = "euclidean_chord_squared.v1"
+METRICS = {"flat": METRIC, "fisher_rao": "categorical_fisher_rao_squared.v1"}
 
 
 def unique_object(pairs):
@@ -37,7 +38,7 @@ def exact_record(actual, expected):
         require(type(actual) is type(expected) and actual == expected, "checkpoint identity")
 
 
-def expected_checkpoint(case, parameters, revision):
+def expected_checkpoint(case, parameters, revision, metric=METRIC):
     """The two frozen fixture topologies, not a general model serializer."""
     c = case["config"]
     descriptors = case["parameters"]
@@ -75,7 +76,7 @@ def expected_checkpoint(case, parameters, revision):
                 "raw_decay": parameter("geometry.raw_decay", [cols // 2])["values"],
                 "raw_phase": parameter("geometry.raw_phase", [cols // 2])["values"],
                 "raw_gains": [parameter(f"geometry.raw_gain.{i}", [c["heads"]])["values"]
-                              for i in range(len(c["blocks"]))], "pair_metric": METRIC}
+                              for i in range(len(c["blocks"]))], "pair_metric": metric}
     blocks = []
     for i, block in enumerate(c["blocks"]):
         prefix = f"block.{i}."
@@ -147,18 +148,37 @@ def exact(actual, expected):
         require(bits(actual) == bits(expected), "resume bits")
 
 
-def verify(reference, report):
-    require(reference["schema"] == "spiraltorch.resident_byte_geometry_flat.torch_fixture.v1", "reference schema")
+def fisher_wide_reference():
+    """Float64 analytic VJP for the fixed symmetric two-row regression."""
+    p = 1. / (1. + math.exp(-1.))
+    r, s = math.sqrt(p), math.sqrt(1. - p)
+    t = 2. * (r - s) ** 2
+    z = t / 4.
+    angle = math.asin(math.sqrt(z))
+    distance = 16. * angle ** 2
+    slope = 4. * angle / math.sqrt(z * (1. - z))
+    seed = rates.struct.unpack("!f", bits(3e38))[0]
+    root_gradient = -math.log(2.) * seed * 2. * slope * (r - s)
+    require(abs(root_gradient) > 3.4028234663852886e38, "boundary control lost overflow trigger")
+    dot = (r - s) * root_gradient
+    a, b = .5 * r * (root_gradient - r * dot), .5 * s * (-root_gradient - s * dot)
+    return {"coordinates": [a, b, b, a], "raw_gain": [-.5 * seed * distance]}
+
+
+def verify(reference, report, *, kind="flat"):
+    require(kind in METRICS, "unsupported metric comparison")
+    metric = METRICS[kind]
+    require(reference["schema"] == f"spiraltorch.resident_byte_geometry_{kind}.torch_fixture.v1", "reference schema")
     require(reference["device"] == "cpu" and reference["dtype"] == "float32"
             and type(reference["threads"]) is int and reference["threads"] == 1, "reference execution")
     require(reference["tolerance"] == {"atol": 3e-6, "rtol": 5e-5, "geometry_relative_l2": .002}, "changed gates")
-    require(report["schema"] == "spiraltorch.resident_byte_geometry_flat.validation.v1"
+    require(report["schema"] == f"spiraltorch.resident_byte_geometry_{kind}.validation.v1"
             and report["passed"] is True, "runtime schema/status")
     require(len(reference["cases"]) == len(report["checks"]) == 2, "case coverage")
     summaries = []
     for index, (case, check) in enumerate(zip(reference["cases"], report["checks"])):
         c = case["config"]
-        require(c["causal_geometry"]["pair_metric"] == check["metric"] == METRIC, "metric identity")
+        require(c["causal_geometry"]["pair_metric"] == check["metric"] == metric, "metric identity")
         descriptors = case["parameters"]
         count = (23, 37)[index]
         require(len(descriptors) == count and type(check["parameter_count"]) is int
@@ -227,26 +247,36 @@ def verify(reference, report):
                                                      "exact_embedding_gradients", "fresh_owner")), "resume controls")
         for name, revision in (("checkpoint_json", 7), ("final_checkpoint_json", 16)):
             checkpoint = json.loads(resume[name], object_pairs_hook=unique_object)
-            exact_record(checkpoint, expected_checkpoint(case, actual_learning["trace"][revision - 1]["parameters"], revision))
+            exact_record(checkpoint, expected_checkpoint(case, actual_learning["trace"][revision - 1]["parameters"], revision, metric))
         require(len(resume["trace"]) == 16, "resume step coverage")
         for a, e in zip(resume["trace"], actual_learning["trace"]):
             require(type(a["revision"]) is int and a["revision"] == e["revision"], "resume revision")
             for field in ("loss", "parameters", "geometry_gradients", "embedding_output_gradient"):
                 exact(a[field], e[field])
-        summaries.append({"name": case["name"], "metric": METRIC, "parameter_tensors": count,
+        summaries.append({"name": case["name"], "metric": metric, "parameter_tensors": count,
                           "parameter_scalars": sum(lengths), "steps": 16, "resume_exact_steps": 16,
                           "minimum_reference_geometry_gradient_l2": minimum_norm, **errors})
-    return {"schema": "spiraltorch.resident_byte_geometry_flat.comparison.v1", "passed": True,
+    result = {"schema": f"spiraltorch.resident_byte_geometry_{kind}.comparison.v1", "passed": True,
             "cases": summaries, "scope": "Synthetic numerical parity and reported same-runtime resume; not quality, speed, or runtime attestation"}
+    if kind == "fisher_rao":
+        boundary = report.get("wide_pullback_control")
+        require(type(boundary) is dict and boundary.get("schema")
+                == "spiraltorch.fisher_rao_wide_pullback.v1", "missing wide pullback control")
+        result["wide_pullback_control"] = {
+            key + "_relative_l2": relative(boundary[key], expected)[0]
+            for key, expected in fisher_wide_reference().items()}
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("reference", "report", "output"):
         parser.add_argument(name, type=Path)
+    parser.add_argument("--fisher-rao", action="store_true", help="require the explicit Fisher-Rao schemas and metric")
     args = parser.parse_args()
     reference, report = args.reference.read_bytes(), args.report.read_bytes()
-    result = verify(json.loads(reference, object_pairs_hook=unique_object), json.loads(report, object_pairs_hook=unique_object))
+    result = verify(json.loads(reference, object_pairs_hook=unique_object), json.loads(report, object_pairs_hook=unique_object),
+                    kind="fisher_rao" if args.fisher_rao else "flat")
     result["input_sha256"] = {"reference": hashlib.sha256(reference).hexdigest(), "report": hashlib.sha256(report).hexdigest()}
     with args.output.open("x", encoding="utf-8") as output:
         json.dump(result, output, indent=2, allow_nan=False)

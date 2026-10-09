@@ -15,6 +15,7 @@ pub mod classification;
 pub mod compaction;
 pub mod elementwise;
 pub mod euclidean;
+pub mod fisher_rao;
 pub mod gradient_clip;
 pub mod graph;
 pub mod indexing;

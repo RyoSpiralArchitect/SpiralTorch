@@ -1,6 +1,134 @@
 use super::*;
 use st_kernel_contracts::euclidean::{EuclideanBiasForward, EuclideanBiasSpec};
+use st_kernel_contracts::fisher_rao::{FisherRaoBiasForward, FisherRaoBiasSpec};
 use st_kernel_contracts::poincare::PoincareBiasForward;
+
+#[test]
+fn fisher_strided_logits_both_endpoints_and_gains_match_cpu() {
+    let Some(d) = device() else { return };
+    for shape in [[1, 1, 1], [2, 3, 4], [2, 7, 3], [1, 17, 2]] {
+        let s = FisherRaoBiasSpec::new(shape, 3).unwrap();
+        let x: Vec<_> = (0..s.coordinates_len())
+            .map(|i| ((i * 7 % 29) as f32 - 14.) * 0.125)
+            .collect();
+        let gains = [-7., 0.2, 4.];
+        let seed: Vec<_> = (0..s.scores_len())
+            .map(|i| ((i * 11 % 23) as f32 - 11.) * 0.07)
+            .collect();
+        let cpu = FisherRaoBiasForward::new(s, &x, &gains).unwrap();
+        let want = cpu.backward(&seed).unwrap();
+        let f = strided(&d, &shape, &x)
+            .causal_fisher_rao_bias(&strided(&d, &[3], &gains))
+            .unwrap();
+        let g = f.backward(&strided(&d, &s.score_shape(), &seed)).unwrap();
+        assert_eq!(f.spec(), s);
+        close(&read(f.scores()), cpu.scores());
+        close(&read(g.coordinates()), &want.coordinates);
+        close(&read(g.raw_gain()), &want.raw_gain);
+        for row in read(g.coordinates()).chunks_exact(shape[2]) {
+            assert!(row.iter().map(|&v| f64::from(v)).sum::<f64>().abs() < 3e-5);
+        }
+    }
+}
+
+#[test]
+fn fisher_identity_neighbours_extremes_and_guard_propagation() {
+    let Some(d) = device() else { return };
+    let gain = d.upload(&[1], &[0.]).unwrap();
+    let seed = d.upload(&[1, 1, 2, 2], &[1.; 4]).unwrap();
+    for x in [[0.1; 4], [f32::MAX, -f32::MAX, -f32::MAX, f32::MAX]] {
+        let cpu =
+            FisherRaoBiasForward::new(FisherRaoBiasSpec::new([1, 2, 2], 1).unwrap(), &x, &[0.])
+                .unwrap();
+        let f = d
+            .upload(&[1, 2, 2], &x)
+            .unwrap()
+            .causal_fisher_rao_bias(&gain)
+            .unwrap();
+        close(&read(f.scores()), cpu.scores());
+        close(
+            &read(f.backward(&seed).unwrap().coordinates()),
+            &cpu.backward(&[1.; 4]).unwrap().coordinates,
+        );
+    }
+    let x = d.upload(&[1, 2, 2], &[0., 0., 0.001, -0.001]).unwrap();
+    let f = x.causal_fisher_rao_bias(&gain).unwrap();
+    let g = f.backward(&seed).unwrap();
+    assert!(read(f.scores())[2] < 0.);
+    assert!(read(g.coordinates()).iter().any(|v| *v != 0.));
+    let saved = read(g.coordinates());
+    let overflow = d
+        .upload(&[1, 1, 2, 2], &[0., f32::MAX, 0., 0.])
+        .unwrap()
+        .mul(&d.upload(&[1, 1, 2, 2], &[2.; 4]).unwrap())
+        .unwrap();
+    let guarded = d.guard_together(&[&seed, &overflow]).unwrap().remove(0);
+    let bad = f.backward(&guarded).unwrap();
+    for value in [bad.coordinates(), bad.raw_gain()] {
+        assert!(matches!(
+            value.snapshot().unwrap().read(),
+            Err(TensorError::NonFinite)
+        ));
+    }
+    let invalid_x = d.guard_together(&[&x, &overflow]).unwrap().remove(0);
+    let bad = invalid_x.causal_fisher_rao_bias(&gain).unwrap();
+    assert!(matches!(
+        bad.scores().snapshot().unwrap().read(),
+        Err(TensorError::NonFinite)
+    ));
+    assert_eq!(read(f.backward(&seed).unwrap().coordinates()), saved);
+}
+
+#[test]
+fn fisher_large_intermediate_has_representable_final_pullback() {
+    let Some(d) = device() else { return };
+    let s = FisherRaoBiasSpec::new([1, 2, 2], 1).unwrap();
+    let x = [0.5, -0.5, -0.5, 0.5];
+    let seed = [0., 0., 3e38, 0.];
+    let cpu = FisherRaoBiasForward::new(s, &x, &[0.])
+        .unwrap()
+        .backward(&seed)
+        .unwrap();
+    assert!(cpu
+        .coordinates
+        .iter()
+        .chain(&cpu.raw_gain)
+        .all(|v| v.is_finite()));
+    let f = d
+        .upload(&s.shape(), &x)
+        .unwrap()
+        .causal_fisher_rao_bias(&d.upload(&[1], &[0.]).unwrap())
+        .unwrap();
+    let g = f
+        .backward(&d.upload(&s.score_shape(), &seed).unwrap())
+        .unwrap();
+    close(&read(g.coordinates()), &cpu.coordinates);
+    close(&read(g.raw_gain()), &cpu.raw_gain);
+}
+
+#[test]
+fn fisher_chart_shader_validates_without_optional_capabilities() {
+    let source = fisher_chart::source();
+    let module = naga::front::wgsl::parse_str(&source)
+        .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::empty(),
+    )
+    .validate(&module)
+    .unwrap();
+    let s = FisherRaoBiasSpec::new([2, 7, 3], 2).unwrap();
+    assert_eq!(sizes(s, &wgpu::Limits::default()).unwrap(), (1568, 604));
+    let wide = FisherRaoBiasSpec::new([1, 2, 120], 2).unwrap();
+    assert!(sizes(
+        wide,
+        &wgpu::Limits {
+            max_storage_buffer_binding_size: 2000,
+            ..Default::default()
+        }
+    )
+    .is_err());
+}
 
 #[test]
 fn euclidean_strided_both_endpoints_gains_and_wide_values() {

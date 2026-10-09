@@ -14,6 +14,7 @@ fn initial_gain_replacement_preserves_every_other_checkpoint_field() {
     for metric in [
         ByteDecoderPairMetric::PoincareSquared,
         ByteDecoderPairMetric::EuclideanChordSquared,
+        ByteDecoderPairMetric::CategoricalFisherRaoSquared,
     ] {
         let mut plan = checkpoint().plan;
         plan.geometry = plan.geometry.take().map(|g| g.with_pair_metric(metric));
@@ -103,6 +104,31 @@ fn flat_metric_checkpoint_is_explicit_and_keeps_the_same_parameter_owner() {
             .unwrap(),
         old_json
     );
+}
+
+#[test]
+fn fisher_metric_checkpoint_remains_explicit_and_rejects_legacy_schema() {
+    let mut checkpoint = checkpoint();
+    checkpoint.plan.geometry = checkpoint
+        .plan
+        .geometry
+        .take()
+        .map(|g| g.with_pair_metric(ByteDecoderPairMetric::CategoricalFisherRaoSquared));
+    let payload = checkpoint.to_json().unwrap();
+    let restored = ByteDecoderCheckpoint::from_json(&payload).unwrap();
+    assert_eq!(restored.to_json().unwrap(), payload);
+    assert_eq!(
+        restored.plan.geometry.unwrap().pair_metric(),
+        ByteDecoderPairMetric::CategoricalFisherRaoSquared
+    );
+    let mut bad: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(bad["schema"], BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA);
+    assert_eq!(
+        bad["model"]["geometry"]["pair_metric"],
+        "categorical_fisher_rao_squared.v1"
+    );
+    bad["schema"] = json!(BYTE_DECODER_CHECKPOINT_SCHEMA);
+    assert!(ByteDecoderCheckpoint::from_json(&bad.to_string()).is_err());
 }
 
 #[test]

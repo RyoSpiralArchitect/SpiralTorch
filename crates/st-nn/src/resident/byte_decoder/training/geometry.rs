@@ -2,24 +2,28 @@ use super::*;
 use st_backend_wgpu::resident_tensor::{
     causal_wave::ResidentCausalWaveForward,
     euclidean::{ResidentEuclideanBiasForward, ResidentPairBiasVjp},
+    fisher_rao::ResidentFisherRaoBiasForward,
     poincare::ResidentPoincareBiasForward,
 };
 
 enum MetricTape {
     Poincare(ResidentPoincareBiasForward),
     Euclidean(ResidentEuclideanBiasForward),
+    FisherRao(ResidentFisherRaoBiasForward),
 }
 impl MetricTape {
     fn scores(&self) -> &ResidentTensor {
         match self {
             Self::Poincare(f) => f.scores(),
             Self::Euclidean(f) => f.scores(),
+            Self::FisherRao(f) => f.scores(),
         }
     }
     fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, GpuTensorError> {
         match self {
             Self::Poincare(f) => f.backward(seed),
             Self::Euclidean(f) => f.backward(seed),
+            Self::FisherRao(f) => f.backward(seed),
         }
     }
 }
@@ -110,6 +114,10 @@ impl GeometryAutograd {
                     .features()
                     .causal_euclidean_bias(gain, 4.)
                     .map(MetricTape::Euclidean),
+                ByteDecoderPairMetric::CategoricalFisherRaoSquared => wave
+                    .features()
+                    .causal_fisher_rao_bias(gain)
+                    .map(MetricTape::FisherRao),
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(GeometryTape {

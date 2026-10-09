@@ -4,7 +4,7 @@ struct Params {
     batch:u32, steps:u32, cols:u32, heads:u32,
     coordinates:u32, pairs:u32, scores:u32, groups_x:u32,
     groups:u32, coordinates_offset:u32, gain_offset:u32, seed_offset:u32,
-    curvature_magnitude:f32, distance_scale:f32, metric_kind:u32, padding:u32,
+    curvature_magnitude:f32, distance_scale:f32, metric_kind:u32, root_gradient_offset:u32,
 };
 @group(0) @binding(0) var<storage,read> coordinates:array<f32>;
 @group(0) @binding(1) var<storage,read> raw_gain:array<f32>;
@@ -70,6 +70,24 @@ fn prepare_pairs(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_in
         let delta=wide_sub(x,y);
         nx=wide_add(nx,wide_mul(x,x));ny=wide_add(ny,wide_mul(y,y));
         square=wide_add(square,wide_mul(delta,delta));
+    }
+    if (p.metric_kind==2u) {
+        // Roots already lie on the nonnegative unit sphere. Use the root chord
+        // instead of 1-dot, preserving exact identity and nearby distances.
+        let t=min(wide_float(square),2.0);let z=0.25*t;
+        var distance=parts(0.0);var slope=parts(4.0);
+        if(z<0.0001) {
+            let ratio=1.0+z*(1.0/3.0+z*(8.0/45.0+z*(4.0/35.0+z*128.0/1575.0)));
+            distance=wide_mul(parts(4.0*ratio),square);
+            slope=parts(4.0*(1.0+z*(2.0/3.0+z*(8.0/15.0+z*(16.0/35.0+z*128.0/315.0)))));
+        } else {
+            let root=sqrt(z);let angle=asin(root);
+            distance=parts(16.0*angle*angle);
+            slope=parts(4.0*angle/(root*sqrt(1.0-z)));
+        }
+        cache[4u*id]=distance;cache[4u*id+1u]=wide_mul(parts(2.0),slope);
+        cache[4u*id+2u]=parts(0.0);cache[4u*id+3u]=parts(0.0);
+        return;
     }
     if (p.metric_kind==1u) {
         let scale=parts(p.distance_scale);
@@ -146,7 +164,29 @@ fn coordinates_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_
         let derivative=wide_add(wide_mul(cache[offset+1u],wide_sub(x,y)),wide_mul(cache[offset+radial],x));
         gradient=wide_add(gradient,wide_mul(pair_scale(offset/4u),derivative));
     }
-    output[id]=bitcast<u32>(checked(wide_float(gradient)));
+    if(p.metric_kind==2u) {
+        let offset=p.root_gradient_offset+4u*id;
+        output[offset]=bitcast<u32>(gradient.hi);output[offset+1u]=bitcast<u32>(gradient.lo);
+        output[offset+2u]=bitcast<u32>(gradient.exponent);output[offset+3u]=bitcast<u32>(gradient.tail);
+    } else { output[id]=bitcast<u32>(checked(wide_float(gradient))); }
+}
+fn root_gradient(id:u32)->Wide {
+    let offset=p.root_gradient_offset+4u*id;
+    return Wide(bitcast<f32>(output[offset]),bitcast<f32>(output[offset+1u]),
+        bitcast<i32>(output[offset+2u]),bitcast<f32>(output[offset+3u]));
+}
+@compute @workgroup_size(256)
+fn fisher_logits_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {
+    let row=invocation(w,lane);if(row>=p.batch*p.steps) {return;}
+    var dot=parts(0.0);
+    for(var i=0u;i<p.cols;i++) {
+        dot=wide_add(dot,wide_mul(coordinate(row,i),root_gradient(row*p.cols+i)));
+    }
+    for(var i=0u;i<p.cols;i++) {
+        let r=coordinate(row,i);let g=root_gradient(row*p.cols+i);
+        let dz=wide_mul(parts(0.5),wide_mul(r,wide_sub(g,wide_mul(r,dot))));
+        output[row*p.cols+i]=bitcast<u32>(checked(wide_float(dz)));
+    }
 }
 @compute @workgroup_size(256)
 fn gain_vjp(@builtin(workgroup_id) w:vec3<u32>,@builtin(local_invocation_index) lane:u32) {

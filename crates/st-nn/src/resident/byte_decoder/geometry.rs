@@ -10,6 +10,9 @@ pub enum ByteDecoderPairMetric {
     PoincareSquared,
     #[serde(rename = "euclidean_chord_squared.v1")]
     EuclideanChordSquared,
+    /// Rowwise softmax of the same chart, then radius-two categorical distance.
+    #[serde(rename = "categorical_fisher_rao_squared.v1")]
+    CategoricalFisherRaoSquared,
 }
 
 /// Projection parameters, two wave vectors and one head-gain vector per block.

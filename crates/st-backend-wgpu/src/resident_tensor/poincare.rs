@@ -1,7 +1,9 @@
 //! Resident causal metric score bias. Coordinates are not projected or clipped.
 use super::*;
 use st_kernel_contracts::euclidean::{EuclideanBiasError, EuclideanBiasSpec};
+use st_kernel_contracts::fisher_rao::{FisherRaoBiasSpec, FisherRaoError};
 use st_kernel_contracts::poincare::{PoincareBiasSpec, PoincareError};
+pub(super) mod fisher_chart;
 mod pair_spec;
 use pair_spec::PairSpec;
 
@@ -14,6 +16,12 @@ pub struct ResidentPoincareBiasForward {
 #[derive(Clone, Debug)]
 pub struct ResidentEuclideanBiasForward {
     spec: EuclideanBiasSpec,
+    tape: PairForward,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResidentFisherRaoBiasForward {
+    spec: FisherRaoBiasSpec,
     tape: PairForward,
 }
 
@@ -61,7 +69,7 @@ struct Params {
     curvature_magnitude: f32,
     distance_scale: f32,
     metric_kind: u32,
-    padding: u32,
+    root_gradient_offset: u32,
 }
 
 fn source() -> String {
@@ -81,6 +89,7 @@ pub(super) struct PoincareKernels {
     scores: wgpu::ComputePipeline,
     pair_seeds: wgpu::ComputePipeline,
     coordinates_vjp: wgpu::ComputePipeline,
+    fisher_logits_vjp: wgpu::ComputePipeline,
     gain_vjp: wgpu::ComputePipeline,
 }
 
@@ -130,6 +139,7 @@ impl PoincareKernels {
             scores: pipeline("scores"),
             pair_seeds: pipeline("prepare_pair_seeds"),
             coordinates_vjp: pipeline("coordinates_vjp"),
+            fisher_logits_vjp: pipeline("fisher_logits_vjp"),
             gain_vjp: pipeline("gain_vjp"),
             layout,
         }
@@ -149,11 +159,20 @@ fn sizes(spec: impl Into<PairSpec>, limits: &wgpu::Limits) -> Result<(usize, usi
         .pairs_len()
         .checked_mul(16)
         .ok_or(PoincareError::Overflow)?;
-    let gradients = spec
+    let mut gradients = spec
         .coordinates_len()
         .checked_add(spec.heads())
         .and_then(|len| spec.pairs_len().checked_mul(4)?.checked_add(len))
         .ok_or(PoincareError::Overflow)?;
+    if matches!(spec, PairSpec::FisherRao(_)) {
+        // A finite final logit VJP can have unrepresentable f32 root cotangents.
+        // Keep their Wide records in this backward's private packed tail.
+        gradients = spec
+            .coordinates_len()
+            .checked_mul(4)
+            .and_then(|n| gradients.checked_add(n))
+            .ok_or(PoincareError::Overflow)?;
+    }
     for count in [cache, gradients, spec.scores_len()] {
         storage_limit(count, limits)?;
     }
@@ -195,14 +214,22 @@ fn params(spec: PairSpec) -> Params {
         seed_offset: 0,
         curvature_magnitude: match spec {
             PairSpec::Poincare(s) => -s.curvature(),
-            PairSpec::Euclidean(_) => 0.,
+            PairSpec::Euclidean(_) | PairSpec::FisherRao(_) => 0.,
         },
         distance_scale: match spec {
-            PairSpec::Poincare(_) => 0.,
+            PairSpec::Poincare(_) | PairSpec::FisherRao(_) => 0.,
             PairSpec::Euclidean(s) => s.scale(),
         },
-        metric_kind: u32::from(matches!(spec, PairSpec::Euclidean(_))),
-        padding: 0,
+        metric_kind: match spec {
+            PairSpec::Poincare(_) => 0,
+            PairSpec::Euclidean(_) => 1,
+            PairSpec::FisherRao(_) => 2,
+        },
+        root_gradient_offset: if matches!(spec, PairSpec::FisherRao(_)) {
+            (spec.coordinates_len() + spec.heads() + 4 * spec.pairs_len()) as u32
+        } else {
+            0
+        },
     }
 }
 
@@ -260,6 +287,25 @@ fn dispatch(
 }
 
 impl ResidentTensor {
+    /// Rowwise logits -> sqrt(softmax) -> squared categorical Fisher-Rao bias.
+    /// Both endpoint and simplex-map derivatives remain resident. Future scores
+    /// are zero; the consumer must still apply a structural causal mask.
+    pub fn causal_fisher_rao_bias(
+        &self,
+        raw_gain: &Self,
+    ) -> Result<ResidentFisherRaoBiasForward, TensorError> {
+        let shape =
+            <[usize; 3]>::try_from(self.layout.shape()).map_err(|_| FisherRaoError::Shape)?;
+        if raw_gain.layout.shape().len() != 1 {
+            return Err(FisherRaoError::Shape.into());
+        }
+        let spec = FisherRaoBiasSpec::new(shape, raw_gain.layout.shape()[0])?;
+        preflight(spec.into(), &[self, raw_gain])?;
+        let roots = fisher_chart::roots(self)?;
+        let tape = roots.causal_pair_bias(raw_gain, spec.into())?;
+        Ok(ResidentFisherRaoBiasForward { spec, tape })
+    }
+
     /// `[B,T,C]` open-ball coordinates and `[H]` gains -> `[B,H,T,T]` bias.
     /// Future bias is zero, not -infinity: still apply a structural causal mask.
     pub fn causal_poincare_bias(
@@ -384,6 +430,18 @@ impl ResidentEuclideanBiasForward {
     }
 }
 
+impl ResidentFisherRaoBiasForward {
+    pub fn scores(&self) -> &ResidentTensor {
+        &self.tape.scores
+    }
+    pub fn spec(&self) -> FisherRaoBiasSpec {
+        self.spec
+    }
+    pub fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
+        self.tape.backward(seed)
+    }
+}
+
 impl PairForward {
     fn backward(&self, seed: &ResidentTensor) -> Result<ResidentPairBiasVjp, TensorError> {
         let s = self.spec;
@@ -391,6 +449,7 @@ impl PairForward {
             return Err(match s {
                 PairSpec::Poincare(_) => PoincareError::Length.into(),
                 PairSpec::Euclidean(_) => EuclideanBiasError::Length.into(),
+                PairSpec::FisherRao(_) => FisherRaoError::Length.into(),
             });
         }
         let (_, len) = preflight(s, &[&self.scores, seed])?;
@@ -448,6 +507,17 @@ impl PairForward {
             p,
             s.heads(),
         )?;
+        if matches!(s, PairSpec::FisherRao(_)) {
+            dispatch(
+                device,
+                &mut encoder,
+                kernels,
+                &kernels.fisher_logits_vjp,
+                &buffers,
+                p,
+                s.shape()[0] * s.shape()[1],
+            )?;
+        }
         context.queue().submit(Some(encoder.finish()));
         let family = device.guard_together(&[&packed, &seed])?;
         Ok(ResidentPairBiasVjp {

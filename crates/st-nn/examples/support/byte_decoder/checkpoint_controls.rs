@@ -36,7 +36,8 @@ pub(super) async fn resume_trajectory(
             saved = checkpoint(&model).await?.to_json()?;
             let record: Value = serde_json::from_str(&saved)?;
             if record["schema"] != st_nn::resident::BYTE_DECODER_METRIC_CHECKPOINT_SCHEMA
-                || record["model"]["geometry"]["pair_metric"] != "euclidean_chord_squared.v1"
+                || record["model"]["geometry"]["pair_metric"]
+                    != case["config"]["causal_geometry"]["pair_metric"]
                 || record["attempted_revision"] != "7"
             {
                 return Err("flat checkpoint lost metric identity or clock".into());

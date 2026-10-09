@@ -21,7 +21,9 @@ metric = load("generate_poincare_bias_torch_fixture").metric
 flat = base.values
 
 
-def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False, calibrate_flat=False):
+def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False, calibrate_flat=False, fisher_rao=False):
+    if fisher_rao and (freeze_geometry or flat_metric or calibrate_flat):
+        raise ValueError("Fisher-Rao is a separate initial correctness experiment")
     if calibrate_flat:
         flat_metric = True
     if freeze_geometry and flat_metric:
@@ -33,6 +35,9 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
     config["causal_geometry"] = {"cols": cols, "curvature": curvature, "metric_only_scores": metric_only}
     if flat_metric:
         config["causal_geometry"]["pair_metric"] = "euclidean_chord_squared.v1"
+    if fisher_rao:
+        config["causal_geometry"]["pair_metric"] = "categorical_fisher_rao_squared.v1"
+    fisher_metric = load("fisher_rao_reference").metric if fisher_rao else None
     rng = torch.Generator(device="cpu").manual_seed(seed + 1047)
     projection = (torch.rand((width, cols), generator=rng, device="cpu") - .5) * 1.6
     extra = [("projection.weight", projection),
@@ -73,7 +78,9 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
         x, offset, combined = embedded, end, []
         for i, (block, (z, pair)) in enumerate(zip(config["blocks"], biases)):
             if enabled:
-                if flat_metric:
+                if fisher_rao:
+                    geometric = fisher_metric(coordinates, p[6 + i])
+                elif flat_metric:
                     distance = 4 * (coordinates[:, :, None, :] - coordinates[:, None, :, :]).square().sum(-1)
                     causal = torch.ones((steps, steps), device="cpu", dtype=torch.bool).tril()
                     geometric = (-F.softplus(p[6 + i])[None, :, None, None] * distance[:, None]).masked_fill(~causal, 0.)
@@ -110,14 +117,14 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
     for _ in range(16):
         logits, embedded, _ = forward()
         loss = F.cross_entropy(logits.reshape(-1, 256), target.reshape(-1))
-        gradient = torch.autograd.grad(loss, [*p, embedded] if freeze_geometry or flat_metric else p)
+        gradient = torch.autograd.grad(loss, [*p, embedded] if freeze_geometry or flat_metric or fisher_rao else p)
         with torch.no_grad():
             for value, g, rate in zip(p, gradient, rates):
                 if rate != 0.:
                     value -= rate * g
         trace.append({"loss": loss.item(), "parameters": [flat(t) for t in p],
                       "geometry_gradients": [flat(g) for g in gradient[2:end]]})
-        if freeze_geometry or flat_metric:
+        if freeze_geometry or flat_metric or fisher_rao:
             trace[-1]["embedding_output_gradient"] = flat(gradient[-1])
     result["learning"] = {"steps": 16, "rate": .125, "trace": trace}
     if freeze_geometry:
@@ -136,18 +143,20 @@ def main():
     mode.add_argument("--freeze-geometry", action="store_true")
     mode.add_argument("--flat-metric", action="store_true")
     mode.add_argument("--calibrate-flat", action="store_true")
+    mode.add_argument("--fisher-rao", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     torch.set_default_dtype(torch.float32)
-    payload = {"schema": ("spiraltorch.resident_byte_bias_scale.torch_fixture.v1" if args.calibrate_flat else
+    payload = {"schema": ("spiraltorch.resident_byte_geometry_fisher_rao.torch_fixture.v1" if args.fisher_rao else
+                         "spiraltorch.resident_byte_bias_scale.torch_fixture.v1" if args.calibrate_flat else
                          "spiraltorch.resident_byte_geometry_flat.torch_fixture.v1" if args.flat_metric else
                          "spiraltorch.resident_byte_geometry_frozen.torch_fixture.v1" if args.freeze_geometry
                           else "spiraltorch.resident_byte_geometry.torch_fixture.v1"),
                "torch_version": torch.__version__, "device": "cpu", "dtype": "float32", "threads": 1,
                "tolerance": {"atol": 3e-6, "rtol": 5e-5, "geometry_relative_l2": .002},
-               "cases": [case(1, False, True, 1761, args.freeze_geometry, args.flat_metric, args.calibrate_flat),
-                         case(2, True, False, 1863, args.freeze_geometry, args.flat_metric, args.calibrate_flat)]}
+               "cases": [case(1, False, True, 1761, args.freeze_geometry, args.flat_metric, args.calibrate_flat, args.fisher_rao),
+                         case(2, True, False, 1863, args.freeze_geometry, args.flat_metric, args.calibrate_flat, args.fisher_rao)]}
     with args.output.open("x", encoding="utf-8") as out:
         json.dump(payload, out, separators=(",", ":"), allow_nan=False)
         out.write("\n")
