@@ -50,3 +50,14 @@ build commands and examples. GPU runs require explicit opt-in, and browser
 execution must show completion rather than merely a successful WASM build.
 Local Rust builds used 1.97.0; workspace formatting used nightly-2026-04-15.
 No strict whole-workspace Clippy success is claimed by this record.
+
+## Broader resident regression follow-up
+
+The same default-feature wheel also passed all 57 methods from
+`test_nn_resident*.py`, including 100 existing Topos graph updates against the
+independent CPU PyTorch reference. This extends the regression scope, not the
+attention quality/performance claim. `resident-regression.json` records the
+tested source and log hashes separately from the frozen first validation.
+The initial attempt lacked the optional Torch dependency; the completed run used
+the already installed Torch with `-I -S -B`, startup patches disabled, and the
+fresh wheel's site-packages first. No new dependency installation was needed.

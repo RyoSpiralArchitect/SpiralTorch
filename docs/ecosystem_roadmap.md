@@ -354,9 +354,15 @@ controls rather than choosing between them:
    activation readback, with 12 matched full-chain controls on both clients.
    The standalone [resident attention VJP](resident_attention_learning.md) now
    carries Q/K/V and both bias gradients into GPU-only synthetic SGD updates,
-   checked against the same PyTorch function. This does not yet train the frozen
-   NN projection chain: trainable projection ownership, uncertainty outputs,
-   KV-cache ownership and complete decoder integration remain open.
+   checked against the same PyTorch function.
+   [Projection training](resident_attention_projection_training.md) now gives
+   fused QKV and output parameters one resident owner and one all-or-none SGD
+   decision. The [Python/WASM clients](resident_attention_training_clients.md)
+   expose the same Rust training contract, with 30 matched numerical conditions
+   and a 16-update synthetic trajectory checked through both public APIs.
+   These are source additions after 0.4.29, not APIs in that published wheel.
+   The original host Modules remain unchanged; uncertainty outputs, KV-cache
+   ownership, complete decoder integration and learning-quality gains remain open.
 3. **Measure the complete language path.** Require numerical agreement before
    transfer-inclusive throughput measurements, with resident-only timings
    labeled separately. Browser WebGPU, native WGPU and PyTorch CPU/MPS/CUDA are

@@ -1,0 +1,56 @@
+{
+  "schema": "spiraltorch.resident_attention.client_regression_followup.v1",
+  "date_utc": "2026-10-09",
+  "tested_source_commit": "1f414b5b98ca8f22d7f7f0d642bdbe1896716e6d",
+  "wheel_sha256": "f3bed3471cec14557159a5af5acf52c651a2ef426cd607602effeb2cf5a392f5",
+  "python_mode": "-I -S -B, no sitecustomize, fresh-wheel site-packages first, existing Torch framework site-packages appended",
+  "startup_patch_flags": {
+    "SPIRALTON_MAGIC": "0",
+    "SPIRALTON_TORCH": "0",
+    "SPIRALTON_MODEL_PATCHES": "0",
+    "SPIRALTON_NUMPY": "0"
+  },
+  "torch": "2.12.1",
+  "torch_cpu_threads": 1,
+  "gpu_opt_in": true,
+  "strict_gpu": true,
+  "unittest": {
+    "pattern": "test_nn_resident*.py",
+    "methods": 57,
+    "failures": 0,
+    "errors": 0,
+    "unittest_skips": 0
+  },
+  "existing_topos_reference": {
+    "scope": "100 synthetic graph updates vs independent CPU Torch, not speed/quality",
+    "max_abs_error": {
+      "output": 5.960464477539063e-8,
+      "dx": 2.9802322387695312e-8,
+      "dg": 1.1920928955078125e-7,
+      "gate": 1.4901161193847656e-8,
+      "loss": 5.960464477539063e-8
+    }
+  },
+  "initial_attempt": {
+    "errors": 1,
+    "reason": "comparison environment lacked optional Torch; no implementation failure",
+    "log_sha256": "b419b17c288a0afd04e5ffb772ae4ec51ac3f9d81653db9c034a6b9f639a01f1"
+  },
+  "completed_log_sha256": "4f49e08890e90c60b538f0811a7d3081d3269c8886161dcc6d9e8a606607e117",
+  "test_files_sha256": {
+    "bindings/st-py/tests/test_nn_resident.py": "241ab48d694ac0256e7351920a6017a2422f5f0435bb8045147d86871c97e679",
+    "bindings/st-py/tests/test_nn_resident_classification.py": "e5f957eee72504e4d68c92561949b47b05f442b11e58a1bcfd6c8a0267ffc801",
+    "bindings/st-py/tests/test_nn_resident_exports.py": "bb5b7757280cb027cba26a86237710542787e97fe79a0f3cc0e6b27dfb93e2f4",
+    "bindings/st-py/tests/test_nn_resident_graph_autograd.py": "ec4908ca99c48eea8eaa4e0ec3136f0f64179fb3acd5ec55df28eac5f4bbb19c",
+    "bindings/st-py/tests/test_nn_resident_graph_forward.py": "40292cd4dcc6711290e18fbe106208ac5af8bd7d0213c9806b297da0f2b07ebe",
+    "bindings/st-py/tests/test_nn_resident_graph_learner.py": "33a8b10eacb03d6838f3897fc0eed1a25662eaa610ec923710793ec162fd6ad5",
+    "bindings/st-py/tests/test_nn_resident_graph_training.py": "3f676fc1fe77320da36b94142bcf0af20c6c88e0b41f980cf0a9c5b02ac04fd8",
+    "bindings/st-py/tests/test_nn_resident_loss.py": "baa5c71764dbd58779589651930d2dc09a01d72327dd1323f9472ade4d972143",
+    "bindings/st-py/tests/test_nn_resident_microbatch.py": "be1252429af77f0637a70188fe623586700dddf7baf9dc3742dd37ada56448cc",
+    "bindings/st-py/tests/test_nn_resident_module_update.py": "710ae046b01a189ac2b07b3c3e562c2026091255fedea9b8501531818adbd07f",
+    "bindings/st-py/tests/test_nn_resident_topos.py": "08ae419da7397dd5301e20e5eed4c050b3e9ba6dbf85dde1a871f262493c00b3",
+    "bindings/st-py/tests/test_nn_resident_training.py": "8de618729573dd3fbe724f3ca21678239327483f3e8d9ff3b4ec50ed74788ebd"
+  },
+  "reference_helper_sha256": "029c97cb969a0a665e75e6c0156125d45015335d799e861f9167333a730ec3bd",
+  "scope": "combined surface and runtime regression methods; not 57 distinct GPU proofs; no speed or language-quality claim"
+}
