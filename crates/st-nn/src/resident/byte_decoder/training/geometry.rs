@@ -34,6 +34,9 @@ impl GeometryTape {
     pub(super) fn bias(&self, block: usize) -> &ResidentTensor {
         self.metrics[block].scores()
     }
+    pub(super) fn get_bias(&self, block: usize) -> Option<&ResidentTensor> {
+        self.metrics.get(block).map(MetricTape::scores)
+    }
 }
 
 pub(super) struct GeometryVjp {

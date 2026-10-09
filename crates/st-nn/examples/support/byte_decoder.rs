@@ -19,6 +19,8 @@ use st_tensor::NdLayout;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type OwnedBias = (Option<ResidentTensor>, Option<ResidentTensor>);
 
+#[path = "byte_decoder/bias_scale_controls.rs"]
+mod bias_scale_controls;
 #[path = "byte_decoder/checkpoint_controls.rs"]
 mod checkpoint_controls;
 #[path = "byte_decoder/geometry_controls.rs"]
@@ -28,6 +30,10 @@ mod parameter_rate_controls;
 
 pub async fn run_parameter_rates(runtime: WgpuRuntime) -> Result<Value> {
     parameter_rate_controls::run(runtime).await
+}
+
+pub async fn run_bias_scale(runtime: WgpuRuntime, fixture: &str) -> Result<Value> {
+    bias_scale_controls::run(runtime, fixture).await
 }
 
 fn data(v: &Value) -> Vec<f32> {
@@ -512,7 +518,7 @@ pub async fn run(runtime: WgpuRuntime) -> Result<Value> {
         .chain(geometry_fixture["cases"].as_array().unwrap())
         .cloned()
         .collect();
-    run_cases(runtime, &cases, &[18, 31, 23, 37], false).await
+    run_cases(runtime, &cases, &[18, 31, 23, 37], false, false).await
 }
 
 /// A local, independent Torch fixture; raw observations are returned only for
@@ -534,7 +540,7 @@ pub async fn run_flat_metric(runtime: WgpuRuntime, fixture_json: &str) -> Result
     {
         return Err("incomplete or mislabeled flat metric cases".into());
     }
-    run_cases(runtime, cases, &[23, 37], true).await
+    run_cases(runtime, cases, &[23, 37], true, false).await
 }
 
 async fn run_cases(
@@ -542,6 +548,7 @@ async fn run_cases(
     cases: &[Value],
     counts: &[usize],
     raw: bool,
+    capture_initial: bool,
 ) -> Result<Value> {
     let mut checks = Vec::new();
     for (case, &expected_count) in cases.iter().zip(counts) {
@@ -579,6 +586,15 @@ async fn run_cases(
             return Err("byte target alignment changed".into());
         }
         let mut model = p.compile_training_wgpu(runtime.clone())?;
+        let initial_checkpoint = if capture_initial {
+            let captured = checkpoint_controls::checkpoint(&model).await?.to_json()?;
+            if captured != p.initial_checkpoint().to_json()? {
+                return Err("learner initial device checkpoint differs from fitted plan".into());
+            }
+            Some(captured)
+        } else {
+            None
+        };
         let resident = model.prepare_batch(&host)?;
         let geometry = biases(model.tensor_device(), case, 4)?;
         let forward = model.forward_with_external_biases(&resident, &borrowed(&geometry))?;
@@ -764,6 +780,9 @@ async fn run_cases(
         checks.push(json!({"name": case["name"], "checkpoint":checkpoint, "parameter_count": expected_count, "output_max_abs_error": output_error,
             "embedding_output_max_abs_error": input_error, "parameter_errors": errors, "bias_errors": bias_errors, "gradient_layouts": true,
             "causality": causal, "tapes": tapes, "metric_controls": metric_controls, "learning": {"steps":16, "trace":trace}}));
+        if let Some(initial) = initial_checkpoint {
+            checks.last_mut().unwrap()["initial_checkpoint_json"] = json!(initial);
+        }
         if raw {
             let check = checks.last_mut().unwrap();
             check["metric"] = json!("euclidean_chord_squared.v1");

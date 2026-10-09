@@ -10,6 +10,51 @@ fn checkpoint() -> ByteDecoderCheckpoint {
 }
 
 #[test]
+fn initial_gain_replacement_preserves_every_other_checkpoint_field() {
+    for metric in [
+        ByteDecoderPairMetric::PoincareSquared,
+        ByteDecoderPairMetric::EuclideanChordSquared,
+    ] {
+        let mut plan = checkpoint().plan;
+        plan.geometry = plan.geometry.take().map(|g| g.with_pair_metric(metric));
+        let original = plan.initial_checkpoint().to_json().unwrap();
+        let raw = vec![vec![-0., 0.75], vec![2.5, -0.25]];
+        let changed = plan.clone().with_initial_geometry_raw_gains(&raw).unwrap();
+        assert_eq!(changed.parameter_layout(), plan.parameter_layout());
+        assert_eq!(changed.causal_geometry().unwrap().pair_metric(), metric);
+        let payload = changed.initial_checkpoint().to_json().unwrap();
+        let restored = ByteDecoderCheckpoint::from_json(&payload).unwrap();
+        assert_eq!(restored.to_json().unwrap(), payload);
+        assert_eq!(
+            restored.plan().causal_geometry().unwrap().raw_gains()[0][0].to_bits(),
+            (-0f32).to_bits()
+        );
+        let mut expected: serde_json::Value = serde_json::from_str(&original).unwrap();
+        expected["model"]["geometry"]["raw_gains"] = json!(raw);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&payload).unwrap(),
+            expected
+        );
+        for bad in [
+            vec![],
+            vec![vec![1.]],
+            vec![vec![1., 2.]; 3],
+            vec![vec![1.], vec![1., 2.]],
+            vec![vec![1., 2.], vec![1., 2., 3.]],
+            vec![vec![1., 2.], vec![0., f32::NAN]],
+        ] {
+            assert!(plan.clone().with_initial_geometry_raw_gains(&bad).is_err());
+            assert_eq!(plan.initial_checkpoint().to_json().unwrap(), original);
+        }
+    }
+    let ordinary = super::super::tests::plan(AttentionMask::Causal { query_offset: 0 }, 1).unwrap();
+    assert!(ordinary.causal_geometry().is_none());
+    assert!(ordinary
+        .with_initial_geometry_raw_gains(&[vec![0., 0.]])
+        .is_err());
+}
+
+#[test]
 fn flat_metric_checkpoint_is_explicit_and_keeps_the_same_parameter_owner() {
     let old = checkpoint();
     let mut flat = old.clone();

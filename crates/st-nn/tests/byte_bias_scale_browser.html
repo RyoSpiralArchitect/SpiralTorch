@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>Calibrated geometry byte learner</title>
+<h1>Calibrated geometry byte learner</h1>
+<p id="summary">Running one-time Rust calibration and the resident learner...</p>
+<a id="download" hidden>Download calibrated byte result</a>
+<pre id="result" data-status="running"></pre>
+<script type="module">
+const result = document.querySelector("#result");
+try {
+  const {default: init, run_resident_byte_bias_scale} = await import("/target/resident-byte-decoder-web/resident_byte_decoder_browser.js");
+  const response = await fetch("/target/resident-byte-decoder-web/bias-scale-reference.json");
+  if (!response.ok) throw Error("Local frozen bias-scale-reference.json is missing");
+  const fixture = await response.text();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fixture));
+  const fixtureSha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+  if (fixtureSha256 !== "3eb8e538371d0aa968abfd1f9d3758b7f83464ce6b36e06fb0fe9c91f2e9a00b") {
+    throw Error("Frozen calibration fixture SHA-256 mismatch");
+  }
+  await init();
+  const raw = await run_resident_byte_bias_scale(fixture);
+  const report = JSON.parse(raw);
+  if (report.schema !== "spiraltorch.resident_byte_bias_scale.validation.v1"
+      || report.passed !== true || report.calibration.length !== 2
+      || report.calibration.some(c => c.no_updates_consumed !== true || c.positive_control !== true
+        || c.ordinary_and_out_of_range_absent !== true
+        || c.targets_and_external_bias_excluded !== true || c.relative_tolerance !== 1e-5)
+      || report.learning.checks.length !== 2
+      || report.learning.checks.some((c, i) => c.parameter_count !== [23, 37][i]
+        || c.learning.trace.length !== 16 || c.resume_trajectory.verified_steps !== 16
+        || c.resume_trajectory.exact_parameters !== true)) {
+    throw Error("Incomplete calibration/learning verification");
+  }
+  result.textContent = JSON.stringify({passed:true, fixture_sha256:fixtureSha256,
+    cases:report.calibration.map(c => ({name:c.name, pairs_per_head:c.valid_pairs_per_head,
+      maximum_relative_rms_error:Math.max(...c.realized_relative_errors)}))}, null, 2);
+  result.dataset.status = "passed";
+  document.querySelector("#summary").textContent = "Rust controls passed. Download raw observations for independent calibration, VJP and all-step Torch verification. Synthetic correctness only.";
+  const download = document.querySelector("#download");
+  // Keep Rust float serialization and checkpoint payloads opaque.
+  download.href = URL.createObjectURL(new Blob([raw], {type:"application/json"}));
+  download.download = "resident-byte-bias-scale.json";
+  download.hidden = false;
+} catch (error) {
+  result.textContent = String(error.stack || error);
+  result.dataset.status = "error";
+  document.querySelector("#summary").textContent = "Verification failed.";
+}
+</script>

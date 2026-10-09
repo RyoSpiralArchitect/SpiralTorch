@@ -126,6 +126,21 @@ impl ByteDecoderGeometryPlan {
         &self.raw_gains
     }
 
+    fn replace_initial_raw_gains(&mut self, raw_gains: &[Vec<f32>]) -> Result<(), InferenceError> {
+        if raw_gains.len() != self.raw_gains.len()
+            || raw_gains
+                .iter()
+                .zip(&self.raw_gains)
+                .any(|(new, old)| new.len() != old.len() || new.iter().any(|v| !v.is_finite()))
+        {
+            return Err(InferenceError::ByteDecoder(
+                "initial geometry gains must preserve every block/head shape and be finite",
+            ));
+        }
+        self.raw_gains = raw_gains.to_vec();
+        Ok(())
+    }
+
     #[cfg(feature = "wgpu")]
     pub(super) fn parameter_values(&self) -> Result<Vec<GraphParameter>, InferenceError> {
         let mut values = self.projection.graph_definition()?.parameters().to_vec();
@@ -147,6 +162,24 @@ impl ByteDecoderGeometryPlan {
 }
 
 impl ByteDecoderPlan {
+    pub fn causal_geometry(&self) -> Option<&ByteDecoderGeometryPlan> {
+        self.geometry.as_ref()
+    }
+
+    /// Reinitialize gains in a frozen plan, e.g. after one-time bias calibration.
+    /// Does not mutate a compiled owner or implement an optimizer update. All
+    /// other parameters, metric, topology and ownership ranges stay unchanged.
+    pub fn with_initial_geometry_raw_gains(
+        mut self,
+        raw_gains: &[Vec<f32>],
+    ) -> Result<Self, InferenceError> {
+        self.geometry
+            .as_mut()
+            .ok_or(InferenceError::ByteDecoder("model has no causal geometry"))?
+            .replace_initial_raw_gains(raw_gains)?;
+        Ok(self)
+    }
+
     /// Add learned causal geometry without changing the ownership/SGD boundary.
     /// Omit this builder for the ordinary byte decoder; no fake zero-gain mode.
     pub fn with_causal_geometry(

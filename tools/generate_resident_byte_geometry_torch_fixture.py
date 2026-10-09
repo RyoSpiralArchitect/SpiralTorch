@@ -21,7 +21,9 @@ metric = load("generate_poincare_bias_torch_fixture").metric
 flat = base.values
 
 
-def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False):
+def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_metric=False, calibrate_flat=False):
+    if calibrate_flat:
+        flat_metric = True
     if freeze_geometry and flat_metric:
         raise ValueError("freeze and flat controls are separate experiments")
     original = base.case(block_count, external, seed)
@@ -51,6 +53,10 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
                 if d["name"].endswith("qkv.bias"):
                     value[:2 * width] = 0
     initial = [{**d, "values": flat(t)} for d, t in zip(descriptors, p)]
+    uncalibrated, calibration = initial, None
+    if calibrate_flat:
+        calibration = load("byte_bias_scale_reference").calibrate(p, config, original["windows"], wave, metric)
+        initial = [{**d, "values": flat(t)} for d, t in zip(descriptors, p)]
     ids = torch.tensor(original["inputs"], device="cpu", dtype=torch.long).reshape(batch, steps)
     target = torch.tensor(original["targets"], device="cpu", dtype=torch.long).reshape(batch, steps)
     biases = []
@@ -116,6 +122,10 @@ def case(block_count, external, metric_only, seed, freeze_geometry=False, flat_m
     result["learning"] = {"steps": 16, "rate": .125, "trace": trace}
     if freeze_geometry:
         result["learning"]["rates"] = rates
+    if calibration is not None:
+        result["name"] = "calibrated_flat_" + result["name"]
+        result["uncalibrated_parameters"] = uncalibrated
+        result["calibration"] = calibration
     return result
 
 
@@ -125,17 +135,19 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--freeze-geometry", action="store_true")
     mode.add_argument("--flat-metric", action="store_true")
+    mode.add_argument("--calibrate-flat", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     torch.set_default_dtype(torch.float32)
-    payload = {"schema": ("spiraltorch.resident_byte_geometry_flat.torch_fixture.v1" if args.flat_metric else
+    payload = {"schema": ("spiraltorch.resident_byte_bias_scale.torch_fixture.v1" if args.calibrate_flat else
+                         "spiraltorch.resident_byte_geometry_flat.torch_fixture.v1" if args.flat_metric else
                          "spiraltorch.resident_byte_geometry_frozen.torch_fixture.v1" if args.freeze_geometry
                           else "spiraltorch.resident_byte_geometry.torch_fixture.v1"),
                "torch_version": torch.__version__, "device": "cpu", "dtype": "float32", "threads": 1,
                "tolerance": {"atol": 3e-6, "rtol": 5e-5, "geometry_relative_l2": .002},
-               "cases": [case(1, False, True, 1761, args.freeze_geometry, args.flat_metric),
-                         case(2, True, False, 1863, args.freeze_geometry, args.flat_metric)]}
+               "cases": [case(1, False, True, 1761, args.freeze_geometry, args.flat_metric, args.calibrate_flat),
+                         case(2, True, False, 1863, args.freeze_geometry, args.flat_metric, args.calibrate_flat)]}
     with args.output.open("x", encoding="utf-8") as out:
         json.dump(payload, out, separators=(",", ":"), allow_nan=False)
         out.write("\n")

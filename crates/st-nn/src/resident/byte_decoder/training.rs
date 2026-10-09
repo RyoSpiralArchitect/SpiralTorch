@@ -78,6 +78,12 @@ impl ResidentByteDecoderForward {
     pub fn parameter_revision(&self) -> u64 {
         self.parameters.revision()
     }
+    /// This forward's internal geometry scores [batch,heads,time,time], before
+    /// external biases or QK content. No readback or normalization is implicit.
+    /// Ordinary models and out-of-range blocks return None.
+    pub fn geometry_pair_bias(&self, block: usize) -> Option<&ResidentTensor> {
+        self.geometry.as_ref()?.get_bias(block)
+    }
     /// The shifted labels are captured from this forward's own byte batch.
     pub fn next_byte_loss(&self, spec: CrossEntropySpec) -> Result<ResidentLoss, InferenceError> {
         require_uncommitted_route()?;

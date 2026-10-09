@@ -187,6 +187,12 @@ between different devices, kernels or compiler versions.
 
 ## The geometry boundary
 
+For a separate **one-time initial score-strength control**, see
+[causal bias calibration](causal_bias_calibration.md). It changes only per-head
+softplus gains, checks actual device RMS again, then uses this same learner and
+checkpoint path. It does not change the existing corpus-study initialization
+contract or implement learned geometry mixtures.
+
 ### A parameter-matched flat distance control
 
 `ByteDecoderGeometryPlan::with_pair_metric(ByteDecoderPairMetric::EuclideanChordSquared)`

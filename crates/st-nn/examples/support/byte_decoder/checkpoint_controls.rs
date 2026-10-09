@@ -113,7 +113,7 @@ pub(super) async fn resume_trajectory(
     )
 }
 
-async fn checkpoint(model: &ResidentByteDecoder) -> Result<ByteDecoderCheckpoint> {
+pub(super) async fn checkpoint(model: &ResidentByteDecoder) -> Result<ByteDecoderCheckpoint> {
     let capture = model.checkpoint_snapshot()?;
     #[cfg(not(target_arch = "wasm32"))]
     let checkpoint = capture.read()?;
